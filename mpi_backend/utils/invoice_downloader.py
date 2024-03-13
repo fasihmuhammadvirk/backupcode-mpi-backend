@@ -3,6 +3,7 @@ import imaplib
 import email
 import os
 from mpi_backend.config import SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD
+from datetime import datetime, timedelta
 
 
 def login():
@@ -14,7 +15,8 @@ def login():
 
 
 def search_new_emails(mail):
-    result, data = mail.search(None, 'UNSEEN')
+    time_frame = (datetime.now() - timedelta(days=3)).strftime('%d-%b-%Y')  # unseen emails since last three days
+    result, data = mail.search(None, '(UNSEEN SINCE {0})'.format(time_frame))
 
     for num in data[0].split():
         result, data = mail.fetch(num, '(RFC822)')
