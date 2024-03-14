@@ -27,7 +27,7 @@ def convert_invoice():
         if failed is not None: failed_files.extend(failed)
         if output is not None: converted_paths.extend(output)
 
-
+    return converted_paths, failed_files
 
 
 def get_leaf_directories(root_dir):
