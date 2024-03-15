@@ -17,6 +17,8 @@ def process_extracted_data(event):
         extracted_data.insert(0, 'Sheet Name', '')
         extracted_data = extracted_data.apply(search_replace, args=(temp_items, item_mappings,), axis=1)
 
+        extracted_customer_job = extracted_data['Customer Job'][0]
+        extracted_data['Customer Job'] = get_updated_customer_job(extracted_customer_job, customer_job_mappings)
         pass
 
 
@@ -42,3 +44,13 @@ def search_replace(row, temp_items, item_mappings):
             row['Sheet Name'] = sheet_name
             return row
     return row
+
+
+def get_updated_customer_job(customer_job, customer_job_mappings):
+    updated_job = ''
+    filtered_df = customer_job_mappings[customer_job_mappings['Customer Job'] == customer_job]
+
+    if not filtered_df.empty:
+        updated_job = filtered_df.iloc[0]['Updated Customer Job']
+
+    return updated_job
