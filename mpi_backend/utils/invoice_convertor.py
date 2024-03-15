@@ -71,14 +71,14 @@ def convert_and_combine(all_files):
                 continue
 
             splited_filepaths = extract_data(filepath, outputpath, supplier)
-            all_output_paths.append(outputpath)
+            all_output_paths.append(filepath)
 
             # integrating the flow of multiple invoices in single file
             if splited_filepaths: # check for splited file list is not empty
                 for splitFile_path in splited_filepaths:
                     output_splited_filepath= splitFile_path.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
                     returned_paths = extract_data(splitFile_path, output_splited_filepath, supplier)
-                    all_output_paths.append(output_splited_filepath)
+                    all_output_paths.append(splitFile_path)
 
         except Exception as e:
             print(f"File Conversion Failed becasue : {e}")

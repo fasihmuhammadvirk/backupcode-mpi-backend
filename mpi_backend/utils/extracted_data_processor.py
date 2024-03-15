@@ -1,25 +1,40 @@
 # the file will be responsible to read all the converted excel files, map their items, descriptions and customer jobs
 # and store them in database.
 import pandas as pd
+from datetime import datetime
+
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
+from mpi_backend.database import crud
 
 
 def process_extracted_data(event):
     converted_files, failed_files = event.retval
     lookup_file = pd.read_excel(f'{INVOICE_DOWNLOAD_FOLDER}/Lookup Sheet.xlsx',
-                                                                     sheet_name=[0, 1, 2])
-    temp_items= lookup_file[0]
-    item_mappings= lookup_file[1]
+                                sheet_name=[0, 1, 2])
+    temp_items = lookup_file[0]
+    item_mappings = lookup_file[1]
     customer_job_mappings = lookup_file[2]
 
     for file in converted_files:
-        extracted_data = pd.read_excel(file)
+        extracted_data = pd.read_excel(file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
         extracted_data.insert(0, 'Sheet Name', '')
         extracted_data = extracted_data.apply(search_replace, args=(temp_items, item_mappings,), axis=1)
 
         extracted_customer_job = extracted_data['Customer Job'][0]
         extracted_data['Customer Job'] = get_updated_customer_job(extracted_customer_job, customer_job_mappings)
-        pass
+
+        extracted_data = extracted_data.fillna({'Qty': 0, 'Cost': 0, 'Class': '', 'Memo': '', 'Ref NO': '',
+                                                'PO #': '', 'Customer Job': '', 'Buyer': ''})
+
+        invoice_record = crud.insert_invoice(extracted_data['Date'][0], file.rsplit('/')[-1],
+                                             extracted_data['Vendor'][0], 'PROCESSED',
+                                             file)  # one record for every file in invoices table
+
+        for index, row in extracted_data.iterrows():  # every item has its own record
+            crud.insert_invoice_items(row, file.rsplit('/')[-1], invoice_record.id)
+
+    for file in failed_files:
+        crud.insert_invoice(datetime.now().strftime('%m/%d/%Y'), file.rsplit('/')[-1], '', 'FAILED', file)
 
 
 def search_replace(row, temp_items, item_mappings):
