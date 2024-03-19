@@ -3,8 +3,12 @@
 import pandas as pd
 from datetime import datetime
 
+from mpi_backend.database import get_db
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
-from mpi_backend.database import crud
+from mpi_backend.database.controllers import InvoiceController,InvoiceItemController
+from contextlib import contextmanager
+
+db = contextmanager(get_db)
 
 
 def process_extracted_data(event):
@@ -26,15 +30,15 @@ def process_extracted_data(event):
         extracted_data = extracted_data.fillna({'Qty': 0, 'Cost': 0, 'Class': '', 'Memo': '', 'Ref NO': '',
                                                 'PO #': '', 'Customer Job': '', 'Buyer': ''})
 
-        invoice_record = crud.insert_invoice(extracted_data['Date'][0], file.rsplit('/')[-1],
+        invoice_record = InvoiceController(db).insert_invoice(extracted_data['Date'][0], file.rsplit('/')[-1],
                                              extracted_data['Vendor'][0], 'PROCESSED',
                                              file)  # one record for every file in invoices table
 
         for index, row in extracted_data.iterrows():  # every item has its own record
-            crud.insert_invoice_items(row, file.rsplit('/')[-1], invoice_record.id)
+            InvoiceItemController(db).insert_invoice_items(row, file.rsplit('/')[-1], invoice_record.id)
 
     for file in failed_files:
-        crud.insert_invoice(datetime.now().strftime('%m/%d/%Y'), file.rsplit('/')[-1], '', 'FAILED', file)
+        InvoiceController(db).insert_invoice(datetime.now().strftime('%m/%d/%Y'), file.rsplit('/')[-1], '', 'FAILED', file)
 
 
 def search_replace(row, temp_items, item_mappings):

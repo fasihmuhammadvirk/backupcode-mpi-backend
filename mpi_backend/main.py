@@ -19,7 +19,7 @@ Base.metadata.create_all(engine)  # create db tables
 @asynccontextmanager
 async def lifespan(app:FastAPI):
     scheduler = BackgroundScheduler()
-    scheduler.add_job(email_download_background_task, "interval", minutes=0.1, max_instances=1)
+    # scheduler.add_job(email_download_background_task, "interval", minutes=0.1, max_instances=1)
     scheduler.add_job(convert_invoice, "interval", minutes=0.2, max_instances=1, id="convert_invoice_job")
     scheduler.add_listener(process_extracted_data, EVENT_JOB_EXECUTED)
     scheduler.start()
