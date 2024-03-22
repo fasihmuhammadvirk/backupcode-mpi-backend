@@ -22,7 +22,7 @@ class SupplierController:
             print(f"Error Getting Suppliers With ID: {e}")
             return None
 
-    def populate_suppliers_if_empty(self):
+    def populate_suppliers(self):
         try:
             if not self.db.query(Supplier).first():
                 # Only Insert if table is empty
