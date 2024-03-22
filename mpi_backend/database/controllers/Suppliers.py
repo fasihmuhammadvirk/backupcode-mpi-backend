@@ -17,7 +17,16 @@ class SupplierController:
     def get_supplier_by_id(self,supplier_id):
         try:
             supplier = self.db.query(Supplier).filter(Supplier.id == supplier_id).first()
-            return supplier
+            return supplier.supplier_name
+        except Exception as e:
+            print(f"Error Getting Suppliers With ID: {e}")
+            return None
+
+    def get_supplier_id(self, supplier_name):
+        try:
+            with self.db() as db:
+                supplier = db.query(Supplier).filter(Supplier.supplier_name == supplier_name).first()
+            return supplier.id
         except Exception as e:
             print(f"Error Getting Suppliers With ID: {e}")
             return None

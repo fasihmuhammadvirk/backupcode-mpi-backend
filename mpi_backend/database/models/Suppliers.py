@@ -9,3 +9,5 @@ class Supplier(Base):
 
     id = Column(Integer, primary_key=True)
     supplier_name = Column(String)
+
+    supplier = relationship("Invoice", back_populates="supplier_fk")
