@@ -1,9 +1,6 @@
 import os
-from dotenv import load_dotenv
 from pathlib import Path
 
-dotenv_path = Path('mpi_backend/.env')
-load_dotenv(dotenv_path=dotenv_path)
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 POSTGRES_HOST = os.getenv("POSTGRES_HOST")
@@ -27,3 +24,6 @@ SUPPLIERS = ['BMW Plumbing Supplies', 'World Wide Plumbing', 'Y & S Plumbing Sup
              'Pyramid Plumbing', 'ABC Opus Services', 'Park Plumbing Supply', 'Gotham Plumbing Supply',
              'FW Webb Plumbing Supply','Bruce Supply','Boro Park & Certified Lumber', 'KJ Plumbing',
              'Nefco Corporation','Sparkleening', 'email_attachments', 'Positive Computer Services', 'Awisco']
+
+PROCESSABLE_SUPPLIERS = ['BMW Plumbing Supplies', 'World Wide Plumbing', 'Y & S Plumbing Supply',
+                         'Supreme Plumbing Supply','Pyramid Plumbing', 'ABC Opus Services', 'Park Plumbing Supply', 'Gotham Plumbing Supply']
