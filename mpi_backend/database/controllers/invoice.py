@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 from datetime import date
+from sqlalchemy import or_
 from mpi_backend.database.models import Invoice
 from mpi_backend.database.schemas import Invoice as InvoiceResponse
 
@@ -39,8 +40,7 @@ class InvoiceController:
         if status == 'processed':
             query = query.filter(Invoice.status == 'PROCESSED')
         elif status == 'unprocessed':
-            # TODO:Add implementation for 'PROCESSING'
-            query = query.filter(Invoice.status == 'FAILED')
+            query = query.filter(or_(Invoice.status == 'PROCESSING', Invoice.status == 'FAILED'))
 
         invoices = query.all()
 
@@ -55,3 +55,7 @@ class InvoiceController:
             invoices_list.append(invoice_item)
 
         return invoices_list
+
+    def set_status_to_processed(self, inserted_id):
+        with self.db_context() as db:
+            db.query(Invoice).filter(Invoice.id == inserted_id).update({"status": "PROCESSED"})

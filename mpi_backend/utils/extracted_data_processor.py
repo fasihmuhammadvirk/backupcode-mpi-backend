@@ -21,6 +21,12 @@ def process_extracted_data(event):
 
     for file in converted_files:
         extracted_data = pd.read_excel(file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
+
+        supplier_id = SupplierController(db).get_supplier_id(extracted_data['Vendor'][0])
+        invoice_record = InvoiceController(db).insert_invoice(extracted_data['Date'][0], file.rsplit('/')[-1],
+                                                              supplier_id, 'PROCESSING',
+                                                              file)  # one record for every file in invoices table
+
         extracted_data.insert(0, 'Sheet Name', '')
         extracted_data = extracted_data.apply(search_replace, args=(temp_items, item_mappings,), axis=1)
 
@@ -30,11 +36,7 @@ def process_extracted_data(event):
         extracted_data = extracted_data.fillna({'Qty': 0, 'Cost': 0, 'Class': '', 'Memo': '', 'Ref NO': '',
                                                 'PO #': '', 'Customer Job': '', 'Buyer': ''})
 
-        supplier_id = SupplierController(db).get_supplier_id(extracted_data['Vendor'][0])
-
-        invoice_record = InvoiceController(db).insert_invoice(extracted_data['Date'][0], file.rsplit('/')[-1],
-                                             supplier_id, 'PROCESSED',
-                                             file)  # one record for every file in invoices table
+        InvoiceController(db).set_status_to_processed(invoice_record.id) # invoice has processed, change its status accordingly
 
         for index, row in extracted_data.iterrows():  # every item has its own record
             InvoiceItemController(db).insert_invoice_items(row, file.rsplit('/')[-1], invoice_record.id)
