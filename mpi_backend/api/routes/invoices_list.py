@@ -21,11 +21,9 @@ def get_invoices(
         size: int = Query(10)
 ):
     try:
-        supplier_name = SupplierController(db).get_supplier_by_id(supplier_id)
-
         invoices = InvoiceController(db).get_invoices(
             db=db,
-            supplier_name=supplier_name,
+            supplier_id=supplier_id,
             from_date=from_date,
             to_date=to_date,
             status=status,

@@ -9,9 +9,9 @@ class InvoiceController:
     def __init__(self, db):
         self.db_context = db
 
-    def insert_invoice(self, date, filename, supplier, status, storage_path):
+    def insert_invoice(self, date, filename, supplier_id, status, storage_path):
         date = datetime.strptime(date, '%m/%d/%Y')
-        new_invoice = Invoice(date=date, filename=filename, supplier=supplier, status=status, storage_path=storage_path)
+        new_invoice = Invoice(date=date, filename=filename, supplier_id=supplier_id, status=status, storage_path=storage_path)
         with self.db_context() as db:
             db.add(new_invoice)
             db.commit()
@@ -20,7 +20,7 @@ class InvoiceController:
 
     def get_invoices(
             self, db,
-            supplier_name: str = None,
+            supplier_id: int = None,
             from_date: date = None,
             to_date: date = None,
             status: str = 'all',
@@ -29,8 +29,8 @@ class InvoiceController:
     ):
         query = db.query(Invoice)
 
-        if supplier_name is not None:  # only apply supplier filter if it's provided.
-            query = query.filter(Invoice.supplier == supplier_name)
+        if supplier_id is not None:  # only apply supplier filter if it's provided.
+            query = query.filter(Invoice.supplier_id == supplier_id)
 
         query = query.filter(Invoice.date >= from_date)
 
@@ -49,7 +49,7 @@ class InvoiceController:
             invoice_item = InvoiceResponse(
                 date=invoice.date,
                 filename=invoice.filename,
-                supplier=invoice.supplier,
+                supplier_id=invoice.supplier_id,
                 status=invoice.status
             )
             invoices_list.append(invoice_item)
