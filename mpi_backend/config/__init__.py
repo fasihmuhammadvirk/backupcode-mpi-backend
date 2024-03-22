@@ -1,9 +1,6 @@
 import os
-from dotenv import load_dotenv
 from pathlib import Path
 
-dotenv_path = Path('mpi_backend/.env')
-load_dotenv(dotenv_path=dotenv_path)
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 POSTGRES_HOST = os.getenv("POSTGRES_HOST")

@@ -5,7 +5,6 @@ sqlalchemy==2.0.4
 psycopg2==2.9.5
 uvicorn==0.18.3
 APScheduler==3.10.4
-python-dotenv==1.0.1
 tabula-py==2.3.0
 XlsxWriter==3.2.0
 pymupdf==1.19.6
