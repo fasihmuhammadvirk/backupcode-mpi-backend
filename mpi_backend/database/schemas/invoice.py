@@ -6,7 +6,7 @@ from datetime import date
 class Invoice(BaseModel):
     date: date
     filename: str
-    supplier: str
+    supplier_id: int
     status: str
     class Config:
         from_attributes = True

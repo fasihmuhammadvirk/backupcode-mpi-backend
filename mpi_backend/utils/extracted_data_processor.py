@@ -5,7 +5,7 @@ from datetime import datetime
 
 from mpi_backend.database import get_db
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
-from mpi_backend.database.controllers import InvoiceController,InvoiceItemController
+from mpi_backend.database.controllers import InvoiceController,InvoiceItemController,SupplierController
 from contextlib import contextmanager
 
 db = contextmanager(get_db)
@@ -30,8 +30,10 @@ def process_extracted_data(event):
         extracted_data = extracted_data.fillna({'Qty': 0, 'Cost': 0, 'Class': '', 'Memo': '', 'Ref NO': '',
                                                 'PO #': '', 'Customer Job': '', 'Buyer': ''})
 
+        supplier_id = SupplierController(db).get_supplier_id(extracted_data['Vendor'][0])
+
         invoice_record = InvoiceController(db).insert_invoice(extracted_data['Date'][0], file.rsplit('/')[-1],
-                                             extracted_data['Vendor'][0], 'PROCESSED',
+                                             supplier_id, 'PROCESSED',
                                              file)  # one record for every file in invoices table
 
         for index, row in extracted_data.iterrows():  # every item has its own record

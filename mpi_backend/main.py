@@ -31,6 +31,8 @@ async def lifespan(app:FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
+
+
 def register_routes(app):
     app.include_router(health.router)
     app.include_router(supplier.router)
