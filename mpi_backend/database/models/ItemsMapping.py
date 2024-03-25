@@ -12,6 +12,7 @@ class ItemsMapping(Base):
     google_sheet_name = Column(String)
     mpi_code = Column(String)
     description = Column(String)
+    supplier_item_ids = Column(String)
     supplier_id = Column(Integer, ForeignKey('suppliers.id'))
 
     mpi_mapping_fk = relationship("Supplier", back_populates="mpi_mapping")
