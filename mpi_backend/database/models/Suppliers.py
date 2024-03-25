@@ -11,3 +11,5 @@ class Supplier(Base):
     supplier_name = Column(String)
 
     supplier = relationship("Invoice", back_populates="supplier_fk")
+
+    mpi_mapping = relationship("ItemsMapping", back_populates="mpi_mapping_fk")
