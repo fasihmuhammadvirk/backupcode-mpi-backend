@@ -1,3 +1,6 @@
 from mpi_backend.database.controllers.invoice import InvoiceController
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
 from mpi_backend.database.controllers.Suppliers import SupplierController
+from mpi_backend.database.controllers.CustomerJobMappingContorller import CustomerJobMappingController
+from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
+from mpi_backend.database.controllers.TemporaryItemMappingController import TempItemsMappingController
