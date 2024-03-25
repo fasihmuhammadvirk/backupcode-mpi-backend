@@ -5,7 +5,7 @@ from datetime import datetime
 
 from mpi_backend.database import get_db
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
-from mpi_backend.database.controllers import InvoiceController,InvoiceItemController,SupplierController
+from mpi_backend.database.controllers import InvoiceController,InvoiceItemController,SupplierController,ItemsMappingController,TempItemsMappingController,CustomerJobMappingController
 from contextlib import contextmanager
 
 db = contextmanager(get_db)
@@ -13,11 +13,10 @@ db = contextmanager(get_db)
 
 def process_extracted_data(event):
     converted_files, failed_files = event.retval
-    lookup_file = pd.read_excel(f'{INVOICE_DOWNLOAD_FOLDER}/Lookup Sheet.xlsx',
-                                sheet_name=[0, 1, 2])
-    temp_items = lookup_file[0]
-    item_mappings = lookup_file[1]
-    customer_job_mappings = lookup_file[2]
+
+    temp_items = TempItemsMappingController(db).get_temp_items_mappings()
+    item_mappings = ItemsMappingController(db).get_items_mappings()
+    customer_job_mappings = CustomerJobMappingController(db).get_customer_job_mappings()
 
     for file in converted_files:
         extracted_data = pd.read_excel(file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
@@ -50,10 +49,10 @@ def search_replace(row, temp_items, item_mappings):
     description = row['Description']
 
     # Searching in temp_items
-    temp_match = temp_items[temp_items['Original Item Number'] == item]
+    temp_match = temp_items[temp_items['original_item_number'] == item]
     if not temp_match.empty:
-        row['Item'] = temp_match.iloc[0]['Temporary Item Number']
-        row['Description'] = temp_match.iloc[0]['Description']
+        row['Item'] = temp_match.iloc[0]['temporary_item_number']
+        row['Description'] = temp_match.iloc[0]['description']
         row['Sheet Name'] = ''
         return row
 
@@ -61,9 +60,9 @@ def search_replace(row, temp_items, item_mappings):
     for column in item_mappings.columns:
         mapping_match = item_mappings[item_mappings[column] == item]
         if not mapping_match.empty:
-            row['Item'] = mapping_match.iloc[0]['MPI']
-            row['Description'] = mapping_match.iloc[0]['Description']
-            sheet_name = mapping_match.iloc[0]['Google Sheet Name']
+            row['Item'] = mapping_match.iloc[0]['mpi_code']
+            row['Description'] = mapping_match.iloc[0]['description']
+            sheet_name = mapping_match.iloc[0]['google_sheet_name']
             row['Sheet Name'] = sheet_name
             return row
     return row
@@ -71,9 +70,9 @@ def search_replace(row, temp_items, item_mappings):
 
 def get_updated_customer_job(customer_job, customer_job_mappings):
     updated_job = ''
-    filtered_df = customer_job_mappings[customer_job_mappings['Customer Job'] == customer_job]
+    filtered_df = customer_job_mappings[customer_job_mappings['customer_job'] == customer_job]
 
     if not filtered_df.empty:
-        updated_job = filtered_df.iloc[0]['Updated Customer Job']
+        updated_job = filtered_df.iloc[0]['updated_customer_job']
 
     return updated_job
