@@ -31,3 +31,14 @@ class ItemsMappingController:
             for item in query_result
         }
         return data
+
+    def update_mapping(self, supplier_id: str, mapping_data: dict):
+        existing_mapping = self.db_context.query(ItemsMapping).filter_by(supplier_id=supplier_id,
+                                                            supplier_item_ids=mapping_data["supplier_item_ids"]).first()
+        if existing_mapping:
+            for key, value in mapping_data.items():
+                setattr(existing_mapping, key, value)
+        else:
+            db_mapping = ItemsMapping(**mapping_data, supplier_id=supplier_id)
+            self.db_context.add(db_mapping)
+        self.db_context.commit()

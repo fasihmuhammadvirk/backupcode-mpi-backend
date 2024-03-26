@@ -3,9 +3,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
 from mpi_backend.database.controllers import ItemsMappingController
-from mpi_backend.database.schemas import ItemMappingsResponse,ItemMappingsByMpiTypeResponse
+from mpi_backend.database.schemas import ItemMappingsResponse,ItemMappingsByMpiTypeResponse,UpdateMappingRequest
 
 router = APIRouter(prefix="/mapping")
+
+
+@router.post("")
+def update_item_mappings(request: UpdateMappingRequest, db: Session = Depends(get_db)):
+    try:
+        for mapping in request.mapping:
+            ItemsMappingController(db).update_mapping(request.supplier_id, mapping)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update item mapping : {e}")
 
 
 @router.get("/mpi_types", response_model=ItemMappingsByMpiTypeResponse)

@@ -19,3 +19,7 @@ class ItemMappingsByMpiType(BaseModel):
 class ItemMappingsByMpiTypeResponse(BaseModel):
     __root__: Dict[str, ItemMappingsByMpiType]
 
+
+class UpdateMappingRequest(BaseModel):
+    supplier_id: str
+    mapping: list[dict]
