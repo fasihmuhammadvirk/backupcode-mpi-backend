@@ -13,6 +13,7 @@ def update_item_mappings(request: UpdateMappingRequest, db: Session = Depends(ge
     try:
         for mapping in request.mapping:
             ItemsMappingController(db).update_mapping(request.supplier_id, mapping)
+            return {"success": True, "message": "Mapping updated/created successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update item mapping : {e}")
 
