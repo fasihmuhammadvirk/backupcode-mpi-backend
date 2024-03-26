@@ -8,6 +8,7 @@ from fastapi_pagination import add_pagination
 from mpi_backend.api.routes import health
 from mpi_backend.api.routes import supplier
 from mpi_backend.api.routes import invoices_list
+from mpi_backend.api.routes import get_mappings
 from mpi_backend.config import LOG_LEVEL
 from mpi_backend.utils.invoice_downloader import email_download_background_task
 from mpi_backend.utils.invoice_convertor import convert_invoice
@@ -37,6 +38,7 @@ def register_routes(app):
     app.include_router(health.router)
     app.include_router(supplier.router)
     app.include_router(invoices_list.router)
+    app.include_router(get_mappings.router)
 
 
 register_routes(app)
