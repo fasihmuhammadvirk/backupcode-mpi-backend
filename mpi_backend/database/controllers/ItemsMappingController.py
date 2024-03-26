@@ -22,3 +22,12 @@ class ItemsMappingController:
             for item in query_result
         ]
         return data
+
+    def get_items_mappings_by_mpi_type(self):
+        query_result = self.db_context.query(ItemsMapping).all()
+
+        data = {
+            item.mpi_code: {"type": item.google_sheet_name, "mpi_description": item.description}
+            for item in query_result
+        }
+        return data

@@ -10,3 +10,12 @@ class ItemMappingsResponse(BaseModel):
     description: str
     google_sheet_name: str
 
+
+class ItemMappingsByMpiType(BaseModel):
+    mpi_description: str
+    type: str
+
+
+class ItemMappingsByMpiTypeResponse(BaseModel):
+    __root__: Dict[str, ItemMappingsByMpiType]
+
