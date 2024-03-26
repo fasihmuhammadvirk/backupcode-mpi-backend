@@ -4,3 +4,4 @@ from mpi_backend.database.models.Suppliers import Supplier
 from mpi_backend.database.models.CustomerJobMappings import CustomerJobMapping
 from mpi_backend.database.models.ItemsMapping import ItemsMapping
 from mpi_backend.database.models.TemporaryItemMapping import TempItemMapping
+from mpi_backend.database.models.User import User
