@@ -8,7 +8,7 @@ class ItemMappingsResponse(BaseModel):
     supplier_item_ids: str
     mpi_code: str
     description: str
-    google_sheet_name: str
+    type: str
 
 
 class ItemMappingsByMpiType(BaseModel):
