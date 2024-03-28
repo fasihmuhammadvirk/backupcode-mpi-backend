@@ -6,6 +6,7 @@ from fastapi_pagination import Page, paginate
 from datetime import date
 from mpi_backend.database.controllers import SupplierController, InvoiceController
 from mpi_backend.database.schemas import Invoice
+from mpi_backend.utils.auth.auth_bearer import JWTBearer
 
 router = APIRouter(prefix="/invoice")
 
@@ -18,7 +19,8 @@ def get_invoices(
         to_date: date = Query(None),
         status: str = Query('all', description="Status (all, processed, unprocessed)"),
         page: int = Query(1),
-        size: int = Query(10)
+        size: int = Query(10),
+        token: str = Depends(JWTBearer())
 ):
     try:
         invoices = InvoiceController(db).get_invoices(

@@ -4,3 +4,4 @@ from mpi_backend.database.controllers.Suppliers import SupplierController
 from mpi_backend.database.controllers.CustomerJobMappingContorller import CustomerJobMappingController
 from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
 from mpi_backend.database.controllers.TemporaryItemMappingController import TempItemsMappingController
+from mpi_backend.database.controllers.UserController import UserController

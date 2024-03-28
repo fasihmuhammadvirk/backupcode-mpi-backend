@@ -4,12 +4,13 @@ from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
 from mpi_backend.database.controllers import ItemsMappingController
 from mpi_backend.database.schemas import ItemMappingsResponse,ItemMappingsByMpiTypeResponse,UpdateMappingRequest
+from mpi_backend.utils.auth.auth_bearer import JWTBearer
 
 router = APIRouter(prefix="/mapping")
 
 
 @router.post("")
-def update_item_mappings(request: UpdateMappingRequest, db: Session = Depends(get_db)):
+def update_item_mappings(request: UpdateMappingRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
     try:
         for mapping in request.mapping:
             ItemsMappingController(db).update_mapping(request.supplier_id, mapping)
@@ -19,7 +20,7 @@ def update_item_mappings(request: UpdateMappingRequest, db: Session = Depends(ge
 
 
 @router.get("/mpi_types", response_model=ItemMappingsByMpiTypeResponse)
-def get_mapping_by_mpi_type(db: Session = Depends(get_db)):
+def get_mapping_by_mpi_type(db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
     try:
         mappings = ItemsMappingController(db).get_items_mappings_by_mpi_type()
         return mappings
@@ -28,7 +29,7 @@ def get_mapping_by_mpi_type(db: Session = Depends(get_db)):
 
 
 @router.get("/{supplier_id}", response_model=List[ItemMappingsResponse])
-def get_mapping_by_supplier_id(supplier_id: int, db: Session = Depends(get_db)):
+def get_mapping_by_supplier_id(supplier_id: int, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
     try:
         mappings = ItemsMappingController(db).get_items_mappings_by_supplier_id(supplier_id)
         return mappings
