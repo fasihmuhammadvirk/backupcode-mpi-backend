@@ -1,0 +1,21 @@
+version: '3'
+
+services:
+  mpi-backend:
+    build: .
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgresql
+    env_file:
+      - .env
+
+  postgresql:
+    image: postgres:latest
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: woodpecker
+      POSTGRES_PASSWORD: woodpecker
+      POSTGRES_DB: mpi_db
+
