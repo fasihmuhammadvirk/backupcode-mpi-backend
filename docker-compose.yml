@@ -8,8 +8,10 @@ services:
       POSTGRES_USER: woodpecker
       POSTGRES_PASSWORD: woodpecker
       POSTGRES_DB: mpi_db
+    expose:
+      - "5432"
     ports:
-      - "5435:5432"
+      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks:
