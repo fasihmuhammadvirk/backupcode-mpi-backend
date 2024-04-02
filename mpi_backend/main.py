@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from fastapi_pagination import add_pagination
+from fastapi.middleware.cors import CORSMiddleware
+
 
 from mpi_backend.api.routes import health
 from mpi_backend.api.routes import supplier
@@ -32,7 +34,15 @@ async def lifespan(app:FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+origins = ["*"]
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def register_routes(app):
