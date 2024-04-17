@@ -38,7 +38,6 @@ def process_extracted_data(event):
 
         InvoiceController(db).set_status_to_processed(invoice_record.id) # invoice has processed, change its status accordingly
         upload_file(file_name=file, file_key=invoice_record.id)
-        get_presigned_url(invoice_record.id) # testing
 
         for index, row in extracted_data.iterrows():  # every item has its own record
             InvoiceItemController(db).insert_invoice_items(row, file.rsplit('/')[-1], invoice_record.id)
@@ -46,7 +45,7 @@ def process_extracted_data(event):
     for file in failed_files:
         invoice_record = InvoiceController(db).insert_invoice(datetime.now().strftime('%m/%d/%Y'), file.rsplit('/')[-1], '', 'FAILED', file)
         upload_file(file_name=file, file_key=invoice_record.id)
-        get_presigned_url(invoice_record.id)# testing
+
 
 def search_replace(row, temp_items, item_mappings):
     item = row['Item']
