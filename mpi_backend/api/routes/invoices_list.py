@@ -7,6 +7,7 @@ from datetime import date
 from mpi_backend.database.controllers import SupplierController, InvoiceController
 from mpi_backend.database.schemas import Invoice
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
+from mpi_backend.utils.s3_utils import get_presigned_url
 
 router = APIRouter(prefix="/invoice")
 
@@ -35,3 +36,13 @@ def get_invoices(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch invoices: {e}")
+
+
+@router.get("/download")
+def download_invoice(invoice_id:str = Query(None)):
+    try:
+        url = get_presigned_url(file_key=invoice_id)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail="Couldn't fetch requested file") # Handle 'No Key Error' on Client Side
+
+    return { "link": url}
