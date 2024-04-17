@@ -18,6 +18,5 @@ async def user_login(credentials: dict, db: Session = Depends(get_db)):
 
     if UserController(db).validate_credentials(username,password):
         return signJWT(username)
-    return {
-        "error": "Wrong login details!"
-    }
+    else:
+        raise HTTPException(status_code=403, detail="Wrong login details!")
