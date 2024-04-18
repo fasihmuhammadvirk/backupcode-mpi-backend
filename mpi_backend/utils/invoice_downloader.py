@@ -6,7 +6,7 @@ from pathlib import Path
 from email.utils import parsedate_to_datetime
 import pytz
 
-from mpi_backend.config import SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, INVOICE_DOWNLOAD_FOLDER, SUPPLIERS
+from mpi_backend.config import SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, INVOICE_DOWNLOAD_FOLDER, SUPPLIERS,TIMEZONE
 from datetime import datetime, timedelta
 
 
@@ -34,7 +34,7 @@ def filter_by_time(email_ids, reference_time, mail):
         if len(msg['Date']) == 37: email_sent_time = msg['Date'][:-12] # Remove the timezone info (+0000) or (-0700 PDT)
         else : email_sent_time = msg['Date'][:-6]
         email_sent_time = datetime.strptime(email_sent_time, '%a, %d %b %Y %H:%M:%S')
-        email_sent_time = pytz.timezone('America/New_York').localize(email_sent_time)  # Convert to NewYork Time
+        email_sent_time = TIMEZONE.localize(email_sent_time)  # Convert to NewYork Time
 
         time_difference = reference_time - email_sent_time
         if time_difference.total_seconds() <= 1500:  # 25 minutes in seconds
@@ -43,7 +43,7 @@ def filter_by_time(email_ids, reference_time, mail):
 
 
 def search_new_emails(mail):
-    time_frame = datetime.now(pytz.timezone('America/New_York')).strftime('%d-%b-%Y')  # unseen emails for current day & than manually filter them later based on time
+    time_frame = datetime.now(TIMEZONE).strftime('%d-%b-%Y')  # unseen emails for current day & than manually filter them later based on time
     result, data = mail.uid('search', None, f'(UNSEEN SINCE "{time_frame}")')
     email_ids = data[0].split()
     return email_ids
@@ -105,16 +105,15 @@ def get_supplier(email_subject, supplier_email) -> str:
 
 
 def email_download_background_task():
-    gmail_timezone = pytz.timezone('America/New_York')
     # folder naming structure is 'current date & time minus 25 minutes -> current date & time'
-    base_folder = f"{(datetime.now(gmail_timezone) - timedelta(minutes=25)).strftime('%d-%b-%Y_%H-%M-%S')} - {datetime.now(gmail_timezone).strftime('%d-%b-%Y_%H-%M-%S')}"
+    base_folder = f"{(datetime.now(TIMEZONE) - timedelta(minutes=25)).strftime('%d-%b-%Y_%H-%M-%S')} - {datetime.now(TIMEZONE).strftime('%d-%b-%Y_%H-%M-%S')}"
     base_folder_path = os.path.join(Path(INVOICE_DOWNLOAD_FOLDER), base_folder)
     if not os.path.isdir(base_folder_path): os.mkdir(base_folder_path)
 
     mail = login()
     email_ids = search_new_emails(mail)
 
-    email_ids = filter_by_time(email_ids,(datetime.now(gmail_timezone) - timedelta(minutes=25)),mail)
+    email_ids = filter_by_time(email_ids,(datetime.now(TIMEZONE) - timedelta(minutes=25)),mail)
 
     for e_id in email_ids:
         _, response = mail.uid('fetch', e_id, '(BODY.PEEK[])')
