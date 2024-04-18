@@ -30,3 +30,7 @@ class InvoiceItemController:
             db.add(new_item)
             db.commit()
 
+    def invoice_exists(self, reference_no):
+        with self.db_context() as db:
+            matched_invoice = db.query(InvoiceItem).filter_by(ref_no=reference_no).first()
+            return matched_invoice is not None
