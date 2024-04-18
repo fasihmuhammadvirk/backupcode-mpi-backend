@@ -9,6 +9,9 @@ import pytz
 from mpi_backend.config import SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, INVOICE_DOWNLOAD_FOLDER, SUPPLIERS,TIMEZONE
 from datetime import datetime, timedelta
 
+from mpi_backend.utils.extracted_data_processor import process_extracted_data
+from mpi_backend.utils.invoice_convertor import convert_invoice
+
 
 def login():
     mail = imaplib.IMAP4_SSL(SMTP_SERVER)
@@ -121,3 +124,7 @@ def email_download_background_task():
         raw_email = response[0][1].decode('utf-8')
         email_message = email.message_from_string(raw_email)
         download_email_attachments(email_message, base_folder_path)
+
+    # trigger remaining two tasks
+    converted_files, failed_files = convert_invoice(base_folder)
+    process_extracted_data(converted_files, failed_files)
