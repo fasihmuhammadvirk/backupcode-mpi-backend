@@ -19,10 +19,6 @@ AWS_SERVER_SECRET_KEY = os.getenv("SECRET_ACCESS_KEY")
 REGION = os.getenv("REGION")
 BUCKET_NAME = os.getenv("BUCKET_NAME")
 
-S3_CLIENT = boto3.client('s3', aws_access_key_id=AWS_SERVER_PUBLIC_KEY,
-                         aws_secret_access_key=AWS_SERVER_SECRET_KEY,
-                         region_name=REGION)
-
 SQLALCHEMY_DATABASE_URI = f"postgresql://{POSTGRES_USERNAME}:" \
                           f"{POSTGRES_PASSWORD}@" \
                           f"{POSTGRES_HOST}:" \
