@@ -39,9 +39,11 @@ def get_invoices(
 
 
 @router.get("/download")
-def download_invoice(invoice_id:str = Query(None)):
+def download_invoice( db: Session = Depends(get_db), invoice_id:str = Query(None)):
     try:
-        url = get_presigned_url(file_key=invoice_id)
+        matched_invoice = InvoiceController(db).get_invoice_by_invoiceID(invoice_id,db)
+        supplier_name = SupplierController(db).get_supplier_by_id(matched_invoice.supplier_id)
+        url = get_presigned_url(file_key=f'{supplier_name}/{invoice_id}')
     except Exception as e:
         raise HTTPException(status_code=404, detail="Couldn't fetch requested file") # Handle 'No Key Error' on Client Side
 
