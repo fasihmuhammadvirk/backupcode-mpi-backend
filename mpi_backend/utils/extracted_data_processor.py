@@ -37,7 +37,7 @@ def process_extracted_data(event):
                                                 'PO #': '', 'Customer Job': '', 'Buyer': ''})
 
         InvoiceController(db).set_status_to_processed(invoice_record.id) # invoice has processed, change its status accordingly
-        upload_file(file_name=file, file_key=invoice_record.id)
+        upload_file(file_name=file, file_key=f'{extracted_data["Vendor"][0]}/{invoice_record.id}')
 
         for index, row in extracted_data.iterrows():  # every item has its own record
             InvoiceItemController(db).insert_invoice_items(row, file.rsplit('/')[-1], invoice_record.id)
