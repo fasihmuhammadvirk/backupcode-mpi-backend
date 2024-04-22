@@ -7,6 +7,7 @@ from mpi_backend.database import get_db
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.database.controllers import InvoiceController,InvoiceItemController,SupplierController,ItemsMappingController,TempItemsMappingController,CustomerJobMappingController
 from contextlib import contextmanager
+from mpi_backend.utils.s3_utils import upload_file,get_presigned_url
 
 db = contextmanager(get_db)
 
@@ -36,12 +37,14 @@ def process_extracted_data(event):
                                                 'PO #': '', 'Customer Job': '', 'Buyer': ''})
 
         InvoiceController(db).set_status_to_processed(invoice_record.id) # invoice has processed, change its status accordingly
+        upload_file(file_name=file, file_key=invoice_record.id)
 
         for index, row in extracted_data.iterrows():  # every item has its own record
             InvoiceItemController(db).insert_invoice_items(row, file.rsplit('/')[-1], invoice_record.id)
 
     for file in failed_files:
-        InvoiceController(db).insert_invoice(datetime.now().strftime('%m/%d/%Y'), file.rsplit('/')[-1], '', 'FAILED', file)
+        invoice_record = InvoiceController(db).insert_invoice(datetime.now().strftime('%m/%d/%Y'), file.rsplit('/')[-1], '', 'FAILED', file)
+        upload_file(file_name=file, file_key=invoice_record.id)
 
 
 def search_replace(row, temp_items, item_mappings):

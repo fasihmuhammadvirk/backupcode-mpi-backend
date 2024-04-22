@@ -59,3 +59,6 @@ class InvoiceController:
     def set_status_to_processed(self, inserted_id):
         with self.db_context() as db:
             db.query(Invoice).filter(Invoice.id == inserted_id).update({"status": "PROCESSED"})
+
+    def get_invoice_by_invoiceID(self, invoice_id,db):
+        return db.query(Invoice).filter(Invoice.id == invoice_id).first()

@@ -22,7 +22,7 @@ class SupplierController:
             print(f"Error Getting Suppliers With ID: {e}")
             return None
 
-    def get_supplier_id(self, supplier_name):
+    def get_supplier_name(self, supplier_name):
         try:
             with self.db() as db:
                 supplier = db.query(Supplier).filter(Supplier.supplier_name == supplier_name).first()
