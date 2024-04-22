@@ -13,7 +13,7 @@ def upload_file(file_name, file_key):
         print(f'{file_name} -> Failed during upload to S3 Bucket. Raised Exception-->{e}')
 
 
-def get_presigned_url(file_key, expiration_time = 600):
+def get_presigned_url(file_key, expiration_time = 180):
     presigned_url = S3_CLIENT.generate_presigned_url(
         'get_object',
         Params={'Bucket': BUCKET_NAME, 'Key': str(file_key)+'.pdf'},
