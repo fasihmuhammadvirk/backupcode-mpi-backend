@@ -2,10 +2,12 @@ import os
 import boto3
 from pathlib import Path
 from dotenv import load_dotenv
+import pytz
 
 dotenv_path = Path('.env')
 load_dotenv(dotenv_path=dotenv_path)
 
+TIMEZONE = pytz.timezone('America/New_York')
 LOG_LEVEL = os.getenv("LOG_LEVEL")
 POSTGRES_HOST = os.getenv("POSTGRES_HOST")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT")

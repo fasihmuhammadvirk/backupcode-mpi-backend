@@ -4,16 +4,14 @@ import os
 import shutil
 from datetime import datetime, timedelta
 
-from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
+from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER, TIMEZONE
 from mpi_backend.utils.pdf_to_excel.main_extractor import extract_data
 from mpi_backend.utils.pdf_to_excel.cleaning_util import get_files_from_folder
 from mpi_backend.utils.pdf_to_excel.abc_opus_services_utils import process_invoice
 
 
-def convert_invoice():
+def convert_invoice(base_folder):
     print("Convert to Excel Background Task Triggered ...")
-
-    base_folder = f"{(datetime.now() - timedelta(days=3)).strftime('%d-%m-%Y')} - {datetime.now().strftime('%d-%m-%Y')}"
 
     if os.path.isdir(f'{INVOICE_DOWNLOAD_FOLDER}/{base_folder}/no_supplier'):  # delete no_supplier directory
         shutil.rmtree(f'{INVOICE_DOWNLOAD_FOLDER}/{base_folder}/no_supplier', ignore_errors=True)

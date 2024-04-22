@@ -12,8 +12,7 @@ from mpi_backend.utils.s3_utils import upload_file,get_presigned_url
 db = contextmanager(get_db)
 
 
-def process_extracted_data(event):
-    converted_files, failed_files = event.retval
+def process_extracted_data(converted_files, failed_files):
 
     temp_items = TempItemsMappingController(db).get_temp_items_mappings()
     item_mappings = ItemsMappingController(db).get_items_mappings()
