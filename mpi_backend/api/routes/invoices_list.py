@@ -35,7 +35,7 @@ def get_invoices(
         return paginate(invoices)
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch invoices: {e}")
+        raise HTTPException(status_code=404, detail=f"No Records Found!")
 
 
 @router.get("/download")
