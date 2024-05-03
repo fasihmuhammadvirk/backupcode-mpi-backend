@@ -53,7 +53,9 @@ def convert_and_combine(all_files):
 
             outputpath = filepath.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
 
-            supplier_sub_stirng = filepath.split("/")[3]
+            if filepath.count('/') ==3 : supplier_sub_stirng = filepath.split("/")[-2] # for upload invoice
+            else : supplier_sub_stirng = filepath.split("/")[3]  # for downloaded invoice through background task
+
             if "BMW Plumbing Supplies" in supplier_sub_stirng: supplier = 'BMW Plumbing Supplies'
             elif "World Wide Plumbing" in supplier_sub_stirng:supplier = 'World Wide Plumbing'
             elif 'Y & S Plumbing Supply' in supplier_sub_stirng:supplier = 'Y & S Plumbing Supply'
