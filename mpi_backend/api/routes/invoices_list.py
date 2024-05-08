@@ -1,10 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query,UploadFile, File
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
 from datetime import datetime
 from fastapi_pagination import Page, paginate
 from datetime import date
+import os
 from mpi_backend.database.controllers import SupplierController, InvoiceController
+from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
+from mpi_backend.utils.extracted_data_processor import process_extracted_data
+from mpi_backend.utils.invoice_convertor import convert_invoice
 from mpi_backend.database.schemas import Invoice
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.s3_utils import get_presigned_url
@@ -48,3 +52,26 @@ def download_invoice( db: Session = Depends(get_db), invoice_id:str = Query(None
         raise HTTPException(status_code=404, detail="Couldn't fetch requested file") # Handle 'No Key Error' on Client Side
 
     return { "link": url}
+
+
+@router.post("/upload")
+async def upload_and_process_invoice(supplier_id : int, file: UploadFile = File(...), db: Session = Depends(get_db),
+                                     token: str = Depends(JWTBearer())):
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
+
+    supplier= SupplierController(db).get_supplier_by_id(supplier_id)
+
+    upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{supplier}' # every supplier will have it own folder at root of storage dir
+    if not os.path.exists(upload_folder): os.makedirs(upload_folder)
+
+    with open(os.path.join(upload_folder, file.filename), "wb") as buffer:
+        buffer.write(await file.read())
+
+    converted_files, failed_files = convert_invoice(supplier)
+    process_extracted_data(converted_files, failed_files)
+
+    [os.remove(os.path.join(upload_folder, filename)) for filename in os.listdir(upload_folder)] # delete files after it's processed
+
+    return {"status": "Uploaded Invoice processed successfully."}
+
