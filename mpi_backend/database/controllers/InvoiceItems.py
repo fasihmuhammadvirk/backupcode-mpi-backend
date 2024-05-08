@@ -1,5 +1,6 @@
 from datetime import datetime
 from mpi_backend.database.models import InvoiceItem
+from mpi_backend.database.schemas import InvoiceItems as InvoiceItemsResponse
 
 
 class InvoiceItemController:
@@ -34,3 +35,13 @@ class InvoiceItemController:
         with self.db_context() as db:
             matched_invoice = db.query(InvoiceItem).filter_by(ref_no=reference_no).first()
             return matched_invoice is not None
+
+    def get_invoice_items(self, invoice_id= None):
+        query = self.db_context.query(InvoiceItem)
+        if invoice_id:
+            query = query.filter(InvoiceItem.invoice_id == invoice_id)
+        items = query.all()
+
+        invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in items]
+
+        return invoices_items
