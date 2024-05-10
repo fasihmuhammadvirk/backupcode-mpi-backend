@@ -11,25 +11,22 @@ from mpi_backend.utils.auth.auth_bearer import JWTBearer
 router = APIRouter(prefix="/quickbooks")
 
 
-@router.get("/migrate")
+@router.post("/migrate")
 def migrate_invoice_to_QB(
-        invoice_ids:List[UUID], db: Session = Depends(get_db)):
-
-    QB_connection = pyodbc.connect('DSN=QuickBooks Data;')
+        invoice_ids: List[UUID], db: Session = Depends(get_db)):
+    QB_connection = pyodbc.connect('DSN=QuickBooks Data;')  # 5 queries per session in trial mode
     cursor = QB_connection.cursor()
-    # TODO replace with fields from MPI latest company file & value of line_item
-    query = """
-       INSERT INTO InvoiceLine (CustomerRefFullName, InvoiceLineItemRefFullName, InvoiceLineDesc, InvoiceLineRate, InvoiceLineAmount, InvoiceLineSalesTaxCodeRefFullName, FQSaveToCache)
-       VALUES ('Joe Mama Inc 2', 'Pest Control', 'Callback VoIP Charge', 33.00, 33.00, 'Non', 0)"""
 
     for invoice_id in invoice_ids:
-        try:
-            line_item = InvoiceItemController(db).get_invoice_items(invoice_id)
-            cursor.execute(query)
-            QB_connection.commit()
-        except Exception as e:
-            print(f"Error executing query for invoice {invoice_id}: {e}")
-            QB_connection.rollback()
-        finally:
-            cursor.close()
-            QB_connection.close()
+        line_items = InvoiceItemController(db).get_invoice_items(invoice_id)
+
+        for line_item in line_items:
+            try:
+                query = f"""INSERT INTO "BillItemLine" ("VendorRefFullName", "RefNumber", "Memo", "ItemLineItemRefFullName", "ItemLineDesc", "ItemLineQuantity", "ItemLineCost", "ItemLineAmount", "ItemLineCustomerRefFullName", "ItemLineClassRefFullName","TxnDate") VALUES ('{line_item.vendor}', '{line_item.ref_no}', '{line_item.memo}', '{line_item.item}', '{line_item.description}', {line_item.qty}, {line_item.cost}, {float(line_item.amount.replace('$', ''))} ,'{line_item.customer_job}', NULL, {{d'{line_item.date.strftime('%Y-%m-%d')}'}})"""
+                cursor.execute(query)
+            except Exception as e:
+                print(f"Error inserting line item {line_item} --> : {e}")
+                continue
+    QB_connection.commit()
+    cursor.close()
+    QB_connection.close()
