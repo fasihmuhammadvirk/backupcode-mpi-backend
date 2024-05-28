@@ -50,7 +50,8 @@ class InvoiceController:
                 date=invoice.date,
                 filename=invoice.filename,
                 supplier_id=invoice.supplier_id,
-                status=invoice.status
+                status=invoice.status,
+                invoice_id= str(invoice.id)
             )
             invoices_list.append(invoice_item)
 
