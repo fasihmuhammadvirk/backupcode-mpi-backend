@@ -8,5 +8,6 @@ class Invoice(BaseModel):
     filename: str
     supplier_id: int
     status: str
+    invoice_id: str
     class Config:
         from_attributes = True
