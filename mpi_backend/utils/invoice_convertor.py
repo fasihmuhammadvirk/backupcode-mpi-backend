@@ -3,6 +3,8 @@ import pandas as pd
 import os
 import shutil
 from datetime import datetime, timedelta
+import logging
+logger = logging.getLogger(__name__)
 
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER, TIMEZONE
 from mpi_backend.utils.pdf_to_excel.main_extractor import extract_data
@@ -11,7 +13,7 @@ from mpi_backend.utils.pdf_to_excel.abc_opus_services_utils import process_invoi
 
 
 def convert_invoice(base_folder):
-    print("Convert to Excel Background Task Triggered ...")
+    logger.info("Convert to Excel Background Task Triggered ...")
 
     if os.path.isdir(f'{INVOICE_DOWNLOAD_FOLDER}/{base_folder}/no_supplier'):  # delete no_supplier directory
         shutil.rmtree(f'{INVOICE_DOWNLOAD_FOLDER}/{base_folder}/no_supplier', ignore_errors=True)
@@ -48,7 +50,7 @@ def convert_and_combine(all_files):
             print(filepath)
             filename = filepath.split("/")[-1]
             if not filename[-4:].lower() == ".pdf":
-                print("Please only select PDF files")
+                logger.info(f"Invalid File >> {filename}")
                 continue
 
             outputpath = filepath.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
@@ -81,7 +83,7 @@ def convert_and_combine(all_files):
                     all_output_paths.append(splitFile_path)
 
         except Exception as e:
-            print(f"File Conversion Failed becasue : {e}")
+            logger.error(f"File Conversion Failed because : {e}")
             failed_input_paths.append(filepath)
 
     return all_output_paths, failed_input_paths

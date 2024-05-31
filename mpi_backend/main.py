@@ -1,4 +1,3 @@
-import logging
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -18,11 +17,10 @@ from mpi_backend.utils.invoice_downloader import email_download_background_task
 from mpi_backend.utils.invoice_convertor import convert_invoice
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.database import Base, engine
+from mpi_backend.config.logging_config import setup_logging
 
-logging.basicConfig(level=LOG_LEVEL)
-logger = logging.getLogger(__name__)
-Base.metadata.create_all(engine)  # create db tables
-
+# Base.metadata.create_all(engine)  # create db tables
+setup_logging()
 
 @asynccontextmanager
 async def lifespan(app:FastAPI):

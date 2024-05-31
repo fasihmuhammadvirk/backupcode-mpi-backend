@@ -5,6 +5,9 @@ import os
 from pathlib import Path
 from email.utils import parsedate_to_datetime
 import pytz
+import logging
+logger = logging.getLogger(__name__)
+
 
 from mpi_backend.config import SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, INVOICE_DOWNLOAD_FOLDER, SUPPLIERS,TIMEZONE
 from datetime import datetime, timedelta
@@ -17,7 +20,7 @@ def login():
     mail = imaplib.IMAP4_SSL(SMTP_SERVER)
     mail.login(LOGIN_EMAIL, LOGIN_PWD)
     mail.select('inbox')
-    print("Connection to mail box established.\n")
+    logger.info("Connection to mail box established.\n")
     return mail
 
 
@@ -83,7 +86,7 @@ def download_email_attachments(email_message, base_folder_path):
             try:
                 with open(filepath, 'wb') as f:
                     f.write(part.get_payload(decode=True))
-                    print(f"Downloaded {part.get_filename()} , saved at {filepath}")
+                    logger.info(f"Downloaded {part.get_filename()} , saved at {filepath}")
             except:
                 continue  # invalid file name
 
@@ -112,6 +115,8 @@ def email_download_background_task():
     base_folder = f"{(datetime.now(TIMEZONE) - timedelta(minutes=25)).strftime('%d-%b-%Y_%H-%M-%S')} - {datetime.now(TIMEZONE).strftime('%d-%b-%Y_%H-%M-%S')}"
     base_folder_path = os.path.join(Path(INVOICE_DOWNLOAD_FOLDER), base_folder)
     if not os.path.isdir(base_folder_path): os.mkdir(base_folder_path)
+
+    logger.info(f"Email Download Background Task Triggered >>> {base_folder}")
 
     mail = login()
     email_ids = search_new_emails(mail)
