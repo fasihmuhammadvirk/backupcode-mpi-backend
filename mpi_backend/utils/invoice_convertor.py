@@ -19,7 +19,7 @@ def convert_invoice(base_folder):
         shutil.rmtree(f'{INVOICE_DOWNLOAD_FOLDER}/{base_folder}/no_supplier', ignore_errors=True)
 
     folders = get_leaf_directories(f'{INVOICE_DOWNLOAD_FOLDER}/{base_folder}')
-    folders = [path.replace('/', '\\') for path in folders]
+    # folders = [path.replace('/', '\\') for path in folders]
     converted_paths, failed_files = [],[]
 
     for folder in folders:
