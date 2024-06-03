@@ -111,8 +111,8 @@ def get_supplier(email_subject, supplier_email) -> str:
 
 
 def email_download_background_task():
-    # folder naming structure is 'current date & time minus 25 minutes -> current date & time'
-    base_folder = f"{(datetime.now(TIMEZONE) - timedelta(minutes=25)).strftime('%d-%b-%Y_%H-%M-%S')} - {datetime.now(TIMEZONE).strftime('%d-%b-%Y_%H-%M-%S')}"
+    # folder naming structure is 'current date & time minus 3 minutes -> current date & time'
+    base_folder = f"{(datetime.now(TIMEZONE) - timedelta(minutes=3)).strftime('%d-%b-%Y_%H-%M-%S')} - {datetime.now(TIMEZONE).strftime('%d-%b-%Y_%H-%M-%S')}"
     base_folder_path = os.path.join(Path(INVOICE_DOWNLOAD_FOLDER), base_folder)
     if not os.path.isdir(base_folder_path): os.mkdir(base_folder_path)
 
@@ -121,7 +121,7 @@ def email_download_background_task():
     mail = login()
     email_ids = search_new_emails(mail)
 
-    email_ids = filter_by_time(email_ids,(datetime.now(TIMEZONE) - timedelta(minutes=25)),mail)
+    email_ids = filter_by_time(email_ids,(datetime.now(TIMEZONE) - timedelta(minutes=3)),mail)
 
     for e_id in email_ids:
         _, response = mail.uid('fetch', e_id, '(BODY.PEEK[])')
