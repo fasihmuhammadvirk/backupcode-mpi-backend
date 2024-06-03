@@ -57,9 +57,18 @@ class InvoiceController:
 
         return invoices_list
 
-    def set_status_to_processed(self, inserted_id):
-        with self.db_context() as db:
-            db.query(Invoice).filter(Invoice.id == inserted_id).update({"status": "PROCESSED"})
+    def set_status_to_processed(self, inserted_id, db_ref= None):
+        if db_ref:
+            db_ref.query(Invoice).filter(Invoice.id == inserted_id).update({"status": "PROCESSED"}) # source -> endpoint
+        else:
+            with self.db_context() as db:
+                db.query(Invoice).filter(Invoice.id == inserted_id).update({"status": "PROCESSED"}) # source -> background task
+
+    def delete_invoice(self,invoice_id,db):
+        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).all()
+        for record in invoice:
+            db.delete(record)
+        db.commit()
 
     def get_invoice_by_invoiceID(self, invoice_id,db):
         return db.query(Invoice).filter(Invoice.id == invoice_id).first()

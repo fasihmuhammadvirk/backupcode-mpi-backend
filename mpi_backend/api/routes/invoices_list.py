@@ -5,7 +5,8 @@ from datetime import datetime
 from fastapi_pagination import Page, paginate
 from datetime import date
 import os
-from mpi_backend.database.controllers import SupplierController, InvoiceController
+import requests
+from mpi_backend.database.controllers import SupplierController, InvoiceController, InvoiceItemController
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.utils.invoice_convertor import convert_invoice
@@ -75,3 +76,33 @@ async def upload_and_process_invoice(supplier_id : int, file: UploadFile = File(
 
     return {"status": "Uploaded Invoice processed successfully."}
 
+
+@router.post("/process")
+async def upload_and_process_invoice(invoice_id : str, db: Session = Depends(get_db),
+                                    token: str = Depends(JWTBearer())):
+
+    invoice = InvoiceController(db).get_invoice_by_invoiceID(invoice_id,db)
+    supplier= SupplierController(db).get_supplier_by_id(invoice.supplier_id)
+    invoice_url = get_presigned_url(file_key=f'{supplier}/{invoice_id}')
+
+    upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{supplier}' # every supplier will have it own folder at root of storage dir
+    if not os.path.exists(upload_folder): os.makedirs(upload_folder)
+
+    if not invoice_url:
+        raise HTTPException(status_code=404, detail="Couldn't fetch requested Invoice")
+
+    response = requests.get(invoice_url)
+    if response.status_code == 200:
+        with open(os.path.join(upload_folder, invoice.filename), 'wb') as file:
+            file.write(response.content)
+    else:
+        raise HTTPException(status_code=response.status_code, detail=response.text)
+
+    InvoiceItemController(db).delete_invoice_items(invoice_id,db) # delete previous ingested invoice items
+    InvoiceController(db).delete_invoice(invoice_id,db)
+
+    converted_files, failed_files = convert_invoice(supplier)
+    process_extracted_data(converted_files, failed_files)
+
+    [os.remove(os.path.join(upload_folder, filename)) for filename in os.listdir(upload_folder)] # delete files after it's processed
+    return {"status": "Invoice reprocessing successful."}
