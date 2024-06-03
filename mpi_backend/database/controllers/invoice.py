@@ -59,10 +59,14 @@ class InvoiceController:
 
     def set_status_to_processed(self, inserted_id, db_ref= None):
         if db_ref:
-            db_ref.query(Invoice).filter(Invoice.id == inserted_id).update({"status": "PROCESSED"}) # source -> endpoint
+            invoice = db_ref.query(Invoice).filter(Invoice.id == inserted_id).first() # source -> endpoint
+            invoice.status = 'PROCESSED'
+            db_ref.commit()
         else:
             with self.db_context() as db:
-                db.query(Invoice).filter(Invoice.id == inserted_id).update({"status": "PROCESSED"}) # source -> background task
+                invoice = db.query(Invoice).filter(Invoice.id == inserted_id).first() # source -> background task
+                invoice.status = 'PROCESSED'
+                db.commit()
 
     def delete_invoice(self,invoice_id,db):
         invoice = db.query(Invoice).filter(Invoice.id == invoice_id).all()
