@@ -66,6 +66,7 @@ def convert_and_combine(all_files):
             elif 'Park Plumbing Supply' in supplier_sub_stirng:supplier = 'Park Plumbing Supply'
             elif 'ABC Opus Services' in supplier_sub_stirng:supplier = 'ABC Opus Services'
             elif "FW Webb Plumbing Supply" in supplier_sub_stirng:supplier = "FW Webb Plumbing Supply"
+            elif "Flow Mark Plumbing Supply" in supplier_sub_stirng:supplier = "Flow Mark Plumbing Supply"
             else: continue
 
             if supplier == 'ABC Opus Services':
@@ -83,7 +84,7 @@ def convert_and_combine(all_files):
                     all_output_paths.append(splitFile_path)
 
         except Exception as e:
-            logger.error(f"File Conversion Failed because : {e}")
+            logger.error(f"File ->{filepath.split('/')[-1]} Conversion Failed because : {e}")
             failed_input_paths.append(filepath)
 
     return all_output_paths, failed_input_paths
