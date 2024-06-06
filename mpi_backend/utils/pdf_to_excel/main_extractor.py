@@ -2,6 +2,8 @@ import os
 import sys
 import tabula
 import pandas as pd
+import logging
+logger = logging.getLogger(__name__)
 from mpi_backend.utils.pdf_to_excel.cleaning_util import clean_individual_table,split_multiple_invoices
 from mpi_backend.utils.pdf_to_excel.extraction_util import extract_job_info, extract_invoice_info, extract_tax_etc, extract_po, extract_buyer,check_for_unique_invoices, read_invoice
 from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
@@ -10,6 +12,7 @@ from mpi_backend.utils.pdf_to_excel.gotham_supply import process_invoice
 from mpi_backend.utils.pdf_to_excel import bmw_old
 from mpi_backend.utils.pdf_to_excel import ys_old
 from mpi_backend.utils.pdf_to_excel import web_co_supply
+from mpi_backend.utils.pdf_to_excel import flow_mark
 
 regular_area = (290, 20, 290+415, 20+570)
 last_page_area = (290, 20, 290+375, 20+570)
@@ -51,7 +54,11 @@ def extract_data(filename, output_path, supplier):
     elif supplier == "FW Webb Plumbing Supply":
         web_co_supply.process_invoice(filename, output_path)
         return
+    elif supplier == "Flow Mark Plumbing Supply":
+        flow_mark.process_invoice(filename, output_path)
+        return
     else:
+        logger.info(f'Invalid Supplier -> {supplier} for file -> {filename}.Skipping Invoice.')
         return "Please enter a valid supplier"
 
     finalized_tables = []
