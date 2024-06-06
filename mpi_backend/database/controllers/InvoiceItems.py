@@ -45,3 +45,10 @@ class InvoiceItemController:
         invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in items]
 
         return invoices_items
+
+    def delete_invoice_items(self, invoice_id,db):
+        items = db.query(InvoiceItem).filter_by(invoice_id=invoice_id).all()
+        for item in items:
+            db.delete(item)
+        db.commit()
+
