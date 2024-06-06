@@ -124,4 +124,5 @@ def email_download_background_task():
 
     # trigger remaining two tasks
     converted_files, failed_files = convert_invoice(base_folder)
+    logger.info(f"Convert to excel task is finished.\n Converted files ->{converted_files} \n Failed Files -> {failed_files}")
     process_extracted_data(converted_files, failed_files)
