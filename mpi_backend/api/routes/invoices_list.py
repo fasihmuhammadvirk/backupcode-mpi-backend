@@ -78,7 +78,7 @@ async def upload_and_process_invoice(supplier_id : int, file: UploadFile = File(
 
 
 @router.post("/process")
-async def upload_and_process_invoice(invoice_id : str, db: Session = Depends(get_db),
+async def process_again(invoice_id : str, db: Session = Depends(get_db),
                                     token: str = Depends(JWTBearer())):
 
     invoice = InvoiceController(db).get_invoice_by_invoiceID(invoice_id,db)

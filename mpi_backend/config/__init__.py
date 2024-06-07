@@ -34,9 +34,8 @@ INVOICE_DOWNLOAD_FOLDER = os.getenv("INVOICE_DOWNLOAD_FOLDER", "mpi_backend/stor
 
 SUPPLIERS = ['BMW Plumbing Supplies', 'World Wide Plumbing', 'Y & S Plumbing Supply', 'Supreme Plumbing Supply',
              'Pyramid Plumbing', 'ABC Opus Services', 'Park Plumbing Supply', 'Gotham Plumbing Supply',
-             'FW Webb Plumbing Supply', 'Bruce Supply', 'Boro Park & Certified Lumber', 'KJ Plumbing',
-             'Nefco Corporation', 'Sparkleening', 'email_attachments', 'Positive Computer Services', 'Awisco']
+             'FW Webb Plumbing Supply', 'Flow Mark Plumbing Supply']
 
 PROCESSABLE_SUPPLIERS = ['BMW Plumbing Supplies', 'World Wide Plumbing', 'Y & S Plumbing Supply',
                          'Supreme Plumbing Supply', 'Pyramid Plumbing', 'ABC Opus Services', 'Park Plumbing Supply',
-                         'Gotham Plumbing Supply']
+                         'Gotham Plumbing Supply', 'FW Webb Plumbing Supply', 'Flow Mark Plumbing Supply']

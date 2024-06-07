@@ -65,11 +65,9 @@ def download_email_attachments(email_message, base_folder_path):
             inner_dir = f'{str(date_time_obj.month)}-{str(date_time_obj.day)}-{str(date_time_obj.year)}'
 
             try:
-                if 'Supreme Plumbing Supply' in part.get_filename() or 'Invoice_I' in part.get_filename():  # could not be extracted from email subject
-                    supplier_name = SUPPLIERS[3]
-                else:
-                    supplier_name = get_supplier(email_message['subject'], supplier_email=email_message['Return-Path'])
+                supplier_name = get_supplier(email_message['subject'], supplier_email=email_message['Return-Path'])
             except:
+                logger.error(f"Couldn't detect supplier for email -> {str(email_message['subject'])}. Skipping Email.")
                 continue
 
             supplier_path = os.path.join(base_folder_path,supplier_name)  # base folder (to-from dates) + supplier name
@@ -95,18 +93,12 @@ def get_supplier(email_subject, supplier_email) -> str:
     if "bmw" in email_subject.lower(): return SUPPLIERS[0]
     elif "world wide" in email_subject.lower(): return SUPPLIERS[1]
     elif "y&s" in email_subject.lower(): return SUPPLIERS[2]
+    elif "invoice # i-" in email_subject.lower() or "supreme plumbing" in email_subject.lower(): return SUPPLIERS[3]
     elif "pyramid plumbing invoice" in email_subject.lower(): return SUPPLIERS[4]
     elif "abc opus services" in email_subject.lower(): return SUPPLIERS[5]
     elif "park plumbing & heating supply - invoices overnight" in email_subject.lower(): return SUPPLIERS[6]
     elif "webb payment receipt" in email_subject.lower(): return SUPPLIERS[8]
-    elif "invoice:" in email_subject.lower() and "p/o:" in email_subject.lower(): return SUPPLIERS[9]
-    elif "mpiplu invoice" in email_subject.lower(): return 'Certified Lumber'
-    elif "kj plumbing sales inc - invoices" in email_subject.lower(): return SUPPLIERS[11]
-    elif "acct no. 133588: your invoice" in email_subject.lower(): return SUPPLIERS[12]
-    elif "invoice" in email_subject.lower() and 'for' in email_subject.lower(): return SUPPLIERS[13]
-    elif "invoice" in email_subject.lower() and 'from positive computer services' in email_subject.lower(): return SUPPLIERS[16]
-    elif email_subject.lower() == "invoices": return SUPPLIERS[17]
-
+    elif "see invoice i-" in email_subject.lower(): return SUPPLIERS[9]
     else: return "no_supplier"
 
 
@@ -132,4 +124,5 @@ def email_download_background_task():
 
     # trigger remaining two tasks
     converted_files, failed_files = convert_invoice(base_folder)
+    logger.info(f"Convert to excel task is finished.\n Converted files ->{converted_files} \n Failed Files -> {failed_files}")
     process_extracted_data(converted_files, failed_files)
