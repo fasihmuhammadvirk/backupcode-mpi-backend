@@ -47,6 +47,19 @@ class InvoiceItemController:
 
         return invoices_items
 
+    def get_invoice_items_by_filters(self, supplier=None, from_date=None, to_date=None):
+        query = self.db_context.query(InvoiceItem)
+
+        if supplier is not None:  # only apply supplier filter if it's provided.
+            query = query.filter(InvoiceItem.vendor == supplier)
+
+        query = query.filter(InvoiceItem.date >= from_date)
+        query = query.filter(InvoiceItem.date <= to_date)
+        items = query.all()
+
+        invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in items]
+        return invoices_items
+
     def delete_invoice_items(self, invoice_id,db):
         items = db.query(InvoiceItem).filter_by(invoice_id=invoice_id).all()
         for item in items:
