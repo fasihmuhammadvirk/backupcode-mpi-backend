@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional,List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query,UploadFile, File
@@ -9,7 +9,7 @@ from fastapi_pagination import Page, paginate
 from datetime import date
 import os
 from mpi_backend.database.controllers import InvoiceItemController
-from mpi_backend.database.schemas import InvoiceItems
+from mpi_backend.database.schemas import InvoiceItems, UpdateInvoiceItemRequest
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 
 
@@ -42,3 +42,10 @@ def get_invoices(
 
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"No Records Found!")
+
+
+@router.put("/update")
+def update_invoice_items(items: List[UpdateInvoiceItemRequest], db: Session = Depends(get_db)):
+    controller = InvoiceItemController(db)
+    controller.update_invoice_items([item.dict() for item in items])
+    return {"status": "invoices updated successfully"}
