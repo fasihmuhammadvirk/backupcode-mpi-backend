@@ -5,6 +5,8 @@ from datetime import datetime
 from fastapi_pagination import Page, paginate
 from datetime import date
 import os
+import logging
+logger = logging.getLogger(__name__)
 import requests
 from mpi_backend.database.controllers import SupplierController, InvoiceController, InvoiceItemController
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
@@ -41,6 +43,17 @@ def get_invoices(
 
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"No Records Found!")
+
+
+@router.get("/all")
+def get_invoices(db: Session = Depends(get_db),token: str = Depends(JWTBearer())):
+    try:
+        invoices = InvoiceController(db).get_all_invoices(db=db)
+
+        return invoices
+    except Exception as e:
+        logger.error(f'Error occured while fetching all invoices -> {e}')
+        raise HTTPException(status_code=500, detail=f"An Error occured while fetching invoices.")
 
 
 @router.get("/download")
