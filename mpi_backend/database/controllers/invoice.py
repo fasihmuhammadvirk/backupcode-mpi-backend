@@ -57,6 +57,22 @@ class InvoiceController:
 
         return invoices_list
 
+    def get_all_invoices(self, db):
+        invoices = db.query(Invoice).all()
+        invoices_list = []
+        for invoice in invoices:
+            invoice_item = InvoiceResponse(
+                date=invoice.date,
+                filename=invoice.filename,
+                supplier_id=invoice.supplier_id,
+                status=invoice.status,
+                invoice_id=str(invoice.id)
+            )
+            invoices_list.append(invoice_item)
+
+        return invoices_list
+
+
     def set_status_to_processed(self, inserted_id, db_ref= None):
         if db_ref:
             invoice = db_ref.query(Invoice).filter(Invoice.id == inserted_id).first() # source -> endpoint
