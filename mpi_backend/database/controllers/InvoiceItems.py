@@ -41,6 +41,7 @@ class InvoiceItemController:
         query = self.db_context.query(InvoiceItem)
         if invoice_id:
             query = query.filter(InvoiceItem.invoice_id == invoice_id)
+        query = query.order_by(InvoiceItem.id.desc())
         items = query.all()
 
         invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in items]
@@ -55,6 +56,7 @@ class InvoiceItemController:
 
         query = query.filter(InvoiceItem.date >= from_date)
         query = query.filter(InvoiceItem.date <= to_date)
+        query = query.order_by(InvoiceItem.id.desc())
         items = query.all()
 
         invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in items]
