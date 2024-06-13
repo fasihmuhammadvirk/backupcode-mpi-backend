@@ -66,3 +66,34 @@ def update_invoice_items(items: List[UpdateInvoiceItemRequest], db: Session = De
     controller = InvoiceItemController(db)
     controller.update_invoice_items([item.dict() for item in items])
     return {"status": "invoices updated successfully"}
+
+
+@router.get("/sort", response_model=Page[InvoiceItems])
+def sort_invoices( db: Session = Depends(get_db), column_name:str = Query(None),
+                   sort_order:str = Query('ascending',description="Sort By (ascending, descending)")):
+    column_mapping = {
+        "File Name": "filename",
+        "Sheet Name": "sheet_name",
+        "Item": "item",
+        "Description": "description",
+        "Quantity": "qty",
+        "Cost": "cost",
+        "Amount": "amount",
+        "Date": "date",
+        "Ref No": "ref_no",
+        "PO #": "po_number",
+        "Customer Job": "customer_job",
+        "Bill": "bill",
+        "Vendor": "vendor",
+        "Class": "class_",
+        "Memo": "memo",
+        "Buyer": "buyer",
+    }
+
+    if column_name not in column_mapping:
+        raise HTTPException(status_code=400, detail="Invalid column name")
+
+    column = column_mapping.get(column_name, 'date')
+
+    invoice_items = InvoiceItemController(db).sort(db,column, sort_order)
+    return paginate(invoice_items)

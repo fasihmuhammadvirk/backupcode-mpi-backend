@@ -126,7 +126,7 @@ def sort_invoices( db: Session = Depends(get_db), column_name:str = Query(None),
                    sort_order:str = Query('ascending',description="Sort By (ascending, descending)")):
 
     column_mapping= {"Date":"date",
-                     "FileName":"filename",
+                     "File Name":"filename",
                      "Status":"status"}
 
     if column_name not in column_mapping and column_name != 'Supplier':

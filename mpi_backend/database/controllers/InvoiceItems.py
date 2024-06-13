@@ -1,4 +1,5 @@
 from datetime import datetime
+from sqlalchemy import asc, desc
 from fastapi import HTTPException
 from mpi_backend.database.models import InvoiceItem
 from mpi_backend.database.schemas import InvoiceItems as InvoiceItemsResponse
@@ -95,4 +96,16 @@ class InvoiceItemController:
 
                 updated_items.add(matched_item.id)  # Mark as updated
         self.db_context.commit()
+
+    def sort(self, db, column, sort_order):
+        if sort_order == 'ascending':
+            order = asc(column)
+        elif sort_order == 'descending':
+            order = desc(column)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid sort order")
+
+        invoice_items = self.db_context.query(InvoiceItem).order_by(order).all()
+        invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in invoice_items]
+        return invoices_items
 
