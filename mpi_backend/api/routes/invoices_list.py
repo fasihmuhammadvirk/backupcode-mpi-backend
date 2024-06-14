@@ -119,3 +119,20 @@ async def process_again(invoice_id : str, db: Session = Depends(get_db),
 
     [os.remove(os.path.join(upload_folder, filename)) for filename in os.listdir(upload_folder)] # delete files after it's processed
     return {"status": "Invoice reprocessing successful."}
+
+
+@router.get("/sort", response_model=Page[Invoice])
+def sort_invoices( db: Session = Depends(get_db), column_name:str = Query(None),
+                   sort_order:str = Query('ascending',description="Sort By (ascending, descending)")):
+
+    column_mapping= {"Date":"date",
+                     "File Name":"filename",
+                     "Status":"status"}
+
+    if column_name not in column_mapping and column_name != 'Supplier':
+        raise HTTPException(status_code=400, detail="Invalid column name")
+
+    column = column_mapping.get(column_name, 'date')
+
+    invoices = InvoiceController(db).sort(db,column, sort_order)
+    return paginate(invoices)

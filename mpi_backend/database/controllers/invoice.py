@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import List, Optional
 from datetime import date
-from sqlalchemy import or_
+
+from fastapi import HTTPException
+from sqlalchemy import or_, asc, desc
 from mpi_backend.database.models import Invoice
 from mpi_backend.database.schemas import Invoice as InvoiceResponse
 
@@ -92,3 +94,27 @@ class InvoiceController:
 
     def get_invoice_by_invoiceID(self, invoice_id,db):
         return db.query(Invoice).filter(Invoice.id == invoice_id).first()
+
+    def sort(self, db, column, sort_order):
+        if sort_order == 'ascending':
+            order = asc(column)
+        elif sort_order == 'descending':
+            order = desc(column)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid sort order")
+
+        invoices = db.query(Invoice).order_by(order).all()
+
+        invoices_list = []
+        for invoice in invoices:
+            invoice_item = InvoiceResponse(
+                date=invoice.date,
+                filename=invoice.filename,
+                supplier_id=invoice.supplier_id,
+                status=invoice.status,
+                invoice_id=str(invoice.id)
+            )
+            invoices_list.append(invoice_item)
+
+        return invoices_list
+
