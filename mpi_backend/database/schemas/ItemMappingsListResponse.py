@@ -22,4 +22,4 @@ class ItemMappingsByMpiTypeResponse(BaseModel):
 
 class UpdateMappingRequest(BaseModel):
     supplier_id: str
-    mapping: list[dict]
+    mapping: List[dict]
