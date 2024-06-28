@@ -5,6 +5,9 @@ import os
 from pathlib import Path
 from email.utils import parsedate_to_datetime
 import pytz
+import logging
+logger = logging.getLogger(__name__)
+
 
 from mpi_backend.config import SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, INVOICE_DOWNLOAD_FOLDER, SUPPLIERS,TIMEZONE
 from datetime import datetime, timedelta
@@ -17,7 +20,7 @@ def login():
     mail = imaplib.IMAP4_SSL(SMTP_SERVER)
     mail.login(LOGIN_EMAIL, LOGIN_PWD)
     mail.select('inbox')
-    print("Connection to mail box established.\n")
+    logger.info("Connection to mail box established.\n")
     return mail
 
 
@@ -62,11 +65,9 @@ def download_email_attachments(email_message, base_folder_path):
             inner_dir = f'{str(date_time_obj.month)}-{str(date_time_obj.day)}-{str(date_time_obj.year)}'
 
             try:
-                if 'Supreme Plumbing Supply' in part.get_filename() or 'Invoice_I' in part.get_filename():  # could not be extracted from email subject
-                    supplier_name = SUPPLIERS[3]
-                else:
-                    supplier_name = get_supplier(email_message['subject'], supplier_email=email_message['Return-Path'])
+                supplier_name = get_supplier(email_message['subject'], supplier_email=email_message['Return-Path'])
             except:
+                logger.error(f"Couldn't detect supplier for email -> {str(email_message['subject'])}. Skipping Email.")
                 continue
 
             supplier_path = os.path.join(base_folder_path,supplier_name)  # base folder (to-from dates) + supplier name
@@ -83,7 +84,7 @@ def download_email_attachments(email_message, base_folder_path):
             try:
                 with open(filepath, 'wb') as f:
                     f.write(part.get_payload(decode=True))
-                    print(f"Downloaded {part.get_filename()} , saved at {filepath}")
+                    logger.info(f"Downloaded {part.get_filename()} , saved at {filepath}")
             except:
                 continue  # invalid file name
 
@@ -92,31 +93,27 @@ def get_supplier(email_subject, supplier_email) -> str:
     if "bmw" in email_subject.lower(): return SUPPLIERS[0]
     elif "world wide" in email_subject.lower(): return SUPPLIERS[1]
     elif "y&s" in email_subject.lower(): return SUPPLIERS[2]
+    elif "invoice # i-" in email_subject.lower() or "supreme plumbing" in email_subject.lower(): return SUPPLIERS[3]
     elif "pyramid plumbing invoice" in email_subject.lower(): return SUPPLIERS[4]
     elif "abc opus services" in email_subject.lower(): return SUPPLIERS[5]
     elif "park plumbing & heating supply - invoices overnight" in email_subject.lower(): return SUPPLIERS[6]
     elif "webb payment receipt" in email_subject.lower(): return SUPPLIERS[8]
-    elif "invoice:" in email_subject.lower() and "p/o:" in email_subject.lower(): return SUPPLIERS[9]
-    elif "mpiplu invoice" in email_subject.lower(): return 'Certified Lumber'
-    elif "kj plumbing sales inc - invoices" in email_subject.lower(): return SUPPLIERS[11]
-    elif "acct no. 133588: your invoice" in email_subject.lower(): return SUPPLIERS[12]
-    elif "invoice" in email_subject.lower() and 'for' in email_subject.lower(): return SUPPLIERS[13]
-    elif "invoice" in email_subject.lower() and 'from positive computer services' in email_subject.lower(): return SUPPLIERS[16]
-    elif email_subject.lower() == "invoices": return SUPPLIERS[17]
-
+    elif "see invoice i-" in email_subject.lower(): return SUPPLIERS[9]
     else: return "no_supplier"
 
 
 def email_download_background_task():
-    # folder naming structure is 'current date & time minus 25 minutes -> current date & time'
-    base_folder = f"{(datetime.now(TIMEZONE) - timedelta(minutes=25)).strftime('%d-%b-%Y_%H-%M-%S')} - {datetime.now(TIMEZONE).strftime('%d-%b-%Y_%H-%M-%S')}"
+    # folder naming structure is 'current date & time minus 3 minutes -> current date & time'
+    base_folder = f"{(datetime.now(TIMEZONE) - timedelta(minutes=3)).strftime('%d-%b-%Y_%H-%M-%S')} - {datetime.now(TIMEZONE).strftime('%d-%b-%Y_%H-%M-%S')}"
     base_folder_path = os.path.join(Path(INVOICE_DOWNLOAD_FOLDER), base_folder)
     if not os.path.isdir(base_folder_path): os.mkdir(base_folder_path)
+
+    logger.info(f"Email Download Background Task Triggered >>> {base_folder}")
 
     mail = login()
     email_ids = search_new_emails(mail)
 
-    email_ids = filter_by_time(email_ids,(datetime.now(TIMEZONE) - timedelta(minutes=25)),mail)
+    email_ids = filter_by_time(email_ids,(datetime.now(TIMEZONE) - timedelta(minutes=3)),mail)
 
     for e_id in email_ids:
         _, response = mail.uid('fetch', e_id, '(BODY.PEEK[])')
@@ -127,4 +124,5 @@ def email_download_background_task():
 
     # trigger remaining two tasks
     converted_files, failed_files = convert_invoice(base_folder)
+    logger.info(f"Convert to excel task is finished.\n Converted files ->{converted_files} \n Failed Files -> {failed_files}")
     process_extracted_data(converted_files, failed_files)

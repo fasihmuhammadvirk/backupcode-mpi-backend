@@ -2,6 +2,8 @@
 # and store them in database.
 import pandas as pd
 from datetime import datetime
+import logging
+logger = logging.getLogger(__name__)
 
 from mpi_backend.database import get_db
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
@@ -24,7 +26,7 @@ def process_extracted_data(converted_files, failed_files):
         supplier_id = SupplierController(db).get_supplier_name(extracted_data['Vendor'][0])
 
         if InvoiceItemController(db).invoice_exists(str(extracted_data['Ref NO'][0])) :
-            print(f'Invoice with REF-NO-> {str(extracted_data["Ref NO"][0])} already processed and is being skipped!')
+            logger.warning(f'Invoice with REF-NO-> {str(extracted_data["Ref NO"][0])} already processed and is being skipped!')
             continue
 
         invoice_record = InvoiceController(db).insert_invoice(extracted_data['Date'][0], file.rsplit('/')[-1],
