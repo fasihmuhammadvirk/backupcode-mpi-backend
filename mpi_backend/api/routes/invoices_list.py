@@ -31,6 +31,10 @@ def get_invoices(
         token: str = Depends(JWTBearer())
 ):
     try:
+        if supplier_id == 0: # 0 translates to ALL Suppliers in dropdown
+            invoices = InvoiceController(db).get_all_invoices(db=db)
+            return paginate(invoices)
+
         invoices = InvoiceController(db).get_invoices(
             db=db,
             supplier_id=supplier_id,
