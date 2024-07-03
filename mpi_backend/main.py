@@ -26,7 +26,7 @@ setup_logging()
 @asynccontextmanager
 async def lifespan(app:FastAPI):
     scheduler = BackgroundScheduler()
-    scheduler.add_job(email_download_background_task, "interval", minutes=3, max_instances=20)
+    scheduler.add_job(email_download_background_task, "interval", minutes=1, max_instances=1)
     scheduler.start()
     yield
 

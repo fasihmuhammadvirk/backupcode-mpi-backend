@@ -4,6 +4,7 @@ import email
 import os
 from pathlib import Path
 from email.utils import parsedate_to_datetime
+from datetime import datetime, timedelta
 import pytz
 import logging
 logger = logging.getLogger(__name__)
@@ -39,18 +40,18 @@ def filter_by_time(email_ids, reference_time, mail):
 
         if len(msg['Date']) == 37: email_sent_time = msg['Date'][:-12] # Remove the timezone info (+0000) or (-0700 PDT)
         else : email_sent_time = msg['Date'][:-6]
-        email_sent_time = datetime.strptime(email_sent_time, '%a, %d %b %Y %H:%M:%S')
-        email_sent_time = TIMEZONE.localize(email_sent_time)  # Convert to NewYork Time
+        # email_sent_time = datetime.strptime(email_sent_time, '%a, %d %b %Y %H:%M:%S')
+        # email_sent_time = TIMEZONE.localize(email_sent_time)  # Convert to NewYork Time
 
-        time_difference = reference_time - email_sent_time
-        if time_difference.total_seconds() <= 1500:  # 25 minutes in seconds
-            emails_info.append(email_id)
+        # time_difference = reference_time - email_sent_time
+        # if time_difference.total_seconds() <= 1500:  # 25 minutes in seconds
+        emails_info.append(email_id)
     return emails_info
 
 
 def search_new_emails(mail):
-    time_frame = datetime.now(TIMEZONE).strftime('%d-%b-%Y')  # unseen emails for current day & than manually filter them later based on time
-    result, data = mail.uid('search', None, f'(UNSEEN SINCE "{time_frame}")')
+    time_frame = (datetime.now(TIMEZONE) - timedelta(days=40)).strftime('%d-%b-%Y')  # unseen emails for current day & than manually filter them later based on time
+    result, data = mail.uid('search', None, f'(SINCE "{time_frame}")')
     email_ids = data[0].split()
     return email_ids
 
@@ -75,8 +76,11 @@ def download_email_attachments(email_message, base_folder_path):
             inner_dir = os.path.join(supplier_path, inner_dir)
             if not os.path.isdir(inner_dir): os.mkdir(inner_dir)
 
-            # saving the attachment
-            filepath = os.path.join(inner_dir, part.get_filename())
+            try:
+                # saving the attachment
+                filepath = os.path.join(inner_dir, part.get_filename())
+            except: continue
+
             if part.get_payload(decode=True) is None: continue
 
             if not (filepath.endswith('.pdf') or filepath.endswith('.PDF')): continue
