@@ -51,6 +51,8 @@ def extract_customer_job(filename):
     tables = tabula.read_pdf(filename, pages=1, area= customer_job_area)
     try:
         customer_job = tables[0]['Ship to'][1]
+        if tables[0]['Ship to'][0] == '44 Hudson Street': # hard fix: no other pattern to identify
+            customer_job = tables[0]['Ship to'][0]
     except:
         pass
     return customer_job
@@ -85,9 +87,28 @@ def extract_ref_no(text):
         if hit: ref_no = hit.group(1)
 
     elif 'Invoice' in text:
-        hit = re.search(r"\nInvoice\s*(I-\d+)\n", text)
-        if hit: ref_no = hit.group(1)
+
+        # existing pattern for searching invoices
+        pattern = r"\nInvoice\s*(I-\d+)\n"
+        hit = re.search(pattern, text)
+
+        # Run this pattern if not found on previous (Resolved the missing invoice issue)
+        if not hit:
+            # Newly added pattern
+            pattern = r"Invoice\s*(I-\d+-\d+)"
+            hit = re.search(pattern, text)
+
+        if hit:
+            ref_no = hit.group(1)
     return ref_no
+
+
+def are_columns_empty(row, columns):
+    return all(pd.isnull(row[col]) for col in columns)
+
+
+def are_columns_not_empty(row, columns):
+    return all(pd.notnull(row[col]) for col in columns)
 
 
 def extract_invoice_items(tables):
@@ -133,6 +154,36 @@ def extract_invoice_items(tables):
 
         elif {'#','MPN'}.issubset(table.columns):
             table = table[['Name', 'Description', 'Qty', 'Price', 'Amount']]
+            # Iterate through the rows of the table in reverse order for easier merging
+            for i in range(len(table) - 1, 0, -1):
+                # Merge descriptions split across rows
+                if (pd.notnull(table.at[i, 'Description']) and
+                        pd.isnull(table.at[i, 'Qty']) and
+                        pd.isnull(table.at[i, 'Price']) and
+                        pd.isnull(table.at[i, 'Amount'])):
+
+                    # Append the description to the previous row
+                    table.at[
+                        i - 1, 'Description'] = f"{table.at[i - 1, 'Description']} {table.at[i, 'Description']}".strip()
+
+                    # Clear the current row's description
+                    table.at[i, 'Description'] = None
+
+                # Move 'Name' value up if the current row is empty except for 'Name'
+                if (pd.notnull(table.at[i, 'Name']) and
+                      pd.isnull(table.at[i, 'Description']) and
+                      pd.isnull(table.at[i, 'Qty']) and
+                      pd.isnull(table.at[i, 'Price']) and
+                      pd.isnull(table.at[i, 'Amount'])):
+
+                    # Check if the row above has no null values in the specified columns
+                    if (pd.notnull(table.at[i - 1, 'Description']) and
+                            pd.notnull(table.at[i - 1, 'Qty']) and
+                            pd.notnull(table.at[i - 1, 'Price']) and
+                            pd.notnull(table.at[i - 1, 'Amount'])):
+                        # Paste the 'Name' value from the current row to the row above
+                        table.at[i - 1, 'Name'] = table.at[i, 'Name']
+
             table = table.rename(columns={'Name': 'Item', 'Price': 'Cost'})
 
         elif {'#', 'Item Name'}.issubset(table.columns):

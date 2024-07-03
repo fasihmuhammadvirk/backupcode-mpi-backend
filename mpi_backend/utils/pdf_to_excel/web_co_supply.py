@@ -94,6 +94,7 @@ def extract_invoice_items(tables):
                               'Exten': 'Amount'}, inplace=True)
         table['Qty']= qty_col
         table['Description'] = table['Description'].str.replace('0 ', '')
+        table['Item'] = table['Description'].str.extract(r'\s(\w*[/-]*\w*\d\w*)')
 
         table = table[['Item', 'Description', 'Qty', 'Cost', 'Amount']]
         table.reset_index(drop=True, inplace=True)

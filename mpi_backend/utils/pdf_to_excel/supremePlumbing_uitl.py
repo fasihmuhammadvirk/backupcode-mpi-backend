@@ -71,6 +71,37 @@ def extract_supremePlumbing_data(filename, output_path):
     save_final_data(results, "Supreme Plumbing Supply", output_path)
 
 
+def merge_rows(table):
+    for i in range(len(table) - 1, 0, -1):
+        # Merge descriptions split across rows
+        if (pd.notnull(table.at[i, 'Description']) and
+                pd.isnull(table.at[i, 'Qty']) and
+                pd.isnull(table.at[i, 'Cost']) and
+                pd.isnull(table.at[i, 'Amount'])):
+            # Append the description to the previous row
+            table.at[
+                i - 1, 'Description'] = f"{table.at[i - 1, 'Description']} {table.at[i, 'Description']}".strip()
+
+            # Clear the current row's description
+            table.at[i, 'Description'] = None
+
+        # Move 'Name' value up if the current row is empty except for 'Name'
+        if (pd.notnull(table.at[i, 'Item']) and
+                pd.isnull(table.at[i, 'Description']) and
+                pd.isnull(table.at[i, 'Qty']) and
+                pd.isnull(table.at[i, 'Cost']) and
+                pd.isnull(table.at[i, 'Amount'])):
+
+            # Check if the row above has no null values in the specified columns
+            if (pd.notnull(table.at[i - 1, 'Description']) and
+                    pd.notnull(table.at[i - 1, 'Qty']) and
+                    pd.notnull(table.at[i - 1, 'Cost']) and
+                    pd.notnull(table.at[i - 1, 'Amount'])):
+                # Paste the 'Name' value from the current row to the row above
+                table.at[i - 1, 'Item'] = table.at[i, 'Item']
+    return table
+
+
 def clean_invoice_items(table):
     # we cannot look for NAN - 6 and 8 columns are returned depending on invoice
     if {'Qty Shipped'}.issubset(table.columns):
@@ -102,6 +133,10 @@ def clean_invoice_items(table):
         elif not {'Unnamed: 1'}.issubset(table.columns) and not table['Price'].isnull().all():
             table = table[['Name', 'Description', 'Unnamed: 0', 'Price', 'Amount']]
             table = table.rename(columns={'Name': 'Item', 'Unnamed: 0': 'Qty', 'Price': 'Cost'})
+            if table['Item'].isnull().any():
+                table = merge_rows(table)
+
+
         else:
             table = table[['Name', 'Description','Qty', 'Unnamed: 0','Amount']]
             table = table.rename(columns={'Name': 'Item', 'Unnamed: 0': 'Cost', 'Unnamed: 1': 'Cost'})
@@ -190,8 +225,8 @@ def extract_date_from_shipping_slip(filename):
     invoice_data = invoice_data.get_text()
     date_match = re.search(r"\d{4}-\d{2}-\d{2}", invoice_data)
     if not date_match : date_match = re.search(r"\d{1,2}/\d{1,2}/\d{4}", invoice_data)
-    if date_match : date = date_match.group()
 
+    if date_match : date = date_match.group()
     return date
 
 
@@ -309,6 +344,7 @@ def merge_and_clean_invoice_items(tables):
                     individual_table = tables[i][['Name', 'Description', 'Qty','Price', 'Amount']]
                     individual_table = individual_table.rename(
                         columns={'Name': 'Item', 'Description': 'Description', 'Price': 'Cost'})
+                    individual_table.dropna(subset=["Cost", "Description","Qty","Amount"], inplace=True)
                 finalized_tables.append(individual_table)
 
             elif i == 0 and 'Unnamed: 0' in tables[i].columns:
@@ -353,6 +389,11 @@ def merge_and_clean_invoice_items(tables):
         elif len(tables[0].columns) == 8 and {'Name', 'Price','Unnamed: 0', 'Unnamed: 1'}.issubset(tables[0].columns):
             tables = tables[0][['Name', 'Description', 'Unnamed: 0', 'Price', 'Amount']]
             tables = tables.rename(columns={'Name': 'Item', 'Unnamed: 0': 'Qty', 'Price': 'Cost'})
+
+        elif {'#', 'Name', 'Description', 'Qty', 'Price', 'Amount'}.issubset(tables[0].columns):
+            tables = tables[0][['Name', 'Description', 'Qty', 'Price', 'Amount']]
+            tables = tables.rename(
+                columns={'Name': 'Item', 'Price': 'Cost'})
 
         elif not {'Unnamed: 0'}.issubset(tables[0].columns):
             tables = tables[0][['Item', 'Description', 'Qty', 'Rate', 'Amount']]

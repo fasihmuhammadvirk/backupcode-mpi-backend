@@ -14,7 +14,8 @@ from datetime import datetime
 gotham_supply_columns = [32, 54, 154.5, 384, 419, 460.5, 527.8, 592, 683]
 regular_area = (247, 32, 247 + 275, 32 + 651)
 customer_job_area = (148, 362, 148 + 26, 362 + 140)
-
+# tax_area = (535.88, 516.76, 535.88 + 162, 516.76 + 23.11)
+tax_area = (535.88, 516.76,535.88 + 23.11, 516.76+ 162)
 
 def process_invoice(filename, output_path):
     processed_file_path = generate_converted_filename(filename)
@@ -29,7 +30,7 @@ def process_invoice(filename, output_path):
 
     date = extract_date(tables[0])
     invoice_no = extract_invoice_no(tables[0])
-    tax = extract_tax(cleaned_pages[-1])
+    tax = extract_tax(cleaned_pages[-1],processed_file_path)
     customer_job = get_customer_job(processed_file_path)
     customer_no = extract_customer_no(tables[0])
 
@@ -55,11 +56,16 @@ def process_results(invoice_items, date, invoice_no, tax, job_name="", customer_
     return results
 
 
-def extract_tax(table):
+def extract_tax(table, filename):
     for value in table[table.columns[-1]].values:
         match = re.search("([0-9]+.[0-9]+)", str(value))
-        if match:
+        if match and len(match.string) < 6:
             return match.string
+
+        tax_table = tabula.read_pdf(filename, pages='all', area=tax_area, stream=True)
+        if len(tax_table) >=1 and 'TAX 8.875' in tax_table[0].columns.to_list():
+            return tax_table[0].columns.to_list()[-1]
+
     return ''  # fallback if tax amount is not found
 
 
