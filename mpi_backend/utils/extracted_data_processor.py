@@ -49,7 +49,10 @@ def process_extracted_data(converted_files, failed_files):
             InvoiceItemController(db).insert_invoice_items(row, file.rsplit('/')[-1], invoice_record.id)
 
     for file in failed_files:
-        invoice_record = InvoiceController(db).insert_invoice(datetime.now().strftime('%m/%d/%Y'), file.rsplit('/')[-1], '', 'FAILED', file)
+        extracted_data = pd.read_excel(file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
+        supplier_id = SupplierController(db).get_supplier_name(extracted_data['Vendor'][0])
+
+        invoice_record = InvoiceController(db).insert_invoice(datetime.now().strftime('%m/%d/%Y'), file.rsplit('/')[-1], supplier_id, 'FAILED', file)
         upload_file(file_name=file, file_key=invoice_record.id)
 
 
