@@ -59,8 +59,16 @@ class InvoiceController:
 
         return invoices_list
 
-    def get_all_invoices(self, db):
-        invoices = db.query(Invoice).all()
+    def get_all_invoices(self, db, status: str = 'all',):
+        query = db.query(Invoice)
+
+        if status == 'processed':
+            query = query.filter(Invoice.status == 'PROCESSED')
+        elif status == 'unprocessed':
+            query = query.filter(or_(Invoice.status == 'PROCESSING', Invoice.status == 'FAILED'))
+
+        invoices = query.all()
+
         invoices_list = []
         for invoice in invoices:
             invoice_item = InvoiceResponse(

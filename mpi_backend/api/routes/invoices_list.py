@@ -32,7 +32,7 @@ def get_invoices(
 ):
     try:
         if supplier_id == 0: # 0 translates to ALL Suppliers in dropdown
-            invoices = InvoiceController(db).get_all_invoices(db=db)
+            invoices = InvoiceController(db).get_all_invoices(db=db,status=status)
             return paginate(invoices)
 
         invoices = InvoiceController(db).get_invoices(
