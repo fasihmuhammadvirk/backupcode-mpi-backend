@@ -103,6 +103,17 @@ class InvoiceController:
     def get_invoice_by_invoiceID(self, invoice_id,db):
         return db.query(Invoice).filter(Invoice.id == invoice_id).first()
 
+    def is_invoice_present(self,filename):
+        try:
+            with self.db_context() as db:
+                invoice = db.query(Invoice).filter_by(filename=filename).first()
+            if invoice:
+                return True
+            else:
+                return False
+        except Exception as e:
+            return False
+
     def sort(self, db, column, sort_order):
         if sort_order == 'ascending':
             order = asc(column)

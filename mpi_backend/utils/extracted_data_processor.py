@@ -49,9 +49,11 @@ def process_extracted_data(converted_files, failed_files):
             InvoiceItemController(db).insert_invoice_items(row, file.rsplit('/')[-1], invoice_record.id)
 
     for file in failed_files:
-        supplier_id = extract_supplier_id (file_path=file)
+        supplier_id, supplier_name = extract_supplier_id (file_path=file)
+        if InvoiceController(db).is_invoice_present(file.split("/")[-1]):
+            continue
         invoice_record = InvoiceController(db).insert_invoice(datetime.now().strftime('%m/%d/%Y'), file.rsplit('/')[-1], supplier_id, 'FAILED', file)
-        upload_file(file_name=file, file_key=invoice_record.id)
+        upload_file(file_name=file, file_key=f'{supplier_name}/{invoice_record.id}')
 
 
 def search_replace(row, temp_items, item_mappings):
@@ -103,5 +105,5 @@ def extract_supplier_id(file_path):
     }
     for company, code in company_codes.items():
         if company in file_path:
-            return code
+            return code, company
     return 1 # need to return some default supplier
