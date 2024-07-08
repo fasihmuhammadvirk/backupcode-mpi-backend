@@ -49,13 +49,7 @@ def process_extracted_data(converted_files, failed_files):
             InvoiceItemController(db).insert_invoice_items(row, file.rsplit('/')[-1], invoice_record.id)
 
     for file in failed_files:
-        try :
-            supplier_id = 1
-            extracted_data = pd.read_excel(file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
-            supplier_id = SupplierController(db).get_supplier_name(extracted_data['Vendor'][0])
-        except :
-            pass
-
+        supplier_id = extract_supplier_id (file_path=file)
         invoice_record = InvoiceController(db).insert_invoice(datetime.now().strftime('%m/%d/%Y'), file.rsplit('/')[-1], supplier_id, 'FAILED', file)
         upload_file(file_name=file, file_key=invoice_record.id)
 
@@ -92,3 +86,22 @@ def get_updated_customer_job(customer_job, customer_job_mappings):
         updated_job = filtered_df.iloc[0]['updated_customer_job']
 
     return updated_job
+
+
+def extract_supplier_id(file_path):
+    company_codes = {
+        "BMW Plumbing Supplies": 1,
+        "World Wide Plumbing": 2,
+        "Y & S Plumbing Supply": 3,
+        "Supreme Plumbing Supply": 4,
+        "Pyramid Plumbing": 5,
+        "ABC Opus Services": 6,
+        "Park Plumbing Supply": 7,
+        "Gotham Plumbing Supply": 8,
+        "FW Webb Plumbing Supply": 9,
+        "Flow Mark Plumbing Supply": 10
+    }
+    for company, code in company_codes.items():
+        if company in file_path:
+            return code
+    return 1 # need to return some default supplier
