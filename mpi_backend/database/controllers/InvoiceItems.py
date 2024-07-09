@@ -63,6 +63,17 @@ class InvoiceItemController:
         invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in items]
         return invoices_items
 
+    def get_invoice_items_by_ids(self, ids):
+        query = self.db_context.query(InvoiceItem)
+
+        if ids:
+            query = query.filter(InvoiceItem.id.in_(ids))
+
+        items = query.all()
+
+        invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in items]
+        return invoices_items
+
     def delete_invoice_items(self, invoice_id,db):
         items = db.query(InvoiceItem).filter_by(invoice_id=invoice_id).all()
         for item in items:

@@ -8,9 +8,13 @@ from datetime import datetime
 from fastapi_pagination import Page, paginate
 from datetime import date
 import os
+from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.database.controllers import InvoiceItemController
 from mpi_backend.database.schemas import InvoiceItems, UpdateInvoiceItemRequest
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
+from mpi_backend.utils.export_utils import convert_items_to_dataframe
+from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
+from mpi_backend.utils.s3_utils import upload_file,get_presigned_url
 
 router = APIRouter(prefix="/invoice-items")
 
@@ -97,3 +101,23 @@ def sort_invoices( db: Session = Depends(get_db), column_name:str = Query(None),
 
     invoice_items = InvoiceItemController(db).sort(db,column, sort_order)
     return paginate(invoice_items)
+
+
+@router.post("/export",)
+def get_invoices(
+        ids: List[int],
+        db: Session = Depends(get_db),
+        token: str = Depends(JWTBearer()),
+):
+    items = InvoiceItemController(db).get_invoice_items_by_ids(ids)
+    items_df = convert_items_to_dataframe(items)
+
+    upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/Exports'
+    filename = f'{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.xlsx'
+    if not os.path.exists(upload_folder):os.makedirs(upload_folder)
+
+    save_final_data(final_df=items_df,supplier='', output_path=filename) # convert to excel
+    upload_file(filename, file_key=f'Exports/{filename}', is_invoice=False) # upload to s3 to be exported
+    download_url = get_presigned_url(file_key=f'Exports/{filename}', is_invoice=False)
+
+    return download_url
