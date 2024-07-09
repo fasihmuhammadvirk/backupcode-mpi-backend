@@ -1,10 +1,11 @@
 from datetime import datetime
 from typing import List, Optional
+from sqlalchemy.orm import joinedload, aliased
 from datetime import date
 
 from fastapi import HTTPException
 from sqlalchemy import or_, asc, desc
-from mpi_backend.database.models import Invoice
+from mpi_backend.database.models import Invoice, InvoiceItem
 from mpi_backend.database.schemas import Invoice as InvoiceResponse
 
 
@@ -30,13 +31,17 @@ class InvoiceController:
             page: int = 1,
             page_size: int = 10,
     ):
-        query = db.query(Invoice)
+        InvoiceItemAlias = aliased(InvoiceItem)
+        query = db.query(
+            Invoice,
+            InvoiceItemAlias.ref_no,
+            InvoiceItemAlias.customer_job
+        ).outerjoin(InvoiceItemAlias, Invoice.id == InvoiceItemAlias.invoice_id)
 
         if supplier_id is not None:  # only apply supplier filter if it's provided.
             query = query.filter(Invoice.supplier_id == supplier_id)
 
         query = query.filter(Invoice.date >= from_date)
-
         query = query.filter(Invoice.date <= to_date)
 
         if status == 'processed':
@@ -47,20 +52,28 @@ class InvoiceController:
         invoices = query.all()
 
         invoices_list = []
-        for invoice in invoices:
+        for invoice, ref_no, customer_job in invoices:
             invoice_item = InvoiceResponse(
                 date=invoice.date,
                 filename=invoice.filename,
                 supplier_id=invoice.supplier_id,
                 status=invoice.status,
-                invoice_id= str(invoice.id)
+                invoice_id=str(invoice.id),
+                ref_no=ref_no if ref_no is not None else '',
+                customer_job=customer_job if customer_job is not None else ''
             )
             invoices_list.append(invoice_item)
 
         return invoices_list
 
     def get_all_invoices(self, db, status: str = 'all',):
-        query = db.query(Invoice)
+
+        InvoiceItemAlias = aliased(InvoiceItem)
+        query = db.query(
+            Invoice,
+            InvoiceItemAlias.ref_no,
+            InvoiceItemAlias.customer_job
+        ).outerjoin(InvoiceItemAlias, Invoice.id == InvoiceItemAlias.invoice_id)
 
         if status == 'processed':
             query = query.filter(Invoice.status == 'PROCESSED')
@@ -70,18 +83,19 @@ class InvoiceController:
         invoices = query.all()
 
         invoices_list = []
-        for invoice in invoices:
+        for invoice, ref_no, customer_job in invoices:
             invoice_item = InvoiceResponse(
                 date=invoice.date,
                 filename=invoice.filename,
                 supplier_id=invoice.supplier_id,
                 status=invoice.status,
-                invoice_id=str(invoice.id)
+                invoice_id=str(invoice.id),
+                ref_no=ref_no if ref_no is not None else '',
+                customer_job=customer_job if customer_job is not None else ''
             )
             invoices_list.append(invoice_item)
 
         return invoices_list
-
 
     def set_status_to_processed(self, inserted_id, db_ref= None):
         if db_ref:
@@ -112,6 +126,7 @@ class InvoiceController:
             else:
                 return False
         except Exception as e:
+            print(f'Failed invoice could not be inserted ->{e}')
             return False
 
     def sort(self, db, column, sort_order):
