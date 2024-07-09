@@ -112,12 +112,13 @@ def get_invoices(
     items = InvoiceItemController(db).get_invoice_items_by_ids(ids)
     items_df = convert_items_to_dataframe(items)
 
-    upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/Exports'
+    upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/Exports/'
     filename = f'{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.xlsx'
+    file_path = f'{upload_folder}{filename}'
     if not os.path.exists(upload_folder):os.makedirs(upload_folder)
 
-    save_final_data(final_df=items_df,supplier='', output_path=filename) # convert to excel
-    upload_file(filename, file_key=f'Exports/{filename}', is_invoice=False) # upload to s3 to be exported
+    save_final_data(final_df=items_df,supplier='', output_path=file_path) # convert to excel
+    upload_file(file_path, file_key=f'Exports/{filename}', is_invoice=False) # upload to s3 to be exported
     download_url = get_presigned_url(file_key=f'Exports/{filename}', is_invoice=False)
 
     return download_url
