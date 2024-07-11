@@ -13,6 +13,7 @@ from mpi_backend.api.routes import get_mappings
 from mpi_backend.api.routes import invoice_items
 from mpi_backend.api.routes import quickbooks
 from mpi_backend.api.routes import signin
+from mpi_backend.api.routes import filters
 from mpi_backend.config import LOG_LEVEL
 from mpi_backend.utils.invoice_downloader import email_download_background_task
 from mpi_backend.utils.invoice_convertor import convert_invoice
@@ -51,6 +52,7 @@ def register_routes(app):
     app.include_router(signin.router)
     app.include_router(invoice_items.router)
     app.include_router(quickbooks.router)
+    app.include_router(filters.router)
 
 
 register_routes(app)

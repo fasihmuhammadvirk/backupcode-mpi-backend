@@ -120,3 +120,7 @@ class InvoiceItemController:
         invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in invoice_items]
         return invoices_items
 
+    def get_customer_jobs(self, db):
+        customer_jobs = db.query(InvoiceItem.customer_job).distinct().all()
+        return customer_jobs
+
