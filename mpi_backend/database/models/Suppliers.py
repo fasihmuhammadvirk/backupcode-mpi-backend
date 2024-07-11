@@ -13,3 +13,4 @@ class Supplier(Base):
     supplier = relationship("Invoice", back_populates="supplier_fk")
 
     mpi_mapping = relationship("ItemsMapping", back_populates="mpi_mapping_fk")
+    unmapped_items = relationship("UnmappedItems", back_populates="unmapped_items_fk")

@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 from mpi_backend.database import get_db
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
-from mpi_backend.database.controllers import InvoiceController,InvoiceItemController,SupplierController,ItemsMappingController,TempItemsMappingController,CustomerJobMappingController
+from mpi_backend.database.controllers import InvoiceController,InvoiceItemController,SupplierController,ItemsMappingController,TempItemsMappingController,CustomerJobMappingController,UnmappedItemsController
 from contextlib import contextmanager
 from mpi_backend.utils.s3_utils import upload_file,get_presigned_url
 
@@ -57,6 +57,8 @@ def process_extracted_data(converted_files, failed_files):
 
 
 def search_replace(row, temp_items, item_mappings):
+    is_mapped = False  # track weather item is mapped or not
+
     item = row['Item']
     description = row['Description']
 
@@ -66,6 +68,7 @@ def search_replace(row, temp_items, item_mappings):
         row['Item'] = temp_match.iloc[0]['temporary_item_number']
         row['Description'] = temp_match.iloc[0]['description']
         row['Sheet Name'] = ''
+        is_mapped = True
         return row
 
     # Searching in item_mappings
@@ -76,7 +79,14 @@ def search_replace(row, temp_items, item_mappings):
             row['Description'] = mapping_match.iloc[0]['description']
             sheet_name = mapping_match.iloc[0]['google_sheet_name']
             row['Sheet Name'] = sheet_name
+            is_mapped = True
             return row
+
+        if not is_mapped:
+            supplier_id, _ = extract_supplier_id(row['Vendor'])
+            if not UnmappedItemsController(db).is_item_code_present(row['Item']):
+                UnmappedItemsController(db).insert_unmapped_item(row['Item'],row['Description'],supplier_id)
+
     return row
 
 

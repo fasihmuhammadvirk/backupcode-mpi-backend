@@ -10,6 +10,13 @@ export PYTHONPATH=../
 alembic upgrade head
 ```
 
+### Generating Migrations
+To create a new migration of revision use following command and commit the resultant file to git: 
+```bash
+alembic revision --autogenerate -m "change details"
+```
+
+
 For this to run you need to have env variable set. We have included a sample .envrc file with this repo
 rename it to `.envrc` and set the values correctly
 
