@@ -12,7 +12,9 @@ def upload_file(file_name, file_key, is_invoice=True):
                                  region_name=REGION)
 
         if is_invoice:
-            s3_client.upload_file(file_name, BUCKET_NAME, str(file_key) + '.pdf')
+            s3_client.upload_file(file_name, BUCKET_NAME, str(file_key) + '.pdf',
+                                  ExtraArgs={'ContentDisposition': 'inline',
+                                             'ContentType': 'application/pdf'})
             print(f'Invoice with Key: {file_key} Uploaded')
         else:
             s3_client.upload_file(file_name, BUCKET_NAME, file_key)
