@@ -1,12 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query,UploadFile, File
+from typing import List, Optional
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
 from datetime import datetime
 from fastapi_pagination import Page, paginate
 from datetime import date
 import os
-import logging
-logger = logging.getLogger(__name__)
 import requests
 from mpi_backend.database.controllers import SupplierController, InvoiceController, InvoiceItemController
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
@@ -15,6 +14,8 @@ from mpi_backend.utils.invoice_convertor import convert_invoice
 from mpi_backend.database.schemas import Invoice
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.s3_utils import get_presigned_url
+import logging
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/invoice")
 
@@ -22,7 +23,7 @@ router = APIRouter(prefix="/invoice")
 @router.get("", response_model=Page[Invoice])
 def get_invoices(
         db: Session = Depends(get_db),
-        supplier_id: int = Query(None),
+        supplier_id: Optional[List[int]] = Query(None),
         from_date: date = Query(None),
         to_date: date = Query(None),
         status: str = Query('all', description="Status (all, processed, unprocessed)"),
@@ -31,13 +32,13 @@ def get_invoices(
         token: str = Depends(JWTBearer())
 ):
     try:
-        if supplier_id == 0: # 0 translates to ALL Suppliers in dropdown
+        if 0 in supplier_id: # 0 translates to ALL Suppliers in dropdown
             invoices = InvoiceController(db).get_all_invoices(db=db,status=status)
             return paginate(invoices)
 
         invoices = InvoiceController(db).get_invoices(
             db=db,
-            supplier_id=supplier_id,
+            supplier_ids=supplier_id,
             from_date=from_date,
             to_date=to_date,
             status=status,

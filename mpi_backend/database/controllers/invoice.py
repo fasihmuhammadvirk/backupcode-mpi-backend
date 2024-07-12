@@ -24,7 +24,7 @@ class InvoiceController:
 
     def get_invoices(
             self, db,
-            supplier_id: int = None,
+            supplier_ids: Optional[List[int]] = None,
             from_date: date = None,
             to_date: date = None,
             status: str = 'all',
@@ -38,11 +38,13 @@ class InvoiceController:
             InvoiceItemAlias.customer_job
         ).outerjoin(InvoiceItemAlias, Invoice.id == InvoiceItemAlias.invoice_id)
 
-        if supplier_id is not None:  # only apply supplier filter if it's provided.
-            query = query.filter(Invoice.supplier_id == supplier_id)
+        if supplier_ids is not None and supplier_ids:
+            query = query.filter(Invoice.supplier_id.in_(supplier_ids))
 
-        query = query.filter(Invoice.date >= from_date)
-        query = query.filter(Invoice.date <= to_date)
+        if from_date:
+            query = query.filter(Invoice.date >= from_date)
+        if to_date:
+            query = query.filter(Invoice.date <= to_date)
 
         if status == 'processed':
             query = query.filter(Invoice.status == 'PROCESSED')
@@ -63,7 +65,6 @@ class InvoiceController:
                 customer_job=customer_job if customer_job is not None else ''
             )
             invoices_list.append(invoice_item)
-
         return invoices_list
 
     def get_all_invoices(self, db, status: str = 'all',):
