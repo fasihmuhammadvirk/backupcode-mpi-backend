@@ -14,6 +14,8 @@ class InvoiceItemController:
             filename=filename,
             sheet_name=row['Sheet Name'],
             invoice_id=invoice_id,
+            mpi_item=row['MpiItem'],
+            mpi_description=row['MpiDescription'],
             item=row['Item'],
             description=row['Description'],
             qty=row['Qty'],

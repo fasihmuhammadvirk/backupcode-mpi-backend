@@ -34,6 +34,9 @@ def process_extracted_data(converted_files, failed_files):
                                                               file)  # one record for every file in invoices table
 
         extracted_data.insert(0, 'Sheet Name', '')
+        extracted_data['MpiItem'] = 'No Match'
+        extracted_data['MpiDescription'] = 'No Match'
+
         extracted_data = extracted_data.apply(search_replace, args=(temp_items, item_mappings,), axis=1)
 
         extracted_customer_job = extracted_data['Customer Job'][0]
@@ -57,35 +60,31 @@ def process_extracted_data(converted_files, failed_files):
 
 
 def search_replace(row, temp_items, item_mappings):
-    is_mapped = False  # track weather item is mapped or not
 
     item = row['Item']
-    description = row['Description']
 
     # Searching in temp_items
     temp_match = temp_items[temp_items['original_item_number'] == item]
     if not temp_match.empty:
-        row['Item'] = temp_match.iloc[0]['temporary_item_number']
-        row['Description'] = temp_match.iloc[0]['description']
+        row['MpiItem'] = temp_match.iloc[0]['temporary_item_number']
+        row['MpiDescription'] = temp_match.iloc[0]['description']
         row['Sheet Name'] = ''
-        is_mapped = True
         return row
 
     # Searching in item_mappings
     for column in item_mappings.columns:
         mapping_match = item_mappings[item_mappings[column] == item]
         if not mapping_match.empty:
-            row['Item'] = mapping_match.iloc[0]['mpi_code']
-            row['Description'] = mapping_match.iloc[0]['description']
+            row['MpiItem'] = mapping_match.iloc[0]['mpi_code']
+            row['MpiDescription'] = mapping_match.iloc[0]['description']
             sheet_name = mapping_match.iloc[0]['google_sheet_name']
             row['Sheet Name'] = sheet_name
-            is_mapped = True
             return row
 
-        if not is_mapped:
-            supplier_id, _ = extract_supplier_id(row['Vendor'])
-            if not UnmappedItemsController(db).is_item_code_present(row['Item']):
-                UnmappedItemsController(db).insert_unmapped_item(row['Item'],row['Description'],supplier_id)
+    # will only be triggered if no mapping is found
+    supplier_id, _ = extract_supplier_id(row['Vendor'])
+    if not UnmappedItemsController(db).is_item_code_present(row['Item']):
+        UnmappedItemsController(db).insert_unmapped_item(row['Item'],row['Description'],supplier_id)
 
     return row
 

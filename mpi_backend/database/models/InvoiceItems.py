@@ -9,6 +9,8 @@ class InvoiceItem(Base):
     id = Column(Integer, primary_key=True)
     filename = Column(String)
     sheet_name = Column(String)
+    mpi_item = Column(String, default='No Match')
+    mpi_description = Column(String, default='No Match')
     item = Column(String)
     description = Column(String)
     qty = Column(Integer)
