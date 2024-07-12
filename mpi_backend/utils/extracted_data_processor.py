@@ -2,6 +2,7 @@
 # and store them in database.
 import pandas as pd
 from datetime import datetime
+import re
 import logging
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ def process_extracted_data(converted_files, failed_files):
         extracted_data.insert(0, 'Sheet Name', '')
         extracted_data['MpiItem'] = 'No Match'
         extracted_data['MpiDescription'] = 'No Match'
+        extracted_data['email_date'] = extract_email_date(file)
 
         extracted_data = extracted_data.apply(search_replace, args=(temp_items, item_mappings,), axis=1)
 
@@ -116,3 +118,18 @@ def extract_supplier_id(file_path):
         if company in file_path:
             return code, company
     return 1 # need to return some default supplier
+
+
+def extract_email_date(path):
+    date_pattern = re.compile(r'\b\d{1,2}-\d{1,2}-\d{4}\b')
+    match = date_pattern.search(path)
+
+    if match:
+        extracted_date = match.group()
+        date_obj = datetime.strptime(extracted_date, '%m-%d-%Y')
+    else:
+        date_obj = datetime.today()
+
+    # Convert the date to "year-month-day" format
+    formatted_date = date_obj.strftime('%Y-%m-%d')
+    return formatted_date

@@ -26,6 +26,7 @@ class InvoiceItems(BaseModel):
     class_: Optional[str]  # 'class' is a reserved word in Python, so appending an underscore
     memo: Optional[str]
     buyer: Optional[str]
+    date_added: Optional[date]
     invoice_id: Optional[UUID]
     class Config:
         from_attributes = True

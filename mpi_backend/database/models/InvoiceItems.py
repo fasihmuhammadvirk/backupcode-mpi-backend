@@ -25,5 +25,6 @@ class InvoiceItem(Base):
     class_ = Column(String)  # 'class' is a reserved word in Python, so appending an underscore
     memo = Column(String)
     buyer = Column(String)
+    date_added = Column(Date)
     invoice_id = Column(UUID, ForeignKey('invoices.id'))
     invoice = relationship("Invoice", back_populates="items")

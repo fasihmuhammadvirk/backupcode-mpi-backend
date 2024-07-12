@@ -29,7 +29,8 @@ class InvoiceItemController:
             vendor=row['Vendor'],
             class_=row['Class'],
             memo=row['Memo'],
-            buyer=row['Buyer']
+            buyer=row['Buyer'],
+            date_added= row['email_date']
         )
         with self.db_context() as db:
             db.add(new_item)
