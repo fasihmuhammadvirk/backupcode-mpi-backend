@@ -1,7 +1,7 @@
 from typing import Optional, List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
 from datetime import datetime
@@ -66,9 +66,9 @@ def get_invoices(
 
 
 @router.put("/update")
-def update_invoice_items(items: List[UpdateInvoiceItemRequest], db: Session = Depends(get_db)):
+def update_invoice_items(items: List[UpdateInvoiceItemRequest],background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     controller = InvoiceItemController(db)
-    controller.update_invoice_items([item.dict() for item in items])
+    controller.update_invoice_items([item.dict() for item in items], background_tasks)
     return {"status": "invoices updated successfully"}
 
 

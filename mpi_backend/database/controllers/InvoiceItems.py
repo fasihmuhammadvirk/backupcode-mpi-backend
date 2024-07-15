@@ -1,6 +1,6 @@
 from datetime import datetime
 from sqlalchemy import asc, desc
-from fastapi import HTTPException
+from fastapi import HTTPException, BackgroundTasks
 from typing import List, Dict
 from mpi_backend.database.models import InvoiceItem
 from mpi_backend.database.schemas import InvoiceItems as InvoiceItemsResponse
@@ -84,7 +84,7 @@ class InvoiceItemController:
             db.delete(item)
         db.commit()
 
-    def update_invoice_items(self, items: List[Dict]):
+    def update_invoice_items(self, items: List[Dict], background_tasks: BackgroundTasks):
         for item_data in items:
             item_id = item_data.get('id')
             if not item_id:
@@ -94,10 +94,25 @@ class InvoiceItemController:
             if not item:
                 raise HTTPException(status_code=404, detail=f"Invoice item with ID {item_id} not found")
 
-            for key, value in item_data.items(): # update items
+            # Check for updates in mpi_item and mpi_description and make updates on whole table
+            # item_data -- > coming from request
+            # item -- > its associated record in database
+            if item_data['mpi_item'] != item.mpi_item:  # mpi_item code is changed
+                background_tasks.add_task(self.update_mpi_field, item_data['item'], 'mpi_item',
+                                          item_data['mpi_item'])
+
+            if item_data['mpi_description'] != item.mpi_description:  # mpi_item description is changed
+                background_tasks.add_task(self.update_mpi_field, item_data['item'], 'mpi_description',
+                                          item_data['mpi_description'])
+
+            for key, value in item_data.items():  # update items
                 setattr(item, key, value)
 
             self.db_context.add(item)
+        self.db_context.commit()
+
+    def update_mpi_field(self, item_value: str, field_name: str, new_value: str):
+        self.db_context.query(InvoiceItem).filter(InvoiceItem.item == item_value).update({field_name: new_value})
         self.db_context.commit()
 
     def sort(self, db, column, sort_order):
