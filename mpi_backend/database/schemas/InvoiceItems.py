@@ -33,18 +33,24 @@ class InvoiceItems(BaseModel):
 
 
 class UpdateInvoiceItemRequest(BaseModel):
-    ref_no: str
-    sheet_name: Optional[str] = Field(None)
-    item: Optional[str] = Field(None)
-    description: Optional[str] = Field(None)
-    qty: Optional[int] = Field(None)
-    cost: Optional[float] = Field(None)
-    amount: Optional[str] = Field(None)
-    date: Optional[str] = Field(None)
-    po_number: Optional[str] = Field(None)
-    customer_job: Optional[str] = Field(None)
-    bill: Optional[str] = Field(None)
-    vendor: Optional[str] = Field(None)
-    class_: Optional[str] = Field(None)
-    memo: Optional[str] = Field(None)
-    buyer: Optional[str] = Field(None)
+    id: int
+    filename: str = None
+    sheet_name: str = None
+    mpi_item: str = None
+    mpi_description: str = None
+    item: str = None
+    description: str = None
+    qty: int = None
+    cost: float = None
+    amount: str = None
+    date: str = None
+    ref_no: str = None
+    po_number: str = None
+    customer_job: str = None
+    bill: str = None
+    vendor: str = None
+    class_: str = None
+    memo: str = None
+    buyer: str = None
+    date_added: str = None
+    invoice_id: str = None

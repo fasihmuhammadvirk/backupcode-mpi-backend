@@ -1,6 +1,7 @@
 from datetime import datetime
 from sqlalchemy import asc, desc
 from fastapi import HTTPException
+from typing import List, Dict
 from mpi_backend.database.models import InvoiceItem
 from mpi_backend.database.schemas import InvoiceItems as InvoiceItemsResponse
 
@@ -83,32 +84,20 @@ class InvoiceItemController:
             db.delete(item)
         db.commit()
 
-    def update_invoice_items(self, items: list):
-        updated_items = set()  # Track updated items to avoid overwriting
-        update_request_data = set()
-        ref_no_set = set(item.get('ref_no') for item in items)
+    def update_invoice_items(self, items: List[Dict]):
+        for item_data in items:
+            item_id = item_data.get('id')
+            if not item_id:
+                raise HTTPException(status_code=400, detail="ID is required for updating invoice item")
 
-        if None in ref_no_set:
-            raise HTTPException(status_code=400, detail="ref_no is required for each item.")
+            item = self.db_context.query(InvoiceItem).filter(InvoiceItem.id == item_id).first()
+            if not item:
+                raise HTTPException(status_code=404, detail=f"Invoice item with ID {item_id} not found")
 
-        for ref_no in ref_no_set:
-            matched_items = self.db_context.query(InvoiceItem).filter_by(ref_no=ref_no).all()
+            for key, value in item_data.items(): # update items
+                setattr(item, key, value)
 
-            if not matched_items:
-                raise HTTPException(status_code=404, detail=f"Invoice items with ref_no {ref_no} not found.")
-
-            for matched_item in matched_items:
-                if matched_item.id in updated_items:
-                    continue  # Skip if already updated
-
-                for index,item_data in enumerate(items):
-                    if item_data['ref_no'] == ref_no and not (index in update_request_data):
-                        for key, value in item_data.items():
-                            if key != 'ref_no' and hasattr(matched_item, key):
-                                setattr(matched_item, key, value)
-                        update_request_data.add(index)
-
-                updated_items.add(matched_item.id)  # Mark as updated
+            self.db_context.add(item)
         self.db_context.commit()
 
     def sort(self, db, column, sort_order):
