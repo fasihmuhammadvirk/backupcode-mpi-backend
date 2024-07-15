@@ -24,3 +24,23 @@ def convert_items_to_dataframe(items):
     df = df[list(columns_mapping.values())]
 
     return df
+
+
+# because of circular dependency, had to duplicate code here, will find a better way soon (hopefully)
+def extract_supplier_id(file_path):
+    company_codes = {
+        "BMW Plumbing Supplies": 1,
+        "World Wide Plumbing": 2,
+        "Y & S Plumbing Supply": 3,
+        "Supreme Plumbing Supply": 4,
+        "Pyramid Plumbing": 5,
+        "ABC Opus Services": 6,
+        "Park Plumbing Supply": 7,
+        "Gotham Plumbing Supply": 8,
+        "FW Webb Plumbing Supply": 9,
+        "Flow Mark Plumbing Supply": 10
+    }
+    for company, code in company_codes.items():
+        if company in file_path:
+            return code, company
+    return 1 # need to return some default supplier

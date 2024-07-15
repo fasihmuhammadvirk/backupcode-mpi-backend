@@ -3,7 +3,9 @@ from sqlalchemy import asc, desc
 from fastapi import HTTPException, BackgroundTasks
 from typing import List, Dict
 from mpi_backend.database.models import InvoiceItem
+from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
 from mpi_backend.database.schemas import InvoiceItems as InvoiceItemsResponse
+from mpi_backend.utils.export_utils import extract_supplier_id
 
 
 class InvoiceItemController:
@@ -100,6 +102,7 @@ class InvoiceItemController:
             if item_data['mpi_item'] != item.mpi_item:  # mpi_item code is changed
                 background_tasks.add_task(self.update_mpi_field, item_data['item'], 'mpi_item',
                                           item_data['mpi_item'])
+                background_tasks.add_task(self.update_mappings_table, item_data)
 
             if item_data['mpi_description'] != item.mpi_description:  # mpi_item description is changed
                 background_tasks.add_task(self.update_mpi_field, item_data['item'], 'mpi_description',
@@ -114,6 +117,16 @@ class InvoiceItemController:
     def update_mpi_field(self, item_value: str, field_name: str, new_value: str):
         self.db_context.query(InvoiceItem).filter(InvoiceItem.item == item_value).update({field_name: new_value})
         self.db_context.commit()
+
+    def update_mappings_table(self, updated_values: dict):
+        supplier_id, _ = extract_supplier_id(updated_values['vendor'])
+        mapping_data = {
+            "supplier_item_ids": updated_values['item'],
+            "description": updated_values['mpi_description'],
+            "mpi_code": updated_values['mpi_item'],
+            "google_sheet_name": updated_values['sheet_name']
+        }
+        ItemsMappingController(self.db_context).update_mapping(supplier_id, mapping_data)
 
     def sort(self, db, column, sort_order):
         if sort_order == 'ascending':
