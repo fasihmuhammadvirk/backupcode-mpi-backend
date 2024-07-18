@@ -53,12 +53,13 @@ def get_invoices(
         supplier_name: str = Query(None),
         from_date: date = Query(None),
         to_date: date = Query(None),
+        job_location: str = Query(None),
         token: str = Depends(JWTBearer())
 ):
     try:
         invoice_items = InvoiceItemController(db).get_invoice_items_by_filters(supplier=supplier_name,
                                                                     from_date=from_date,
-                                                                    to_date=to_date, )
+                                                                    to_date=to_date, job_location=job_location)
         return paginate(invoice_items)
 
     except Exception as e:

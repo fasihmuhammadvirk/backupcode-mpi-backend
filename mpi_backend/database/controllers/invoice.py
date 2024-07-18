@@ -28,6 +28,7 @@ class InvoiceController:
             from_date: date = None,
             to_date: date = None,
             status: str = 'all',
+            job_location:str = None,
             page: int = 1,
             page_size: int = 10,
     ):
@@ -38,13 +39,16 @@ class InvoiceController:
             InvoiceItemAlias.customer_job
         ).outerjoin(InvoiceItemAlias, Invoice.id == InvoiceItemAlias.invoice_id)
 
-        if supplier_ids is not None and supplier_ids:
+        if supplier_ids is not None and supplier_ids and 0 not in supplier_ids:
             query = query.filter(Invoice.supplier_id.in_(supplier_ids))
 
         if from_date:
             query = query.filter(Invoice.date >= from_date)
         if to_date:
             query = query.filter(Invoice.date <= to_date)
+
+        if job_location:
+            query = query.filter(InvoiceItemAlias.customer_job == job_location)
 
         if status == 'processed':
             query = query.filter(Invoice.status == 'PROCESSED')
@@ -67,7 +71,7 @@ class InvoiceController:
             invoices_list.append(invoice_item)
         return invoices_list
 
-    def get_all_invoices(self, db, status: str = 'all',):
+    def get_all_invoices(self, db, status: str = 'all',): # deprecated
 
         InvoiceItemAlias = aliased(InvoiceItem)
         query = db.query(

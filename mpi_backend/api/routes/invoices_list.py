@@ -27,14 +27,15 @@ def get_invoices(
         from_date: date = Query(None),
         to_date: date = Query(None),
         status: str = Query('all', description="Status (all, processed, unprocessed)"),
+        job_location: str = Query(None),
         page: int = Query(1),
         size: int = Query(10),
         token: str = Depends(JWTBearer())
 ):
     try:
-        if 0 in supplier_id: # 0 translates to ALL Suppliers in dropdown
-            invoices = InvoiceController(db).get_all_invoices(db=db,status=status)
-            return paginate(invoices)
+        # if 0 in supplier_id: # 0 translates to ALL Suppliers in dropdown
+        #     invoices = InvoiceController(db).get_all_invoices(db=db,status=status)
+        #     return paginate(invoices)
 
         invoices = InvoiceController(db).get_invoices(
             db=db,
@@ -42,6 +43,7 @@ def get_invoices(
             from_date=from_date,
             to_date=to_date,
             status=status,
+            job_location=job_location
         )
 
         return paginate(invoices)
