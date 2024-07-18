@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import asc, desc
+from sqlalchemy import asc, desc, distinct
 from fastapi import HTTPException, BackgroundTasks
 from typing import List, Dict
 from mpi_backend.database.models import InvoiceItem
@@ -144,3 +144,7 @@ class InvoiceItemController:
         customer_jobs = db.query(InvoiceItem.customer_job).distinct().all()
         return customer_jobs
 
+    def get_data_by_column_name(self, column_name):
+        column = getattr(InvoiceItem, column_name)
+        distinct_values = self.db_context.query(distinct(column)).all()
+        return [value[0] for value in distinct_values if value[0] is not None]
