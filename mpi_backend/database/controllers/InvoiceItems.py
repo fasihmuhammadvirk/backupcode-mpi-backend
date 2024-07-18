@@ -2,6 +2,7 @@ from datetime import datetime
 from sqlalchemy import asc, desc, distinct
 from fastapi import HTTPException, BackgroundTasks
 from typing import List, Dict
+from datetime import date
 from mpi_backend.database.models import InvoiceItem
 from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
 from mpi_backend.database.schemas import InvoiceItems as InvoiceItemsResponse
@@ -148,3 +149,52 @@ class InvoiceItemController:
         column = getattr(InvoiceItem, column_name)
         distinct_values = self.db_context.query(distinct(column)).all()
         return [value[0] for value in distinct_values if value[0] is not None]
+
+    def apply_filters(self, request):
+        query = self.db_context.query(InvoiceItem)
+
+        # applying 'IN' filters dynamically
+        for column_name, values in request.filters.items():
+            if not hasattr(InvoiceItem, column_name):
+                raise HTTPException(status_code=400, detail=f"Invalid column name: {column_name}")
+
+            column = getattr(InvoiceItem, column_name)
+            query = query.filter(column.in_(values))
+
+        # applying comparison (>,<= etc) filters
+        for comp_filter in request.comparison_filters:
+            if not hasattr(InvoiceItem, comp_filter.column):
+                raise HTTPException(status_code=400, detail=f"Invalid column name: {comp_filter.column}")
+
+            column = getattr(InvoiceItem, comp_filter.column)
+
+            # Handle type casting for comparison filters
+            try:
+                if column.type.python_type == int:
+                    value = int(comp_filter.value)
+                elif column.type.python_type == float:
+                    value = float(comp_filter.value)
+                elif column.type.python_type == date:
+                    value = date.fromisoformat(comp_filter.value)
+                else:
+                    value = comp_filter.value
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail=f"Invalid value type for column: {comp_filter.column}")
+
+            if comp_filter.operator == "gt":
+                query = query.filter(column > value)
+            elif comp_filter.operator == "lt":
+                query = query.filter(column < value)
+            elif comp_filter.operator == "gte":
+                query = query.filter(column >= value)
+            elif comp_filter.operator == "lte":
+                query = query.filter(column <= value)
+            elif comp_filter.operator == "eq":
+                query = query.filter(column == value)
+            else:
+                raise HTTPException(status_code=400, detail=f"Invalid operator: {comp_filter.operator}")
+
+        results = query.all()
+        invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in results]
+        return invoices_items
+

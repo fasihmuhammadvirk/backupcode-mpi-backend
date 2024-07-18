@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException,Query
 from typing import List
 from sqlalchemy.orm import Session
+from fastapi_pagination import Page, paginate
 
 from mpi_backend.database import get_db
 from mpi_backend.database.controllers import SupplierController, InvoiceItemController
+from mpi_backend.database.schemas import FilterRequest
+from mpi_backend.database.schemas import InvoiceItems
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 
 router = APIRouter(prefix="/filter")
@@ -55,3 +58,9 @@ def column_mappings(db: Session = Depends(get_db), token: str = Depends(JWTBeare
 
     distinct_values = InvoiceItemController(db).get_data_by_column_name(column_name)
     return distinct_values
+
+
+@router.post("",response_model=Page[InvoiceItems])
+def filter_data(request: FilterRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+    filtered_data = InvoiceItemController(db).apply_filters(request)
+    return paginate(filtered_data)
