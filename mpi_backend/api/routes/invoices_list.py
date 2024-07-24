@@ -134,7 +134,11 @@ def sort_invoices( db: Session = Depends(get_db), column_name:str = Query(None),
 
     column_mapping= {"Date":"date",
                      "File Name":"filename",
-                     "Status":"status"}
+                     "Status":"status",
+                     "Job Address" : "customer_job",
+                     "Invoice" : "ref_no"
+                     }
+
 
     if column_name not in column_mapping and column_name != 'Supplier':
         raise HTTPException(status_code=400, detail="Invalid column name")

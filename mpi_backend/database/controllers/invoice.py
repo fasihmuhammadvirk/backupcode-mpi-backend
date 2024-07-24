@@ -142,18 +142,25 @@ class InvoiceController:
         else:
             raise HTTPException(status_code=400, detail="Invalid sort order")
 
-        invoices = db.query(Invoice).order_by(order).all()
+        InvoiceItemAlias = aliased(InvoiceItem)
+        query = db.query(
+            Invoice,
+            InvoiceItemAlias.ref_no,
+            InvoiceItemAlias.customer_job
+        ).outerjoin(InvoiceItemAlias, Invoice.id == InvoiceItemAlias.invoice_id)
+
+        invoices = query.order_by(order).all()
 
         invoices_list = []
-        for invoice in invoices:
+        for invoice, ref_no, customer_job in invoices:
             invoice_item = InvoiceResponse(
                 date=invoice.date,
                 filename=invoice.filename,
                 supplier_id=invoice.supplier_id,
                 status=invoice.status,
-                invoice_id=str(invoice.id)
+                invoice_id=str(invoice.id),
+                ref_no=ref_no if ref_no is not None else '',
+                customer_job=customer_job if customer_job is not None else ''
             )
             invoices_list.append(invoice_item)
-
         return invoices_list
-
