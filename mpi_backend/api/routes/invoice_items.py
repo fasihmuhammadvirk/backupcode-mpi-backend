@@ -93,6 +93,12 @@ def sort_invoices( db: Session = Depends(get_db), column_name:str = Query(None),
         "Class": "class_",
         "Memo": "memo",
         "Buyer": "buyer",
+        "Date Added": "date_added",
+        "Original Item": "mpi_item", # will be removed adding beacuse of incorect naming on frontend
+        "Original Description": "mpi_description", # will be removed adding beacuse of incorect naming on frontend
+        "Date Added": "date_added",
+        "MPI Item": "mpi_item",
+        "MPI Description": "mpi_description",
     }
 
     if column_name not in column_mapping:
