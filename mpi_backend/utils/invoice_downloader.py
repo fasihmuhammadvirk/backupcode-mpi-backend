@@ -1,7 +1,7 @@
 import time
 import imaplib
 import email
-import os
+import os,re
 from pathlib import Path
 from email.utils import parsedate_to_datetime
 import pytz
@@ -33,18 +33,34 @@ def filter_by_time(email_ids, reference_time, mail):
     """
     emails_info = []
     for email_id in email_ids:
-        result, email_data = mail.uid('fetch', email_id, '(RFC822)')
-        raw_email = email_data[0][1]
-        msg = email.message_from_bytes(raw_email)
+        try:
+            result, email_data = mail.uid('fetch', email_id, '(RFC822)')
+            raw_email = email_data[0][1]
+            msg = email.message_from_bytes(raw_email)
 
-        if len(msg['Date']) == 37: email_sent_time = msg['Date'][:-12] # Remove the timezone info (+0000) or (-0700 PDT)
-        else : email_sent_time = msg['Date'][:-6]
-        email_sent_time = datetime.strptime(email_sent_time, '%a, %d %b %Y %H:%M:%S')
-        email_sent_time = TIMEZONE.localize(email_sent_time)  # Convert to NewYork Time
+            if len(msg['Date']) == 37:
+                email_sent_time = msg['Date'][:-12] # Remove the timezone info (+0000) or (-0700 PDT)
+            else:
+                email_sent_time = msg['Date'][:-6]
 
-        time_difference = reference_time - email_sent_time
-        if time_difference.total_seconds() <= 1500:  # 25 minutes in seconds
-            emails_info.append(email_id)
+            # Modified code
+            if re.match(r'\A[a-zA-Z]{3},', email_sent_time):
+                email_sent_time = datetime.strptime(email_sent_time, '%a, %d %b %Y %H:%M:%S')
+            else:
+                email_sent_time = datetime.strptime(email_sent_time, '%d %b %Y %H:%M:%S')
+            email_sent_time = TIMEZONE.localize(email_sent_time)
+
+            time_difference = reference_time - email_sent_time
+            if time_difference.total_seconds() <= 1500:  # 25 minutes in seconds
+                emails_info.append(email_id)
+
+        except Exception as e:
+            logger.error(type(e).__name__,
+                  e.__traceback__.tb_lineno, "Exception with date-time format")
+
+            print(type(e).__name__,
+                  e.__traceback__.tb_lineno,
+                  "Exception with date-time format")
     return emails_info
 
 
