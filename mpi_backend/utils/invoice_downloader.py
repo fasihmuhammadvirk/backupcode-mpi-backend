@@ -43,8 +43,7 @@ def filter_by_time(email_ids, reference_time, mail):
             else:
                 email_sent_time = msg['Date'][:-6]
 
-            # Modified code
-            if re.match(r'\A[a-zA-Z]{3},', email_sent_time):
+            if re.match(r'\A[a-zA-Z]{3},', email_sent_time):  # handling multiple date formats coming from gmail
                 email_sent_time = datetime.strptime(email_sent_time, '%a, %d %b %Y %H:%M:%S')
             else:
                 email_sent_time = datetime.strptime(email_sent_time, '%d %b %Y %H:%M:%S')
@@ -57,15 +56,11 @@ def filter_by_time(email_ids, reference_time, mail):
         except Exception as e:
             logger.error(type(e).__name__,
                   e.__traceback__.tb_lineno, "Exception with date-time format")
-
-            print(type(e).__name__,
-                  e.__traceback__.tb_lineno,
-                  "Exception with date-time format")
     return emails_info
 
 
 def search_new_emails(mail):
-    time_frame = datetime.now(TIMEZONE).strftime('%d-%b-%Y')  # unseen emails for current day & than manually filter them later based on time
+    time_frame = datetime.now(TIMEZONE).strftime('%d-%b-%Y')  #unseen emails for current day & than manually filter them later based on time
     result, data = mail.uid('search', None, f'(SINCE "{time_frame}")')
     email_ids = data[0].split()
     return email_ids
@@ -140,6 +135,8 @@ def email_download_background_task():
         raw_email = response[0][1].decode('utf-8')
         email_message = email.message_from_string(raw_email)
         download_email_attachments(email_message, base_folder_path)
+        # mark emails as Unread
+        mail.uid('store', e_id, '-FLAGS', '(\Seen)')
 
     # trigger remaining two tasks
     converted_files, failed_files = convert_invoice(base_folder)
