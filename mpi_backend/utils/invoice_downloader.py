@@ -35,7 +35,9 @@ EXCLUDED_SENDERS = [ # suppliers whose emails are to be marked as read after dow
     "billing@positive.tech",
     "ar@opusoperations.com",
     "donotreply@cardknox.com",
-    "billing@flowmarksupply.com"]
+    "billing@flowmarksupply.com",
+    # "billing@mpiplumbingcorp.com" # uncomment only for testing
+]
 
 
 def login():
@@ -85,7 +87,16 @@ def search_new_emails(mail):
     time_frame = datetime.now(TIMEZONE).strftime('%d-%b-%Y')  #unseen emails for current day & than manually filter them later based on time
     result, data = mail.uid('search', None, f'(SINCE "{time_frame}")')
     email_ids = data[0].split()
-    return email_ids
+    filtered_email_ids = []
+    for email_id in email_ids:
+        result, msg_data = mail.uid('fetch', email_id, '(BODY.PEEK[HEADER.FIELDS (FROM)])')
+        raw_email = msg_data[0][1]
+        msg = email.message_from_bytes(raw_email)
+        from_email = email.utils.parseaddr(msg['From'])[1]
+        # Check if the email is from the excluded senders list
+        if from_email in EXCLUDED_SENDERS:
+            filtered_email_ids.append(email_id)
+    return filtered_email_ids
 
 
 def download_email_attachments(email_message, base_folder_path):
@@ -159,8 +170,8 @@ def email_download_background_task():
         download_email_attachments(email_message, base_folder_path)
         # mark emails as Unread
         from_email = email.utils.parseaddr(email_message['From'])[1]
-        if from_email not in EXCLUDED_SENDERS:
-            mail.uid('store', e_id, '-FLAGS', '(\Seen)')
+        # if from_email not in EXCLUDED_SENDERS:
+        #     mail.uid('store', e_id, '-FLAGS', '(\Seen)')
 
     # trigger remaining two tasks
     converted_files, failed_files = convert_invoice(base_folder)
