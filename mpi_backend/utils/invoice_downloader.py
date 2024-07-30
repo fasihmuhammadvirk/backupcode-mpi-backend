@@ -5,6 +5,7 @@ import os,re
 from pathlib import Path
 from email.utils import parsedate_to_datetime
 import pytz
+import email
 import logging
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,27 @@ from datetime import datetime, timedelta
 
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.utils.invoice_convertor import convert_invoice
+
+EXCLUDED_SENDERS = [ # suppliers whose emails are to be marked as read after downloading
+    "info@wwps.co",
+    "bmwpsupply@gmail.com",
+    "billing@ysplumbing.com",
+    "accounting@supremeplumbingnj.com",
+    "orders@supremeplumbingnj.com",
+    "billing@pyramidps.com",
+    "purchasing@pyramidps.com",
+    "donotreply@brucesupply.net",
+    "donotreply@certifiedlumber.com",
+    "breindy@parkplumbingsupply.com",
+    "accounting@kjpsinc.com",
+    "nefcocorp@billtrust.com",
+    "timsfile@awisco.net",
+    "billing@afsupply.com",
+    "billing@sparkleening.com",
+    "billing@positive.tech",
+    "ar@opusoperations.com",
+    "donotreply@cardknox.com",
+    "billing@flowmarksupply.com"]
 
 
 def login():
@@ -136,7 +158,9 @@ def email_download_background_task():
         email_message = email.message_from_string(raw_email)
         download_email_attachments(email_message, base_folder_path)
         # mark emails as Unread
-        mail.uid('store', e_id, '-FLAGS', '(\Seen)')
+        from_email = email.utils.parseaddr(email_message['From'])[1]
+        if from_email not in EXCLUDED_SENDERS:
+            mail.uid('store', e_id, '-FLAGS', '(\Seen)')
 
     # trigger remaining two tasks
     converted_files, failed_files = convert_invoice(base_folder)
