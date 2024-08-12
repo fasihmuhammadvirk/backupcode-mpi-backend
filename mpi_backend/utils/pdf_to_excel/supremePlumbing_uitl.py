@@ -4,6 +4,7 @@ import PyPDF2 as pyPdf  # alternate approach
 import fitz
 import re
 from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
+import numpy as np
 
 def extract_supremePlumbing_data(filename, output_path):
     if get_pages(filename) > 1:  # have different flow if we have >1 pages in invoice
@@ -14,6 +15,7 @@ def extract_supremePlumbing_data(filename, output_path):
 
     # get tax details
     tax = extract_tax(filename, get_pages(filename))
+
     tax = float(tax.replace("$", "").replace(",", ""))
     tax_row = ["10 Materials", "Tax", "", "", tax]
 
@@ -103,6 +105,7 @@ def merge_rows(table):
 
 
 def clean_invoice_items(table):
+
     # we cannot look for NAN - 6 and 8 columns are returned depending on invoice
     if {'Qty Shipped'}.issubset(table.columns):
         table = table[['Item', 'Description', 'Unnamed: 0']]
@@ -197,6 +200,7 @@ def clean_invoice_attributes(table, filename):
         table.insert(1, "Ref NO", " ")
         table = table.rename(
             {'Date': 'Date', 'Ref NO': 'Ref NO', 'PO #': 'PO #'})
+
     return table
 
 
@@ -277,6 +281,7 @@ def extract_tax(filename, page):
 
 
 def get_pages(filename):
+
     reader = pyPdf.PdfFileReader(filename)
     numPages = reader.getNumPages()
     return numPages
@@ -322,16 +327,27 @@ def get_customer_job(filename):
 
 
 def merge_and_clean_invoice_items(tables):
+
     finalized_tables = []
+
     if len(tables) > 1:  # has to be true in all cases
         for i in range(len(tables)):
+
             if i == 0 and {'Image'}.issubset(tables[0].columns) and not {'Unnamed: 0'}.issubset(tables[0].columns):
+
+                if {'Name','Price'}.issubset(tables[0].columns) :
+                    tables[i].rename(
+                        columns={'Name': 'Item', 'Description': 'Description', 'Qty': 'Qty',
+                                 'Price': 'Rate', 'Amount': 'Amount'}, inplace=True)
+
                 individual_table = tables[i][['Item', 'Description', 'Qty', 'Rate', 'Amount']]
+
                 individual_table = individual_table.rename(
                     columns={'Rate': 'Cost'})
                 individual_table.dropna(subset=["Item", "Description"], inplace=True)
                 individual_table.reset_index(drop=True, inplace=True)
                 finalized_tables.append(individual_table)
+
             elif {'Name'}.issubset(tables[i].columns):
                 if {'Unnamed: 0'}.issubset(tables[i].columns):
                     individual_table = tables[i][['Name', 'Description', 'Unnamed: 0', 'Price', 'Amount']]
@@ -363,6 +379,7 @@ def merge_and_clean_invoice_items(tables):
                 individual_table.dropna(subset=["Item", "Description"], inplace=True)
                 individual_table.reset_index(drop=True, inplace=True)
                 finalized_tables.append(individual_table)
+
     else:  # ideally should not be triggered at all, but adding for fun/agility
 
         if {'Image'}.issubset(tables[0].columns) and not {'Unnamed: 0'}.issubset(tables[0].columns):
@@ -416,9 +433,11 @@ def merge_and_clean_invoice_items(tables):
 # the idea behind this function is to use bars/ seperators in invoice file
 # to get all required information i.e use existing natural dividers in file
 def extract_supremePlumbing_data_multiplepages(filename, output_path):
+
     tables = tabula.read_pdf(filename, pages='all', stream=False, guess=True)
 
     extraction_start_index = 0
+
     for index,table in enumerate(tables):
         # had to rewrite the multiple page extraction logic
         # because of unique pattern occurred

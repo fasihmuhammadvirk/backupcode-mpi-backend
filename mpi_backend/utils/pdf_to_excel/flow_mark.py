@@ -2,6 +2,7 @@ import tabula
 import pandas as pd
 import PyPDF2 as pyPdf  # alternate approach
 import fitz
+import numpy as np
 import re
 from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
 from mpi_backend.utils.pdf_to_excel.supremePlumbing_uitl import get_pages
@@ -49,12 +50,21 @@ def process_results(invoice_items, date, invoice_no, tax, job_name="", po_no="")
 def extract_customer_job(filename):
     customer_job =''
     tables = tabula.read_pdf(filename, pages=1, area= customer_job_area)
-    try:
+    if "hipping Address" in tables[0].columns:
+        customer_job_area[0] = 140.40
+        customer_job_area[1] = 311.55
+        tables = tabula.read_pdf(filename, pages=1, area=customer_job_area)
+        customer_job = tables[0]['Shipping Address'][1]
+
+    elif "Shipping Address" in tables[0].columns:
+        customer_job = tables[0]['Shipping Address'][1]
+    elif 'Ship to' in tables[0].columns:
         customer_job = tables[0]['Ship to'][1]
         if tables[0]['Ship to'][0] == '44 Hudson Street': # hard fix: no other pattern to identify
             customer_job = tables[0]['Ship to'][0]
-    except:
-        pass
+        if tables[0]['Ship to'][0] == '625 Fulton Street':
+            customer_job = tables[0]['Ship to'][0]
+
     return customer_job
 
 
@@ -112,8 +122,10 @@ def are_columns_not_empty(row, columns):
 
 
 def extract_invoice_items(tables):
+
     invoice_items = []
     for table in tables:
+        print(table)
         if {'Date', 'Due Date', 'Rep', 'Customer PO #', 'Terms'}.issubset(table.columns):
             continue # header table- should not be processed
 
@@ -121,12 +133,13 @@ def extract_invoice_items(tables):
             table = table[['Unnamed: 1', 'Unnamed: 2', 'Unnamed: 3', 'Unnamed: 6', 'Unnamed: 7']]
             table = table.rename(
                 columns={'Unnamed: 1': 'Item', 'Unnamed: 2': 'Description', 'Unnamed: 3': 'Qty', 'Unnamed: 6': 'Cost', 'Unnamed: 7': 'Amount'})
-            #dropping header row
+
+        #dropping header row
             rows_to_drop = table[(table['Item'] == 'Name') & (table['Description'] == 'Description') & (table['Qty'] == 'Qty') & (
                         table['Cost'] == 'Price') & (table['Amount'] == 'Amount')].index
             table.drop(rows_to_drop, inplace=True)
 
-        elif {'Unnamed: 0','Unnamed: 1'}.issubset(table.columns) and table['Rate'].isna().all():
+        elif {'Unnamed: 0', 'Unnamed: 1'}.issubset(table.columns) and table['Rate'].isna().all():
             table = table[['Item', 'Description', 'Unnamed: 0', 'Unnamed: 1', 'Amount']]
             table = table.rename(
                 columns={'Unnamed: 0': 'Qty', 'Unnamed: 1': 'Cost'})
@@ -135,6 +148,59 @@ def extract_invoice_items(tables):
             table = table[['Item', 'Description', 'Qty', 'Rate', 'Amount']]
             table = table.rename(
                 columns={'Rate': 'Cost'})
+
+        elif {'Unnamed: 0', 'Return Qty'}.issubset(table.columns) and 'Rate' not in table.columns:
+
+            table = table[['# Item Name', 'Description', 'Unnamed: 0', 'Amount']]
+            table['Cost'] = '0'
+            table = table.rename(
+                columns={'# Item Name': 'Item', 'Unnamed: 0': 'Qty'})
+            table = table[['Item', 'Description', 'Qty', 'Cost', 'Amount']]
+
+        # make changes for concatination of descriptions in some invoices
+            # if table['Item'].isna().all() and table['Amount'].isna().all():
+            for i in range(1, len(table)):
+                if pd.isna(table.at[i, 'Item']):
+                    table.at[i - 1, 'Description'] = table.at[i - 1, 'Description'] + ' ' + table.at[i, 'Description']
+
+            table = table.dropna(subset=['Item']).reset_index(drop=True)
+            table['Item'] = table['Item'].str.split(' ')
+
+            # get the index of row where amount and item are combine
+            result = table[table['Item'].apply(len) == 1 & table['Amount'].isna()]
+            if len(result) > 0:
+                row_indices = result.index.tolist()
+                item_value = table.at[row_indices[0], 'Item']
+                item_string = item_value[0]
+                match = re.search(r'(\d)([A-Z]{3})', item_string)
+
+                if match:
+                    # Extract the part before the match
+                    before_match = item_string[:match.start()]
+
+                    # Extract the digit and the three alphabets
+                    digit = int(match.group(1))
+                    three_alphabets = match.group(2)
+
+                    # Extract the rest of the string after the matched pattern
+                    rest_of_string = item_string[match.end():]
+
+                    # Combine into a new list
+                    updated_list = [before_match, digit, three_alphabets + rest_of_string]
+                    table.at[row_indices[0], 'Amount'] = updated_list[0]
+                    del updated_list[0]
+                    table.at[row_indices[0], 'Item'] = updated_list
+
+            # remove the sr# Number
+            for idx, item_value in table['Item'].items():
+                if isinstance(item_value, list) and len(item_value) > 1:
+                    # Remove the first item in the list
+                    new_item_value = item_value[1]
+
+                    # Update the DataFrame with the new value
+                    table.at[idx, 'Item'] = new_item_value
+
+        # End changes
 
         elif 'Unnamed: 0' in table.columns and table['Rate'].isna().all():
             table = table[['Item', 'Description', 'Qty', 'Unnamed: 0', 'Amount']]
@@ -152,7 +218,18 @@ def extract_invoice_items(tables):
             table['Amount'] = '0'
             table = table.rename(columns={'Name': 'Item'})
 
-        elif {'#','MPN'}.issubset(table.columns):
+        elif {'#', 'MPN'}.issubset(table.columns):
+
+            # MAKE CHANGES TO CONCATE THE SCATTERED ITEM VALUE (made for invoice-flow mark)
+            if non_nan_count := table['Amount'].notna().sum():
+                for i in range(1, len(table)):
+                    amount_index = table['Amount'].first_valid_index()
+                    if pd.isna(table.loc[i, 'Amount']):
+                        # Combine the current row's text with the previous row
+                        table.loc[amount_index, 'Name'] = str(table.loc[amount_index, 'Name']) + " " + str(table.loc[i, 'Name'])
+                        table.loc[amount_index, 'Name'] = table.loc[amount_index, 'Name'].replace('nan','')
+            # End changes
+
             table = table[['Name', 'Description', 'Qty', 'Price', 'Amount']]
             # Iterate through the rows of the table in reverse order for easier merging
             for i in range(len(table) - 1, 0, -1):
@@ -190,7 +267,7 @@ def extract_invoice_items(tables):
             table = table[['Item Name', 'Description', 'Return Qty', 'Amount']]
             table['Cost'] = '0'
             table = table.rename(columns={'Item Name': 'Item', 'Return Qty': 'Qty'})
-
+            table = table[['Item', 'Description', 'Qty', 'Cost', 'Amount']]
         else:
             table = table[['Item', 'Description', 'Qty', 'Rate', 'Amount']]
             table = table.rename(
@@ -206,9 +283,11 @@ def extract_invoice_items(tables):
 
     merged_invoice_items = pd.DataFrame()
     for item in range(len(invoice_items)):
+
         merged_invoice_items = pd.concat([merged_invoice_items, invoice_items[item]], axis=0)
 
     merged_invoice_items.reset_index(drop=True, inplace=True)
+
     return merged_invoice_items
 
 
