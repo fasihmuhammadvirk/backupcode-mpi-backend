@@ -16,7 +16,12 @@ def convert_items_to_dataframe(items):
         'vendor': 'Vendor',
         'class_': 'Class',
         'memo': 'Memo',
-        'buyer': 'Buyer'
+        'buyer': 'Buyer',
+        "filename": "Filename",
+        "sheet_name": "Sheet Name",
+        "mpi_item": "MPI Item Code",
+        "mpi_description": "MPI Description",
+        "date_added": "Date Added"
     }
 
     items_dict = [item.__dict__ for item in items]

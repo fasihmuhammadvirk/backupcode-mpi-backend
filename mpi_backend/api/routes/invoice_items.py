@@ -110,9 +110,10 @@ def sort_invoices( db: Session = Depends(get_db), column_name:str = Query(None),
     return paginate(invoice_items)
 
 
-@router.post("/export",)
+@router.post("/export")
 def get_invoices(
         ids: List[int],
+        columns: Optional[List[str]] = None,
         db: Session = Depends(get_db),
         token: str = Depends(JWTBearer()),
 ):
@@ -124,8 +125,15 @@ def get_invoices(
     file_path = f'{upload_folder}{filename}'
     if not os.path.exists(upload_folder):os.makedirs(upload_folder)
 
-    save_final_data(final_df=items_df,supplier='', output_path=file_path) # convert to excel
-    upload_file(file_path, file_key=f'Exports/{filename}', is_invoice=False) # upload to s3 to be exported
-    download_url = get_presigned_url(file_key=f'Exports/{filename}', is_invoice=False)
+    if columns: items_df = items_df[columns]  # only export certain columns
+    else:
+        columns = ["Item","Description","Qty","Cost","Amount","Date","Ref NO","PO #","Customer Job","Bill","Vendor",
+                    "Class","Memo"]
+        items_df = items_df[columns]
 
-    return download_url
+    save_final_data(final_df=items_df,supplier='', output_path=file_path) # convert to excel
+
+    # upload_file(file_path, file_key=f'Exports/{filename}', is_invoice=False) # upload to s3 to be exported
+    # download_url = get_presigned_url(file_key=f'Exports/{filename}', is_invoice=False)
+    #
+    # return download_url

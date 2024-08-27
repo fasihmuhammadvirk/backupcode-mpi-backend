@@ -27,12 +27,13 @@ def save_final_data(final_df, supplier, output_path):
     worksheet.set_column('M:M', 15)
     worksheet.set_column('N:N', 15)
 
+    if num_cols > 14: # data-review tab export
+        worksheet.set_column('O:S', 20)
 
     columns_format = workbook.add_format({'bg_color': 'yellow', 'font_color': 'red'})
     bolded_column_format = workbook.add_format({'bold': True})
 
-    # if num_cols == 13:
-    column_range = "A1:N1"
+    column_range = "A1:N1" if num_cols <= 14 else "A1:S1"
     bolded_range1 = "F2:H"+str(len(final_df)+1)
     bolded_range2 = "K2:K"+str(len(final_df)+1)
     # elif num_cols == 14:
