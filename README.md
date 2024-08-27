@@ -23,3 +23,10 @@ rename it to `.envrc` and set the values correctly
 For ease of use, using `direnv` is recommended.
 You can follow instructions to install and use it here 
 https://direnv.net
+
+
+To start the uvicorn server run below command:
+
+```bash
+uvicorn mpi_backend.main:app --reload --port 8080
+```
