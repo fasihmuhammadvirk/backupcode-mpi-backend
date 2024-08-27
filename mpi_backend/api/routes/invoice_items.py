@@ -133,7 +133,6 @@ def get_invoices(
 
     save_final_data(final_df=items_df,supplier='', output_path=file_path) # convert to excel
 
-    # upload_file(file_path, file_key=f'Exports/{filename}', is_invoice=False) # upload to s3 to be exported
-    # download_url = get_presigned_url(file_key=f'Exports/{filename}', is_invoice=False)
-    #
-    # return download_url
+    upload_file(file_path, file_key=f'Exports/{filename}', is_invoice=False) # upload to s3 to be exported
+    download_url = get_presigned_url(file_key=f'Exports/{filename}', is_invoice=False)
+    return download_url
