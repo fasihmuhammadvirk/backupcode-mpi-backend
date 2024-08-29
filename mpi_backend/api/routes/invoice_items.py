@@ -50,7 +50,7 @@ def get_invoices(
 @router.get("/supplier-date", response_model=Page[InvoiceItems])
 def get_invoices(
         db: Session = Depends(get_db),
-        supplier_name: str = Query(None),
+        supplier_name: List[str] = Query(None),
         from_date: date = Query(None),
         to_date: date = Query(None),
         job_location: str = Query(None),

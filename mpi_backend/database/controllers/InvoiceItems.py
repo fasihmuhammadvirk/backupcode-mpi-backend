@@ -60,7 +60,7 @@ class InvoiceItemController:
         query = self.db_context.query(InvoiceItem)
 
         if supplier is not None:  # only apply supplier filter if it's provided.
-            query = query.filter(InvoiceItem.vendor == supplier)
+            query = query.filter(InvoiceItem.vendor.in_(supplier))
 
         if job_location:
             query = query.filter(InvoiceItem.customer_job == job_location)
