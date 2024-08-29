@@ -30,10 +30,6 @@ def process_extracted_data(converted_files, failed_files):
             logger.warning(f'Invoice with REF-NO-> {str(extracted_data["Ref NO"][0])} already processed and is being skipped!')
             continue
 
-        invoice_record = InvoiceController(db).insert_invoice(extracted_data['Date'][0], file.rsplit('/')[-1],
-                                                              supplier_id, 'PROCESSING',
-                                                              file)  # one record for every file in invoices table
-
         extracted_data.insert(0, 'Sheet Name', '')
         extracted_data['MpiItem'] = 'No Match'
         extracted_data['MpiDescription'] = 'No Match'
@@ -45,7 +41,12 @@ def process_extracted_data(converted_files, failed_files):
         extracted_data['Customer Job'] = get_updated_customer_job(extracted_customer_job, customer_job_mappings)
 
         extracted_data = extracted_data.fillna({'Qty': 0, 'Cost': 0, 'Class': '', 'Memo': '', 'Ref NO': '',
-                                                'PO #': '', 'Customer Job': '', 'Buyer': ''})
+                                                'PO #': '', 'Customer Job': '', 'Buyer': '',
+                                                'Date': datetime.today().strftime('%m/%d/%Y')})
+
+        invoice_record = InvoiceController(db).insert_invoice(extracted_data['Date'][0], file.rsplit('/')[-1],
+                                                              supplier_id, 'PROCESSING',
+                                                              file)  # one record for every file in invoices table
 
         InvoiceController(db).set_status_to_processed(invoice_record.id) # invoice has processed, change its status accordingly
         upload_file(file_name=file, file_key=f'{extracted_data["Vendor"][0]}/{invoice_record.id}')
