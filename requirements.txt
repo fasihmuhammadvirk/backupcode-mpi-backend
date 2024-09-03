@@ -24,3 +24,4 @@ python-dotenv==1.0.1
 numpy==1.24.4
 PyMuPDF==1.19.6
 middleware-apm
+apitally[fastapi]

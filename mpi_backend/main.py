@@ -4,6 +4,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from fastapi_pagination import add_pagination
 from fastapi.middleware.cors import CORSMiddleware
+from apitally.fastapi import ApitallyMiddleware
 
 
 from mpi_backend.api.routes import health
@@ -46,6 +47,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+app.add_middleware(
+    ApitallyMiddleware,
+    client_id="d2f20325-2b6d-4fe0-8a73-a757ae4227b8",
+    env="prod",  # or "dev"
 )
 
 
