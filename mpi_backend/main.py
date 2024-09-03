@@ -24,6 +24,11 @@ from mpi_backend.config.logging_config import setup_logging
 # Base.metadata.create_all(engine)  # create db tables
 setup_logging()
 
+import logging
+logger = logging.getLogger(__name__)
+from middleware import MwTracker
+tracker=MwTracker() # initializing middleware monitoring tool // comment out when running in local environment
+
 @asynccontextmanager
 async def lifespan(app:FastAPI):
     scheduler = BackgroundScheduler()

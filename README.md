@@ -25,8 +25,13 @@ You can follow instructions to install and use it here
 https://direnv.net
 
 
-To start the uvicorn server run below command:
+To start the uvicorn server in PRODUCTION (with monitoring enabled) run below command:
 
 ```bash
-uvicorn mpi_backend.main:app --reload --port 8080
+middleware-apm run uvicorn mpi_backend.main:app --port 8080
+```
+
+For execution in LOCAL environment (or without monitoring) run below command:
+```bash
+uvicorn mpi_backend.main:app --port 8080
 ```
