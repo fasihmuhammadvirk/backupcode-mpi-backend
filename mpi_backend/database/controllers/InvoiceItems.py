@@ -59,7 +59,7 @@ class InvoiceItemController:
     def get_invoice_items_by_filters(self, supplier=None, from_date=None, to_date=None, job_location=None):
         query = self.db_context.query(InvoiceItem)
 
-        if supplier is not None:  # only apply supplier filter if it's provided.
+        if supplier is not None or supplier != 'All':  # only apply supplier filter if it's provided.
             query = query.filter(InvoiceItem.vendor.in_(supplier))
 
         if job_location:
