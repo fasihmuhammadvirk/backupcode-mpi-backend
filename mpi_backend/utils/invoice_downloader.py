@@ -138,6 +138,7 @@ def download_email_attachments(email_message, base_folder_path):
 
 
 def get_supplier(email_subject, supplier_email) -> str:
+    if "statement" in email_subject.lower(): return "no_supplier"
     if "bmw" in email_subject.lower(): return SUPPLIERS[0]
     elif "world wide" in email_subject.lower(): return SUPPLIERS[1]
     elif "y&s" in email_subject.lower(): return SUPPLIERS[2]
