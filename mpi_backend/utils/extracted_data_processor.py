@@ -38,7 +38,8 @@ def process_extracted_data(converted_files, failed_files):
         extracted_data = extracted_data.apply(search_replace, args=(temp_items, item_mappings,), axis=1)
 
         extracted_customer_job = extracted_data['Customer Job'][0]
-        extracted_data['Customer Job'] = get_updated_customer_job(extracted_customer_job, customer_job_mappings)
+        # as per updated requirements, customer job no longer needs to be mapped
+        # extracted_data['Customer Job'] = get_updated_customer_job(extracted_customer_job, customer_job_mappings)
 
         extracted_data = extracted_data.fillna({'Qty': 0, 'Cost': 0, 'Class': '', 'Memo': '', 'Ref NO': '',
                                                 'PO #': '', 'Customer Job': '', 'Buyer': '',
