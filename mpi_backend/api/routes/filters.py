@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException,Query
-from typing import List
+from fastapi import APIRouter, Depends, HTTPException,Query, Body
+from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
 from fastapi_pagination import Page, paginate
 
@@ -49,14 +49,18 @@ def column_mappings(token: str = Depends(JWTBearer())):
     return column_mapping
 
 
-@router.get("/by-column")
-def column_mappings(db: Session = Depends(get_db), token: str = Depends(JWTBearer()),
-                    column_name: str = Query(None, description="Name of Column for which data is required")
-                    ):
+@router.post("/by-column")
+def column_mappings(db: Session = Depends(get_db),
+                    token: str = Depends(JWTBearer()),
+                    column_name: str = Query(None, description="Name of Column for which data is required"),
+                    payload: Optional[Dict] = Body(None, description="Previous selections of filters & their values as json.")):
     if column_name is None:
         return {"data": "Invalid Column Name Specified"}
 
-    distinct_values = InvoiceItemController(db).get_data_by_column_name(column_name)
+    if payload: filter_context = payload["filter_context"]
+    else: filter_context = None
+
+    distinct_values = InvoiceItemController(db).get_data_by_column_name(column_name, filter_context)
     return distinct_values
 
 

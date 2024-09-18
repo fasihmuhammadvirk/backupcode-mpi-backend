@@ -148,9 +148,16 @@ class InvoiceItemController:
         customer_jobs = db.query(InvoiceItem.customer_job).distinct().all()
         return customer_jobs
 
-    def get_data_by_column_name(self, column_name):
+    def get_data_by_column_name(self, column_name, filter_context):
         column = getattr(InvoiceItem, column_name)
-        distinct_values = self.db_context.query(distinct(column)).all()
+        query = self.db_context.query(distinct(column))
+
+        if filter_context:  # if there are previous filter selections -> add them in query
+            for key, value in filter_context.items():
+                filter_column = getattr(InvoiceItem, key)
+                query = query.filter(filter_column == value)
+
+        distinct_values = query.all()
         return [value[0] for value in distinct_values if value[0] is not None]
 
     def apply_filters(self, request):
@@ -200,5 +207,3 @@ class InvoiceItemController:
         results = query.all()
         invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in results]
         return invoices_items
-
-
