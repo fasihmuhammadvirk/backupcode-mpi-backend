@@ -55,6 +55,7 @@ class InvoiceController:
         elif status == 'unprocessed':
             query = query.filter(or_(Invoice.status == 'PROCESSING', Invoice.status == 'FAILED'))
 
+        query = query.order_by(Invoice.date.desc()) # show latest data first
         invoices = query.all()
 
         invoices_list = []
