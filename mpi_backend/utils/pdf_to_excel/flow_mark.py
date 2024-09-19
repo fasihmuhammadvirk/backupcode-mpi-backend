@@ -134,7 +134,7 @@ def extract_invoice_items(tables):
             table = table.rename(
                 columns={'Unnamed: 1': 'Item', 'Unnamed: 2': 'Description', 'Unnamed: 3': 'Qty', 'Unnamed: 6': 'Cost', 'Unnamed: 7': 'Amount'})
 
-        #dropping header row
+            #dropping header row
             rows_to_drop = table[(table['Item'] == 'Name') & (table['Description'] == 'Description') & (table['Qty'] == 'Qty') & (
                         table['Cost'] == 'Price') & (table['Amount'] == 'Amount')].index
             table.drop(rows_to_drop, inplace=True)
@@ -157,7 +157,7 @@ def extract_invoice_items(tables):
                 columns={'# Item Name': 'Item', 'Unnamed: 0': 'Qty'})
             table = table[['Item', 'Description', 'Qty', 'Cost', 'Amount']]
 
-        # make changes for concatination of descriptions in some invoices
+            # make changes for concatination of descriptions in some invoices
             # if table['Item'].isna().all() and table['Amount'].isna().all():
             for i in range(1, len(table)):
                 if pd.isna(table.at[i, 'Item']):
@@ -200,7 +200,6 @@ def extract_invoice_items(tables):
                     # Update the DataFrame with the new value
                     table.at[idx, 'Item'] = new_item_value
 
-        # End changes
 
         elif 'Unnamed: 0' in table.columns and table['Rate'].isna().all():
             table = table[['Item', 'Description', 'Qty', 'Unnamed: 0', 'Amount']]
@@ -223,12 +222,15 @@ def extract_invoice_items(tables):
             # MAKE CHANGES TO CONCATE THE SCATTERED ITEM VALUE (made for invoice-flow mark)
             if non_nan_count := table['Amount'].notna().sum():
                 for i in range(1, len(table)):
-                    amount_index = table['Amount'].first_valid_index()
+                    if i == 1: amount_index = table['Amount'].first_valid_index()
+
                     if pd.isna(table.loc[i, 'Amount']):
                         # Combine the current row's text with the previous row
-                        table.loc[amount_index, 'Name'] = str(table.loc[amount_index, 'Name']) + " " + str(table.loc[i, 'Name'])
-                        table.loc[amount_index, 'Name'] = table.loc[amount_index, 'Name'].replace('nan','')
-            # End changes
+                        table.loc[amount_index, 'Name'] = str(table.loc[amount_index, 'Name']) + " " + str(
+                            table.loc[i, 'Name'])
+                        table.loc[amount_index, 'Name'] = table.loc[amount_index, 'Name'].replace('nan', '')
+                    else:
+                        amount_index = i  # the fix is to prevent wrong merging of item numbers
 
             table = table[['Name', 'Description', 'Qty', 'Price', 'Amount']]
             # Iterate through the rows of the table in reverse order for easier merging
