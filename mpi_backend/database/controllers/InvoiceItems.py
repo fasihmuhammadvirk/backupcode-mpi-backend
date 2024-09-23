@@ -153,9 +153,9 @@ class InvoiceItemController:
         query = self.db_context.query(distinct(column))
 
         if filter_context:  # if there are previous filter selections -> add them in query
-            for key, value in filter_context.items():
-                filter_column = getattr(InvoiceItem, key)
-                query = query.filter(filter_column == value)
+            for column in filter_context.keys():
+                filter_column = getattr(InvoiceItem, column)
+                query = query.filter(filter_column.in_(filter_context[column]))
 
         distinct_values = query.all()
         return [value[0] for value in distinct_values if value[0] is not None]
