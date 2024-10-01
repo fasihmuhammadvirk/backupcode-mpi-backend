@@ -115,7 +115,8 @@ def extract_supplier_id(file_path):
         "Park Plumbing Supply": 7,
         "Gotham Plumbing Supply": 8,
         "FW Webb Plumbing Supply": 9,
-        "Flow Mark Plumbing Supply": 10
+        "Flow Mark Plumbing Supply": 10,
+        "Plumbing Exchange": 11
     }
     for company, code in company_codes.items():
         if company in file_path:

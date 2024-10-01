@@ -13,6 +13,7 @@ from mpi_backend.utils.pdf_to_excel import bmw_old
 from mpi_backend.utils.pdf_to_excel import ys_old
 from mpi_backend.utils.pdf_to_excel import web_co_supply
 from mpi_backend.utils.pdf_to_excel import flow_mark
+from mpi_backend.utils.pdf_to_excel import plumbing_exchange
 
 regular_area = (290, 20, 290+415, 20+570)
 last_page_area = (290, 20, 290+375, 20+570)
@@ -56,6 +57,9 @@ def extract_data(filename, output_path, supplier):
         return
     elif supplier == "Flow Mark Plumbing Supply":
         flow_mark.process_invoice(filename, output_path)
+        return
+    elif supplier == "Plumbing Exchange":
+        plumbing_exchange.process_invoice(filename, output_path)
         return
     else:
         logger.info(f'Invalid Supplier -> {supplier} for file -> {filename}.Skipping Invoice.')
