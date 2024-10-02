@@ -77,7 +77,6 @@ def extract_customer_job(filename):
     table= tabula.read_pdf(filename, area=customer_job_area, guess=True, stream=False)
     return table[0].columns.values[0]
 
-
 def clean_invoice_items(tables,filename):
     invoice_items = []
     for table in tables:
@@ -86,14 +85,25 @@ def clean_invoice_items(tables,filename):
             table.columns = table.iloc[0]
             table = table[1:].reset_index(drop=True) # making first row header
 
+            description_index = table.columns.get_loc('DESCRIPTION')  # get col after description and if its not null name it to Item
+            column_after_description = table.columns[description_index + 1]
+            try:
+                if table[column_after_description].notna().any():
+                    table.rename(columns={column_after_description: 'Item'}, inplace=True)
+            except:
+                table = tabula.read_pdf(filename, pages='all', area=invoice_items_area, columns=columns, guess=True,
+                                        stream=False)[0]
+                table.columns = table.iloc[0]
+                table = table[1:].reset_index(drop=True)
+
         if {'DISCOUNT UNIT'}.issubset(table.columns.values):
             table = tabula.read_pdf(filename, pages='all', area=invoice_items_area,columns=columns, guess=True, stream=False)[0]
             table.columns = table.iloc[0]
             table = table[1:].reset_index(drop=True)  # making first row header
 
+        if not {'Item'}.issubset(table.columns.values):
+            table['Item'] = table['DESCRIPTION'].str.split().str[-1]
 
-
-        table['Item'] = ''  # no item numbers were present
         table = table[['Item','DESCRIPTION', 'SHIP','UNIT','AMOUNT']]
         table = table.rename(columns={'DESCRIPTION':'Description', 'SHIP':'Qty', 'UNIT':'Cost', 'AMOUNT':'Amount'})
         table['Description'] = table['Description'].str.split(r'\s{4,}').str[0] # remove everything after multiple spaces
@@ -112,4 +122,3 @@ def clean_invoice_items(tables,filename):
         combined_invoice_items.reset_index(drop=True, inplace=True)
 
         return combined_invoice_items
-
