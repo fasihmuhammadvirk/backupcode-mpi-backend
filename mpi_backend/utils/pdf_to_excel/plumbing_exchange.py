@@ -104,6 +104,10 @@ def clean_invoice_items(tables,filename):
         if not {'Item'}.issubset(table.columns.values):
             table['Item'] = table['DESCRIPTION'].str.split().str[-1]
 
+        if {'SHIP', 'ORDER'}.issubset(table.columns.values) and table['SHIP'].isnull().all():
+            table.drop('SHIP', axis=1,inplace=True)
+            table.rename(columns={'ORDER':'SHIP'},inplace=True)  # ship column could not be picked up using order col instead
+
         table = table[['Item','DESCRIPTION', 'SHIP','UNIT','AMOUNT']]
         table = table.rename(columns={'DESCRIPTION':'Description', 'SHIP':'Qty', 'UNIT':'Cost', 'AMOUNT':'Amount'})
         table['Description'] = table['Description'].str.split(r'\s{4,}').str[0] # remove everything after multiple spaces
