@@ -15,6 +15,10 @@ def extract_job_info(filename):
             job_name = pjb
             break
 
+    if job_name.count(" ") > 4: # threshold to identify if there are extra spaces
+        job_name = job_name.replace(" ", "")
+        job_name = re.sub(r'(?<!^)([A-Z])', r' \1', job_name)  # add space before capital letters
+
     return job_name
 
 
@@ -22,6 +26,15 @@ def extract_tax_etc(filename):
     tables = tabula.read_pdf(filename, pages="all", area=regular_area)
     financial_details_table = tabula.read_pdf(filename, pages=len(tables), area=(658, 425, 658 + 84, 425 + 165),
                                               guess=False)
+
+    if 'M e rc h a n d is e' in str(financial_details_table[0].columns.values):
+        financial_details_table = tabula.read_pdf(filename, pages=len(tables), area=(650.95, 410.77, 650+84, 420+164.67),
+                                              guess=False)
+        tax = str(financial_details_table[0]).split('T a x ( 00 4 )')[-1]
+        tax =  ''.join(tax.split())
+        return {'tax' : tax}
+
+
 
     if financial_details_table[0].shape[1] == 1:
         first_item = financial_details_table[0].columns[0]
@@ -56,21 +69,43 @@ def extract_tax_etc(filename):
     return financial_data
 
 
-def extract_invoice_info(filename, pages =1, check = False ):
-    tables = tabula.read_pdf(filename, pages=pages, area=(245, 21, 245 + 30, 21 + 160), guess=False,
-                             columns=[20,98], pandas_options={'dtype': str})
-    try :
-        invoice_num = str(tables[0]['Invoice #'][0])
-        invoice_date = tables[0]['Invoice Date'][0]
-    except:
-        return '', ''  # triggered in case no invoice num or date present
+def extract_invoice_info(filename, pages =1, check = False ,supplier = "default"):
+    invoice_num = ''
+    invoice_date = ''
+    tables = None
+
+    if supplier == "default":
+        tables = tabula.read_pdf(filename, pages=pages, area=(245, 21, 245 + 30, 21 + 160), guess=False,
+                                 columns=[20,98], pandas_options={'dtype': str})
+        try :
+            if {'Unnamed: 0', 'Inv oi ce #', 'Inv oi ce D at e'}.issubset(tables[0].columns.values):
+                invoice_num = str(tables[0]['Inv oi ce #'][0])
+                invoice_date = tables[0]['Inv oi ce D at e'][0]
+                invoice_num = ''.join(invoice_num.split()) # remove extra spaces
+                invoice_date = ''.join(invoice_date.split())
+            else:
+                invoice_num = str(tables[0]['Invoice #'][0])
+                invoice_date = tables[0]['Invoice Date'][0]
+        except:
+            return '', ''  # triggered in case no invoice num or date present
+
+    elif supplier == "Ferguson":
+
+        tables = tabula.read_pdf(filename, pages=pages, area=(33.84, 344.16, 56.88, 599.76), guess=False,
+                                 columns=[344.16, 413.76,486.72,554.56], pandas_options={'dtype': str})
 
     # check will ensure that this file fulfills all criteria to be splited i.e is not supreme, page > 1 etc
     if check:
         # separate case for extraction of invoice num for all pages
         invoice_num = []
+
         for invoice_id in range(len(tables)):
-            invoice_num.append(tables[invoice_id]['Invoice #'][0])
+            if supplier == "Ferguson":
+                invoice_num.append(tables[invoice_id]['INVOICE NUMBER'][0])
+            else:
+                try:
+                    invoice_num.append(tables[invoice_id]['Invoice #'][0])
+                except:  invoice_num.append(tables[invoice_id]['Inv oi ce #'][0])
         return invoice_num
 
     return invoice_num, invoice_date
@@ -81,7 +116,11 @@ def extract_po(filename):
                              pandas_options={'dtype': str})
     po = ""
     if len(tables[0]):
-        po = tables[0]['Customer P/O #'][0]
+        if {'C us tom e r P /O  #'}.issubset(tables[0].columns):
+            po = tables[0]['C us tom e r P /O  #'][0]
+            po = ''.join(po.split())
+        else :
+            po = tables[0]['Customer P/O #'][0]
     return po
 
 
@@ -90,13 +129,18 @@ def extract_buyer(filename):
                              pandas_options={'dtype': str})
     buyer = ""
     if len(tables[0]):
-        buyer = tables[0]['Buyer'][0]
+        if {'Bu ye r'}.issubset(tables[0]):
+            buyer = tables[0]['Bu ye r'][0]
+            buyer = ''.join(buyer.split())
+        else :
+            buyer = tables[0]['Buyer'][0]
     return buyer
 
 
 def check_for_unique_invoices(filename, supplier):
     # file may have single invoice spanning over multiple pages
     unique_invoices = []
+
     if supplier == 'Supreme Plumbing Supply':
         with fitz.open(filename) as doc:
             for page in doc:
