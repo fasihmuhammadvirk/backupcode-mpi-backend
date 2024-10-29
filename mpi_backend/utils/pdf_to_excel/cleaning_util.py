@@ -8,14 +8,27 @@ from os.path import isfile, join
 from PyPDF2 import PdfFileWriter, PdfFileReader
 from mpi_backend.utils.pdf_to_excel.extraction_util import extract_invoice_info
 
-def clean_individual_table(table, page):
-    if len(table) < 2:
+def clean_spaces(text):
+    if isinstance(text, str):
+        return ''.join(text.split())
+    return text
+
+
+def clean_individual_table(table, page,check_row_count = False):
+    if len(table) < 2 and check_row_count: # don't check row count if file is processed by camelot
         return None
 
     try:
         table = table[['LN', 'QNTY.1', 'QNTY.2', 'PRODUCT', 'Unnamed: 1', 'NET', 'EXTENSION']]
     except KeyError:
-        if {'NET', 'EXT'}.issubset(table.columns):
+        if {'Unnamed: 0','L N','Q N T Y','Q N T Y.1','Q N T Y.2','P R O D U C T', 'Unnamed: 1','U O M','N E T','EXTENSION'}.issubset(table.columns):
+            table = table[['L N', 'Q N T Y.1', 'Q N T Y.2', 'P R O D U C T', 'Unnamed: 1', 'N E T', 'EXTENSION']]
+            table = table.rename(columns={'L N': 'LN','Q N T Y.1':'QNTY.1', 'Q N T Y.2': 'QNTY.2','P R O D U C T':'PRODUCT',
+                                         'N E T': 'NET'})
+            table = table.applymap(clean_spaces)
+
+
+        elif {'NET', 'EXT'}.issubset(table.columns):
             table = table[['LN', 'QNTY.1', 'QNTY.2', 'PRODUCT', 'Unnamed: 1', 'EXT', 'ENSION']]
             table = table.rename(columns={'EXT':'NET', 'ENSION': 'EXTENSION'})
         else:
@@ -34,7 +47,10 @@ def clean_individual_table(table, page):
     table['Qty BO'] = table['Qty BO'].fillna(0)
 
     bo_line_mapping = pd.Series(table['Qty BO'].values, index=table['Line']).to_dict()
-    bo_line_mapping = {k: bo_line_mapping[k] for k in bo_line_mapping if not np.isnan(k)}
+    try:
+        bo_line_mapping = {k: bo_line_mapping[k] for k in bo_line_mapping if not np.isnan(k)}
+    except TypeError:
+        bo_line_mapping = {k: v for k, v in bo_line_mapping.items() if not pd.isna(k)}
 
     # Join rows where there is nothing in LN column but value in Description
     table['Line'] = table['Line'].fillna(method="ffill")
@@ -85,6 +101,8 @@ def clean_individual_table(table, page):
             table['Qty'] = table['Qty'].astype(np.int64)
         except ValueError:
             table['Qty'] = table['Qty'].astype(float)
+
+        table['Qty BO'].replace([''],0, inplace=True)
         table['Qty BO'] = table['Qty BO'].astype(float)
         table['Cost'] = table['Cost'].apply(lambda cost: float(re.sub(r"[^0-9.]", "",str(cost))))
 
@@ -151,6 +169,7 @@ def split_multiple_invoices(filename, supplier):
 
 
 def save_splited_invoice(output, index, filename):
+
     # output will contain the page/s of same invoice
     if '.pdf' in filename:
         filename = filename.split('.pdf', 1)

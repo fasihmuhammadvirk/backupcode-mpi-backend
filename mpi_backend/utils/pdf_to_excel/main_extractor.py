@@ -14,6 +14,7 @@ from mpi_backend.utils.pdf_to_excel import ys_old
 from mpi_backend.utils.pdf_to_excel import web_co_supply
 from mpi_backend.utils.pdf_to_excel import flow_mark
 from mpi_backend.utils.pdf_to_excel import plumbing_exchange
+from mpi_backend.utils.pdf_to_excel import file_preprocess
 
 regular_area = (290, 20, 290+415, 20+570)
 last_page_area = (290, 20, 290+375, 20+570)
@@ -66,6 +67,12 @@ def extract_data(filename, output_path, supplier):
         return "Please enter a valid supplier"
 
     finalized_tables = []
+    is_camelot = False
+    # FIX--> flow for double-spaced invoices, process them with camelot library
+    if (supplier == "BMW Plumbing Supplies"
+            and {'L N', 'Q N T Y.2', 'P R O D U C T'}.issubset(tables[0].columns)):
+        tables = file_preprocess.process_bmw_with_camelot(filename)
+        is_camelot = True  # will track if the file is processed with camelot, because we need to reprocess the files again
 
     if len(tables) > 1:
         for i in range(len(tables) - 1):
@@ -77,14 +84,16 @@ def extract_data(filename, output_path, supplier):
         last_tables = tabula.read_pdf(filename, pages=len(tables), area=last_page_area, guess=False, stream=True,
                                       columns=wwps_columns)
     elif supplier == "BMW Plumbing Supplies" or supplier == "Y & S Plumbing Supply" or supplier == "Park Plumbing Supply":
-        last_tables = tabula.read_pdf(filename, pages=len(tables), area=last_page_area, guess=False, stream=True,
-                                      columns=bmw_columns)
+        if is_camelot:  # if files are processed by camelot, the extracted table will work for last page as well
+            last_tables = tables
+        else:
+            last_tables = tabula.read_pdf(filename, pages=len(tables), area=last_page_area, guess=False, stream=True,
+                                          columns=bmw_columns)
     elif supplier == "Pyramid Plumbing":
         last_tables = tabula.read_pdf(filename, pages=len(tables), area=last_page_area, guess=False, stream=True,
-                                     columns=pyramid_columns)
+                                      columns=pyramid_columns)
 
-    # print(len(last_table))
-    last_table = clean_individual_table(last_tables[0], page=-1)
+    last_table = clean_individual_table(last_tables[0], page=-1, check_row_count=not (is_camelot))
     finalized_tables.append(last_table)
 
     final_df = pd.concat(finalized_tables).reset_index(drop=True)
