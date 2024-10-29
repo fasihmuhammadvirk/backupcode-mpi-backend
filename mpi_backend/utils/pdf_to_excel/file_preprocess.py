@@ -31,3 +31,17 @@ def process_bmw_with_camelot(filepath):
     return extracted_tables
 
 
+def extract_customer_job_double_spaced_invoice(filepath):
+    tables = camelot.read_pdf(
+        filepath,
+        flavor='stream',
+        table_areas=['296,675,616,592'],
+        split_text=True
+    )
+    try:
+        customer_job = tables[0].df[0][1]
+    except:
+        customer_job = ''
+
+    return customer_job
+

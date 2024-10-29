@@ -105,6 +105,10 @@ def extract_data(filename, output_path, supplier):
     po = extract_po(filename)
     buyer = extract_buyer(filename)
 
+    if is_camelot and job_name.count(" ") > 6:
+        # trigger if customer_job is still double spaced and file was processed with camelot
+        job_name = file_preprocess.extract_customer_job_double_spaced_invoice(filename)
+
     for i, item in enumerate(financial_data):
         if i == 0:
             tax_row = ["10 Materials", item.capitalize(), "", "", "", financial_data[item]]
