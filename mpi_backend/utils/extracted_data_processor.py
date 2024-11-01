@@ -11,6 +11,7 @@ from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.database.controllers import InvoiceController,InvoiceItemController,SupplierController,ItemsMappingController,TempItemsMappingController,CustomerJobMappingController,UnmappedItemsController
 from contextlib import contextmanager
 from mpi_backend.utils.s3_utils import upload_file,get_presigned_url
+from mpi_backend.utils.customer_job_matching import load_addresses, map_address
 
 db = contextmanager(get_db)
 
@@ -19,7 +20,7 @@ def process_extracted_data(converted_files, failed_files):
 
     temp_items = TempItemsMappingController(db).get_temp_items_mappings()
     item_mappings = ItemsMappingController(db).get_items_mappings()
-    customer_job_mappings = CustomerJobMappingController(db).get_customer_job_mappings()
+    customer_jobs = load_addresses()
 
     for file in converted_files:
         extracted_data = pd.read_excel(file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
@@ -38,9 +39,7 @@ def process_extracted_data(converted_files, failed_files):
         extracted_data = extracted_data.apply(search_replace, args=(temp_items, item_mappings,), axis=1)
 
         extracted_customer_job = extracted_data['Customer Job'][0]
-        # as per updated requirements, customer job no longer needs to be mapped
-        extracted_data['Customer Job'] = get_updated_customer_job(extracted_customer_job, customer_job_mappings)
-        # extracted_data['Customer Job'] = extracted_customer_job
+        extracted_data['Customer Job'] = map_address(extracted_customer_job, customer_jobs)
 
         extracted_data = extracted_data.fillna({'Qty': 0, 'Cost': 0, 'Class': '', 'Memo': '', 'Ref NO': '',
                                                 'PO #': '', 'Customer Job': '', 'Buyer': '',

@@ -26,3 +26,4 @@ PyMuPDF==1.19.6
 middleware-apm
 apitally[fastapi]
 camelot-py
+fuzzywuzzy==0.18.0
