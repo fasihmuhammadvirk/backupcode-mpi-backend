@@ -77,7 +77,11 @@ def extract_data(filename, output_path, supplier):
     if len(tables) > 1:
         for i in range(len(tables) - 1):
             current_table = tables[i]
-            current_table = clean_individual_table(current_table, page=i + 1)
+            if is_camelot:
+                current_table = clean_individual_table(current_table, page=-1,
+                                                       check_row_count=False)  # setting any value of page other than one
+            else:
+                current_table = clean_individual_table(current_table, page=i + 1, check_row_count=True)
             if current_table is not None:
                 finalized_tables.append(current_table)
     if supplier == 'World Wide Plumbing':
@@ -93,7 +97,10 @@ def extract_data(filename, output_path, supplier):
         last_tables = tabula.read_pdf(filename, pages=len(tables), area=last_page_area, guess=False, stream=True,
                                       columns=pyramid_columns)
 
-    last_table = clean_individual_table(last_tables[0], page=-1, check_row_count=not (is_camelot))
+    if is_camelot:
+        last_table = clean_individual_table(last_tables[-1], page=-1)
+    else:
+        last_table = clean_individual_table(last_tables[0], page=-1, check_row_count=True)
     finalized_tables.append(last_table)
 
     final_df = pd.concat(finalized_tables).reset_index(drop=True)

@@ -28,8 +28,8 @@ def extract_tax_etc(filename):
                                               guess=False)
 
     if 'M e rc h a n d is e' in str(financial_details_table[0].columns.values):
-        financial_details_table = tabula.read_pdf(filename, pages=len(tables), area=(650.95, 410.77, 650+84, 420+164.67),
-                                              guess=False)
+        financial_details_table = tabula.read_pdf(filename, pages=len(tables),
+                                                  area=(650.95, 410.77, 650 + 84, 430 + 164.67), guess=False)
         tax = str(financial_details_table[0]).split('T a x ( 00 4 )')[-1]
         tax =  ''.join(tax.split())
         return {'tax' : tax}

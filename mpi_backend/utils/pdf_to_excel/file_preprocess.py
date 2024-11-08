@@ -15,7 +15,8 @@ def process_bmw_with_camelot(filepath):
         flavor='stream',
         table_areas=table_area,
         columns=columns,
-        split_text=True
+        split_text=True,
+        pages='all'
     )
 
     for table in tables:
