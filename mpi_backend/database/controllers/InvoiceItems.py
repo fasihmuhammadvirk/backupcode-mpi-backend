@@ -34,7 +34,8 @@ class InvoiceItemController:
             class_=row['Class'],
             memo=row['Memo'],
             buyer=row['Buyer'],
-            date_added= row['email_date']
+            date_added= row['email_date'],
+            export_status="Pending"
         )
         with self.db_context() as db:
             db.add(new_item)
@@ -83,6 +84,44 @@ class InvoiceItemController:
 
         invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in items]
         return invoices_items
+
+    def set_export_status_to_sent(self, ids):
+        """
+        Updates the export_status of the InvoiceItems with the given IDs to 'Sent'.
+        Args:
+            ids (list): A list of InvoiceItem IDs to update.
+        Returns:
+            int: The number of records updated.
+        """
+        query = self.db_context.query(InvoiceItem)
+
+        if ids:
+            query = query.filter(InvoiceItem.id.in_(ids))
+        else:
+            print('Invoice Item Row Ids not provided')
+            return 0
+
+        updated_count = query.update({"export_status": "Sent"}, synchronize_session='fetch')
+        self.db_context.commit()
+        return updated_count
+
+    def is_exported(self, invoice_id):
+        """
+        Checks if all invoice items for the given invoice_id have export_status as 'Sent'.
+
+        Args:
+            invoice_id (str): The ID of the invoice to check.
+
+        Returns:
+            bool: True if all items are 'Sent', False if any item is 'Pending'.
+        """
+        query = self.db_context.query(InvoiceItem).filter(InvoiceItem.invoice_id == invoice_id)
+        items = query.all()
+
+        for item in items:
+            if item.export_status != "Sent":
+                return False
+        return True
 
     def delete_invoice_items(self, invoice_id,db):
         items = db.query(InvoiceItem).filter_by(invoice_id=invoice_id).all()

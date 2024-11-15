@@ -9,7 +9,7 @@ from fastapi_pagination import Page, paginate
 from datetime import date
 import os
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
-from mpi_backend.database.controllers import InvoiceItemController
+from mpi_backend.database.controllers import InvoiceItemController, InvoiceController
 from mpi_backend.database.schemas import InvoiceItems, UpdateInvoiceItemRequest
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.export_utils import convert_items_to_dataframe
@@ -135,4 +135,12 @@ def get_invoices(
 
     upload_file(file_path, file_key=f'Exports/{filename}', is_invoice=False) # upload to s3 to be exported
     download_url = get_presigned_url(file_key=f'Exports/{filename}', is_invoice=False)
+
+    # track & manage invoice export status
+    InvoiceItemController(db).set_export_status_to_sent(ids) # update line item export status to sent
+    invoice_ids = {item.invoice_id for item in items if item.invoice_id} # get all distinct invoice-ids to check & update invoice level export status
+    for invoice_id in invoice_ids:
+        if InvoiceItemController(db).is_exported(invoice_id):
+            InvoiceController(db).set_invoice_is_exported(invoice_id)
+
     return download_url

@@ -5,7 +5,7 @@ from typing import List
 import pyodbc
 
 from mpi_backend.database import get_db
-from mpi_backend.database.controllers import InvoiceItemController
+from mpi_backend.database.controllers import InvoiceItemController,InvoiceController
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 
 router = APIRouter(prefix="/quickbooks")
@@ -20,6 +20,13 @@ def migrate_invoice_to_QB(
 
     for invoice_id in invoice_ids:
         line_items = InvoiceItemController(db).get_invoice_items(invoice_id)
+
+        # track & manage invoice export status
+        invoice_item_ids = [item.id for item in line_items if item.id] # get all line item row ids
+        InvoiceItemController(db).set_export_status_to_sent(invoice_item_ids)  # update line item export status to sent
+
+        if InvoiceItemController(db).is_exported(str(invoice_id)):
+            InvoiceController(db).set_invoice_is_exported(str(invoice_id))
 
         for line_item in line_items:
             try:

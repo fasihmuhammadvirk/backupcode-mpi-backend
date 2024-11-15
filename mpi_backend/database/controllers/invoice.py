@@ -15,7 +15,7 @@ class InvoiceController:
 
     def insert_invoice(self, date, filename, supplier_id, status, storage_path):
         date = datetime.strptime(date, '%m/%d/%Y')
-        new_invoice = Invoice(date=date, filename=filename, supplier_id=supplier_id, status=status, storage_path=storage_path)
+        new_invoice = Invoice(date=date, filename=filename, supplier_id=supplier_id, status=status, storage_path=storage_path, is_exported='Pending')
         with self.db_context() as db:
             db.add(new_invoice)
             db.commit()
@@ -29,6 +29,7 @@ class InvoiceController:
             to_date: date = None,
             status: str = 'all',
             job_location:str = None,
+            export_status:str = None,
             page: int = 1,
             page_size: int = 10,
     ):
@@ -55,6 +56,11 @@ class InvoiceController:
         elif status == 'unprocessed':
             query = query.filter(or_(Invoice.status == 'PROCESSING', Invoice.status == 'FAILED'))
 
+        if export_status == 'Pending':
+            query = query.filter(Invoice.is_exported == 'Pending')
+        elif export_status == 'Sent':
+            query =  query.filter(Invoice.is_exported == 'Sent')
+
         query = query.order_by(Invoice.date.desc()) # show latest data first
         invoices = query.all()
 
@@ -67,7 +73,8 @@ class InvoiceController:
                 status=invoice.status,
                 invoice_id=str(invoice.id),
                 ref_no=ref_no if ref_no is not None else '',
-                customer_job=customer_job if customer_job is not None else ''
+                customer_job=customer_job if customer_job is not None else '',
+                is_exported=invoice.is_exported
             )
             invoices_list.append(invoice_item)
         return invoices_list
@@ -97,7 +104,8 @@ class InvoiceController:
                 status=invoice.status,
                 invoice_id=str(invoice.id),
                 ref_no=ref_no if ref_no is not None else '',
-                customer_job=customer_job if customer_job is not None else ''
+                customer_job=customer_job if customer_job is not None else '',
+                is_exported=invoice.is_exported
             )
             invoices_list.append(invoice_item)
 
@@ -113,6 +121,27 @@ class InvoiceController:
                 invoice = db.query(Invoice).filter(Invoice.id == inserted_id).first() # source -> background task
                 invoice.status = 'PROCESSED'
                 db.commit()
+
+    def set_invoice_is_exported(self, invoice_id):
+        """
+        Updates the is_exported column of the Invoice with the given ID to 'Sent'.
+
+        Args:
+            invoice_id (str): The ID of the invoice to update.
+
+        Returns:
+            bool: True if the update was successful, False otherwise.
+        """
+        query = self.db_context.query(Invoice).filter(Invoice.id == invoice_id)
+
+        invoice = query.first()
+        if not invoice:
+            return False  # Invoice not found
+        query.update({"is_exported": "Sent"}, synchronize_session='fetch')
+
+        self.db_context.commit()
+
+        return True
 
     def delete_invoice(self,invoice_id,db):
         invoice = db.query(Invoice).filter(Invoice.id == invoice_id).all()
@@ -161,7 +190,8 @@ class InvoiceController:
                 status=invoice.status,
                 invoice_id=str(invoice.id),
                 ref_no=ref_no if ref_no is not None else '',
-                customer_job=customer_job if customer_job is not None else ''
+                customer_job=customer_job if customer_job is not None else '',
+                is_exported=invoice.is_exported
             )
             invoices_list.append(invoice_item)
         return invoices_list

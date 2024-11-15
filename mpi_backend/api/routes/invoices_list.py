@@ -28,6 +28,7 @@ def get_invoices(
         to_date: date = Query(None),
         status: str = Query('all', description="Status (all, processed, unprocessed)"),
         job_location: str = Query(None),
+        export_status: str = Query(None),
         page: int = Query(1),
         size: int = Query(10),
         token: str = Depends(JWTBearer())
@@ -43,7 +44,8 @@ def get_invoices(
             from_date=from_date,
             to_date=to_date,
             status=status,
-            job_location=job_location
+            job_location=job_location,
+            export_status=export_status
         )
 
         return paginate(invoices)
