@@ -26,5 +26,6 @@ class InvoiceItem(Base):
     memo = Column(String)
     buyer = Column(String)
     date_added = Column(Date)
+    export_status = Column(String, default="Pending")
     invoice_id = Column(UUID, ForeignKey('invoices.id'))
     invoice = relationship("Invoice", back_populates="items")

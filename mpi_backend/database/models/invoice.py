@@ -13,6 +13,7 @@ class Invoice(Base):
     supplier_id = Column(Integer, ForeignKey('suppliers.id'))
     status = Column(String)
     storage_path = Column(String)
+    is_exported = Column(String, default="Pending")
 
     items = relationship("InvoiceItem", back_populates="invoice")
     supplier_fk = relationship("Supplier", back_populates="supplier")
