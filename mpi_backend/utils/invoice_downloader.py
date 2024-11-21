@@ -103,7 +103,9 @@ def search_new_emails(mail):
 
 def download_email_attachments(email_message, base_folder_path):
     for part in email_message.walk():
-        if part.get_content_maintype() != 'multipart' and part.get('Content-Disposition') is not None:
+        part.get_payload()
+        if ((part.get_content_maintype() != 'multipart' and part.get('Content-Disposition') is not None) or
+                ('customer of World Wide' in part.get_payload())): # for WWPS 'Content-Disposition' is None, so a separate condition
             email_date = email_message['Date']
             date_time_obj = parsedate_to_datetime(email_date)
 
