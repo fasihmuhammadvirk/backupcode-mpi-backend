@@ -57,7 +57,7 @@ class InvoiceItemController:
 
         return invoices_items
 
-    def get_invoice_items_by_filters(self, supplier=None, from_date=None, to_date=None, job_location=None):
+    def get_invoice_items_by_filters(self, supplier=None, from_date=None, to_date=None, job_location=None, export_status=None):
         query = self.db_context.query(InvoiceItem)
 
         if supplier is not None and 'All' not in supplier:  # only apply supplier filter if it's provided.
@@ -65,6 +65,9 @@ class InvoiceItemController:
 
         if job_location:
             query = query.filter(InvoiceItem.customer_job == job_location)
+
+        if export_status:
+            query = query.filter(InvoiceItem.export_status == export_status)
 
         query = query.filter(InvoiceItem.date >= from_date)
         query = query.filter(InvoiceItem.date <= to_date)
