@@ -31,6 +31,13 @@ class InvoiceItems(BaseModel):
     class Config:
         from_attributes = True
 
+class PaginatedInvoiceItemsResponse(BaseModel):
+    items: List[InvoiceItems]
+    total: int
+    page: int
+    size: int
+    pages: int
+
 
 class UpdateInvoiceItemRequest(BaseModel):
     id: int

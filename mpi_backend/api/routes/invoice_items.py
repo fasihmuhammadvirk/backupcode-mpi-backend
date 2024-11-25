@@ -10,11 +10,11 @@ from datetime import date
 import os
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.database.controllers import InvoiceItemController, InvoiceController
-from mpi_backend.database.schemas import InvoiceItems, UpdateInvoiceItemRequest
+from mpi_backend.database.schemas import InvoiceItems, UpdateInvoiceItemRequest, PaginatedInvoiceItemsResponse
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.export_utils import convert_items_to_dataframe
 from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
-from mpi_backend.utils.s3_utils import upload_file,get_presigned_url
+from mpi_backend.utils.s3_utils import upload_file, get_presigned_url
 
 router = APIRouter(prefix="/invoice-items")
 
@@ -47,7 +47,7 @@ def get_invoices(
         raise HTTPException(status_code=404, detail=f"No Records Found!")
 
 
-@router.get("/supplier-date", response_model=Page[InvoiceItems])
+@router.get("/supplier-date", response_model=PaginatedInvoiceItemsResponse)
 def get_invoices(
         db: Session = Depends(get_db),
         supplier_name: List[str] = Query(None),
@@ -55,14 +55,18 @@ def get_invoices(
         to_date: date = Query(None),
         job_location: str = Query(None),
         export_status: str = Query(None),
+        page: int = Query(1, ge=1),
+        size: int = Query(10, ge=1, le=100),
         token: str = Depends(JWTBearer())
 ):
     try:
         invoice_items = InvoiceItemController(db).get_invoice_items_by_filters(supplier=supplier_name,
-                                                                    from_date=from_date,
-                                                                    to_date=to_date, job_location=job_location,
-                                                             export_status=export_status)
-        return paginate(invoice_items)
+                                                                               from_date=from_date,
+                                                                               to_date=to_date,
+                                                                               job_location=job_location,
+                                                                               export_status=export_status,
+                                                                               page=page, page_size=size)
+        return invoice_items
 
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"No Records Found!")

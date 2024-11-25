@@ -3,7 +3,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
 from datetime import datetime
-from fastapi_pagination import Page, paginate
+from fastapi_pagination import Page,paginate
 from datetime import date
 import os
 import requests
@@ -11,7 +11,7 @@ from mpi_backend.database.controllers import SupplierController, InvoiceControll
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.utils.invoice_convertor import convert_invoice
-from mpi_backend.database.schemas import Invoice
+from mpi_backend.database.schemas import Invoice,PaginatedInvoiceResponse
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.s3_utils import get_presigned_url
 import logging
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/invoice")
 
 
-@router.get("", response_model=Page[Invoice])
+@router.get("", response_model=PaginatedInvoiceResponse)
 def get_invoices(
         db: Session = Depends(get_db),
         supplier_id: Optional[List[int]] = Query(None),
@@ -29,15 +29,11 @@ def get_invoices(
         status: str = Query('all', description="Status (all, processed, unprocessed)"),
         job_location: str = Query(None),
         export_status: str = Query(None),
-        page: int = Query(1),
-        size: int = Query(10),
+        page: int = Query(1, ge=1),
+        size: int = Query(10, ge=1, le=100),
         token: str = Depends(JWTBearer())
 ):
     try:
-        # if 0 in supplier_id: # 0 translates to ALL Suppliers in dropdown
-        #     invoices = InvoiceController(db).get_all_invoices(db=db,status=status)
-        #     return paginate(invoices)
-
         invoices = InvoiceController(db).get_invoices(
             db=db,
             supplier_ids=supplier_id,
@@ -45,10 +41,11 @@ def get_invoices(
             to_date=to_date,
             status=status,
             job_location=job_location,
-            export_status=export_status
+            export_status=export_status,
+            page=page, page_size=size
         )
 
-        return paginate(invoices)
+        return invoices
 
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"No Records Found!")

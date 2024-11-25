@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import List, Optional
 from sqlalchemy.orm import joinedload, aliased
 from datetime import date
+from math import ceil
 
 from fastapi import HTTPException
 from sqlalchemy import or_, asc, desc
@@ -38,7 +39,7 @@ class InvoiceController:
             Invoice,
             InvoiceItemAlias.ref_no,
             InvoiceItemAlias.customer_job
-        ).outerjoin(InvoiceItemAlias, Invoice.id == InvoiceItemAlias.invoice_id)
+        ).outerjoin(InvoiceItemAlias, Invoice.id == InvoiceItemAlias.invoice_id).distinct()
 
         if supplier_ids is not None and supplier_ids and 0 not in supplier_ids:
             query = query.filter(Invoice.supplier_id.in_(supplier_ids))
@@ -62,6 +63,8 @@ class InvoiceController:
             query =  query.filter(Invoice.is_exported == 'Sent')
 
         query = query.order_by(Invoice.date.desc()) # show latest data first
+        total = query.count()
+        query = query.limit(page_size).offset((page - 1) * page_size) # database level pagination
         invoices = query.all()
 
         invoices_list = []
@@ -77,7 +80,13 @@ class InvoiceController:
                 is_exported=invoice.is_exported
             )
             invoices_list.append(invoice_item)
-        return invoices_list
+        return {
+            "items": invoices_list,
+            "total": total,
+            "page": page,
+            "size": page_size,
+            "pages": ceil(total / page_size)
+        }
 
     def get_all_invoices(self, db, status: str = 'all',): # deprecated
 

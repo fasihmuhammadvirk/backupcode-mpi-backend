@@ -3,6 +3,7 @@ from sqlalchemy import asc, desc, distinct
 from fastapi import HTTPException, BackgroundTasks
 from typing import List, Dict
 from datetime import date
+from math import ceil
 from mpi_backend.database.models import InvoiceItem
 from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
 from mpi_backend.database.schemas import InvoiceItems as InvoiceItemsResponse
@@ -57,7 +58,8 @@ class InvoiceItemController:
 
         return invoices_items
 
-    def get_invoice_items_by_filters(self, supplier=None, from_date=None, to_date=None, job_location=None, export_status=None):
+    def get_invoice_items_by_filters(self, supplier=None, from_date=None, to_date=None, job_location=None, export_status=None,
+                                     page: int = 1,page_size: int = 10):
         query = self.db_context.query(InvoiceItem)
 
         if supplier is not None and 'All' not in supplier:  # only apply supplier filter if it's provided.
@@ -72,10 +74,19 @@ class InvoiceItemController:
         query = query.filter(InvoiceItem.date >= from_date)
         query = query.filter(InvoiceItem.date <= to_date)
         query = query.order_by(InvoiceItem.id.desc())
+        total = query.count()
+        query = query.limit(page_size).offset((page - 1) * page_size)
         items = query.all()
 
         invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in items]
-        return invoices_items
+
+        return {
+            "items": invoices_items,
+            "total": total,
+            "page": page,
+            "size": page_size,
+            "pages": ceil(total / page_size)
+        }
 
     def get_invoice_items_by_ids(self, ids):
         query = self.db_context.query(InvoiceItem)
