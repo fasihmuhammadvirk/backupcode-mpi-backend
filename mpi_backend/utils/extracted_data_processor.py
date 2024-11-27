@@ -22,7 +22,11 @@ def process_extracted_data(converted_files, failed_files):
     customer_job_mappings = CustomerJobMappingController(db).get_customer_job_mappings()
 
     for file in converted_files:
-        extracted_data = pd.read_excel(file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
+        try:
+            extracted_data = pd.read_excel(file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
+        except FileNotFoundError:
+            logger.error(f'Invoice ->{file} does not exists')
+            continue
 
         supplier_id = SupplierController(db).get_supplier_name(extracted_data['Vendor'][0])
 
@@ -114,7 +118,8 @@ def extract_supplier_id(file_path):
         "Gotham Plumbing Supply": 8,
         "FW Webb Plumbing Supply": 9,
         "Flow Mark Plumbing Supply": 10,
-        "Plumbing Exchange": 11
+        "Plumbing Exchange": 11,
+        "AF Supply":12
     }
     for company, code in company_codes.items():
         if company in file_path:

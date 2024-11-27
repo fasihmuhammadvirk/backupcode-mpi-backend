@@ -131,6 +131,15 @@ def split_multiple_invoices(filename, supplier):
                 invoice_data = invoice_data[0]
                 if 8 < len(invoice_data) < 14: unique_invoices.append(invoice_data)
 
+    elif supplier == 'AF Supply':
+        with fitz.open(filename) as doc:
+            for page in doc:
+                text = page.get_text()
+                invoice_data = text.split("INVOICE NO.", 1)
+                invoice_data = invoice_data[1].split("\n", 2)
+                invoice_data = invoice_data[1]
+                if 8 < len(invoice_data) < 14: unique_invoices.append(invoice_data)
+
     elif supplier == 'Plumbing Exchange':
         with fitz.open(filename) as doc:
             for page in doc:
