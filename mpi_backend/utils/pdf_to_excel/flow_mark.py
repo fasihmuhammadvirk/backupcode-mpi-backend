@@ -48,6 +48,7 @@ def process_results(invoice_items, date, invoice_no, tax, job_name="", po_no="")
 
 
 def extract_customer_job(filename):
+
     customer_job =''
     tables = tabula.read_pdf(filename, pages=1, area= customer_job_area)
     if "hipping Address" in tables[0].columns:
@@ -87,6 +88,7 @@ def extract_po_no(text):
 
 
 def extract_ref_no(text):
+
     ref_no = ''
     if 'Sale Order' in text:
         hit = re.search(r"\nSale Order\s*(SO-\d+)\n", text)
@@ -110,6 +112,7 @@ def extract_ref_no(text):
 
         if hit:
             ref_no = hit.group(1)
+
     return ref_no
 
 
@@ -125,7 +128,6 @@ def extract_invoice_items(tables):
 
     invoice_items = []
     for table in tables:
-        print(table)
         if {'Date', 'Due Date', 'Rep', 'Customer PO #', 'Terms'}.issubset(table.columns):
             continue # header table- should not be processed
 
@@ -200,11 +202,26 @@ def extract_invoice_items(tables):
                     # Update the DataFrame with the new value
                     table.at[idx, 'Item'] = new_item_value
 
-
-        elif 'Unnamed: 0' in table.columns and table['Rate'].isna().all():
+        elif {'Unnamed: 0','Rate'}.issubset(table.columns) and table['Rate'].isna().all(): # rate column added as stability fix
             table = table[['Item', 'Description', 'Qty', 'Unnamed: 0', 'Amount']]
             table = table.rename(
                 columns={'Unnamed: 0': 'Cost'})
+
+        elif['#', 'Name', 'MPN', 'Description', 'Unnamed: 0', 'Qty'] == table.columns.tolist():
+            table = table[['Name', 'Description', 'Unnamed: 0']]
+            table = table.rename(
+                columns={'Name': 'Item', 'Unnamed: 0': 'Qty'})
+            table['Cost'] = '0'
+            table['Amount'] = '0'
+            table = table[['Item', 'Description', 'Qty', 'Cost', 'Amount']]
+
+        elif ['#', 'Image', 'Name', 'MPN', 'Description', 'Unnamed: 0', 'Qty'] == table.columns.tolist():
+            table = table[['Name', 'Description', 'Unnamed: 0']]
+            table = table.rename(
+                columns={'Name': 'Item', 'Unnamed: 0': 'Qty'})
+            table['Cost'] = '0'
+            table['Amount'] = '0'
+            table = table[['Item', 'Description', 'Qty', 'Cost', 'Amount']]
 
         elif 'Unnamed: 0' in table.columns and table['Qty'].isna().all():
             table = table[['Item', 'Description', 'Unnamed: 0', 'Rate', 'Amount']]
@@ -222,15 +239,14 @@ def extract_invoice_items(tables):
             # MAKE CHANGES TO CONCATE THE SCATTERED ITEM VALUE (made for invoice-flow mark)
             if non_nan_count := table['Amount'].notna().sum():
                 for i in range(1, len(table)):
+
                     if i == 1: amount_index = table['Amount'].first_valid_index()
 
                     if pd.isna(table.loc[i, 'Amount']):
                         # Combine the current row's text with the previous row
-                        table.loc[amount_index, 'Name'] = str(table.loc[amount_index, 'Name']) + " " + str(
-                            table.loc[i, 'Name'])
-                        table.loc[amount_index, 'Name'] = table.loc[amount_index, 'Name'].replace('nan', '')
-                    else:
-                        amount_index = i  # the fix is to prevent wrong merging of item numbers
+                        table.loc[amount_index, 'Name'] = str(table.loc[amount_index, 'Name']) + " " + str(table.loc[i, 'Name'])
+                        table.loc[amount_index, 'Name'] = table.loc[amount_index, 'Name'].replace('nan','')
+                    else : amount_index = i # the fix is to prevent wrong merging of item numbers
 
             table = table[['Name', 'Description', 'Qty', 'Price', 'Amount']]
             # Iterate through the rows of the table in reverse order for easier merging
@@ -283,6 +299,7 @@ def extract_invoice_items(tables):
         table['Qty'] = table['Qty'].astype(int)
         invoice_items.append(table)
 
+
     merged_invoice_items = pd.DataFrame()
     for item in range(len(invoice_items)):
 
@@ -291,6 +308,7 @@ def extract_invoice_items(tables):
     merged_invoice_items.reset_index(drop=True, inplace=True)
 
     return merged_invoice_items
+
 
 
 def extract_tax(filename, page):
@@ -302,15 +320,21 @@ def extract_tax(filename, page):
     if "NY Sales Tax (8.875%)" in lastPageData:
         return lastPageData.split("NY Sales Tax (8.875%)", 1)[-1].split('\n')[1]
     elif "(8.875%)" in lastPageData:
-        return lastPageData.split("(8.875%):", 1)[-1].split('\n')[1]
+        raw_tax = lastPageData.split("(8.875%):", 1)[-1].split('\n')[1]
+        if not 'TOTAL' in  raw_tax : return raw_tax
+    elif "(8.13%):" in lastPageData:
+        return lastPageData.split("(8.13%):", 1)[-1].split('\n')[1]
 
     try :
         if not "Subtotal" in lastPageData:
             lastPageData = data[page - 2]
             lastPageData = lastPageData.get_text()
-            lastPageData = lastPageData.split("NY Sales Tax (8.875%):", 1)
-            lastPageData = lastPageData[1].split("\n", 2)
-            tax = str(lastPageData[1])
+            if 'NY City Sales Tax' in lastPageData:
+                tax = lastPageData.split("(8.875%):", 1)[-1].split('\n')[1]
+            else:
+                lastPageData = lastPageData.split("NY Sales Tax (8.875%):", 1)
+                lastPageData = lastPageData[1].split("\n", 2)
+                tax = str(lastPageData[1])
         else:
             lastPageData = lastPageData.split("NY Sales Tax (8.875%):", 1)
             lastPageData = lastPageData[1].split("\n", 2)
