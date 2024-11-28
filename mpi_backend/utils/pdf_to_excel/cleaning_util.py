@@ -112,6 +112,12 @@ def clean_individual_table(table, page,check_row_count = False):
             table['Amount'] = [value.split("..",1)[0] if ".." in value else value for value in table['Amount'].values] # fix for values like $45.2..$65
             table['Amount'] = table['Amount'].astype(str).str.replace(',', '').str.replace('$', '').astype(float)
 
+        try:
+            table['Amount'] = table['Amount'].astype(str).str.replace(',', '').str.replace('$', '').astype(float)
+            table['Cost'] = table['Cost'].astype(str).str.replace(',', '').str.replace('$', '').astype(float)
+        except:
+            pass # cleaning up dollar sign from amount
+
         table['Description'] = table['Description'].str.strip()
 
         return table

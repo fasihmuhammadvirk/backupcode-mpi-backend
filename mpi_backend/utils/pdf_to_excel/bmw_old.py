@@ -69,6 +69,9 @@ def extract_invoice_items(tables):
         table['Amount'] = table['Amount'].str.replace('T', '')
         table = table[['Item', 'Description', 'Qty', 'Cost', 'Amount']]
         table.dropna(subset=['Qty'],inplace=True)
+
+        table['Amount'] = table['Amount'].astype(str).str.replace(',', '').str.replace('$', '')
+        table['Cost'] = table['Cost'].astype(str).str.replace(',', '').str.replace('$', '')
         table['Qty'] = table['Qty'].astype(str).str.replace(',', '').astype(float)
         table['Qty'] = table['Qty'].astype(int)
         table.reset_index(drop=True, inplace=True)

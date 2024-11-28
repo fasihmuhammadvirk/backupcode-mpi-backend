@@ -113,8 +113,8 @@ def clean_invoice_items(tables,filename):
         table['Description'] = table['Description'].str.split(r'\s{4,}').str[0] # remove everything after multiple spaces
 
         table.dropna(subset=['Qty', 'Description', 'Cost', 'Amount'], inplace=True)
-        table['Amount'] = table['Amount'].astype(str).str.replace(',', '').str.replace('-', '').astype(float)
-        table['Cost'] = table['Cost'].astype(str).str.replace(',', '').str.replace('-', '').astype(float)
+        table['Amount'] = table['Amount'].astype(str).str.replace(',', '').str.replace('-', '').str.replace('$', '').astype(float)
+        table['Cost'] = table['Cost'].astype(str).str.replace(',', '').str.replace('-', '').str.replace('$', '').astype(float)
         table['Qty'] = table['Qty'].astype(str).str.replace(',', '').str.replace('-', '').astype(float)
         table['Qty'] = table['Qty'].astype(int)
 

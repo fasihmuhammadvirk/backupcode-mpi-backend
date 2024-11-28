@@ -116,7 +116,7 @@ def extract_and_clean_invoice_items(filename):
         table.rename(columns={'Unnamed: 1': 'Item', 'PRODUCT NO./ DESCRIPTION': 'Description',
                               'UNIT PRICE': 'Cost', 'EXTENDED AMOUNT': 'Amount', 'QTY': 'Qty'}, inplace=True)
 
-        table['Amount'] = table['Amount'].astype(str).str.replace(',', '')
+        table['Amount'] = table['Amount'].astype(str).str.replace(',', '').str.replace('$', '')
 
         table['Cost'] = (table['Amount'].astype(float) / table['Qty']).apply(lambda x: round(x, 2))
         table = table[['Item', 'Description', 'Qty', 'Cost', 'Amount']]
