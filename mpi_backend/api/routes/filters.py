@@ -1,11 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException,Query, Body
 from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
-from fastapi_pagination import Page, paginate
-
 from mpi_backend.database import get_db
 from mpi_backend.database.controllers import SupplierController, InvoiceItemController
-from mpi_backend.database.schemas import FilterRequest
+from mpi_backend.database.schemas import FilterRequest, PaginatedInvoiceItemsResponse
 from mpi_backend.database.schemas import InvoiceItems
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 
@@ -64,7 +62,9 @@ def column_mappings(db: Session = Depends(get_db),
     return distinct_values
 
 
-@router.post("",response_model=Page[InvoiceItems])
-def filter_data(request: FilterRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
-    filtered_data = InvoiceItemController(db).apply_filters(request)
-    return paginate(filtered_data)
+@router.post("",response_model=PaginatedInvoiceItemsResponse)
+def filter_data(request: FilterRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer()),
+                page: int = Query(1, ge=1),
+                size: int = Query(10)):
+    filtered_data = InvoiceItemController(db).apply_filters(request, page,size)
+    return filtered_data

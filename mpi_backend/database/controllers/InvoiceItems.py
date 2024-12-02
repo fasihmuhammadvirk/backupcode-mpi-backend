@@ -213,7 +213,7 @@ class InvoiceItemController:
         distinct_values = query.all()
         return [value[0] for value in distinct_values if value[0] is not None]
 
-    def apply_filters(self, request):
+    def apply_filters(self, request,page, size):
         query = self.db_context.query(InvoiceItem)
 
         # applying 'IN' filters dynamically
@@ -257,6 +257,16 @@ class InvoiceItemController:
             else:
                 raise HTTPException(status_code=400, detail=f"Invalid operator: {comp_filter.operator}")
 
+        total = query.count()
+        query = query.limit(size).offset((page - 1) * size)
         results = query.all()
+
         invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in results]
-        return invoices_items
+
+        return {
+            "items": invoices_items,
+            "total": total,
+            "page": page,
+            "size": size,
+            "pages": ceil(total / size)
+        }
