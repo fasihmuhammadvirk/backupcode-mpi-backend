@@ -79,6 +79,11 @@ def update_invoice_items(items: List[UpdateInvoiceItemRequest],background_tasks:
     return {"status": "invoices updated successfully"}
 
 
+@router.get("/count")
+def count_invoice_items(db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+    no_of_line_items = InvoiceItemController(db).count_line_items()
+    return {"count": no_of_line_items}
+
 @router.get("/sort", response_model=Page[InvoiceItems])
 def sort_invoices( db: Session = Depends(get_db), column_name:str = Query(None),
                    sort_order:str = Query('ascending',description="Sort By (ascending, descending)")):

@@ -88,6 +88,12 @@ class InvoiceItemController:
             "pages": ceil(total / page_size)
         }
 
+    def count_line_items(self):
+        query = self.db_context.query(InvoiceItem)
+        total = query.count()
+        return total
+
+
     def get_invoice_items_by_ids(self, ids):
         query = self.db_context.query(InvoiceItem)
 
