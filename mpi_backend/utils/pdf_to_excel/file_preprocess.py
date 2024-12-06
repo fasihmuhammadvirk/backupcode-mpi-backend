@@ -1,6 +1,7 @@
 import camelot
 import os
 import numpy as np
+import re
 
 dll_dir = 'C:\Program Files\gs\gs10.04.0'
 os.environ['PATH'] += ';' + dll_dir
@@ -42,7 +43,12 @@ def extract_customer_job_double_spaced_invoice(filepath):
     try:
         customer_job = tables[0].df[0][1]
     except:
-        customer_job = ''
+        if tables[0].df[0].shape == (1,):  # if there is one row and one col
+            customer_job = tables[0].df[0][0]
+            split_parts = re.split(r'\s{2,}', customer_job, maxsplit=1)
+            customer_job = split_parts[-1] if len(split_parts) > 1 else ''
+        else:
+            customer_job = ''
 
     return customer_job
 
