@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Union,Optional
 from datetime import date
 
 
@@ -8,7 +8,12 @@ class ComparisonFilter(BaseModel):
     operator: str
     value: Union[str, int, float, date]  # supports date, int, and float
 
+class OrderByFilter(BaseModel):
+    column: str
+    order: str  # "asc" for ascending or "desc" for descending
 
 class FilterRequest(BaseModel):
     filters: Dict[str, List[Any]] = {}
     comparison_filters: List[ComparisonFilter] = []
+    order_by: Optional[List[OrderByFilter]] = None  # multiple ordering supported
+

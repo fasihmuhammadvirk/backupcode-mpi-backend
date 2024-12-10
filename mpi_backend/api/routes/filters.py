@@ -47,7 +47,7 @@ def column_mappings(token: str = Depends(JWTBearer())):
     return column_mapping
 
 
-@router.post("/by-column")
+@router.post("/by-column") # for dropdown population
 def column_mappings(db: Session = Depends(get_db),
                     token: str = Depends(JWTBearer()),
                     column_name: str = Query(None, description="Name of Column for which data is required"),

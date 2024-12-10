@@ -263,6 +263,21 @@ class InvoiceItemController:
             else:
                 raise HTTPException(status_code=400, detail=f"Invalid operator: {comp_filter.operator}")
 
+        if request.order_by: # applying sorting
+            for order_filter in request.order_by:
+                if not hasattr(InvoiceItem, order_filter.column):
+                    raise HTTPException(status_code=400,
+                                        detail=f"Invalid column name for ordering: {order_filter.column}")
+
+                column = getattr(InvoiceItem, order_filter.column)
+
+                if order_filter.order == "asc":
+                    query = query.order_by(column.asc())
+                elif order_filter.order == "desc":
+                    query = query.order_by(column.desc())
+                else:
+                    raise HTTPException(status_code=400, detail=f"Invalid order direction: {order_filter.order}")
+
         total = query.count()
         query = query.limit(size).offset((page - 1) * size)
         results = query.all()
