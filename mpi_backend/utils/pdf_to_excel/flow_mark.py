@@ -146,6 +146,12 @@ def extract_invoice_items(tables):
             table = table.rename(
                 columns={'Unnamed: 0': 'Qty', 'Unnamed: 1': 'Cost'})
 
+        elif {'#', 'Name MPN', 'Unnamed: 0', 'Description', 'Qty', 'Price', 'Amount'}.issubset(table.columns):
+            table = table[['Name MPN', 'Description', 'Qty', 'Price', 'Amount']]
+            table['Name MPN'] = table['Name MPN'].str.split().str[0] # name and mpn columns were merged
+            table = table.rename(
+                columns={'Name MPN': 'Item', 'Price':'Cost'})
+
         elif 'Unnamed: 0' in table.columns and table['Unnamed: 0'].isna().all():
             table = table[['Item', 'Description', 'Qty', 'Rate', 'Amount']]
             table = table.rename(
