@@ -3,7 +3,7 @@ from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
 from mpi_backend.database.controllers import SupplierController, InvoiceItemController
-from mpi_backend.database.schemas import FilterRequest, PaginatedInvoiceItemsResponse
+from mpi_backend.database.schemas import FilterRequest, PaginatedInvoiceItemsResponse, PriceHistoryRequest, PriceHistoryResponse
 from mpi_backend.database.schemas import InvoiceItems
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 
@@ -68,3 +68,9 @@ def filter_data(request: FilterRequest, db: Session = Depends(get_db), token: st
                 size: int = Query(10)):
     filtered_data = InvoiceItemController(db).apply_filters(request, page,size)
     return filtered_data
+
+
+@router.post("/price-history",response_model=List[PriceHistoryResponse])
+def get_price_history(request: PriceHistoryRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+    price_history = InvoiceItemController(db).get_price_history(request)
+    return price_history

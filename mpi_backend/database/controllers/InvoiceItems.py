@@ -7,6 +7,7 @@ from math import ceil
 from mpi_backend.database.models import InvoiceItem
 from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
 from mpi_backend.database.schemas import InvoiceItems as InvoiceItemsResponse
+from mpi_backend.database.schemas import PriceHistoryResponse
 from mpi_backend.utils.export_utils import extract_supplier_id
 
 
@@ -291,3 +292,17 @@ class InvoiceItemController:
             "size": size,
             "pages": ceil(total / size)
         }
+
+    def get_price_history(self, request):
+        query = self.db_context.query(InvoiceItem)
+        query = query.filter(InvoiceItem.item == request.item_number)
+        query = query.filter(InvoiceItem.vendor == request.vendor)
+
+        matched_items = query.all()
+
+        response = [
+            PriceHistoryResponse(
+                ref_no=item.ref_no, date=item.date,
+                cost=item.cost, qty=item.qty)
+            for item in matched_items]
+        return response
