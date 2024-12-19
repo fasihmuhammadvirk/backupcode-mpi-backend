@@ -14,3 +14,4 @@ class PriceHistoryResponse(BaseModel):
     date: date
     cost: float
     qty:int
+    invoice_id: str

@@ -303,6 +303,6 @@ class InvoiceItemController:
         response = [
             PriceHistoryResponse(
                 ref_no=item.ref_no, date=item.date,
-                cost=item.cost, qty=item.qty)
+                cost=item.cost, qty=item.qty, invoice_id= str(item.invoice_id))
             for item in matched_items]
         return response
