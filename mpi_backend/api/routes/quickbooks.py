@@ -21,6 +21,7 @@ def migrate_invoice_to_QB(
 
     for invoice_id in invoice_ids:
         line_items = InvoiceItemController(db).get_invoice_items(invoice_id)
+        line_item_copy = line_items
 
         tax = 0
         for item in line_items:
@@ -52,7 +53,7 @@ def migrate_invoice_to_QB(
         all_batch_entries.append(batch_entry)
 
         # track & manage invoice export status
-        invoice_item_ids = [item.id for item in line_items if item.id] # get all line item row ids
+        invoice_item_ids = [item.id for item in line_item_copy if item.id] # get all line item row ids
         InvoiceItemController(db).set_export_status_to_sent(invoice_item_ids)  # update line item export status to sent
 
         if InvoiceItemController(db).is_exported(str(invoice_id)):
