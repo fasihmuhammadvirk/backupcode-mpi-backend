@@ -1,4 +1,6 @@
 import pandas as pd
+from datetime import datetime
+import os
 # import openpyxl
 
 
@@ -258,3 +260,46 @@ def draw_frame_border(workbook, worksheet, first_row, first_col, rows_count, col
                                  first_row + rows_count - 2, first_col + cols_count - 1,
                                  {'type': 'formula', 'criteria': 'True', 'format': workbook.add_format({'right': 1})})
 
+
+def export_batch_entry_to_excel(df, output_dir="mpi_backend/storage/Exports"):
+    """
+    Exports a DataFrame to an Excel file with formatted headers using xlsxwriter
+    and generates a unique filename.
+
+    Parameters:
+        df (pd.DataFrame): The DataFrame to export.
+        output_dir (str): Directory to save the file. Defaults to "output".
+
+    Returns:
+        str: The path of the generated Excel file.
+    """
+    # Ensure the output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Generate a unique filename based on timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_path = os.path.join(output_dir, f"exported_data_{timestamp}.xlsx")
+
+    # Use pd.ExcelWriter with xlsxwriter as the engine
+    with pd.ExcelWriter(file_path, engine="xlsxwriter") as writer:
+        # Write the DataFrame to Excel
+        df.to_excel(writer, sheet_name="Filtered Data", index=False)
+
+        # Access the workbook and worksheet
+        workbook = writer.book
+        worksheet = writer.sheets["Filtered Data"]
+
+        # Define header formatting
+        header_format = workbook.add_format({
+            "bold": True,
+            "font_color": "white",
+            "bg_color": "#4F81BD",
+            "align": "center",
+            "valign": "vcenter",
+        })
+
+        # Apply the formatting to the header row
+        for col_num, column in enumerate(df.columns):
+            worksheet.write(0, col_num, column, header_format)
+
+    return file_path

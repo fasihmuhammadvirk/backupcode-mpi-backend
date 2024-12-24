@@ -6,3 +6,4 @@ from mpi_backend.database.controllers.ItemsMappingController import ItemsMapping
 from mpi_backend.database.controllers.TemporaryItemMappingController import TempItemsMappingController
 from mpi_backend.database.controllers.UserController import UserController
 from mpi_backend.database.controllers.UnmappedItems import UnmappedItemsController
+from mpi_backend.database.controllers.ItemClassification import ItemClassificationController
