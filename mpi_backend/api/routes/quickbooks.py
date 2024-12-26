@@ -31,6 +31,7 @@ def migrate_invoice_to_QB(
 
         line_item_df = pd.DataFrame([vars(item) for item in line_items])
         line_item_df['account'] = line_item_df['sheet_name'].apply(lambda sheet_name: ItemClassificationController(db).get_classification(sheet_name))
+        line_item_df['account'] = line_item_df['account'].replace([None, 'None'], '')
 
         line_item_df = line_item_df.astype(str)
         float_columns = ['qty', 'cost','amount']
