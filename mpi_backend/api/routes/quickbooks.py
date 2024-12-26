@@ -45,6 +45,7 @@ def migrate_invoice_to_QB(
             'class_': 'first'
         }).reset_index()
 
+        batch_entry['date'] = pd.to_datetime(batch_entry['date']).dt.strftime('%m/%d/%Y')
         batch_entry['amount'] = batch_entry['amount'].apply(lambda x: x+tax)
         batch_entry['terms'] = ''
         batch_entry['bill due'] = ''
