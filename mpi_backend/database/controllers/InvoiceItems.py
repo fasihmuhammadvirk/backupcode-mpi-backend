@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import asc, desc, distinct
+from sqlalchemy import asc, desc, distinct, case
 from fastapi import HTTPException, BackgroundTasks
 from typing import List, Dict
 from datetime import date
@@ -99,7 +99,8 @@ class InvoiceItemController:
         query = self.db_context.query(InvoiceItem)
 
         if ids:
-            query = query.filter(InvoiceItem.id.in_(ids))
+            case_statement = case({id_: idx for idx, id_ in enumerate(ids)}, value=InvoiceItem.id) #order the results based on the order of the IDs
+            query = query.filter(InvoiceItem.id.in_(ids)).order_by(case_statement)
 
         items = query.all()
 
