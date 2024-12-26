@@ -293,7 +293,7 @@ def export_batch_entry_to_excel(df, output_dir="mpi_backend/storage/Exports"):
         header_format = workbook.add_format({
             "bold": True,
             "font_color": "white",
-            "bg_color": "#4F81BD",
+            "bg_color": "#000000",
             "align": "center",
             "valign": "vcenter",
         })
@@ -301,5 +301,24 @@ def export_batch_entry_to_excel(df, output_dir="mpi_backend/storage/Exports"):
         # Apply the formatting to the header row
         for col_num, column in enumerate(df.columns):
             worksheet.write(0, col_num, column, header_format)
+
+        column_widths = {
+            "Date": 12,
+            "Ref": 15,
+            "vendor": 25,
+            "terms": 10,
+            "bill due": 12,
+            "account": 40,
+            "Amount": 10,
+            "Memo": 25,
+            "Customer Job": 40,
+            "Class": 10,
+        }
+
+        for col_num, column in enumerate(df.columns):
+            width = column_widths.get(column, 15)  # Default width is 15 if not specified
+            worksheet.set_column(col_num, col_num, width)
+
+        worksheet.autofilter(0, 0, 0, len(df.columns) - 1)
 
     return file_path

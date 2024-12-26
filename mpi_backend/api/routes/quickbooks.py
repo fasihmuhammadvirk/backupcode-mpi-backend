@@ -49,7 +49,7 @@ def migrate_invoice_to_QB(
         batch_entry['bill due'] = ''
 
         batch_entry.rename(columns = {'date':'Date', 'ref_no':'Ref', 'amount':'Amount', 'customer_job':'Customer Job', 'class_':'Class', 'memo':'Memo'}, inplace=True)
-        batch_entry = batch_entry[['Date','Ref','terms','bill due','account','Amount','Memo','Customer Job','Class']]
+        batch_entry = batch_entry[['Date','Ref','vendor','terms','bill due','account','Amount','Memo','Customer Job','Class']]
         all_batch_entries.append(batch_entry)
 
         # track & manage invoice export status
