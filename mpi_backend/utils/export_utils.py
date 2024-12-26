@@ -14,7 +14,7 @@ def convert_items_to_dataframe(items):
         'customer_job': 'Customer Job',
         'bill': 'Bill',
         'vendor': 'Vendor',
-        'class_': 'class_',
+        'class_': 'Class',
         'memo': 'Memo',
         'buyer': 'Buyer',
         "filename": "Filename",

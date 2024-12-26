@@ -128,6 +128,8 @@ def get_invoices(
         db: Session = Depends(get_db),
         token: str = Depends(JWTBearer()),
 ):
+    columns = [col.replace('class_', 'Class') for col in columns] # fix to handle column mismatch
+
     items = InvoiceItemController(db).get_invoice_items_by_ids(ids)
     items_df = convert_items_to_dataframe(items)
 
