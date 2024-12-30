@@ -27,11 +27,13 @@ def process_invoice(filename, output_path):
     tax = extract_tax(filename, get_pages(filename))
     tax = float(tax.replace("$", "").replace(",", ""))
 
-    result = process_results(invoice_items, date, ref_no, tax, customer_job, po_no)
+    buyer = extract_buyer(tables)
+
+    result = process_results(invoice_items, date, ref_no, tax, customer_job, po_no, buyer)
     save_final_data(result, "Flow Mark Plumbing Supply", output_path)
 
 
-def process_results(invoice_items, date, invoice_no, tax, job_name="", po_no=""):
+def process_results(invoice_items, date, invoice_no, tax, job_name="", po_no="", buyer=""):
     results = invoice_items
     tax_row = ["10 Materials", "Tax", "", "", float(tax)]
     results.loc[len(results)] = tax_row
@@ -43,9 +45,23 @@ def process_results(invoice_items, date, invoice_no, tax, job_name="", po_no="")
     results["Vendor"] = "Flow Mark Plumbing Supply"
     results["Class"] = ""
     results["Memo"] = ""
-    results["Buyer"] = ""
+    results["Buyer"] = buyer
     return results
 
+def extract_buyer(table):
+    if len(table) <= 1: return ''
+    try:
+        first_row = table[1].iloc[0]
+        non_null_columns = first_row[first_row.notna()]
+
+        if 1 <= len(non_null_columns) <= 3: # if the number of non-null columns is between 1 to 3
+            buyer = ''.join(value for value in non_null_columns)
+            buyer = buyer.replace('nan','').replace('*','')
+
+            if 'contact' in buyer.lower() or 'call' in buyer.lower(): return buyer
+            else: return ''
+    except: return ''
+    return ''
 
 def extract_customer_job(filename):
 
