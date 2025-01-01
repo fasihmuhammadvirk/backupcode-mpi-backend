@@ -25,7 +25,7 @@ def migrate_invoice_to_QB(
 
         tax = 0
         for item in line_items:
-            if item.sheet_name == '(TAX)': tax = float(item.amount)
+            if item.sheet_name == '(TAX)': tax = float(item.amount.replace(',',''))
 
         line_items = [item for item in line_items if item.sheet_name != '(TAX)']
 
