@@ -33,6 +33,9 @@ def migrate_invoice_to_QB(
         line_item_df['account'] = line_item_df['sheet_name'].apply(lambda sheet_name: ItemClassificationController(db).get_classification(sheet_name))
         line_item_df['account'] = line_item_df['account'].replace([None, 'None'], '')
 
+        if '' in line_item_df['account'].values:
+            raise HTTPException(status_code=400, detail="Unmatched items or sheet names are present.")
+
         line_item_df = line_item_df.astype(str)
         float_columns = ['qty', 'cost','amount']
         line_item_df[float_columns] = line_item_df[float_columns].astype(float)
