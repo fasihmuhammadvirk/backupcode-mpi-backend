@@ -16,6 +16,7 @@ from mpi_backend.utils.pdf_to_excel import flow_mark
 from mpi_backend.utils.pdf_to_excel import plumbing_exchange
 from mpi_backend.utils.pdf_to_excel import file_preprocess
 from mpi_backend.utils.pdf_to_excel import af_supply
+from mpi_backend.utils.pdf_to_excel import lion_havac
 
 regular_area = (290, 20, 290+415, 20+570)
 last_page_area = (290, 20, 290+375, 20+570)
@@ -65,6 +66,9 @@ def extract_data(filename, output_path, supplier):
         return
     elif supplier == 'AF Supply':
         af_supply.process_invoice(filename, output_path)
+        return
+    elif supplier == 'Lion Hvac Supplies':
+        lion_havac.process_invoice(filename, output_path)
         return
     else:
         logger.info(f'Invalid Supplier -> {supplier} for file -> {filename}.Skipping Invoice.')

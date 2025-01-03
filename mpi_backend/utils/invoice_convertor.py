@@ -69,6 +69,7 @@ def convert_and_combine(all_files):
             elif "Flow Mark Plumbing Supply" in supplier_sub_stirng:supplier = "Flow Mark Plumbing Supply"
             elif "Plumbing Exchange" in supplier_sub_stirng:supplier = "Plumbing Exchange"
             elif "AF Supply" in supplier_sub_stirng:supplier = "AF Supply"
+            elif "Lion Hvac Supplies" in supplier_sub_stirng:supplier = "Lion Hvac Supplies"
             else: continue
 
             if supplier == 'ABC Opus Services':
