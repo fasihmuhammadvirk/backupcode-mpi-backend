@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import asc, desc, distinct, case
+from sqlalchemy import asc, desc, distinct, case, cast, Float
 from fastapi import HTTPException, BackgroundTasks
 from typing import List, Dict
 from datetime import date
@@ -238,6 +238,10 @@ class InvoiceItemController:
                 raise HTTPException(status_code=400, detail=f"Invalid column name: {comp_filter.column}")
 
             column = getattr(InvoiceItem, comp_filter.column)
+
+            # Special handling for 'amount' column (string to float conversion)
+            if comp_filter.column == "amount":
+                column = cast(column, Float)
 
             # Handle type casting for comparison filters
             try:
