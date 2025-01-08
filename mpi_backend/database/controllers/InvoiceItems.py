@@ -245,7 +245,12 @@ class InvoiceItemController:
 
             # Handle type casting for comparison filters
             try:
-                if column.type.python_type == int:
+                if comp_filter.column == "amount":
+                    try:
+                        value = float(comp_filter.value)
+                    except ValueError:
+                        continue # Skip invalid float conversion
+                elif column.type.python_type == int:
                     value = int(comp_filter.value)
                 elif column.type.python_type == float:
                     value = float(comp_filter.value)
