@@ -34,6 +34,8 @@ def migrate_invoice_to_QB(
 
         line_item_df.loc[line_item_df['mpi_item'] == 'UIDI-Job Materials Purchased', 'account'] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased' # also map temporary item numbers
         line_item_df.loc[line_item_df['mpi_item'] == 'UIDI-Job Equipment', 'account'] = 'UnInvoiced JIP:Cost Of Materials:Job Equipments Purchased'
+        line_item_df.loc[line_item_df['mpi_item'] == 'UIDI-Sprinkler specialty item', 'account'] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
+        line_item_df.loc[line_item_df['mpi_item'] == 'UIDI-Drainage Material', 'account'] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
 
         line_item_df['account'] = line_item_df['account'].replace([None, 'None'], '')
 

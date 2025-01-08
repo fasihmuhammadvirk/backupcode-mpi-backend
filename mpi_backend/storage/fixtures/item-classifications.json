@@ -258,5 +258,17 @@
     {
         "item": "(Z, ADDITIONAL FEES)",
         "category": null
+    },
+    {
+        "item": "(MALLEABLE FITTING)",
+        "category": "M"
+    },
+    {
+        "item": "(PRESS COPPER)",
+        "category": "M"
+    },
+    {
+        "item": "(CAST IRON FITTING)",
+        "category": "M"
     }
 ]
