@@ -30,11 +30,19 @@ def extract_tax_etc(filename):
     if 'M e rc h a n d is e' in str(financial_details_table[0].columns.values):
         financial_details_table = tabula.read_pdf(filename, pages=len(tables),
                                                   area=(650.95, 410.77, 650 + 84, 430 + 164.67), guess=False)
+
         tax = str(financial_details_table[0]).split('T a x ( 00 4 )')[-1]
-        tax =  ''.join(tax.split())
-        return {'tax' : tax}
+        tax = ''.join(tax.split())
 
-
+        try:
+            raw_text = read_invoice(filename)
+            if 'Freight\n' in raw_text:
+                freight = raw_text.split('Freight\n')[1].split('\n',1)[0].replace(',','').replace(' ','')
+                freight = float(freight)
+                return {'tax' : float(tax) + freight}
+            else: return {'tax': tax}
+        except:
+            return {'tax': tax}
 
     if financial_details_table[0].shape[1] == 1:
         first_item = financial_details_table[0].columns[0]
