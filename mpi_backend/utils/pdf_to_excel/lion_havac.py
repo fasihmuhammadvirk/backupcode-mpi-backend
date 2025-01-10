@@ -4,15 +4,15 @@ import PyPDF2 as pyPdf  # alternate approach
 import fitz
 import re
 from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
+from mpi_backend.utils.pdf_to_excel.extraction_util import read_invoice
 import os
 
 # area1 = [205.5, 16.67, 205.5+140.85, 16.67+562.99]
-area1 = [205.5, 16.67, 205.5+300.85, 16.67+562.99]
+area1 = [205.5, 16.67, 205.5+390, 16.67+573]
 area2 = [227, 21.18, 227+196.56, 21.18+550.99] # for credit invoices
 
 def process_invoice(filename, output_path):
-    raw_text = fitz.open(filename)
-    raw_text = raw_text[0].get_text()
+    raw_text = read_invoice(filename)
     invoice_items = extract_invoice_items(filename,raw_text)
     customer_job = extract_customer_job(raw_text)
     ref_no = extract_ref_no(raw_text)
@@ -63,6 +63,9 @@ def extract_date(text):
     if hit: date = hit.group(1)
     elif 'Credit Issued:' in text:
         hit = re.search(r'Credit Issued: \s*(\d{2}/\d{2}/\d{4})', text)
+        if hit: date = hit.group(1)
+    elif hit is None:
+        hit = re.search(r'Date:\s*(\d{1}/\d{1}/\d{4})', text)
         if hit: date = hit.group(1)
     return date
 
@@ -138,5 +141,10 @@ def extract_invoice_items(filename, raw_text):
     table.dropna(how='all', inplace=True)
     table.dropna(subset=['Qty', 'Cost', 'Amount'], inplace=True)
     table.reset_index(drop=True, inplace=True)
+
+    table['Amount'] = table['Amount'].str.replace(',', '').str.replace('$', '').replace('.00', '').astype(float)
+    table['Cost'] = table['Cost'].str.replace(',', '').str.replace('$', '').replace('.00', '').astype(float)
+    table['Qty'] = table['Qty'].astype(str).str.replace(',', '').replace('.00', '').astype(float)
+    table['Qty'] = table['Qty'].astype(int)
     return table
 
