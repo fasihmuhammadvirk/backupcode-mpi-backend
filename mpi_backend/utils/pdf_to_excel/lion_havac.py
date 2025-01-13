@@ -51,10 +51,10 @@ def extract_tax(text):
     tax = ''
     if 'Sales Tax: 8.8750 %' in text:
         tax = text.split('Sales Tax: 8.8750 %\n',1)[1].split('\n',2)[0]
-        return tax.replace('$','')
+        return tax.replace('$','').replace(',','')
     elif 'Sales Tax:' in text:
         tax = text.split('Sales Tax:\n', 1)[1].split('\n', 2)[0]
-        return tax.replace('$', '')
+        return tax.replace('$', '').replace(',','')
     return tax
 
 def extract_date(text):
@@ -101,8 +101,18 @@ def extract_customer_job(raw_text):
 
 def extract_invoice_items(filename, raw_text):
     table = tabula.read_pdf(filename, pages='all', guess=True, stream=False, area=[area1], columns= [42.58, 126.13,355.81,409.3,449.36,495,536])[0]
-
     table = table[~table.iloc[:, 0].astype(str).str.startswith('$')] # drop rows in df which start with $
+
+    if 'Page 1 of 2' in raw_text and 'Order' in str(table.columns[0]): # a different flow for multi page invoices
+        tables = tabula.read_pdf(filename, pages='all')
+        table = pd.DataFrame() # will hold cleaned, combined lne items
+        for tab in tables:
+            tab = tab[tab.iloc[:, 0].astype(str).str.match(r'^\d{1,2}$')]
+            tab = tab.iloc[:, :8] # keep first eight columns only
+            tab.columns = [  # rename columns
+                tab.columns[0], 'Item', 'Description', 'Qty', tab.columns[4], 'Cost', tab.columns[6], 'Amount']
+            tab = tab[['Item', 'Description', 'Qty', 'Cost', 'Amount']]
+            table = pd.concat([table, tab], ignore_index=True)
 
     if 'Customer Credit' in raw_text:
         table = tabula.read_pdf(filename, pages='all', guess=True, stream=False, area=[area2])[0]
