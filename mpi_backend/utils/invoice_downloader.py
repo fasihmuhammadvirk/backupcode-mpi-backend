@@ -173,10 +173,11 @@ def email_download_background_task():
         raw_email = response[0][1].decode('utf-8')
         email_message = email.message_from_string(raw_email)
         download_email_attachments(email_message, base_folder_path)
-        # mark emails as Unread
-        from_email = email.utils.parseaddr(email_message['From'])[1]
-        # if from_email not in EXCLUDED_SENDERS:
-        #     mail.uid('store', e_id, '-FLAGS', '(\Seen)')
+
+        try: # check if it is invoice, if it is not mark emails as unread
+            if not any(keyword in email_message['subject'].lower() for keyword in ['invoice', 'invoices']):
+                mail.uid('store', e_id, '-FLAGS', '(\Seen)')
+        except: pass
 
     # trigger remaining two tasks
     converted_files, failed_files = convert_invoice(base_folder)
