@@ -175,7 +175,13 @@ def email_download_background_task():
         download_email_attachments(email_message, base_folder_path)
 
         try: # check if it is invoice, if it is not mark emails as unread
-            if not any(keyword in email_message['subject'].lower() for keyword in ['invoice', 'invoices']):
+            subject = email_message['subject'].lower() if email_message['subject'] else ""
+            in_reply_to = email_message['In-Reply-To']
+            references = email_message['References']
+
+            is_thread = bool(in_reply_to or references) # Check if the email is part of a thread or not
+
+            if is_thread or not any(keyword in subject for keyword in ['invoice', 'invoices']): # Mark email as unread if it's part of a thread or doesn't contain specific keywords
                 mail.uid('store', e_id, '-FLAGS', '(\Seen)')
         except: pass
 
