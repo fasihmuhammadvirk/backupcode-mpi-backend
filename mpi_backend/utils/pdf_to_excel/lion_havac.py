@@ -55,6 +55,9 @@ def extract_tax(text):
     elif 'Sales Tax:' in text:
         tax = text.split('Sales Tax:\n', 1)[1].split('\n', 2)[0]
         return tax.replace('$', '').replace(',','')
+    elif 'Tax' in text:
+        tax = text.split('Tax\n', 1)[1].split('\n', 2)[0]
+        return tax.replace('$', '').replace(',', '')
     return tax
 
 def extract_date(text):
@@ -65,7 +68,7 @@ def extract_date(text):
         hit = re.search(r'Credit Issued: \s*(\d{2}/\d{2}/\d{4})', text)
         if hit: date = hit.group(1)
     elif hit is None:
-        hit = re.search(r'Date:\s*(\d{1}/\d{1}/\d{4})', text)
+        hit = re.search(r'Date:\s*(\d{1,2}/\d{1,2}/\d{4})', text)
         if hit: date = hit.group(1)
     return date
 
@@ -73,6 +76,9 @@ def extract_po_no(text):
     po_no = ''
     hit = re.search(r'SO#: (\d+)', text)
     if hit: po_no = hit.group(1)
+    elif 'Packing Slip' in text:
+        hit =  re.search(r'Packing Slip #: (\d+)', text)
+        if hit: po_no = hit.group(1)
     return po_no
 
 
@@ -102,6 +108,17 @@ def extract_customer_job(raw_text):
 def extract_invoice_items(filename, raw_text):
     table = tabula.read_pdf(filename, pages='all', guess=True, stream=False, area=[area1], columns= [42.58, 126.13,355.81,409.3,449.36,495,536])[0]
     table = table[~table.iloc[:, 0].astype(str).str.startswith('$')] # drop rows in df which start with $
+
+    if {'Orde', 'r Date', 'Purchase Order Shipment Me'}.issubset(table.columns):
+        tables = tabula.read_pdf(filename, pages='all', guess=True, stream=False, area=[270,6,270+480, 6+560], columns=[33,64,144,330,380,416,466.5,508,557])
+        table = pd.DataFrame()  # cleaned & combined
+        for tab in tables:
+            tab = tab[tab.iloc[:, 0].astype(str).str.match(r'^\d{1,2}$')]
+            tab = tab.iloc[:, :9] # keep first eight columns only
+            tab.columns = [  # rename columns
+                tab.columns[0], 'Qty', 'Item', 'Description', tab.columns[4], tab.columns[5], 'Cost', tab.columns[7], 'Amount']
+            tab = tab[['Item', 'Description', 'Qty', 'Cost', 'Amount']]
+            table = pd.concat([table, tab], ignore_index=True)
 
     if 'Page 1 of 2' in raw_text and 'Order' in str(table.columns[0]): # a different flow for multi page invoices
         tables = tabula.read_pdf(filename, pages='all')

@@ -175,6 +175,15 @@ def check_for_unique_invoices(filename, supplier):
                     invoice_num = text.split('mpip01', 1)[-1].split('\n \n', 2)[1].strip()
                 except: continue
                 if len(invoice_num) >= 5:unique_invoices.append(invoice_num)
+    elif supplier == 'Lion Hvac Supplies':
+        with fitz.open(filename) as doc:
+            for page in doc:
+                try:
+                    text = page.get_text()
+                    invoice_num = text.split('Invoice #:', 1)[-1].split('\n', 2)[0].strip()
+                except:
+                    continue
+                if len(invoice_num) >= 5: unique_invoices.append(invoice_num)
 
     elif supplier == "Ferguson":
         unique_invoices = extract_invoice_info(filename,'all',True,"Ferguson")
