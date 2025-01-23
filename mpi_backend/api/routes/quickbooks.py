@@ -6,6 +6,7 @@ import pyodbc
 import pandas as pd
 from mpi_backend.database import get_db
 from mpi_backend.database.controllers import InvoiceItemController,InvoiceController, ItemClassificationController
+from mpi_backend.database.schemas import SendtoQBFilterRequest
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.pdf_to_excel.formatting_util import export_batch_entry_to_excel
 from mpi_backend.utils.s3_utils import upload_file, get_presigned_url
@@ -15,8 +16,15 @@ router = APIRouter(prefix="/quickbooks")
 
 
 @router.post("/migrate")
-def migrate_invoice_to_QB(
-        invoice_ids: List[UUID], db: Session = Depends(get_db)):
+def migrate_invoice_to_QB(request: SendtoQBFilterRequest, db: Session = Depends(get_db)):
+    filtered_data = InvoiceItemController(db).apply_filters(request,page=1, size=0)
+    invoice_ids = [item.invoice_id for item in filtered_data['items']]
+
+    if request.excluded_invoice_ids: # un selected items from frontend
+        invoice_ids = [invoice_id for invoice_id in invoice_ids if invoice_id not in request.excluded_invoice_ids]
+
+    invoice_ids = list(set(invoice_ids)) # make invoice-ids in list to be unique, no repetition.
+
     all_batch_entries = []
 
     for invoice_id in invoice_ids:

@@ -10,7 +10,7 @@ from datetime import date
 import os
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.database.controllers import InvoiceItemController, InvoiceController
-from mpi_backend.database.schemas import InvoiceItems, UpdateInvoiceItemRequest, PaginatedInvoiceItemsResponse
+from mpi_backend.database.schemas import InvoiceItems, UpdateInvoiceItemRequest, PaginatedInvoiceItemsResponse, ExportToExcelFilterRequest
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.export_utils import convert_items_to_dataframe
 from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
@@ -122,13 +122,19 @@ def sort_invoices( db: Session = Depends(get_db), column_name:str = Query(None),
 
 
 @router.post("/export")
-def get_invoices(
-        ids: List[int],
-        columns: Optional[List[str]] = None,
+def get_invoices(request: ExportToExcelFilterRequest,
         db: Session = Depends(get_db),
         token: str = Depends(JWTBearer()),
 ):
-    columns = [col.replace('class_', 'Class') for col in columns] # fix to handle column mismatch
+    filtered_data = InvoiceItemController(db).apply_filters(request, page=1, size=0)
+    ids = [item.id for item in filtered_data['items']]
+
+    if request.excluded_rows_ids:  # un selected items from frontend
+        ids = [record_id for record_id in ids if record_id not in request.excluded_rows_ids]
+
+    ids = list(set(ids))  # make row ids of items to be exported in list to be unique, no repetition.
+
+    columns = [col.replace('class_', 'Class') for col in request.columns] # fix to handle column mismatch
 
     items = InvoiceItemController(db).get_invoice_items_by_ids(ids)
     items_df = convert_items_to_dataframe(items)

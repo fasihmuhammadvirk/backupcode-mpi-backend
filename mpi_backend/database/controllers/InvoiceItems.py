@@ -288,10 +288,14 @@ class InvoiceItemController:
                     query = query.order_by(column.desc())
                 else:
                     raise HTTPException(status_code=400, detail=f"Invalid order direction: {order_filter.order}")
-
-        total = query.count()
-        query = query.limit(size).offset((page - 1) * size)
-        results = query.all()
+        if size == 0:
+            results = query.all()
+            size=1
+            total = len(results)
+        else:
+            total = query.count()
+            query = query.limit(size).offset((page - 1) * size)
+            results = query.all()
 
         invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in results]
 
