@@ -120,9 +120,8 @@ def sort_invoices( db: Session = Depends(get_db), column_name:str = Query(None),
     invoice_items = InvoiceItemController(db).sort(db,column, sort_order)
     return paginate(invoice_items)
 
-
-@router.post("/export")
-def get_invoices(request: ExportToExcelFilterRequest,
+@router.post("/export-all")
+def export_all_invoices(request: ExportToExcelFilterRequest,
         db: Session = Depends(get_db),
         token: str = Depends(JWTBearer()),
 ):
@@ -133,8 +132,16 @@ def get_invoices(request: ExportToExcelFilterRequest,
         ids = [record_id for record_id in ids if record_id not in request.excluded_rows_ids]
 
     ids = list(set(ids))  # make row ids of items to be exported in list to be unique, no repetition.
+    return export_invoices (ids,request.columns,db=db)
 
-    columns = [col.replace('class_', 'Class') for col in request.columns] # fix to handle column mismatch
+@router.post("/export")
+def export_invoices(
+        ids: List[int],
+        columns: Optional[List[str]] = None,
+        db: Session = Depends(get_db),
+        token: str = Depends(JWTBearer()),
+):
+    columns = [col.replace('class_', 'Class') for col in columns]  # fix to handle column mismatch
 
     items = InvoiceItemController(db).get_invoice_items_by_ids(ids)
     items_df = convert_items_to_dataframe(items)

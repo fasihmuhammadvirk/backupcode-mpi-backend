@@ -14,9 +14,8 @@ import os
 
 router = APIRouter(prefix="/quickbooks")
 
-
-@router.post("/migrate")
-def migrate_invoice_to_QB(request: SendtoQBFilterRequest, db: Session = Depends(get_db)):
+@router.post("/migrate-all")
+def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest, db: Session = Depends(get_db)):
     filtered_data = InvoiceItemController(db).apply_filters(request,page=1, size=0)
     invoice_ids = [item.invoice_id for item in filtered_data['items']]
 
@@ -24,6 +23,13 @@ def migrate_invoice_to_QB(request: SendtoQBFilterRequest, db: Session = Depends(
         invoice_ids = [invoice_id for invoice_id in invoice_ids if invoice_id not in request.excluded_invoice_ids]
 
     invoice_ids = list(set(invoice_ids)) # make invoice-ids in list to be unique, no repetition.
+
+    return  migrate_invoice_to_QB(invoice_ids, db=db)
+
+
+@router.post("/migrate")
+def migrate_invoice_to_QB(
+        invoice_ids: List[UUID], db: Session = Depends(get_db)):
 
     all_batch_entries = []
 
