@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import asc, desc, distinct, case, cast, Float
+from sqlalchemy import asc, desc, distinct, case, cast, Float, func
 from fastapi import HTTPException, BackgroundTasks
 from typing import List, Dict
 from datetime import date
@@ -325,3 +325,76 @@ class InvoiceItemController:
                 cost=item.cost, qty=item.qty, invoice_id= str(item.invoice_id))
             for item in matched_items]
         return response
+
+
+    def get_aggregates(self, request):
+        query = self.db_context.query(InvoiceItem)
+
+        # applying 'IN' filters dynamically
+        for column_name, values in request.filters.items():
+            if not hasattr(InvoiceItem, column_name):
+                raise HTTPException(status_code=400, detail=f"Invalid column name: {column_name}")
+
+            column = getattr(InvoiceItem, column_name)
+            query = query.filter(column.in_(values))
+
+        # applying comparison (>,<= etc) filters
+        for comp_filter in request.comparison_filters:
+            if not hasattr(InvoiceItem, comp_filter.column):
+                raise HTTPException(status_code=400, detail=f"Invalid column name: {comp_filter.column}")
+
+            column = getattr(InvoiceItem, comp_filter.column)
+
+            # Special handling for 'amount' column (string to float conversion)
+            if comp_filter.column == "amount":
+                column = cast(column, Float)
+
+            # Handle type casting for comparison filters
+            try:
+                if comp_filter.column == "amount":
+                    try:
+                        value = float(comp_filter.value)
+                    except ValueError:
+                        continue  # Skip invalid float conversion
+                elif column.type.python_type == int:
+                    value = int(comp_filter.value)
+                elif column.type.python_type == float:
+                    value = float(comp_filter.value)
+                elif column.type.python_type == date:
+                    value = date.fromisoformat(comp_filter.value)
+                else:
+                    value = comp_filter.value
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail=f"Invalid value type for column: {comp_filter.column}")
+
+            if comp_filter.operator == "gt":
+                query = query.filter(column > value)
+            elif comp_filter.operator == "lt":
+                query = query.filter(column < value)
+            elif comp_filter.operator == "gte":
+                query = query.filter(column >= value)
+            elif comp_filter.operator == "lte":
+                query = query.filter(column <= value)
+            elif comp_filter.operator == "eq":
+                query = query.filter(column == value)
+            else:
+                raise HTTPException(status_code=400, detail=f"Invalid operator: {comp_filter.operator}")
+
+        # Cast amount to float for calculations
+        amount_column = cast(InvoiceItem.amount, Float)
+
+        aggregates = query.with_entities(
+            func.sum(InvoiceItem.qty).label('total_qty'),
+            func.sum(amount_column).label('total_amount'),
+            func.avg(InvoiceItem.cost).label('average_cost')
+        ).first()
+
+        total_qty = aggregates.total_qty or 0
+        total_amount = float(aggregates.total_amount or 0)
+        average_cost = float(aggregates.average_cost or 0)
+
+        return {
+            "total_qty": total_qty,
+            "total_amount": round(total_amount, 2),
+            "average_cost": round(average_cost, 2)
+        }

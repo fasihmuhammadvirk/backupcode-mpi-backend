@@ -74,3 +74,10 @@ def filter_data(request: FilterRequest, db: Session = Depends(get_db), token: st
 def get_price_history(request: PriceHistoryRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
     price_history = InvoiceItemController(db).get_price_history(request)
     return price_history
+
+
+@router.post("/get_aggregates")
+def get_aggregates(request: FilterRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+    aggregates = InvoiceItemController(db).get_aggregates(request)
+    return aggregates
+
