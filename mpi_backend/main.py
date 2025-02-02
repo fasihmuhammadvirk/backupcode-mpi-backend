@@ -4,7 +4,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from fastapi_pagination import add_pagination
 from fastapi.middleware.cors import CORSMiddleware
-from apitally.fastapi import ApitallyMiddleware
+# from apitally.fastapi import ApitallyMiddleware
 
 
 from mpi_backend.api.routes import health
@@ -27,8 +27,8 @@ setup_logging()
 
 import logging
 logger = logging.getLogger(__name__)
-from middleware import MwTracker
-tracker=MwTracker() # initializing middleware monitoring tool // comment out when running in local environment
+# from middleware import MwTracker
+# tracker=MwTracker() # initializing middleware monitoring tool // comment out when running in local environment
 
 @asynccontextmanager
 async def lifespan(app:FastAPI):
@@ -49,11 +49,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.add_middleware(
-    ApitallyMiddleware,
-    client_id="d2f20325-2b6d-4fe0-8a73-a757ae4227b8",
-    env="prod",  # or "dev"
-)
+# app.add_middleware(
+#     ApitallyMiddleware,
+#     client_id="d2f20325-2b6d-4fe0-8a73-a757ae4227b8",
+#     env="prod",  # or "dev"
+# )
 
 
 def register_routes(app):
