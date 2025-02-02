@@ -76,8 +76,13 @@ class InvoiceItemController:
         query = query.filter(InvoiceItem.date <= to_date)
         query = query.order_by(InvoiceItem.id.desc())
         total = query.count()
-        query = query.limit(page_size).offset((page - 1) * page_size)
-        items = query.all()
+        if page_size == 0:
+            items = query.all()
+            page_size = 1
+            total = len(items)
+        else:
+            query = query.limit(page_size).offset((page - 1) * page_size)
+            items = query.all()
 
         invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in items]
 
