@@ -71,10 +71,14 @@ def extract_customer_job(filename):
         customer_job_area[0] = 140.40
         customer_job_area[1] = 311.55
         tables = tabula.read_pdf(filename, pages=1, area=customer_job_area)
-        customer_job = tables[0]['Shipping Address'][1]
+        try:
+            customer_job = tables[0]['Shipping Address'][1]
+        except KeyError:
+            customer_job = tables[0]['Shipping Address'][0]
 
     elif "Shipping Address" in tables[0].columns:
-        customer_job = tables[0]['Shipping Address'][1]
+        try: customer_job = tables[0]['Shipping Address'][1]
+        except KeyError: customer_job = tables[0]['Shipping Address'][0]
     elif 'Ship to' in tables[0].columns:
         customer_job = tables[0]['Ship to'][1]
         if tables[0]['Ship to'][0] == '44 Hudson Street': # hard fix: no other pattern to identify
@@ -304,8 +308,12 @@ def extract_invoice_items(tables):
             table = table.rename(columns={'Name': 'Item', 'Price': 'Cost'})
 
         elif {'#', 'Item Name'}.issubset(table.columns):
-            table = table[['Item Name', 'Description', 'Return Qty', 'Amount']]
-            table['Cost'] = '0'
+            if {'Price'}.issubset(table.columns):
+                table = table[['Item Name', 'Description', 'Return Qty', 'Price', 'Amount']]
+                table = table.rename(columns={'Price': 'Cost'})
+            else:
+                table = table[['Item Name', 'Description', 'Return Qty', 'Amount']]
+                table['Cost'] = '0'
             table = table.rename(columns={'Item Name': 'Item', 'Return Qty': 'Qty'})
             table = table[['Item', 'Description', 'Qty', 'Cost', 'Amount']]
         else:

@@ -135,7 +135,8 @@ def extract_data(filename, output_path, supplier):
             tax_row = ["10 Materials", item.capitalize(), "", "", financial_data[item]]
             if "Qty BO" in final_df:
                 tax_row = ["10 Materials", item.capitalize(), "", "", "", financial_data[item]]
-                if final_df['Qty BO'].drop(final_df.index[len(final_df)-1]).sum() == 0: # fix applied->frieght row had " " which couldnot be summed
+                qty_bo_sum = pd.to_numeric(final_df['Qty BO'], errors='coerce').sum()
+                if qty_bo_sum == 0:
                     final_df = final_df.reindex(columns=["Item", "Description", "Qty", "Cost", "Amount"])
                     tax_row = ["10 Materials", item.capitalize(), "", "", financial_data[item]]
             final_df.loc[len(final_df)] = tax_row

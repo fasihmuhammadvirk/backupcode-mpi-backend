@@ -124,6 +124,8 @@ def extract_invoice_items(filename, raw_text):
         tables = tabula.read_pdf(filename, pages='all')
         table = pd.DataFrame() # will hold cleaned, combined lne items
         for tab in tables:
+            if tab.empty or len(tab.columns) == 3: # skip processing if no line items are on second page
+                continue
             tab = tab[tab.iloc[:, 0].astype(str).str.match(r'^\d{1,2}$')]
             tab = tab.iloc[:, :8] # keep first eight columns only
             tab.columns = [  # rename columns
