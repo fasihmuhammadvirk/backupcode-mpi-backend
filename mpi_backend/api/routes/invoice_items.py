@@ -125,13 +125,12 @@ def export_all_invoices(request: ExportToExcelFilterRequest,
         db: Session = Depends(get_db),
         token: str = Depends(JWTBearer()),
 ):
-    filtered_data = InvoiceItemController(db).apply_filters(request, page=1, size=0)
-    ids = [item.id for item in filtered_data['items']]
+    ids = InvoiceItemController(db).apply_filters(request, page=1, size=0, col_param='id')
 
     if request.excluded_rows_ids:  # un selected items from frontend
-        ids = [record_id for record_id in ids if record_id not in request.excluded_rows_ids]
+        ids = list(set(ids) - set(request.excluded_rows_ids))
 
-    ids = list(set(ids))  # make row ids of items to be exported in list to be unique, no repetition.
+    # ids = list(set(ids))  # make row ids of items to be exported in list to be unique, no repetition.
     return export_invoices (ids,request.columns,db=db)
 
 @router.post("/export")

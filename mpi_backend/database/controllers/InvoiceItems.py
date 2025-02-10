@@ -103,9 +103,12 @@ class InvoiceItemController:
     def get_invoice_items_by_ids(self, ids):
         query = self.db_context.query(InvoiceItem)
 
+        # if ids:
+        #     case_statement = case({id_: idx for idx, id_ in enumerate(ids)}, value=InvoiceItem.id) #order the results based on the order of the IDs
+        #     query = query.filter(InvoiceItem.id.in_(ids)).order_by(case_statement) # commenting out because of slow performance
+
         if ids:
-            case_statement = case({id_: idx for idx, id_ in enumerate(ids)}, value=InvoiceItem.id) #order the results based on the order of the IDs
-            query = query.filter(InvoiceItem.id.in_(ids)).order_by(case_statement)
+            query = query.filter(InvoiceItem.id.in_(ids))
 
         items = query.all()
 
@@ -226,7 +229,7 @@ class InvoiceItemController:
         distinct_values = query.all()
         return [value[0] for value in distinct_values if value[0] is not None]
 
-    def apply_filters(self, request,page, size):
+    def apply_filters(self, request,page, size, col_param=None):
         query = self.db_context.query(InvoiceItem)
 
         # applying 'IN' filters dynamically
@@ -294,6 +297,10 @@ class InvoiceItemController:
                 else:
                     raise HTTPException(status_code=400, detail=f"Invalid order direction: {order_filter.order}")
         if size == 0:
+            if col_param: # select distinct values of certain column
+                column = getattr(InvoiceItem, col_param, None)
+                return list(set(row[0] for row in query.with_entities(column).distinct()))
+
             results = query.all()
             size=1
             total = len(results)
