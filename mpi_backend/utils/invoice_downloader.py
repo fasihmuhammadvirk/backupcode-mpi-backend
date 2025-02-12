@@ -103,9 +103,15 @@ def search_new_emails(mail):
 
 def download_email_attachments(email_message, base_folder_path):
     for part in email_message.walk():
-        part.get_payload()
+
+        payload = part.get_payload()
+        if isinstance(payload, list): # payload can sometimes be a list or string
+            payload_text = ' '.join(str(p) for p in payload)
+        else:
+            payload_text = str(payload)
+
         if ((part.get_content_maintype() != 'multipart' and part.get('Content-Disposition') is not None) or
-                ('customer of World Wide' in part.get_payload())): # for WWPS 'Content-Disposition' is None, so a separate condition
+                ('customer of World Wide' in payload_text)): # for WWPS 'Content-Disposition' is None, so a separate condition
             email_date = email_message['Date']
             date_time_obj = parsedate_to_datetime(email_date)
 
