@@ -87,6 +87,11 @@ def extract_invoice_info(filename, pages =1, check = False ,supplier = "default"
                                  columns=[20,98], pandas_options={'dtype': str})
         try :
             if {'Unnamed: 0', 'Inv oi ce #', 'Inv oi ce D at e'}.issubset(tables[0].columns.values):
+                if len(tables[0])==0: # if dataframe is empty - fix for misprinting / misplacement
+                    tables = tabula.read_pdf(filename, pages=pages, area=(245, 21, 245 + 50, 21 + 160), guess=False,
+                                             columns=[20, 98], pandas_options={'dtype': str})
+                    tables[0].dropna(how='all', inplace=True)
+                    tables[0].reset_index(inplace=True)
                 invoice_num = str(tables[0]['Inv oi ce #'][0])
                 invoice_date = tables[0]['Inv oi ce D at e'][0]
                 invoice_num = ''.join(invoice_num.split()) # remove extra spaces
