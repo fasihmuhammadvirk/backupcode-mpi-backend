@@ -6,6 +6,7 @@ from datetime import date
 from math import ceil
 from mpi_backend.database.models import InvoiceItem
 from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
+from mpi_backend.database.controllers.CustomerJobMappingContorller import CustomerJobMappingController
 from mpi_backend.database.schemas import InvoiceItems as InvoiceItemsResponse
 from mpi_backend.database.schemas import PriceHistoryResponse
 from mpi_backend.utils.export_utils import extract_supplier_id
@@ -169,7 +170,7 @@ class InvoiceItemController:
             if not item:
                 raise HTTPException(status_code=404, detail=f"Invoice item with ID {item_id} not found")
 
-            # Check for updates in mpi_item and mpi_description and make updates on whole table
+            # Check for updates in mpi_item and mpi_description and customer_job and make updates on whole table
             # item_data -- > coming from request
             # item -- > its associated record in database
             if item_data['mpi_item'] != item.mpi_item:  # mpi_item code is changed
@@ -181,6 +182,11 @@ class InvoiceItemController:
                 background_tasks.add_task(self.update_mpi_field, item_data['item'], 'mpi_description',
                                           item_data['mpi_description'])
 
+            if item_data['customer_job'] != item.customer_job: # customer job was updated
+                background_tasks.add_task(self.update_customer_job, item.customer_job, 'customer_job',
+                                          item_data['customer_job'])
+                CustomerJobMappingController(self.db_context).update_mappings_table(old_customer_job=item.customer_job,new_customer_job=item_data['customer_job'])
+
             for key, value in item_data.items():  # update items
                 setattr(item, key, value)
 
@@ -189,6 +195,10 @@ class InvoiceItemController:
 
     def update_mpi_field(self, item_value: str, field_name: str, new_value: str):
         self.db_context.query(InvoiceItem).filter(InvoiceItem.item == item_value).update({field_name: new_value})
+        self.db_context.commit()
+
+    def update_customer_job(self, item_value: str, field_name: str, new_value: str):
+        self.db_context.query(InvoiceItem).filter(InvoiceItem.customer_job == item_value).update({field_name: new_value})
         self.db_context.commit()
 
     def update_mappings_table(self, updated_values: dict):
