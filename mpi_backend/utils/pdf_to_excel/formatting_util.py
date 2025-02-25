@@ -72,7 +72,7 @@ def save_final_data(final_df, supplier, output_path):
                                             'format': bolded_column_format})
 
 
-    writer.save()
+    writer.close()
 
 
 def save_opus_services(extracted_data, output_path):

@@ -2,11 +2,14 @@
 __pycache__/
 *.py[cod]
 *$py.class
+.DS_Store
+.idea
 
 # C extensions
 *.so
 
 # Distribution / packaging
+storage/
 .Python
 build/
 develop-eggs/
@@ -25,6 +28,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

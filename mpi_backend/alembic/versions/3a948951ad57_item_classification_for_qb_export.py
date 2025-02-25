@@ -32,7 +32,7 @@ def upgrade():
     )
 
     # self updated code to populate mappings and supplier tabled with static data
-    op.bulk_insert(ItemClassification.__table__, read_mapping_file('storage/fixtures/item-classifications.json'))
+    op.bulk_insert(ItemClassification.__table__, read_mapping_file('mpi_backend/storage/fixtures/item-classifications.json'))
     # ### end Alembic commands ###
 
 
