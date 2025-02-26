@@ -149,11 +149,5 @@ def sort_invoices(db: Session = Depends(get_db), column_name: str = Query(None),
 
     invoices = InvoiceController(db).sort(db, column, sort_order)
 
-    # Format dates before returning the response
-    for invoice in invoices:
-        if hasattr(invoice, 'date') and isinstance(invoice.date, datetime):
-            invoice.date = invoice.date.strftime("%m-%d-%Y")
-        if hasattr(invoice, 'date_added') and isinstance(invoice.date_added, datetime):
-            invoice.date_added = invoice.date_added.strftime("%m-%d-%Y")
 
     return paginate(invoices)

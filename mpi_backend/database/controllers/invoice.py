@@ -16,7 +16,8 @@ class InvoiceController:
 
     def insert_invoice(self, date, filename, supplier_id, status, storage_path):
         date = datetime.strptime(date, '%m/%d/%Y')
-        new_invoice = Invoice(date=date, filename=filename, supplier_id=supplier_id, status=status, storage_path=storage_path, is_exported='Pending')
+        new_invoice = Invoice(date=date, filename=filename, supplier_id=supplier_id, status=status,
+                              storage_path=storage_path, is_exported='Pending')
         with self.db_context() as db:
             db.add(new_invoice)
             db.commit()
@@ -29,8 +30,8 @@ class InvoiceController:
             from_date: date = None,
             to_date: date = None,
             status: str = 'all',
-            job_location:str = None,
-            export_status:str = None,
+            job_location: str = None,
+            export_status: str = None,
             page: int = 1,
             page_size: int = 10,
     ):
@@ -60,17 +61,17 @@ class InvoiceController:
         if export_status == 'Pending':
             query = query.filter(Invoice.is_exported == 'Pending')
         elif export_status == 'Sent':
-            query =  query.filter(Invoice.is_exported == 'Sent')
+            query = query.filter(Invoice.is_exported == 'Sent')
 
-        query = query.order_by(Invoice.date.desc()) # show latest data first
+        query = query.order_by(Invoice.date.desc())  # show latest data first
         total = query.count()
-        query = query.limit(page_size).offset((page - 1) * page_size) # database level pagination
+        query = query.limit(page_size).offset((page - 1) * page_size)  # database level pagination
         invoices = query.all()
 
         invoices_list = []
         for invoice, ref_no, customer_job in invoices:
             invoice_item = InvoiceResponse(
-                date=invoice.date.strftime("%m-%d-%Y"),
+                date=invoice.date,
                 filename=invoice.filename,
                 supplier_id=invoice.supplier_id,
                 status=invoice.status,
@@ -88,7 +89,7 @@ class InvoiceController:
             "pages": ceil(total / page_size)
         }
 
-    def get_all_invoices(self, db, status: str = 'all',): # deprecated
+    def get_all_invoices(self, db, status: str = 'all', ):  # deprecated
 
         InvoiceItemAlias = aliased(InvoiceItem)
         query = db.query(
@@ -107,7 +108,7 @@ class InvoiceController:
         invoices_list = []
         for invoice, ref_no, customer_job in invoices:
             invoice_item = InvoiceResponse(
-                date=invoice.date.strftime("%m-%d-%Y"),
+                date=invoice.date,
                 filename=invoice.filename,
                 supplier_id=invoice.supplier_id,
                 status=invoice.status,
@@ -120,14 +121,14 @@ class InvoiceController:
 
         return invoices_list
 
-    def set_status_to_processed(self, inserted_id, db_ref= None):
+    def set_status_to_processed(self, inserted_id, db_ref=None):
         if db_ref:
-            invoice = db_ref.query(Invoice).filter(Invoice.id == inserted_id).first() # source -> endpoint
+            invoice = db_ref.query(Invoice).filter(Invoice.id == inserted_id).first()  # source -> endpoint
             invoice.status = 'PROCESSED'
             db_ref.commit()
         else:
             with self.db_context() as db:
-                invoice = db.query(Invoice).filter(Invoice.id == inserted_id).first() # source -> background task
+                invoice = db.query(Invoice).filter(Invoice.id == inserted_id).first()  # source -> background task
                 invoice.status = 'PROCESSED'
                 db.commit()
 
@@ -152,7 +153,7 @@ class InvoiceController:
 
         return True
 
-    def delete_invoice(self,invoice_id,db):
+    def delete_invoice(self, invoice_id, db):
         invoice = db.query(Invoice).filter(Invoice.id == invoice_id).all()
         for record in invoice:
             db.delete(record)
@@ -160,16 +161,9 @@ class InvoiceController:
 
     def get_invoice_by_invoiceID(self, invoice_id, db):
         invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
-
-        if invoice:
-            if hasattr(invoice, 'date') and isinstance(invoice.date, datetime):
-                invoice.date = invoice.date.strftime("%m-%d-%Y")
-            if hasattr(invoice, 'date_added') and isinstance(invoice.date_added, datetime):
-                invoice.date_added = invoice.date_added.strftime("%m-%d-%Y")
-
         return invoice
 
-    def is_invoice_present(self,filename):
+    def is_invoice_present(self, filename):
         try:
             with self.db_context() as db:
                 invoice = db.query(Invoice).filter_by(filename=filename).first()
