@@ -322,3 +322,98 @@ def export_batch_entry_to_excel(df, output_dir="mpi_backend/storage/Exports"):
         worksheet.autofilter(0, 0, 0, len(df.columns) - 1)
 
     return file_path
+
+
+def export_price_history_to_excel(price_history, output_dir="mpi_backend/storage/Exports"):
+    """
+    Exports price history data to an Excel file with formatted headers using xlsxwriter.
+
+    Parameters:
+        price_history (List[PriceHistoryResponse]): List of price history records
+        output_dir (str): Directory to save the file. Defaults to "mpi_backend/storage/Exports"
+
+    Returns:
+        str: The path of the generated Excel file.
+    """
+    # Convert price history to DataFrame
+    df = pd.DataFrame([{
+        'Ref No': item.ref_no,
+        'Date': item.date.strftime('%m/%d/%Y'),
+        'Cost': float(item.cost),
+        'Quantity': item.qty,
+    } for item in price_history])
+
+    # Ensure the output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Generate a unique filename based on timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_path = os.path.join(output_dir, f"price_history_{timestamp}.xlsx")
+
+    # Use pd.ExcelWriter with xlsxwriter as the engine
+    with pd.ExcelWriter(file_path, engine="xlsxwriter") as writer:
+        # Write the DataFrame to Excel
+        df.to_excel(writer, sheet_name="Price History", index=False)
+
+        # Access the workbook and worksheet
+        workbook = writer.book
+        worksheet = writer.sheets["Price History"]
+
+        # Define header formatting
+        header_format = workbook.add_format({
+            "bold": True,
+            "font_color": "white",
+            "bg_color": "#366092",  # Blue background
+            "align": "center",
+            "valign": "vcenter",
+            "border": 1
+        })
+
+        # Define number format for prices
+        price_format = workbook.add_format({
+            "num_format": "#,##0.00",
+            "align": "right",
+            "border": 1
+        })
+
+        # Define date format
+        date_format = workbook.add_format({
+            "num_format": "mm-dd-yyyy",
+            "align": "center",
+            "border": 1
+        })
+
+        # Define general cell format
+        cell_format = workbook.add_format({
+            "align": "left",
+            "border": 1
+        })
+
+        # Apply the formatting to the header row
+        for col_num, column in enumerate(df.columns):
+            worksheet.write(0, col_num, column, header_format)
+
+        # Define column widths
+        column_widths = {
+            "Ref No": 20,
+            "Date": 20,
+            "Cost": 12,
+            "Quantity": 13,
+        }
+
+        # Set column widths and formats
+        for col_num, column in enumerate(df.columns):
+            width = column_widths.get(column, 15)  # Default width is 15 if not specified
+            worksheet.set_column(col_num, col_num, width)
+
+            # Apply formats to entire columns
+            if column == "Cost":
+                worksheet.set_column(col_num, col_num, width, price_format)
+            elif column == "Date":
+                worksheet.set_column(col_num, col_num, width, date_format)
+            else:
+                worksheet.set_column(col_num, col_num, width, cell_format)
+
+        worksheet.autofilter(0, 0, len(df.index), len(df.columns))
+
+    return file_path

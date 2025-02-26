@@ -6,6 +6,9 @@ from mpi_backend.database.controllers import SupplierController, InvoiceItemCont
 from mpi_backend.database.schemas import FilterRequest, PaginatedInvoiceItemsResponse, PriceHistoryRequest, PriceHistoryResponse
 from mpi_backend.database.schemas import InvoiceItems
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
+from mpi_backend.utils.pdf_to_excel.formatting_util import export_price_history_to_excel
+from mpi_backend.utils.s3_utils import upload_file, get_presigned_url
+import os
 
 router = APIRouter(prefix="/filter")
 
@@ -74,6 +77,16 @@ def filter_data(request: FilterRequest, db: Session = Depends(get_db), token: st
 def get_price_history(request: PriceHistoryRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
     price_history = InvoiceItemController(db).get_price_history(request)
     return price_history
+
+@router.post("/download-price-history")
+def get_price_history(request: PriceHistoryRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+    price_history = InvoiceItemController(db).get_price_history(request)
+
+    exported_file_path = export_price_history_to_excel(price_history)
+    file_name = os.path.basename(exported_file_path)
+    upload_file(exported_file_path, file_key=f'Exports/{file_name}', is_invoice=False)  # upload to s3 to be exported
+    download_url = get_presigned_url(file_key=f'Exports/{file_name}', is_invoice=False)
+    return download_url
 
 
 @router.post("/get_aggregates")
