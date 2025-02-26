@@ -48,7 +48,7 @@ def process_extracted_data(converted_files, id):
         extracted_data = pd.read_excel(file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
 
 
-        if InvoiceItemController(db).invoice_exists(str(extracted_data['Ref NO'][0])) :
+        if InvoiceItemController(db).invoice_exists(str(extracted_data['Ref NO'][0]),str(extracted_data['Vendor'][0])) :
             print(f'Invoice with REF-NO-> {str(extracted_data["Ref NO"][0])} already processed and is being skipped!')
             continue
 

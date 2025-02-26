@@ -30,7 +30,7 @@ def process_extracted_data(converted_files, failed_files):
 
         supplier_id = SupplierController(db).get_supplier_name(extracted_data['Vendor'][0])
 
-        if InvoiceItemController(db).invoice_exists(str(extracted_data['Ref NO'][0])) :
+        if InvoiceItemController(db).invoice_exists(str(extracted_data['Ref NO'][0]),str(extracted_data['Vendor'][0])) :
             logger.warning(f'Invoice with REF-NO-> {str(extracted_data["Ref NO"][0])} already processed and is being skipped!')
             continue
 
