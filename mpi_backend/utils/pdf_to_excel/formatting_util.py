@@ -1,14 +1,15 @@
 import pandas as pd
 from datetime import datetime
 import os
+from mpi_backend.utils.s3_utils import upload_file, get_presigned_url
 # import openpyxl
 
 
 def save_final_data(final_df, supplier, output_path):
     writer = pd.ExcelWriter(output_path, engine='xlsxwriter')
-    
+
     num_cols = len(final_df.columns)
-    
+
     final_df.to_excel(writer, index=False, sheet_name='Table 1')
 
     workbook = writer.book
@@ -72,7 +73,7 @@ def save_final_data(final_df, supplier, output_path):
                                             'format': bolded_column_format})
 
 
-    writer.close()
+    writer.save()
 
 
 def save_opus_services(extracted_data, output_path):
@@ -322,3 +323,32 @@ def export_batch_entry_to_excel(df, output_dir="mpi_backend/storage/Exports"):
         worksheet.autofilter(0, 0, 0, len(df.columns) - 1)
 
     return file_path
+
+def convert_download_price_history(price_history):
+    if not price_history:
+        return {"error": "No data available for download"}
+
+    # Convert price history to DataFrame
+    df = pd.DataFrame([{
+        "Reference Number": item.ref_no,
+        "Date": item.date.strftime('%m/%d/%Y'),
+        "Cost": item.cost,
+        "Quantity": item.qty,
+    } for item in price_history])
+
+    export_dir = "mpi_backend/storage/exports/"
+    os.makedirs(export_dir, exist_ok=True)
+
+    # Generate a unique file name
+    file_name = f"price_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    file_path = os.path.join(export_dir, file_name)
+
+    df.to_excel(file_path, index=False, sheet_name="Price History", engine="xlsxwriter")
+
+    # Upload file to S3
+    upload_file(file_path, file_name)
+
+    # Generate presigned URL for download
+    presigned_url = get_presigned_url(file_name)
+
+    return presigned_url
