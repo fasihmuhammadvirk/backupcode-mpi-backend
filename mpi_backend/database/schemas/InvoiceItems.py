@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import List, Optional
 from datetime import date
 from uuid import UUID
@@ -17,7 +17,7 @@ class InvoiceItems(BaseModel):
     qty: Optional[int]
     cost: Optional[float]
     amount: Optional[str]
-    date: Optional[date]
+    date: Optional[str]
     ref_no: Optional[str]
     po_number: Optional[str]
     customer_job: Optional[str]
@@ -26,10 +26,24 @@ class InvoiceItems(BaseModel):
     class_: Optional[str]  # 'class' is a reserved word in Python, so appending an underscore
     memo: Optional[str]
     buyer: Optional[str]
-    date_added: Optional[date]
+    date_added: Optional[str]
     invoice_id: Optional[UUID]
     class Config:
         from_attributes = True
+
+    @validator('date', 'date_added', pre=True)
+    def format_date(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            try:
+                parsed_date = date.fromisoformat(value)
+                return parsed_date.strftime("%m-%d-%Y")
+            except ValueError:
+                return value # already is US format, or is invalid
+        if isinstance(value, date):
+            return value.strftime("%m-%d-%Y")
+        return value
 
 class PaginatedInvoiceItemsResponse(BaseModel):
     items: List[InvoiceItems]
