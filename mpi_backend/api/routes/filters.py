@@ -7,7 +7,7 @@ from mpi_backend.database.schemas import FilterRequest, PaginatedInvoiceItemsRes
     PriceHistoryResponse
 from mpi_backend.database.schemas import InvoiceItems
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
-from mpi_backend.utils.invoice_convertor import convert_download_price_history
+from mpi_backend.utils.pdf_to_excel.formatting_util import convert_download_price_history
 router = APIRouter(prefix="/filter")
 
 
