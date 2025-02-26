@@ -346,9 +346,9 @@ def convert_download_price_history(price_history):
     df.to_excel(file_path, index=False, sheet_name="Price History", engine="xlsxwriter")
 
     # Upload file to S3
-    upload_file(file_path, file_name)
+    upload_file(file_path, file_name, is_invoice=False)
 
     # Generate presigned URL for download
-    presigned_url = get_presigned_url(file_name)
+    presigned_url = get_presigned_url(file_name, is_invoice=False)
 
     return presigned_url
