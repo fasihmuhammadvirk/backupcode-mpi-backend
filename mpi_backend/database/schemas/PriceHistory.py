@@ -11,7 +11,7 @@ class PriceHistoryRequest(BaseModel):
 
 class PriceHistoryResponse(BaseModel):
     ref_no: str
-    date: date
+    date: str # we are formatting to US dates and get formatted strings back
     cost: float
     qty:int
     invoice_id: str
