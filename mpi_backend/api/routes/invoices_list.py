@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Query,UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
 from datetime import datetime
-from fastapi_pagination import Page,paginate
+from fastapi_pagination import Page, paginate
 from datetime import date
 import os
 import requests
@@ -11,10 +11,12 @@ from mpi_backend.database.controllers import SupplierController, InvoiceControll
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.utils.invoice_convertor import convert_invoice
-from mpi_backend.database.schemas import Invoice,PaginatedInvoiceResponse
+from mpi_backend.database.schemas import Invoice, PaginatedInvoiceResponse
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.s3_utils import get_presigned_url
+from datetime import datetime
 import logging
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/invoice")
@@ -52,7 +54,7 @@ def get_invoices(
 
 
 @router.get("/all")
-def get_invoices(db: Session = Depends(get_db),token: str = Depends(JWTBearer())):
+def get_invoices(db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
     try:
         invoices = InvoiceController(db).get_all_invoices(db=db)
 
@@ -63,26 +65,27 @@ def get_invoices(db: Session = Depends(get_db),token: str = Depends(JWTBearer())
 
 
 @router.get("/download")
-def download_invoice( db: Session = Depends(get_db), invoice_id:str = Query(None)):
+def download_invoice(db: Session = Depends(get_db), invoice_id: str = Query(None)):
     try:
-        matched_invoice = InvoiceController(db).get_invoice_by_invoiceID(invoice_id,db)
+        matched_invoice = InvoiceController(db).get_invoice_by_invoiceID(invoice_id, db)
         supplier_name = SupplierController(db).get_supplier_by_id(matched_invoice.supplier_id)
         url = get_presigned_url(file_key=f'{supplier_name}/{invoice_id}')
     except Exception as e:
-        raise HTTPException(status_code=404, detail="Couldn't fetch requested file") # Handle 'No Key Error' on Client Side
+        raise HTTPException(status_code=404,
+                            detail="Couldn't fetch requested file")  # Handle 'No Key Error' on Client Side
 
-    return { "link": url}
+    return {"link": url}
 
 
 @router.post("/upload")
-async def upload_and_process_invoice(supplier_id : int, file: UploadFile = File(...), db: Session = Depends(get_db),
+async def upload_and_process_invoice(supplier_id: int, file: UploadFile = File(...), db: Session = Depends(get_db),
                                      token: str = Depends(JWTBearer())):
     if not file.filename.lower().endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
 
-    supplier= SupplierController(db).get_supplier_by_id(supplier_id)
+    supplier = SupplierController(db).get_supplier_by_id(supplier_id)
 
-    upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{supplier}' # every supplier will have it own folder at root of storage dir
+    upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{supplier}'  # every supplier will have it own folder at root of storage dir
     if not os.path.exists(upload_folder): os.makedirs(upload_folder)
 
     with open(os.path.join(upload_folder, file.filename), "wb") as buffer:
@@ -91,20 +94,20 @@ async def upload_and_process_invoice(supplier_id : int, file: UploadFile = File(
     converted_files, failed_files = convert_invoice(supplier)
     process_extracted_data(converted_files, failed_files)
 
-    [os.remove(os.path.join(upload_folder, filename)) for filename in os.listdir(upload_folder)] # delete files after it's processed
+    [os.remove(os.path.join(upload_folder, filename)) for filename in
+     os.listdir(upload_folder)]  # delete files after it's processed
 
     return {"status": "Uploaded Invoice processed successfully."}
 
 
 @router.post("/process")
-async def process_again(invoice_id : str, db: Session = Depends(get_db),
-                                    token: str = Depends(JWTBearer())):
-
-    invoice = InvoiceController(db).get_invoice_by_invoiceID(invoice_id,db)
-    supplier= SupplierController(db).get_supplier_by_id(invoice.supplier_id)
+async def process_again(invoice_id: str, db: Session = Depends(get_db),
+                        token: str = Depends(JWTBearer())):
+    invoice = InvoiceController(db).get_invoice_by_invoiceID(invoice_id, db)
+    supplier = SupplierController(db).get_supplier_by_id(invoice.supplier_id)
     invoice_url = get_presigned_url(file_key=f'{supplier}/{invoice_id}')
 
-    upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{supplier}' # every supplier will have it own folder at root of storage dir
+    upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{supplier}'  # every supplier will have it own folder at root of storage dir
     if not os.path.exists(upload_folder): os.makedirs(upload_folder)
 
     if not invoice_url:
@@ -117,32 +120,40 @@ async def process_again(invoice_id : str, db: Session = Depends(get_db),
     else:
         raise HTTPException(status_code=response.status_code, detail=response.text)
 
-    InvoiceItemController(db).delete_invoice_items(invoice_id,db) # delete previous ingested invoice items
-    InvoiceController(db).delete_invoice(invoice_id,db)
+    InvoiceItemController(db).delete_invoice_items(invoice_id, db)  # delete previous ingested invoice items
+    InvoiceController(db).delete_invoice(invoice_id, db)
 
     converted_files, failed_files = convert_invoice(supplier)
     process_extracted_data(converted_files, failed_files)
 
-    [os.remove(os.path.join(upload_folder, filename)) for filename in os.listdir(upload_folder)] # delete files after it's processed
+    [os.remove(os.path.join(upload_folder, filename)) for filename in
+     os.listdir(upload_folder)]  # delete files after it's processed
     return {"status": "Invoice reprocessing successful."}
 
 
 @router.get("/sort", response_model=Page[Invoice])
-def sort_invoices( db: Session = Depends(get_db), column_name:str = Query(None),
-                   sort_order:str = Query('ascending',description="Sort By (ascending, descending)")):
-
-    column_mapping= {"Date":"date",
-                     "File Name":"filename",
-                     "Status":"status",
-                     "Job Address" : "customer_job",
-                     "Invoice" : "ref_no"
-                     }
-
+def sort_invoices(db: Session = Depends(get_db), column_name: str = Query(None),
+                  sort_order: str = Query('ascending', description="Sort By (ascending, descending)")):
+    column_mapping = {
+        "Date": "date",
+        "File Name": "filename",
+        "Status": "status",
+        "Job Address": "customer_job",
+        "Invoice": "ref_no"
+    }
 
     if column_name not in column_mapping and column_name != 'Supplier':
         raise HTTPException(status_code=400, detail="Invalid column name")
 
     column = column_mapping.get(column_name, 'date')
 
-    invoices = InvoiceController(db).sort(db,column, sort_order)
+    invoices = InvoiceController(db).sort(db, column, sort_order)
+
+    # Format dates before returning the response
+    for invoice in invoices:
+        if hasattr(invoice, 'date') and isinstance(invoice.date, datetime):
+            invoice.date = invoice.date.strftime("%m-%d-%Y")
+        if hasattr(invoice, 'date_added') and isinstance(invoice.date_added, datetime):
+            invoice.date_added = invoice.date_added.strftime("%m-%d-%Y")
+
     return paginate(invoices)

@@ -56,7 +56,14 @@ class InvoiceItemController:
         query = query.order_by(InvoiceItem.id.desc())
         items = query.all()
 
-        invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in items]
+        invoices_items = []
+        for item in items:
+            item_dict = item.__dict__.copy()  # Copy to avoid modifying the original object
+            for key, value in item_dict.items():
+                if isinstance(value, datetime):  # Format datetime fields
+                    item_dict[key] = value.strftime("%m-%d-%Y")
+
+            invoices_items.append(InvoiceItemsResponse(**item_dict))
 
         return invoices_items
 

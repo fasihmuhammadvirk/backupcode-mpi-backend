@@ -276,6 +276,11 @@ def export_batch_entry_to_excel(df, output_dir="mpi_backend/storage/Exports"):
     # Ensure the output directory exists
     os.makedirs(output_dir, exist_ok=True)
 
+    # Convert date columns to MM-DD-YYYY format if they exist
+    for col in ["Date", "bill due"]:  # Add other date column names if needed
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime("%m-%d-%Y")
+
     # Generate a unique filename based on timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     file_path = os.path.join(output_dir, f"exported_data_{timestamp}.xlsx")

@@ -1,5 +1,5 @@
 import pandas as pd
-
+from datetime import datetime
 
 def convert_items_to_dataframe(items):
     columns_mapping = {
@@ -27,6 +27,11 @@ def convert_items_to_dataframe(items):
     items_dict = [item.__dict__ for item in items]
     df = pd.DataFrame(items_dict).rename(columns=columns_mapping)
     df = df[list(columns_mapping.values())]
+
+    date_columns = ["Date", "Date Added"]  # Adjust this list if more date columns exist
+    for col in date_columns:
+        if col in df.columns:
+            df[col] = df[col].apply(lambda x: x.strftime("%m-%d-%Y") if isinstance(x, datetime) else x)
 
     return df
 

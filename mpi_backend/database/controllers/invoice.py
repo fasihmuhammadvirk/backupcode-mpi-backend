@@ -70,7 +70,7 @@ class InvoiceController:
         invoices_list = []
         for invoice, ref_no, customer_job in invoices:
             invoice_item = InvoiceResponse(
-                date=invoice.date,
+                date=invoice.date.strftime("%m-%d-%Y"),
                 filename=invoice.filename,
                 supplier_id=invoice.supplier_id,
                 status=invoice.status,
@@ -107,7 +107,7 @@ class InvoiceController:
         invoices_list = []
         for invoice, ref_no, customer_job in invoices:
             invoice_item = InvoiceResponse(
-                date=invoice.date,
+                date=invoice.date.strftime("%m-%d-%Y"),
                 filename=invoice.filename,
                 supplier_id=invoice.supplier_id,
                 status=invoice.status,
@@ -158,8 +158,16 @@ class InvoiceController:
             db.delete(record)
         db.commit()
 
-    def get_invoice_by_invoiceID(self, invoice_id,db):
-        return db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    def get_invoice_by_invoiceID(self, invoice_id, db):
+        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+
+        if invoice:
+            if hasattr(invoice, 'date') and isinstance(invoice.date, datetime):
+                invoice.date = invoice.date.strftime("%m-%d-%Y")
+            if hasattr(invoice, 'date_added') and isinstance(invoice.date_added, datetime):
+                invoice.date_added = invoice.date_added.strftime("%m-%d-%Y")
+
+        return invoice
 
     def is_invoice_present(self,filename):
         try:
