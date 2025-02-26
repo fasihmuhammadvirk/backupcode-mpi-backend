@@ -17,28 +17,28 @@ from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.utils.invoice_convertor import convert_invoice
 
 EXCLUDED_SENDERS = [ # suppliers whose emails are to be marked as read after downloading
-    # "info@wwps.co",
+    "info@wwps.co",
     "bmwpsupply@gmail.com",
-    # "billing@ysplumbing.com",
-    # "accounting@supremeplumbingnj.com",
-    # "orders@supremeplumbingnj.com",
-    # "billing@pyramidps.com",
-    # "purchasing@pyramidps.com",
-    # "donotreply@brucesupply.net",
-    # "donotreply@certifiedlumber.com",
-    # "breindy@parkplumbingsupply.com",
-    # "accounting@kjpsinc.com",
-    # "nefcocorp@billtrust.com",
-    # "timsfile@awisco.net",
-    # "billing@afsupply.com",
-    # "billing@sparkleening.com",
-    # "billing@positive.tech",
-    # "ar@opusoperations.com",
-    # "donotreply@cardknox.com",
-    # "billing@flowmarksupply.com",
-    # "mendy@flowmarksupply.com",
-    # "billing@mpiplumbingcorp.com",
-    # "Info@wwps.co"
+    "billing@ysplumbing.com",
+    "accounting@supremeplumbingnj.com",
+    "orders@supremeplumbingnj.com",
+    "billing@pyramidps.com",
+    "purchasing@pyramidps.com",
+    "donotreply@brucesupply.net",
+    "donotreply@certifiedlumber.com",
+    "breindy@parkplumbingsupply.com",
+    "accounting@kjpsinc.com",
+    "nefcocorp@billtrust.com",
+    "timsfile@awisco.net",
+    "billing@afsupply.com",
+    "billing@sparkleening.com",
+    "billing@positive.tech",
+    "ar@opusoperations.com",
+    "donotreply@cardknox.com",
+    "billing@flowmarksupply.com",
+    "mendy@flowmarksupply.com",
+    "billing@mpiplumbingcorp.com",
+    "Info@wwps.co"
 ]
 
 
@@ -76,8 +76,8 @@ def filter_by_time(email_ids, reference_time, mail):
             email_sent_time = TIMEZONE.localize(email_sent_time)
 
             time_difference = reference_time - email_sent_time
-            # if time_difference.total_seconds() <= 1500:  # 25 minutes in seconds
-            emails_info.append(email_id)
+            if time_difference.total_seconds() <= 1500:  # 25 minutes in seconds
+                emails_info.append(email_id)
 
         except Exception as e:
             logger.error(type(e).__name__,
@@ -86,7 +86,7 @@ def filter_by_time(email_ids, reference_time, mail):
 
 
 def search_new_emails(mail):
-    time_frame = (datetime.now(TIMEZONE)-timedelta(days=1)).strftime('%d-%b-%Y')  #unseen emails for current day & than manually filter them later based on time
+    time_frame = datetime.now(TIMEZONE).strftime('%d-%b-%Y')  #unseen emails for current day & than manually filter them later based on time
     result, data = mail.uid('search', None, f'(SINCE "{time_frame}")')
     email_ids = data[0].split()
     filtered_email_ids = []
