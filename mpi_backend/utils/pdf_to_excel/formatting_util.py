@@ -338,7 +338,7 @@ def export_price_history_to_excel(price_history, output_dir="mpi_backend/storage
     # Convert price history to DataFrame
     df = pd.DataFrame([{
         'Ref No': item.ref_no,
-        'Date': item.date.strftime('%m/%d/%Y'),
+        'Date': item.date,
         'Cost': float(item.cost),
         'Quantity': item.qty,
     } for item in price_history])
