@@ -236,7 +236,7 @@ class InvoiceItemController:
                 filter_column = getattr(InvoiceItem, column)
                 query = query.filter(filter_column.in_(filter_context[column]))
 
-        distinct_values = query.all()
+        distinct_values = query.order_by(column.asc()).all()
         return [value[0] for value in distinct_values if value[0] is not None]
 
     def apply_filters(self, request,page, size, col_param=None):
