@@ -2,7 +2,7 @@ from datetime import datetime
 from sqlalchemy import asc, desc, distinct, case, cast, Float, func
 from fastapi import HTTPException, BackgroundTasks
 from typing import List, Dict
-from datetime import date
+from datetime import date,datetime, timedelta
 from math import ceil
 from mpi_backend.database.models import InvoiceItem
 from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
@@ -415,3 +415,99 @@ class InvoiceItemController:
             "total_amount": round(total_amount, 2),
             "average_cost": round(average_cost, 2)
         }
+
+    def calculate_price_increase(self, item_numbers):
+        """
+        Calculate percentage price increase by comparing current price with price from ~1 year ago.
+        Optimized for minimal latency.
+
+        Args:
+            item_numbers: List containing item_numbers
+
+        Returns:
+            Dictionary with item numbers as keys and percentage increases as values
+        """
+        current_date = datetime.now()
+        target_date = current_date - timedelta(days=365)  # Date 1 year ago
+        result = {}
+
+        # No items to process
+        if not item_numbers:
+            return result
+
+        base_query = self.db_context.query(InvoiceItem)
+        items_filter = InvoiceItem.item.in_(item_numbers)
+        all_items = base_query.filter(items_filter).all()
+
+        # Group same item numbers together
+        grouped_items = {}
+        for item in all_items:
+            if item.item not in grouped_items:
+                grouped_items[item.item] = []
+            grouped_items[item.item].append(item)
+
+        # Process each item number
+        for item_number in item_numbers:
+            if item_number not in grouped_items:
+                result[item_number] = "∞%"  # Item was not bought before
+                continue
+
+            items = grouped_items[item_number]
+            if not items:
+                result[item_number] = "∞%"
+                continue
+
+            # Sort by date descending (most recent first)
+            items.sort(key=lambda x: x.date, reverse=True)
+
+            # Get most recent price
+            current_item = items[0]
+            current_price = current_item.cost
+
+            # Find items purchased before target date (1 year ago)
+            past_items = []
+            for item in items:
+                # Safely compare dates by ensuring both are datetime objects
+                item_date = item.date
+                compare_date = target_date
+
+                # Convert date to datetime if needed
+                if isinstance(item_date, date) and not isinstance(item_date, datetime):
+                    item_date = datetime.combine(item_date, datetime.min.time())
+
+                if isinstance(compare_date, date) and not isinstance(compare_date, datetime):
+                    compare_date = datetime.combine(compare_date, datetime.min.time())
+
+                if item_date < compare_date:
+                    past_items.append(item)
+
+            if not past_items:
+                result[item_number] = "∞%"
+                continue
+
+            # Find the item with date closest to target date
+            def date_difference(item):
+                item_date = item.date
+                compare_date = target_date
+
+                # Convert date to datetime if needed
+                if isinstance(item_date, date) and not isinstance(item_date, datetime):
+                    item_date = datetime.combine(item_date, datetime.min.time())
+
+                if isinstance(compare_date, date) and not isinstance(compare_date, datetime):
+                    compare_date = datetime.combine(compare_date, datetime.min.time())
+
+                # Return absolute difference in seconds
+                return abs((item_date - compare_date).total_seconds())
+
+            past_item = min(past_items, key=date_difference)
+            previous_price = past_item.cost
+
+            # Calculate percentage increase
+            if previous_price == 0:
+                result[item_number] = "∞%"
+            else:
+                percentage_increase = ((current_price - previous_price) / previous_price) * 100
+                result[item_number] = f"{round(percentage_increase, 1)}%"
+
+        return result

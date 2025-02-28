@@ -73,6 +73,16 @@ def filter_data(request: FilterRequest, db: Session = Depends(get_db), token: st
     return filtered_data
 
 
+@router.post("/price-difference",response_model=Dict)
+def get_price_difference(request: FilterRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer()),
+                page: int = Query(1, ge=1),
+                size: int = Query(10)):
+    filtered_data = InvoiceItemController(db).apply_filters(request, page,size)
+    invoice_items = [invoice_item.item for invoice_item in filtered_data["items"]]
+    price_increase = InvoiceItemController(db).calculate_price_increase(item_numbers=invoice_items)
+    return price_increase
+
+
 @router.post("/price-history",response_model=List[PriceHistoryResponse])
 def get_price_history(request: PriceHistoryRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
     price_history = InvoiceItemController(db).get_price_history(request)
