@@ -73,8 +73,9 @@ def filter_data(request: FilterRequest, db: Session = Depends(get_db), token: st
     return filtered_data
 
 
-@router.post("/price-difference",response_model=Dict)
-def get_price_difference(request: FilterRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer()),
+@router.post("/price-difference")
+def get_price_difference(request: FilterRequest, db: Session = Depends(get_db),
+                         # token: str = Depends(JWTBearer()),
                 page: int = Query(1, ge=1),
                 size: int = Query(10)):
     filtered_data = InvoiceItemController(db).apply_filters(request, page,size)
