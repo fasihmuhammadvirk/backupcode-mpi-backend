@@ -79,9 +79,19 @@ def get_price_difference(request: FilterRequest, db: Session = Depends(get_db),
                 page: int = Query(1, ge=1),
                 size: int = Query(10)):
     filtered_data = InvoiceItemController(db).apply_filters(request, page,size)
+    item_id_pairs = [(invoice_item.item, invoice_item.id) for invoice_item in filtered_data["items"]]
     invoice_items = [invoice_item.item for invoice_item in filtered_data["items"]]
     price_increase = InvoiceItemController(db).calculate_price_increase(item_numbers=invoice_items)
-    return price_increase
+
+    result = []
+    for i, (item, percentage) in enumerate(price_increase):
+        _, item_id = item_id_pairs[i]
+        result.append({
+            "item": item,
+            "id": item_id,
+            "percentage_increase": percentage
+        })
+    return result
 
 
 @router.post("/price-history",response_model=List[PriceHistoryResponse])
