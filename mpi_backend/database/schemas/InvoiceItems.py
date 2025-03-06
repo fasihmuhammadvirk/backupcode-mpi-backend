@@ -75,3 +75,6 @@ class UpdateInvoiceItemRequest(BaseModel):
     buyer: str = None
     date_added: str = None
     invoice_id: str = None
+
+class DeleteInvoiceItemsRequest(BaseModel):
+    ids: List[int]

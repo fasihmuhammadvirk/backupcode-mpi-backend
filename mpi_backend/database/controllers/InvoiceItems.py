@@ -160,6 +160,15 @@ class InvoiceItemController:
             db.delete(item)
         db.commit()
 
+    def delete_invoice_items_by_ids(self, ids: List[int]):
+        if not ids:
+            return 0
+        db = self.db_context
+        deleted_count = db.query(InvoiceItem).filter(InvoiceItem.id.in_(ids)).delete(synchronize_session=False)
+        db.commit()
+        return deleted_count
+
+
     def update_invoice_items(self, items: List[Dict], background_tasks: BackgroundTasks):
         for item_data in items:
             item_id = item_data.get('id')
