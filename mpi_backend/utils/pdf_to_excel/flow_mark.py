@@ -20,7 +20,7 @@ def process_invoice(filename, output_path):
     invoice_items = extract_invoice_items(tables)
 
     ref_no = extract_ref_no(raw_text)
-    po_no = extract_po_no(raw_text)
+    po_no = extract_po_no(tables)
     date = extract_date(raw_text)
     customer_job = extract_customer_job(filename)
 
@@ -48,20 +48,35 @@ def process_results(invoice_items, date, invoice_no, tax, job_name="", po_no="",
     results["Buyer"] = buyer
     return results
 
-def extract_buyer(table):
-    if len(table) <= 1: return ''
-    try:
-        first_row = table[1].iloc[0]
-        non_null_columns = first_row[first_row.notna()]
+def extract_buyer(tables):
+    buyer = ''
+    # First check tables for rep/buyer column
+    for table in tables:
+        # Find columns that might contain rep/buyer
+        buyer_column = [col for col in table.columns
+                      if 'rep' in str(col).lower()]
 
-        if 1 <= len(non_null_columns) <= 3: # if the number of non-null columns is between 1 to 3
-            buyer = ''.join(value for value in non_null_columns)
-            buyer = buyer.replace('nan','').replace('*','')
+        if buyer_column:
+            # Get the first rep column found
+            buyer_col = buyer_column[0]
 
-            if 'contact' in buyer.lower() or 'call' in buyer.lower(): return buyer
-            else: return ''
-    except: return ''
-    return ''
+            try:
+                # Find first non-empty value in rep column (skip header row)
+                for idx in range(1, len(table)):
+                    value = table.iloc[idx][buyer_col]
+                    if pd.notna(value) and str(value).strip() != '':
+                        buyer = str(value).strip()
+                        return buyer
+
+                # If no values found in data rows, check header
+                header_value = table.iloc[0][buyer_col]
+                if pd.notna(header_value) and header_value != buyer_col:
+                    buyer = str(header_value).strip()
+                    return buyer
+
+            except (KeyError, IndexError):
+                continue
+    return buyer
 
 def extract_customer_job(filename):
 
@@ -100,12 +115,35 @@ def extract_date(text):
     return date
 
 
-def extract_po_no(text):
+def extract_po_no(tables):
     po_no = ''
-    hit = re.search(r'Customer PO #\n(\w*\d*)Rep', text)
-    if hit: po_no = hit.group(1)
-    return po_no
+    # First check tables for PO number columns
+    for table in tables:
+        # Find columns that might contain PO numbers
+        po_columns = [col for col in table.columns
+                      if 'customer po' in str(col).lower() or 'po #' in str(col).lower()]
 
+        if po_columns:
+            # Get the first PO column found
+            po_col = po_columns[0]
+
+            try:
+                # Find first non-empty value in PO column (skip header row)
+                for idx in range(1, len(table)):
+                    value = table.iloc[idx][po_col]
+                    if pd.notna(value) and str(value).strip() != '':
+                        po_no = str(value).strip()
+                        return po_no
+
+                # If no values found in data rows, check header
+                header_value = table.iloc[0][po_col]
+                if pd.notna(header_value) and header_value != po_col:
+                    po_no = str(header_value).strip()
+                    return po_no
+
+            except (KeyError, IndexError):
+                continue
+    return po_no
 
 def extract_ref_no(text):
 
@@ -361,6 +399,8 @@ def extract_tax(filename, page):
             lastPageData = lastPageData.get_text()
             if 'NY City Sales Tax' in lastPageData:
                 tax = lastPageData.split("(8.875%):", 1)[-1].split('\n')[1]
+            elif "(8.875%)" in lastPageData:
+                tax = lastPageData.split("(8.875%)", 1)[-1].split("\n")[0].strip()
             else:
                 lastPageData = lastPageData.split("NY Sales Tax (8.875%):", 1)
                 lastPageData = lastPageData[1].split("\n", 2)
