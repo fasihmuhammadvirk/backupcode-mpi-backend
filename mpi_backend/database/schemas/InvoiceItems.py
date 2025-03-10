@@ -28,6 +28,7 @@ class InvoiceItems(BaseModel):
     buyer: Optional[str]
     date_added: Optional[str]
     invoice_id: Optional[UUID]
+    is_active:Optional[bool]
     class Config:
         from_attributes = True
 
@@ -75,3 +76,8 @@ class UpdateInvoiceItemRequest(BaseModel):
     buyer: str = None
     date_added: str = None
     invoice_id: str = None
+    is_active:bool = None
+
+class ToggleVisibilityRequest(BaseModel):
+    ids: List[int]
+    make_visible: bool = False

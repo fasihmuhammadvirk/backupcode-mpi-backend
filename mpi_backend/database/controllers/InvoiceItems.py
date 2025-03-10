@@ -160,6 +160,33 @@ class InvoiceItemController:
             db.delete(item)
         db.commit()
 
+    def toggle_visibility(self, ids: List[int], make_visible: bool) -> int:
+        """Update visibility for given invoice items."""
+        try:
+            db = self.db_context
+            updated_count = db.query(InvoiceItem).filter(
+                InvoiceItem.id.in_(ids)
+            ).update({InvoiceItem.is_active: make_visible}, synchronize_session=False)
+
+            db.commit()
+            return updated_count
+        except Exception as e:
+            self.db_context.rollback()
+            raise HTTPException(status_code=500, detail=str(e))
+
+    def get_hidden_items(self):
+        """Fetch all hidden invoice items."""
+        try:
+            items = self.db_context.query(InvoiceItem).execution_options(include_all=True)\
+                    .filter(InvoiceItem.is_active.is_(False))\
+                    .all()
+            hidden_items = [item for item in items if not item.is_active]
+            invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in hidden_items]
+            return invoices_items
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+
     def update_invoice_items(self, items: List[Dict], background_tasks: BackgroundTasks):
         for item_data in items:
             item_id = item_data.get('id')
