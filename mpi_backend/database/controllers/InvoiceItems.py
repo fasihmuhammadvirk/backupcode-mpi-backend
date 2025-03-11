@@ -261,15 +261,15 @@ class InvoiceItemController:
         column_name: the column we want the values for.
         filter_context: the previous selected columns / previous applied filters
         """
-        column_name = getattr(InvoiceItem, column_name)
-        query = self.db_context.query(distinct(column_name))
+        my_column_name = getattr(InvoiceItem, column_name)
+        query = self.db_context.query(distinct(my_column_name))
 
         if filter_context:  # if there are previous filter selections -> add them in query
             for column in filter_context.keys():
                 filter_column = getattr(InvoiceItem, column)
                 query = query.filter(filter_column.in_(filter_context[column]))
 
-        distinct_values = query.order_by(column_name.asc()).all()
+        distinct_values = query.order_by(my_column_name.asc()).all()
         return [value[0] for value in distinct_values if value[0] is not None]
 
     def apply_filters(self, request,page, size, col_param=None):
