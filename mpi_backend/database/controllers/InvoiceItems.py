@@ -413,15 +413,15 @@ class InvoiceItemController:
 
             # Special handling for 'amount' column (string to float conversion)
             if comp_filter.column == "amount":
-                column = cast(column, Float)
+                column = cast(func.replace(column, ',', ''), Float)
 
             # Handle type casting for comparison filters
             try:
                 if comp_filter.column == "amount":
                     try:
-                        value = float(comp_filter.value)
+                        value = float(comp_filter.value.replace(",", ""))
                     except ValueError:
-                        continue  # Skip invalid float conversion
+                        raise HTTPException(status_code=400, detail=f"Invalid amount format: {comp_filter.value}")
                 elif column.type.python_type == int:
                     value = int(comp_filter.value)
                 elif column.type.python_type == float:
@@ -447,7 +447,7 @@ class InvoiceItemController:
                 raise HTTPException(status_code=400, detail=f"Invalid operator: {comp_filter.operator}")
 
         # Cast amount to float for calculations
-        amount_column = cast(InvoiceItem.amount, Float)
+        amount_column = cast(func.replace(InvoiceItem.amount, ',', ''), Float)
 
         aggregates = query.with_entities(
             func.sum(InvoiceItem.qty).label('total_qty'),
