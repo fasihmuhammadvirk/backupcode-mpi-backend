@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 from mpi_backend.config import SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, INVOICE_DOWNLOAD_FOLDER, SUPPLIERS, TIMEZONE
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
-from mpi_backend.utils.invoice_convertor import convert_invoice
+from mpi_backend.utils.new_invoice_convertor import convert_invoice
 
 EXCLUDED_SENDERS = [
     "info@wwps.co", "bmwpsupply@gmail.com", "billing@ysplumbing.com",
@@ -45,7 +45,7 @@ def login():
 
 def search_last_30_days_emails(mail):
     try:
-        date_30_days_ago = (datetime.now(TIMEZONE) - timedelta(days=30)).strftime('%d-%b-%Y')
+        date_30_days_ago = (datetime.now(TIMEZONE) - timedelta(days=0.5)).strftime('%d-%b-%Y')
         logger.info(f"Searching for emails since {date_30_days_ago}")
         result, data = mail.uid('search', None, f'(SINCE "{date_30_days_ago}")')
         if result != 'OK':
@@ -111,7 +111,7 @@ def download_email_attachments(email_message, base_folder_path):
 
                     # Supplier detection
                     try:
-                        logger.info(f"Emailed with Subject: {email_message.get('Subject')}")
+                        logger.info(f"\nEmailed with Subject: {email_message.get('Subject')}")
                         supplier_name = get_supplier(
                             email_message.get('Subject', ''),
                             email_message.get('Return-Path', '')
@@ -179,7 +179,7 @@ def download_email_attachments(email_message, base_folder_path):
 def email_download_background_task():
     mail = None
     try:
-        base_folder = datetime.now(TIMEZONE).strftime('%d-%b-%Y_%H-%M-%S')
+        base_folder = f"{(datetime.now(TIMEZONE) - timedelta(minutes=3)).strftime('%d-%b-%Y_%H-%M-%S')} - {datetime.now(TIMEZONE).strftime('%d-%b-%Y_%H-%M-%S')}"
         base_folder_path = Path(INVOICE_DOWNLOAD_FOLDER) / base_folder
         base_folder_path.mkdir(parents=True, exist_ok=True)
         logger.info(f"Created download directory: {base_folder_path}")
