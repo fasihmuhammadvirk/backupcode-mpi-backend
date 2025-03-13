@@ -15,7 +15,7 @@ from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.export_utils import convert_items_to_dataframe
 from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
 from mpi_backend.utils.s3_utils import upload_file, get_presigned_url
-
+from mpi_backend.database.schemas.InvoiceItems import ToggleVisibilityRequest
 router = APIRouter(prefix="/invoice-items")
 
 
@@ -78,6 +78,25 @@ def update_invoice_items(items: List[UpdateInvoiceItemRequest],background_tasks:
     controller.update_invoice_items([item.dict() for item in items], background_tasks)
     return {"status": "invoices updated successfully"}
 
+
+@router.put("/toggle-visibility", status_code=200)
+def toggle_visibility(
+    request: ToggleVisibilityRequest,
+    db: Session = Depends(get_db),
+    token: str = Depends(JWTBearer())
+):
+    controller = InvoiceItemController(db)
+    updated_count = controller.toggle_visibility(request.ids, request.make_visible)
+    return {"status": f"Updated visibility for {updated_count} items"}
+
+
+@router.get("/hidden-items", response_model=Page[InvoiceItems])
+def get_hidden_items(
+    db: Session = Depends(get_db),
+    token: str = Depends(JWTBearer())
+):
+    controller = InvoiceItemController(db)
+    return paginate(controller.get_hidden_items())
 
 @router.get("/count")
 def count_invoice_items(db: Session = Depends(get_db), token: str = Depends(JWTBearer())):

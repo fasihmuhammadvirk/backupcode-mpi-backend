@@ -160,6 +160,33 @@ class InvoiceItemController:
             db.delete(item)
         db.commit()
 
+    def toggle_visibility(self, ids: List[int], make_visible: bool) -> int:
+        """Update visibility for given invoice items."""
+        try:
+            db = self.db_context
+            updated_count = db.query(InvoiceItem).filter(
+                InvoiceItem.id.in_(ids)
+            ).update({InvoiceItem.is_active: make_visible}, synchronize_session=False)
+
+            db.commit()
+            return updated_count
+        except Exception as e:
+            self.db_context.rollback()
+            raise HTTPException(status_code=500, detail=str(e))
+
+    def get_hidden_items(self):
+        """Fetch all hidden invoice items."""
+        try:
+            items = self.db_context.query(InvoiceItem).execution_options(include_all=True)\
+                    .filter(InvoiceItem.is_active.is_(False))\
+                    .all()
+            hidden_items = [item for item in items if not item.is_active]
+            invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in hidden_items]
+            return invoices_items
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+
     def update_invoice_items(self, items: List[Dict], background_tasks: BackgroundTasks):
         for item_data in items:
             item_id = item_data.get('id')
@@ -234,15 +261,15 @@ class InvoiceItemController:
         column_name: the column we want the values for.
         filter_context: the previous selected columns / previous applied filters
         """
-        column_name = getattr(InvoiceItem, column_name)
-        query = self.db_context.query(distinct(column_name))
+        my_column_name = getattr(InvoiceItem, column_name)
+        query = self.db_context.query(distinct(my_column_name))
 
         if filter_context:  # if there are previous filter selections -> add them in query
             for column in filter_context.keys():
                 filter_column = getattr(InvoiceItem, column)
                 query = query.filter(filter_column.in_(filter_context[column]))
 
-        distinct_values = query.order_by(column_name.asc()).all()
+        distinct_values = query.order_by(my_column_name.asc()).all()
         return [value[0] for value in distinct_values if value[0] is not None]
 
     def apply_filters(self, request,page, size, col_param=None):
@@ -298,20 +325,36 @@ class InvoiceItemController:
             else:
                 raise HTTPException(status_code=400, detail=f"Invalid operator: {comp_filter.operator}")
 
-        if request.order_by: # applying sorting
+        # Tax ordering logic (Move Tax-related rows to the end)
+        tax_order = case(
+            (
+                (InvoiceItem.description == 'Tax'),1),
+            else_=0
+        )
+
+        # Apply ordering from request
+        order_clauses = []
+        latest_invoice_order = func.max(InvoiceItem.id).over(partition_by=InvoiceItem.invoice_id)
+        order_clauses.append(latest_invoice_order.desc())
+        order_clauses.append(InvoiceItem.invoice_id)
+        order_clauses.append(tax_order)
+
+        if request.order_by:
             for order_filter in request.order_by:
                 if not hasattr(InvoiceItem, order_filter.column):
                     raise HTTPException(status_code=400,
                                         detail=f"Invalid column name for ordering: {order_filter.column}")
 
                 column = getattr(InvoiceItem, order_filter.column)
-
                 if order_filter.order == "asc":
-                    query = query.order_by(column.asc())
+                    order_clauses.append(column.asc())
                 elif order_filter.order == "desc":
-                    query = query.order_by(column.desc())
+                    order_clauses.append(column.desc())
                 else:
                     raise HTTPException(status_code=400, detail=f"Invalid order direction: {order_filter.order}")
+
+        query = query.order_by(*order_clauses)
+
         if size == 0:
             if col_param: # select distinct values of certain column
                 column = getattr(InvoiceItem, col_param, None)
@@ -370,15 +413,15 @@ class InvoiceItemController:
 
             # Special handling for 'amount' column (string to float conversion)
             if comp_filter.column == "amount":
-                column = cast(column, Float)
+                column = cast(func.replace(column, ',', ''), Float)
 
             # Handle type casting for comparison filters
             try:
                 if comp_filter.column == "amount":
                     try:
-                        value = float(comp_filter.value)
+                        value = float(comp_filter.value.replace(",", ""))
                     except ValueError:
-                        continue  # Skip invalid float conversion
+                        raise HTTPException(status_code=400, detail=f"Invalid amount format: {comp_filter.value}")
                 elif column.type.python_type == int:
                     value = int(comp_filter.value)
                 elif column.type.python_type == float:
@@ -404,7 +447,7 @@ class InvoiceItemController:
                 raise HTTPException(status_code=400, detail=f"Invalid operator: {comp_filter.operator}")
 
         # Cast amount to float for calculations
-        amount_column = cast(InvoiceItem.amount, Float)
+        amount_column = cast(func.replace(InvoiceItem.amount, ',', ''), Float)
 
         aggregates = query.with_entities(
             func.sum(InvoiceItem.qty).label('total_qty'),
