@@ -395,7 +395,7 @@ def extract_tax(filename, page):
     elif "(8.875%)" in lastPageData:
         tax = lastPageData.split("(8.875%)", 1)[-1].split("\n")[0].strip()
     elif "(8.13%)" in lastPageData:
-        tax = lastPageData.split("(8.13%)", 1)[-1].split("\n")[0].strip(
+        tax = lastPageData.split("(8.13%)", 1)[-1].split("\n")[0].strip()
     try :
         if not "Subtotal" in lastPageData:
             lastPageData = data[page - 2]
