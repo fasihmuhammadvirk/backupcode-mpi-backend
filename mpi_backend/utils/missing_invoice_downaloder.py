@@ -8,28 +8,30 @@ from pathlib import Path
 from email.utils import parsedate_to_datetime
 import pytz
 import logging
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
 from mpi_backend.config import SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, INVOICE_DOWNLOAD_FOLDER, SUPPLIERS, TIMEZONE
-from datetime import datetime, timedelta
-
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.utils.invoice_convertor import convert_invoice
 
 EXCLUDED_SENDERS = [
-    "info@wwps.co", "bmwpsupply@gmail.com", "billing@ysplumbing.com", "accounting@supremeplumbingnj.com",
-    "orders@supremeplumbingnj.com", "billing@pyramidps.com", "purchasing@pyramidps.com",
-    "donotreply@brucesupply.net", "donotreply@certifiedlumber.com", "breindy@parkplumbingsupply.com",
-    "accounting@kjpsinc.com", "nefcocorp@billtrust.com", "timsfile@awisco.net", "billing@afsupply.com",
-    "billing@sparkleening.com", "billing@positive.tech", "ar@opusoperations.com", "donotreply@cardknox.com",
-    "billing@flowmarksupply.com", "mendy@flowmarksupply.com", "billing@mpiplumbingcorp.com", "Info@wwps.co"
+    "info@wwps.co", "bmwpsupply@gmail.com", "billing@ysplumbing.com",
+    "accounting@supremeplumbingnj.com", "orders@supremeplumbingnj.com",
+    "billing@pyramidps.com", "purchasing@pyramidps.com",
+    "donotreply@brucesupply.net", "donotreply@certifiedlumber.com",
+    "breindy@parkplumbingsupply.com", "accounting@kjpsinc.com",
+    "nefcocorp@billtrust.com", "timsfile@awisco.net",
+    "billing@afsupply.com", "billing@sparkleening.com",
+    "billing@positive.tech", "ar@opusoperations.com",
+    "donotreply@cardknox.com", "billing@flowmarksupply.com",
+    "mendy@flowmarksupply.com", "billing@mpiplumbingcorp.com",
+    "Info@wwps.co"
 ]
 
 
 def login():
-    """Establish IMAP connection with error handling"""
-    mail = None
     try:
         mail = imaplib.IMAP4_SSL(SMTP_SERVER)
         mail.login(LOGIN_EMAIL, LOGIN_PWD)
@@ -38,29 +40,57 @@ def login():
         return mail
     except Exception as e:
         logger.error(f"IMAP connection failed: {str(e)}")
-        if mail:
-            mail.logout()
         raise
 
 
-def search_emails_last_30_days(mail):
-    """Search for emails from the last 30 days, including both read and unread messages."""
+def search_last_30_days_emails(mail):
     try:
-        thirty_days_ago = (datetime.now(TIMEZONE) - timedelta(days=30)).strftime('%d-%b-%Y')
-        logger.info(f"Searching for emails since {thirty_days_ago}")
-
-        result, data = mail.uid('search', None, f'(SINCE "{thirty_days_ago}")')
+        date_30_days_ago = (datetime.now(TIMEZONE) - timedelta(days=30)).strftime('%d-%b-%Y')
+        logger.info(f"Searching for emails since {date_30_days_ago}")
+        result, data = mail.uid('search', None, f'(SINCE "{date_30_days_ago}")')
         if result != 'OK':
             logger.error(f"Email search failed: {result}")
             return []
-
-        email_ids = data[0].split()
-        logger.info(f"Found {len(email_ids)} emails in the last 30 days")
-        return email_ids
-
+        raw_email_ids = data[0].split()
+        logger.info(f"Found {len(raw_email_ids)} emails in last 30 days")
+        return raw_email_ids
     except Exception as e:
-        logger.error(f"Error in search_emails_last_30_days: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"Error in search_last_30_days_emails: {str(e)}\n{traceback.format_exc()}")
         return []
+
+
+def get_supplier(email_subject, supplier_email) -> str:
+    """Get supplier name with error handling"""
+    try:
+        subject = (email_subject or "").lower()
+        supplier_email = (supplier_email or "").lower()
+
+        if "statement" in subject:
+            return "no_supplier"
+        if "bmw" in subject:
+            return SUPPLIERS[0]
+        elif "world wide" in subject:
+            return SUPPLIERS[1]
+        elif "y&s" in subject:
+            return SUPPLIERS[2]
+        elif "invoice # i-" in subject or "supreme plumbing" in subject:
+            return SUPPLIERS[3]
+        elif "pyramid plumbing invoice" in subject:
+            return SUPPLIERS[4]
+        elif "abc opus services" in subject:
+            return SUPPLIERS[5]
+        elif "park plumbing & heating supply - invoices overnight" in subject:
+            return SUPPLIERS[6]
+        elif "webb payment receipt" in subject:
+            return SUPPLIERS[8]
+        elif "see invoice i-" in subject:
+            return SUPPLIERS[9]
+        else:
+            logger.warning(f"Unknown supplier for subject: {email_subject}")
+            return "no_supplier"
+    except Exception as e:
+        logger.error(f"Supplier detection failed: {str(e)}\n{traceback.format_exc()}")
+        return "no_supplier"
 
 
 def download_email_attachments(email_message, base_folder_path):
@@ -119,7 +149,7 @@ def download_email_attachments(email_message, base_folder_path):
                     # File handling
                     filename = part.get_filename()
                     if not filename:
-                        logger.warning("Attachment missing filename, skipping")
+                        logger.warning(f"Attachment missing filename, skipping of {email_message.get('Subject')}")
                         continue
 
                     if not filename.lower().endswith(('.pdf', '.PDF')):
@@ -146,47 +176,16 @@ def download_email_attachments(email_message, base_folder_path):
         logger.error(f"Error in download_email_attachments: {str(e)}\n{traceback.format_exc()}")
 
 
-def get_supplier(email_subject, supplier_email) -> str:
-    """Get supplier name with error handling"""
-    try:
-        subject = (email_subject or "").lower()
-        supplier_email = (supplier_email or "").lower()
-
-        if "statement" in subject:
-            return "no_supplier"
-        if "bmw" in subject:
-            return SUPPLIERS[0]
-        elif "world wide" in subject:
-            return SUPPLIERS[1]
-        elif "y&s" in subject:
-            return SUPPLIERS[2]
-        elif "invoice # i-" in subject or "supreme plumbing" in subject:
-            return SUPPLIERS[3]
-        elif "pyramid plumbing invoice" in subject:
-            return SUPPLIERS[4]
-        elif "abc opus services" in subject:
-            return SUPPLIERS[5]
-        elif "park plumbing & heating supply - invoices overnight" in subject:
-            return SUPPLIERS[6]
-        elif "webb payment receipt" in subject:
-            return SUPPLIERS[8]
-        elif "see invoice i-" in subject:
-            return SUPPLIERS[9]
-        else:
-            logger.warning(f"Unknown supplier for subject: {email_subject}")
-            return "no_supplier"
-    except Exception as e:
-        logger.error(f"Supplier detection failed: {str(e)}\n{traceback.format_exc()}")
-        return "no_supplier"
-
-
 def email_download_background_task():
-    """Main task function with comprehensive error handling"""
     mail = None
     try:
-        mail = login()
-        email_ids = search_emails_last_30_days(mail)
+        base_folder = datetime.now(TIMEZONE).strftime('%d-%b-%Y_%H-%M-%S')
+        base_folder_path = Path(INVOICE_DOWNLOAD_FOLDER) / base_folder
+        base_folder_path.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Created download directory: {base_folder_path}")
 
+        mail = login()
+        email_ids = search_last_30_days_emails(mail)
         if not email_ids:
             logger.info("No new emails to process")
             return
@@ -199,18 +198,22 @@ def email_download_background_task():
                 if result != 'OK' or not response or not response[0]:
                     logger.error(f"Failed to fetch email UID {e_id}")
                     continue
-
-                try:
-                    raw_email = response[0][1].decode('utf-8')
-                except UnicodeDecodeError:
-                    raw_email = response[0][1].decode('latin-1')
-
-                email_message = email.message_from_string(raw_email)
-                download_email_attachments(email_message, INVOICE_DOWNLOAD_FOLDER)
-
+                raw_email = response[0][1]
+                email_message = email.message_from_bytes(raw_email)
+                download_email_attachments(email_message, base_folder_path)
+                mail.uid('store', e_id, '+FLAGS', '(\Seen)')
+                logger.info(f"Marked email UID {e_id} as seen")
             except Exception as email_error:
                 logger.error(f"Failed to process email UID {e_id}: {str(email_error)}\n{traceback.format_exc()}")
                 continue
+
+        logger.info("Starting invoice conversion")
+        converted_files, failed_files = convert_invoice(base_folder_path)
+        logger.info(f"Conversion complete. Success: {len(converted_files)}, Failed: {len(failed_files)}")
+
+        logger.info("Starting data processing")
+        process_extracted_data(converted_files, failed_files)
+        logger.info("Data processing complete")
 
     except Exception as main_error:
         logger.error(f"Critical error in background task: {str(main_error)}\n{traceback.format_exc()}")
