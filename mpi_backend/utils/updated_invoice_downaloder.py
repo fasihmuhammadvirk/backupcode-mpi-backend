@@ -16,7 +16,7 @@ from mpi_backend.config import SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, INVOICE_DOWN
 from datetime import datetime, timedelta
 
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
-from mpi_backend.utils.invoice_convertor import convert_invoice
+from mpi_backend.utils.new_invoice_convertor import convert_invoice
 
 EXCLUDED_SENDERS = [  # suppliers whose emails are to be marked as read after downloading
     "info@wwps.co",
@@ -64,22 +64,34 @@ def login():
 
 
 def filter_by_time(email_ids, reference_time, mail):
-    """Filter emails by time with enhanced error handling"""
+    """Filter unread emails based on time with improved debugging"""
     emails_info = []
     if not email_ids:
-        logger.info("No emails to filter by time")
+        logger.info("No emails found to filter by time.")
         return emails_info
 
-    logger.info(f"Starting time filtering for {len(email_ids)} emails")
+    logger.info(f"Filtering {len(email_ids)} emails by time and unread status...")
 
     for idx, email_id in enumerate(email_ids, 1):
         try:
             email_id = email_id.decode('utf-8') if isinstance(email_id, bytes) else email_id
-            logger.debug(f"Processing email {idx}/{len(email_ids)} - UID: {email_id}")
+            logger.debug(f"Checking email {idx}/{len(email_ids)} - UID: {email_id}")
 
+            # Check if email is unread
+            result, flags_data = mail.uid('fetch', email_id, '(FLAGS)')
+            if result != 'OK' or not flags_data:
+                logger.error(f"Failed to fetch flags for email UID {email_id}. Skipping.")
+                continue
+
+            flags = flags_data[0].decode() if isinstance(flags_data[0], bytes) else flags_data[0]
+            if '\\Seen' in flags:
+                logger.debug(f"Email UID {email_id} is already read. Skipping.")
+                continue
+
+            # Fetch the email data
             result, email_data = mail.uid('fetch', email_id, '(RFC822)')
-            if result != 'OK':
-                logger.error(f"Failed to fetch email UID {email_id}: {result}")
+            if result != 'OK' or not email_data:
+                logger.error(f"Failed to fetch email UID {email_id}. Skipping.")
                 continue
 
             raw_email = email_data[0][1]
@@ -87,32 +99,40 @@ def filter_by_time(email_ids, reference_time, mail):
 
             date_header = msg.get('Date', '')
             if not date_header:
-                logger.warning(f"No Date header found for email UID {email_id}")
+                logger.warning(f"No Date header found for email UID {email_id}. Skipping.")
                 continue
 
             try:
                 email_sent_time = parsedate_to_datetime(date_header)
-                if not email_sent_time.tzinfo:
+                if email_sent_time is None:
+                    logger.error(f"Failed to parse date for email UID {email_id}. Skipping.")
+                    continue
+
+                # Ensure timezone-awareness
+                if email_sent_time.tzinfo is None:
                     email_sent_time = TIMEZONE.localize(email_sent_time)
                 else:
                     email_sent_time = email_sent_time.astimezone(TIMEZONE)
+
+                time_difference = (reference_time - email_sent_time).total_seconds()
+
+                # Allow some buffer time (e.g., emails received within last 30 mins)
+                if 0 <= time_difference <= 1800:
+                    emails_info.append(email_id)
+                    logger.debug(f"Unread email UID {email_id} added to processing list. Sent at: {email_sent_time}")
+                else:
+                    logger.debug(
+                        f"Email UID {email_id} skipped. Sent at: {email_sent_time} (Diff: {time_difference} sec)")
+
             except Exception as parse_error:
                 logger.error(f"Date parsing failed for UID {email_id}: {str(parse_error)}")
-                logger.debug(f"Problematic Date header: {date_header}")
                 continue
-
-            time_difference = reference_time - email_sent_time
-            if time_difference.total_seconds() <= 1500:
-                emails_info.append(email_id)
-                logger.debug(f"Email UID {email_id} passed time filter")
-            else:
-                logger.debug(f"Email UID {email_id} filtered out by time difference: {time_difference}")
 
         except Exception as e:
             logger.error(f"Error processing email UID {email_id}: {str(e)}\n{traceback.format_exc()}")
             continue
 
-    logger.info(f"Time filtering complete. {len(emails_info)} emails passed filter")
+    logger.info(f"Filtering complete. {len(emails_info)} unread emails passed the time filter.")
     return emails_info
 
 
@@ -161,6 +181,40 @@ def search_new_emails(mail):
     except Exception as e:
         logger.error(f"Error in search_new_emails: {str(e)}\n{traceback.format_exc()}")
         return []
+
+
+def get_supplier(email_subject, supplier_email) -> str:
+    """Get supplier name with error handling"""
+    try:
+        subject = (email_subject or "").lower()
+        supplier_email = (supplier_email or "").lower()
+
+        if "statement" in subject:
+            return "no_supplier"
+        if "bmw" in subject:
+            return SUPPLIERS[0]
+        elif "world wide" in subject:
+            return SUPPLIERS[1]
+        elif "y&s" in subject:
+            return SUPPLIERS[2]
+        elif "invoice # i-" in subject or "supreme plumbing" in subject:
+            return SUPPLIERS[3]
+        elif "pyramid plumbing invoice" in subject:
+            return SUPPLIERS[4]
+        elif "abc opus services" in subject:
+            return SUPPLIERS[5]
+        elif "park plumbing & heating supply - invoices overnight" in subject:
+            return SUPPLIERS[6]
+        elif "webb payment receipt" in subject:
+            return SUPPLIERS[8]
+        elif "see invoice i-" in subject:
+            return SUPPLIERS[9]
+        else:
+            logger.warning(f"Unknown supplier for subject: {email_subject}")
+            return "no_supplier"
+    except Exception as e:
+        logger.error(f"Supplier detection failed: {str(e)}\n{traceback.format_exc()}")
+        return "no_supplier"
 
 
 def download_email_attachments(email_message, base_folder_path):
@@ -244,40 +298,6 @@ def download_email_attachments(email_message, base_folder_path):
 
     except Exception as e:
         logger.error(f"Error in download_email_attachments: {str(e)}\n{traceback.format_exc()}")
-
-
-def get_supplier(email_subject, supplier_email) -> str:
-    """Get supplier name with error handling"""
-    try:
-        subject = (email_subject or "").lower()
-        supplier_email = (supplier_email or "").lower()
-
-        if "statement" in subject:
-            return "no_supplier"
-        if "bmw" in subject:
-            return SUPPLIERS[0]
-        elif "world wide" in subject:
-            return SUPPLIERS[1]
-        elif "y&s" in subject:
-            return SUPPLIERS[2]
-        elif "invoice # i-" in subject or "supreme plumbing" in subject:
-            return SUPPLIERS[3]
-        elif "pyramid plumbing invoice" in subject:
-            return SUPPLIERS[4]
-        elif "abc opus services" in subject:
-            return SUPPLIERS[5]
-        elif "park plumbing & heating supply - invoices overnight" in subject:
-            return SUPPLIERS[6]
-        elif "webb payment receipt" in subject:
-            return SUPPLIERS[8]
-        elif "see invoice i-" in subject:
-            return SUPPLIERS[9]
-        else:
-            logger.warning(f"Unknown supplier for subject: {email_subject}")
-            return "no_supplier"
-    except Exception as e:
-        logger.error(f"Supplier detection failed: {str(e)}\n{traceback.format_exc()}")
-        return "no_supplier"
 
 
 def email_download_background_task():

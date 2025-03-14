@@ -16,7 +16,7 @@ from mpi_backend.api.routes import quickbooks
 from mpi_backend.api.routes import signin
 from mpi_backend.api.routes import filters
 from mpi_backend.config import LOG_LEVEL
-from mpi_backend.utils.invoice_downloader import email_download_background_task
+from mpi_backend.utils.updated_invoice_downaloder import email_download_background_task
 from mpi_backend.utils.invoice_convertor import convert_invoice
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.database import Base, engine
