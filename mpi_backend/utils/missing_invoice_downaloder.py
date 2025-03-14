@@ -1,12 +1,9 @@
-import time
 import imaplib
 import email
 import os
-import re
 import traceback
 from pathlib import Path
 from email.utils import parsedate_to_datetime
-import pytz
 import logging
 from datetime import datetime, timedelta
 
@@ -45,17 +42,18 @@ def login():
 
 def search_last_30_days_emails(mail):
     try:
-        date_30_days_ago = (datetime.now(TIMEZONE) - timedelta(days=0.5)).strftime('%d-%b-%Y')
-        logger.info(f"Searching for emails since {date_30_days_ago}")
-        result, data = mail.uid('search', None, f'(SINCE "{date_30_days_ago}")')
+        date_2_days_ago = (datetime.now(TIMEZONE) - timedelta(days=2)).strftime(
+            '%d-%b-%Y')  # get mail of previous 2 days
+        logger.info(f"Searching for emails since {date_2_days_ago}")
+        result, data = mail.uid('search', None, f'(SINCE "{date_2_days_ago}")')
         if result != 'OK':
             logger.error(f"Email search failed: {result}")
             return []
         raw_email_ids = data[0].split()
-        logger.info(f"Found {len(raw_email_ids)} emails in last 30 days")
+        logger.info(f"Found {len(raw_email_ids)} emails in last 2 days")
         return raw_email_ids
     except Exception as e:
-        logger.error(f"Error in search_last_30_days_emails: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"Error in search_last_2_days_emails: {str(e)}\n{traceback.format_exc()}")
         return []
 
 
@@ -176,7 +174,7 @@ def download_email_attachments(email_message, base_folder_path):
         logger.error(f"Error in download_email_attachments: {str(e)}\n{traceback.format_exc()}")
 
 
-def email_download_background_task():
+def missing_email_download_background_task():
     mail = None
     try:
         base_folder = f"{(datetime.now(TIMEZONE) - timedelta(minutes=3)).strftime('%d-%b-%Y_%H-%M-%S')} - {datetime.now(TIMEZONE).strftime('%d-%b-%Y_%H-%M-%S')}"

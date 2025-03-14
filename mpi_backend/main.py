@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from fastapi_pagination import add_pagination
 from fastapi.middleware.cors import CORSMiddleware
+import pytz
 # from apitally.fastapi import ApitallyMiddleware
 
 
@@ -17,6 +19,8 @@ from mpi_backend.api.routes import signin
 from mpi_backend.api.routes import filters
 from mpi_backend.config import LOG_LEVEL
 from mpi_backend.utils.updated_invoice_downaloder import email_download_background_task
+from mpi_backend.utils.missing_invoice_downaloder import missing_email_download_background_task
+
 from mpi_backend.utils.invoice_convertor import convert_invoice
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.database import Base, engine
@@ -26,16 +30,29 @@ from mpi_backend.config.logging_config import setup_logging
 setup_logging()
 
 import logging
+
 logger = logging.getLogger(__name__)
+
 # from middleware import MwTracker
 # tracker=MwTracker() # initializing middleware monitoring tool // comment out when running in local environment
 
+UTC_TZ = pytz.utc  # UTC Time Zone
+
+
 @asynccontextmanager
-async def lifespan(app:FastAPI):
+async def lifespan(app: FastAPI):
     scheduler = BackgroundScheduler()
     scheduler.add_job(email_download_background_task, "interval", minutes=3, max_instances=20)
+    scheduler.add_job(missing_email_download_background_task,
+                      CronTrigger(hour=2, minute=0, timezone=UTC_TZ),
+                      # Eastern Time: 9:00 PM Previous Day
+                      # European Time: 3:00 AM Same Day
+                      max_instances=1,
+                      replace_existing=True  # Avoids duplicate jobs if restarted
+                      )
     scheduler.start()
     yield
+
 
 app = FastAPI(lifespan=lifespan)
 
@@ -48,6 +65,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # app.add_middleware(
 #     ApitallyMiddleware,
