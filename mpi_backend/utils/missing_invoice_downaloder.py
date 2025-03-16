@@ -199,8 +199,18 @@ def missing_email_download_background_task():
                 raw_email = response[0][1]
                 email_message = email.message_from_bytes(raw_email)
                 download_email_attachments(email_message, base_folder_path)
-                mail.uid('store', e_id, '+FLAGS', '(\Seen)')
-                logger.info(f"Marked email UID {e_id} as seen")
+
+                subject = (email_message.get('Subject', '') or '').lower()
+                in_reply_to = email_message.get('In-Reply-To', '')
+                references = email_message.get('References', '')
+
+                is_thread = bool(in_reply_to or references)
+                has_invoice_keyword = any(kw in subject for kw in ['invoice', 'invoices', 'invoice(s)'])
+
+                if is_thread or not has_invoice_keyword:
+                    mail.uid('store', e_id, '-FLAGS', '(\Seen)')
+                    logger.info(f"Marked email UID {e_id} as unread")
+
             except Exception as email_error:
                 logger.error(f"Failed to process email UID {e_id}: {str(email_error)}\n{traceback.format_exc()}")
                 continue

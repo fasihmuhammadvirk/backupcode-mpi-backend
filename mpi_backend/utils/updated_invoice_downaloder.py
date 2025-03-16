@@ -349,7 +349,7 @@ def email_download_background_task():
                         references = email_message.get('References', '')
 
                         is_thread = bool(in_reply_to or references)
-                        has_invoice_keyword = any(kw in subject for kw in ['invoice', 'invoices'])
+                        has_invoice_keyword = any(kw in subject for kw in ['invoice', 'invoices','invoice(s)'])
 
                         if is_thread or not has_invoice_keyword:
                             mail.uid('store', e_id, '-FLAGS', '(\Seen)')
