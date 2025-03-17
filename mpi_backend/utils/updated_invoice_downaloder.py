@@ -62,84 +62,11 @@ def login():
             mail.logout()
         raise
 
-
-def filter_by_time(email_ids, reference_time, mail):
-    """Filter unread emails based on time with improved debugging"""
-    emails_info = []
-    if not email_ids:
-        logger.info("No emails found to filter by time.")
-        return emails_info
-
-    logger.info(f"Filtering {len(email_ids)} emails by time and unread status...")
-
-    for idx, email_id in enumerate(email_ids, 1):
-        try:
-            email_id = email_id.decode('utf-8') if isinstance(email_id, bytes) else email_id
-            logger.debug(f"Checking email {idx}/{len(email_ids)} - UID: {email_id}")
-
-            # Check if email is unread
-            result, flags_data = mail.uid('fetch', email_id, '(FLAGS)')
-            if result != 'OK' or not flags_data:
-                logger.error(f"Failed to fetch flags for email UID {email_id}. Skipping.")
-                continue
-
-            flags = flags_data[0].decode() if isinstance(flags_data[0], bytes) else flags_data[0]
-            if '\\Seen' in flags:
-                logger.debug(f"Email UID {email_id} is already read. Skipping.")
-                continue
-
-            # Fetch the email data
-            result, email_data = mail.uid('fetch', email_id, '(RFC822)')
-            if result != 'OK' or not email_data:
-                logger.error(f"Failed to fetch email UID {email_id}. Skipping.")
-                continue
-
-            raw_email = email_data[0][1]
-            msg = email.message_from_bytes(raw_email)
-
-            date_header = msg.get('Date', '')
-            if not date_header:
-                logger.warning(f"No Date header found for email UID {email_id}. Skipping.")
-                continue
-
-            try:
-                email_sent_time = parsedate_to_datetime(date_header)
-                if email_sent_time is None:
-                    logger.error(f"Failed to parse date for email UID {email_id}. Skipping.")
-                    continue
-
-                # Ensure timezone-awareness
-                if email_sent_time.tzinfo is None:
-                    email_sent_time = TIMEZONE.localize(email_sent_time)
-                else:
-                    email_sent_time = email_sent_time.astimezone(TIMEZONE)
-
-                time_difference = (reference_time - email_sent_time).total_seconds()
-
-                # Allow some buffer time (e.g., emails received within last 30 mins)
-                if 0 <= time_difference <= 1800:
-                    emails_info.append(email_id)
-                    logger.debug(f"Unread email UID {email_id} added to processing list. Sent at: {email_sent_time}")
-                else:
-                    logger.debug(
-                        f"Email UID {email_id} skipped. Sent at: {email_sent_time} (Diff: {time_difference} sec)")
-
-            except Exception as parse_error:
-                logger.error(f"Date parsing failed for UID {email_id}: {str(parse_error)}")
-                continue
-
-        except Exception as e:
-            logger.error(f"Error processing email UID {email_id}: {str(e)}\n{traceback.format_exc()}")
-            continue
-
-    logger.info(f"Filtering complete. {len(emails_info)} unread emails passed the time filter.")
-    return emails_info
-
-
 def search_new_emails(mail):
     """Search for new emails with error handling"""
     try:
-        time_frame = datetime.now(TIMEZONE).strftime('%d-%b-%Y')
+        current_time = datetime.now(TIMEZONE) - timedelta(minutes=25) # of last 25 minnutes
+        time_frame = current_time.strftime('%d-%b-%Y')
         logger.info(f"Searching for emails since {time_frame}")
 
         result, data = mail.uid('search', None, f'(SINCE "{time_frame}")')
@@ -318,8 +245,7 @@ def email_download_background_task():
         # Email processing
         try:
             mail = login()
-            email_ids = search_new_emails(mail)
-            filtered_ids = filter_by_time(email_ids, time_window_start, mail)
+            filtered_ids = search_new_emails(mail)
 
             if not filtered_ids:
                 logger.info("No new emails to process")
@@ -344,16 +270,17 @@ def email_download_background_task():
 
                     # Thread handling logic
                     try:
-                        subject = (email_message.get('Subject', '') or '').lower()
-                        in_reply_to = email_message.get('In-Reply-To', '')
-                        references = email_message.get('References', '')
+                        if  filtered_ids != 0:
+                            subject = (email_message.get('Subject', '') or '').lower()
+                            in_reply_to = email_message.get('In-Reply-To', '')
+                            references = email_message.get('References', '')
 
-                        is_thread = bool(in_reply_to or references)
-                        has_invoice_keyword = any(kw in subject for kw in ['invoice', 'invoices','invoice(s)'])
+                            is_thread = bool(in_reply_to or references)
+                            has_invoice_keyword = any(kw in subject for kw in ['invoice', 'invoices','invoice(s)'])
 
-                        if is_thread or not has_invoice_keyword:
-                            mail.uid('store', e_id, '-FLAGS', '(\Seen)')
-                            logger.info(f"Marked email UID {e_id} as unread")
+                            if is_thread or not has_invoice_keyword:
+                                mail.uid('store', e_id, '-FLAGS', '(\Seen)')
+                                logger.info(f"Marked email UID {e_id} as unread")
                     except Exception as flag_error:
                         logger.error(f"Error handling read status for UID {e_id}: {str(flag_error)}")
 

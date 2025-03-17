@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
     scheduler = BackgroundScheduler()
     scheduler.add_job(email_download_background_task, "interval", minutes=3, max_instances=20)
     scheduler.add_job(missing_email_download_background_task,
-                      CronTrigger(hour=2, minute=0, timezone=UTC_TZ),
+                      CronTrigger(hour=5, minute=0, timezone=UTC_TZ),
                       # Eastern Time: 9:00 PM Previous Day
                       # European Time: 3:00 AM Same Day
                       max_instances=1,
