@@ -36,6 +36,7 @@ EXCLUDED_SENDERS = [  # suppliers whose emails are to be marked as read after do
     "billing@sparkleening.com",
     "billing@positive.tech",
     "ar@opusoperations.com",
+    "AR@opusoperations.com",
     "donotreply@cardknox.com",
     "billing@flowmarksupply.com",
     "mendy@flowmarksupply.com",
