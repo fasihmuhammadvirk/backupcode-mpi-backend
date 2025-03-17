@@ -62,14 +62,15 @@ def login():
             mail.logout()
         raise
 
+
 def search_new_emails(mail):
     """Search for new emails with error handling"""
     try:
-        current_time = datetime.now(TIMEZONE) - timedelta(minutes=25) # of last 25 minnutes
-        time_frame = current_time.strftime('%d-%b-%Y')
+
+        time_frame = datetime.now(TIMEZONE).strftime('%d-%b-%Y')
         logger.info(f"Searching for emails since {time_frame}")
 
-        result, data = mail.uid('search', None, f'(SINCE "{time_frame}")')
+        result, data = mail.uid('search', None, f'(SINCE {time_frame} UNSEEN)')
         if result != 'OK':
             logger.error(f"Email search failed: {result}")
             return []
@@ -84,6 +85,7 @@ def search_new_emails(mail):
                 logger.debug(f"Processing email {idx}/{len(raw_email_ids)} - UID: {email_id}")
 
                 result, msg_data = mail.uid('fetch', email_id, '(BODY.PEEK[HEADER.FIELDS (FROM)])')
+
                 if result != 'OK':
                     logger.warning(f"Failed to fetch headers for UID {email_id}: {result}")
                     continue
@@ -95,6 +97,7 @@ def search_new_emails(mail):
                 if from_email in EXCLUDED_SENDERS:
                     filtered_email_ids.append(email_id)
                     logger.debug(f"Email UID {email_id} from excluded sender: {from_email}")
+
                 else:
                     logger.debug(f"Email UID {email_id} from non-excluded sender: {from_email}")
 
@@ -255,11 +258,12 @@ def email_download_background_task():
             for idx, e_id in enumerate(filtered_ids, 1):
                 try:
                     logger.info(f"Processing email {idx}/{len(filtered_ids)} - UID: {e_id}")
-                    result, response = mail.uid('fetch', e_id, '(BODY.PEEK[])')
+                    # result, response = mail.uid('fetch', e_id, '(BODY.PEEK[])')
+                    result, response = mail.uid('fetch', e_id, '(RFC822)')
+
                     if result != 'OK' or not response or not response[0]:
                         logger.error(f"Failed to fetch email UID {e_id}")
                         continue
-
                     try:
                         raw_email = response[0][1].decode('utf-8')
                     except UnicodeDecodeError:
@@ -269,18 +273,17 @@ def email_download_background_task():
                     download_email_attachments(email_message, base_folder_path)
 
                     # Thread handling logic
-                    try:
-                        if  filtered_ids != 0:
-                            subject = (email_message.get('Subject', '') or '').lower()
-                            in_reply_to = email_message.get('In-Reply-To', '')
-                            references = email_message.get('References', '')
+                    try:  # check if it is invoice, if it is not mark emails as unread
+                        subject = email_message['subject'].lower() if email_message['subject'] else ""
+                        in_reply_to = email_message['In-Reply-To']
+                        references = email_message['References']
 
-                            is_thread = bool(in_reply_to or references)
-                            has_invoice_keyword = any(kw in subject for kw in ['invoice', 'invoices','invoice(s)'])
+                        is_thread = bool(in_reply_to or references)  # Check if the email is part of a thread or not
+                        has_invoice_keyword = any(kw in subject for kw in ['invoice', 'invoices', 'invoice(s)'])
 
-                            if is_thread or not has_invoice_keyword:
-                                mail.uid('store', e_id, '-FLAGS', '(\Seen)')
-                                logger.info(f"Marked email UID {e_id} as unread")
+                        if is_thread or not has_invoice_keyword:  # Mark email as unread if it's part of a thread or doesn't contain specific keywords
+                            mail.uid('store', e_id, '-FLAGS', '(\Seen)')
+
                     except Exception as flag_error:
                         logger.error(f"Error handling read status for UID {e_id}: {str(flag_error)}")
 

@@ -183,7 +183,7 @@ def missing_email_download_background_task():
         logger.info(f"Created download directory: {base_folder_path}")
 
         mail = login()
-        email_ids = search_last_30_days_emails(mail)
+        email_ids = search_last_2_days_emails(mail)
         if not email_ids:
             logger.info("No new emails to process")
             return
