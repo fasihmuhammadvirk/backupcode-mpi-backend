@@ -130,6 +130,10 @@ def convert_and_combine(all_files):
             logger.error(f"File ->{filepath.split('/')[-1]} Conversion Failed because : {e}")
             failed_input_paths.append(filepath)
 
+    for file in all_files:
+        if all_files != 0 and file not in all_output_paths:
+            failed_input_paths.append(file)
+
     return all_output_paths, failed_input_paths
 
 
