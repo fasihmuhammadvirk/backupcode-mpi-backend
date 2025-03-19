@@ -114,6 +114,8 @@ def convert_and_combine(all_files):
 
             if supplier == 'ABC Opus Services':
                 process_invoice(filepath, outputpath)
+                logger.info(f"ABC Opus: Downloaded at -> {outputpath}")
+                logger.warning(f"Skipping ABC Opus file for Processing")
                 continue
 
             splited_filepaths = extract_data(filepath, outputpath, supplier)
@@ -130,9 +132,17 @@ def convert_and_combine(all_files):
             logger.error(f"File ->{filepath.split('/')[-1]} Conversion Failed because : {e}")
             failed_input_paths.append(filepath)
 
-    for file in all_files:
-        if all_files != 0 and file not in all_output_paths:
-            failed_input_paths.append(file)
+    for file_path in all_files:
+        if all_files != 0 and file_path not in all_output_paths:
+            if file_path.count('/') == 3:
+                supplier_sub_stirng = file_path.split("/")[-2]  # for upload invoice
+            else:
+                supplier_sub_stirng = file_path.split("/")[3]  # for downloaded invoice through background task
+
+            if 'ABC Opus Services' in supplier_sub_stirng:
+                continue
+
+            failed_input_paths.append(filepath)
 
     return all_output_paths, failed_input_paths
 

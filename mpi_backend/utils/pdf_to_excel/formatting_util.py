@@ -136,7 +136,7 @@ def save_opus_services(extracted_data, output_path):
     #                               })
 
     rows_with_total = extracted_data[
-        extracted_data.applymap(lambda x: True if isinstance(x, str) and 'total' in x.lower() else False).any(1)].index.to_list()
+        extracted_data.applymap(lambda x: True if isinstance(x, str) and 'total' in x.lower() else False).any(axis=1)].index.to_list()
     for row in rows_with_total:
         worksheet.conditional_format(f"E{row+1}:F{row+1}", {'type': 'cell',
                                                               'criteria': '>=',
@@ -144,7 +144,7 @@ def save_opus_services(extracted_data, output_path):
                                                               'format': date_format})
 
     dataframe_border_indexes = extracted_data[
-        extracted_data.Description.map(lambda x: True if isinstance(x, str) and 'name' in x.lower() or x.lower is '' else False)].index.to_list()
+        extracted_data.Description.map(lambda x: True if isinstance(x, str) and 'name' in x.lower() or x.lower == '' else False)].index.to_list()
     border_areas = []
     for index,border_index in enumerate(dataframe_border_indexes):
         if index+1 < len(dataframe_border_indexes):
