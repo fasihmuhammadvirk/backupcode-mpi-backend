@@ -173,7 +173,8 @@ def extract_invoice_items(filename, raw_text):
 
     table['Amount'] = table['Amount'].str.replace(',', '').str.replace('$', '').replace('.00', '').astype(float)
     table['Cost'] = table['Cost'].str.replace(',', '').str.replace('$', '').replace('.00', '').astype(float)
-    table['Qty'] = table['Qty'].astype(str).str.replace(',', '').replace('.00', '').astype(float)
+    table['Qty'] = table['Qty'].astype(str).str.replace(',', '').str.replace('[a-zA-Z]', '', regex=True).str.replace(
+        '[^0-9.]', '', regex=True).astype(float)
     table['Qty'] = table['Qty'].astype(int)
     return table
 
