@@ -259,8 +259,8 @@ def email_download_background_task():
             for idx, e_id in enumerate(filtered_ids, 1):
                 try:
                     logger.info(f"Processing email {idx}/{len(filtered_ids)} - UID: {e_id}")
-                    # result, response = mail.uid('fetch', e_id, '(BODY.PEEK[])')
-                    result, response = mail.uid('fetch', e_id, '(RFC822)')
+                    result, response = mail.uid('fetch', e_id, '(BODY.PEEK[])')
+                    # result, response = mail.uid('fetch', e_id, '(RFC822)')
 
                     if result != 'OK' or not response or not response[0]:
                         logger.error(f"Failed to fetch email UID {e_id}")
@@ -274,16 +274,18 @@ def email_download_background_task():
                     download_email_attachments(email_message, base_folder_path)
 
                     # Thread handling logic
-                    try:  # check if it is invoice, if it is not mark emails as unread
+                    try:
                         subject = email_message['subject'].lower() if email_message['subject'] else ""
-                        in_reply_to = email_message['In-Reply-To']
-                        references = email_message['References']
+                        sender = email.utils.parseaddr(email_message["From"])[1]  # Extract sender's email address
+                        in_reply_to = email_message["In-Reply-To"]
+                        references = email_message["References"]
 
-                        is_thread = bool(in_reply_to or references)  # Check if the email is part of a thread or not
+                        is_thread = bool(in_reply_to or references)  # Check if the email is part of a thread
                         has_invoice_keyword = any(kw in subject for kw in ['invoice', 'invoices', 'invoice(s)'])
+                        is_excluded_sender = sender in EXCLUDED_SENDERS  # Check if the sender is in the exclusion list
 
-                        if is_thread or not has_invoice_keyword:  # Mark email as unread if it's part of a thread or doesn't contain specific keywords
-                            mail.uid('store', e_id, '-FLAGS', '(\Seen)')
+                        if is_excluded_sender and has_invoice_keyword:
+                            mail.uid('store', e_id, '+FLAGS', '(\Seen)')
 
                     except Exception as flag_error:
                         logger.error(f"Error handling read status for UID {e_id}: {str(flag_error)}")
