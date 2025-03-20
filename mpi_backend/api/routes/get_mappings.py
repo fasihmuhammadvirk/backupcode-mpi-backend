@@ -32,6 +32,9 @@ def get_mapping_by_mpi_type(db: Session = Depends(get_db), token: str = Depends(
 def get_mapping_by_supplier_id(supplier_id: int, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
     try:
         mappings = ItemsMappingController(db).get_items_mappings_by_supplier_id(supplier_id)
-        return mappings
+
+        for mapping in mappings:
+            yield mapping
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch item mapping by supplier id: {e}")
