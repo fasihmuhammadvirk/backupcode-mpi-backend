@@ -9,9 +9,10 @@ from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.pdf_to_excel.formatting_util import export_price_history_to_excel
 from mpi_backend.utils.s3_utils import upload_file, get_presigned_url
 import os
+import logging
 
 router = APIRouter(prefix="/filter")
-
+logger = logging.getLogger(__name__)
 
 @router.get("/get-locations", response_model=List[str])
 def customer_job_filter(db: Session = Depends(get_db),  token: str = Depends(JWTBearer())):
@@ -50,19 +51,32 @@ def column_mappings(token: str = Depends(JWTBearer())):
     return column_mapping
 
 
-@router.post("/by-column") # for dropdown population
-def column_mappings(db: Session = Depends(get_db),
-                    token: str = Depends(JWTBearer()),
-                    column_name: str = Query(None, description="Name of Column for which data is required"),
-                    payload: Optional[Dict] = Body(None, description="Previous selections of filters & their values as json.")):
+@router.post("/by-column")  # for dropdown population
+def column_mappings(
+    db: Session = Depends(get_db),
+    token: str = Depends(JWTBearer()),
+    column_name: str = Query(None, description="Name of Column for which data is required"),
+    payload: Optional[Dict] = Body(None, description="Previous selections of filters & their values as json.")
+):
+    logger.info(f"Received request for column_mappings with column_name: {column_name}, payload: {payload}")
+
     if column_name is None:
+        logger.warning("Invalid Column Name Specified")
         return {"data": "Invalid Column Name Specified"}
 
-    if payload: filter_context = payload["filter_context"]
-    else: filter_context = None
+    try:
+        filter_context = payload["filter_context"] if payload else None
+        logger.debug(f"Filter context: {filter_context}")
 
-    distinct_values = InvoiceItemController(db).get_data_by_column_name(column_name, filter_context)
-    return distinct_values
+        invoice_item_controller = InvoiceItemController(db)
+        distinct_values = invoice_item_controller.get_data_by_column_name(column_name, filter_context)
+
+        logger.info(f"Fetched distinct values for column '{column_name}': {distinct_values}")
+
+        return distinct_values
+    except Exception as e:
+        logger.error(f"Error occurred in column_mappings: {str(e)}", exc_info=True)
+        return {"error": "Internal Server Error"}
 
 
 @router.post("",response_model=PaginatedInvoiceItemsResponse)

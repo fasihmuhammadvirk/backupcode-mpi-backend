@@ -10,6 +10,9 @@ from mpi_backend.database.controllers.CustomerJobMappingContorller import Custom
 from mpi_backend.database.schemas import InvoiceItems as InvoiceItemsResponse
 from mpi_backend.database.schemas import PriceHistoryResponse
 from mpi_backend.utils.export_utils import extract_supplier_id
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class InvoiceItemController:
@@ -256,21 +259,40 @@ class InvoiceItemController:
 
     def get_data_by_column_name(self, column_name, filter_context):
         """
-        Used to generates drop down filters for data-review table header.
+        Generates drop-down filters for data-review table header.
+
         Args:
-        column_name: the column we want the values for.
-        filter_context: the previous selected columns / previous applied filters
+        column_name: The column we want the values for.
+        filter_context: The previously selected columns / applied filters.
         """
-        my_column_name = getattr(InvoiceItem, column_name)
-        query = self.db_context.query(distinct(my_column_name))
+        try:
+            logger.info(f"Fetching distinct values for column: {column_name}")
+            my_column_name = getattr(InvoiceItem, column_name, None)
 
-        if filter_context:  # if there are previous filter selections -> add them in query
-            for column in filter_context.keys():
-                filter_column = getattr(InvoiceItem, column)
-                query = query.filter(filter_column.in_(filter_context[column]))
+            if my_column_name is None:
+                logger.warning(f"Invalid column name: {column_name}")
+                return []
 
-        distinct_values = query.order_by(my_column_name.asc()).all()
-        return [value[0] for value in distinct_values if value[0] is not None]
+            query = self.db_context.query(distinct(my_column_name))
+
+            if filter_context:
+                logger.debug(f"Applying filter context: {filter_context}")
+                for column, values in filter_context.items():
+                    filter_column = getattr(InvoiceItem, column, None)
+                    if filter_column is None:
+                        logger.warning(f"Skipping invalid filter column: {column}")
+                        continue
+                    query = query.filter(filter_column.in_(values))
+
+            distinct_values = query.order_by(my_column_name.asc()).all()
+            result = [value[0] for value in distinct_values if value[0] is not None]
+
+            logger.info(f"Retrieved {len(result)} distinct values for column '{column_name}'")
+
+            return result
+        except Exception as e:
+            logger.error(f"Error in get_data_by_column_name: {str(e)}", exc_info=True)
+            return []
 
     def apply_filters(self, request,page, size, col_param=None):
         query = self.db_context.query(InvoiceItem)
