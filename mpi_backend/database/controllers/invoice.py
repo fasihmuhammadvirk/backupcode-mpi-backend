@@ -3,6 +3,7 @@ from typing import List, Optional
 from sqlalchemy.orm import joinedload, aliased
 from datetime import date
 from math import ceil
+import os
 
 from fastapi import HTTPException
 from sqlalchemy import or_, asc, desc
@@ -152,11 +153,27 @@ class InvoiceController:
 
         return True
 
-    def delete_invoice(self,invoice_id,db):
-        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).all()
-        for record in invoice:
-            db.delete(record)
-        db.commit()
+    def delete_invoice(self, INVOICE_DOWNLOAD_FOLDER, invoice_id,db):
+
+        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        if not invoice:
+            raise HTTPException(status_code=404, detail="Invoice not found")
+
+        # Construct the file path
+        file_path = os.path.join(INVOICE_DOWNLOAD_FOLDER, invoice.filename)
+
+        # Delete file if exists
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+        try:
+            db.delete(invoice)
+            db.commit()
+        except Exception as e:
+            return print(f"Failed to delete Invoice: Error {e}")
+
+        return invoice_id
+
 
     def get_invoice_by_invoiceID(self, invoice_id,db):
         return db.query(Invoice).filter(Invoice.id == invoice_id).first()

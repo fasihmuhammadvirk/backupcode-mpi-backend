@@ -146,3 +146,16 @@ def sort_invoices( db: Session = Depends(get_db), column_name:str = Query(None),
 
     invoices = InvoiceController(db).sort(db,column, sort_order)
     return paginate(invoices)
+
+
+@router.delete("/delete")
+async def delete_invoice(invoice_id: str, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+
+    # Delete from database
+    invoice_controller = InvoiceController(db)
+    invoice_id = invoice_controller.delete_invoice(INVOICE_DOWNLOAD_FOLDER,invoice_id, db)
+
+
+    return {"status": f"Invoice {invoice_id} and associated file deleted successfully."}
+
+
