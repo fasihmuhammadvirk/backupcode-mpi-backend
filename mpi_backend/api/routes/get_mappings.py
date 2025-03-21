@@ -29,12 +29,22 @@ def get_mapping_by_mpi_type(db: Session = Depends(get_db), token: str = Depends(
 
 
 @router.get("/{supplier_id}", response_model=List[ItemMappingsResponse])
-def get_mapping_by_supplier_id(supplier_id: int, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+def get_mapping_by_supplier_id(
+    supplier_id: int, db: Session = Depends(get_db), token: str = Depends(JWTBearer())
+):
     try:
-        mappings = ItemsMappingController(db).get_items_mappings_by_supplier_id(supplier_id)
+        batch_size = 100  # Adjust based on expected dataset size
+        mappings = []
+        offset = 0
 
-        for mapping in mappings:
-            yield mapping
+        while True:
+            batch = ItemsMappingController(db).get_items_mappings_by_supplier_id(supplier_id, limit=batch_size, offset=offset)
+            if not batch:
+                break
+            mappings.extend(batch)
+            offset += batch_size  # Move to the next batch
+
+        return mappings
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch item mapping by supplier id: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch item mapping: {e}")
