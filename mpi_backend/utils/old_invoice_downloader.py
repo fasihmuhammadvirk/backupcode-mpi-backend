@@ -14,7 +14,7 @@ from mpi_backend.config import SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, INVOICE_DOWN
 from datetime import datetime, timedelta
 
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
-from mpi_backend.utils.invoice_convertor import convert_invoice
+from mpi_backend.utils.old_invoice_convertor import convert_invoice
 
 EXCLUDED_SENDERS = [ # suppliers whose emails are to be marked as read after downloading
     "info@wwps.co",
