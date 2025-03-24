@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import or_, asc, desc
 from mpi_backend.database.models import Invoice, InvoiceItem
 from mpi_backend.database.schemas import Invoice as InvoiceResponse
+from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 
 
 class InvoiceController:
@@ -153,7 +154,7 @@ class InvoiceController:
 
         return True
 
-    def delete_invoice(self, INVOICE_DOWNLOAD_FOLDER, invoice_id,db):
+    def delete_invoice(self, invoice_id,db):
 
         invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
         if not invoice:
