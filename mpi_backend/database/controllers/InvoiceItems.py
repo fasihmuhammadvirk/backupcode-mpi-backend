@@ -358,7 +358,7 @@ class InvoiceItemController:
         if size == 0:
             if col_param: # select distinct values of certain column
                 column = getattr(InvoiceItem, col_param, None)
-                return list(set(row[0] for row in query.with_entities(column).distinct()))
+                return list(set(row[0] for row in query.order_by(None).with_entities(column).distinct()))
 
             results = query.all()
             size=1
