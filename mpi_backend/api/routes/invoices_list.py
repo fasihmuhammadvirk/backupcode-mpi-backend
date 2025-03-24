@@ -153,7 +153,7 @@ async def delete_invoice(invoice_id: str, db: Session = Depends(get_db), token: 
 
     # Delete from database
     invoice_controller = InvoiceController(db)
-    invoice_id = invoice_controller.delete_invoice(INVOICE_DOWNLOAD_FOLDER,invoice_id, db)
+    invoice_id = invoice_controller.delete_invoice(invoice_id, db)
 
 
     return {"status": f"Invoice {invoice_id} and associated file deleted successfully."}

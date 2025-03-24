@@ -16,7 +16,7 @@ from mpi_backend.config import SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, INVOICE_DOWN
 from datetime import datetime, timedelta
 
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
-from mpi_backend.utils.new_invoice_convertor import convert_invoice
+from mpi_backend.utils.invoice_convertor import convert_invoice_for_email
 
 EXCLUDED_SENDERS = [  # suppliers whose emails are to be marked as read after downloading
     "info@wwps.co",
@@ -301,7 +301,7 @@ def email_download_background_task():
         # Post-processing
         try:
             logger.info("Starting invoice conversion")
-            converted_files, failed_files = convert_invoice(base_folder_path)
+            converted_files, failed_files = convert_invoice_for_email(base_folder_path)
             logger.info(f"Conversion complete. Success: {len(converted_files)}, Failed: {len(failed_files)}")
 
             logger.info("Starting data processing")

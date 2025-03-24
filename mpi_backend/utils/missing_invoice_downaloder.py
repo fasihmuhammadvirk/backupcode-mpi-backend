@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 from mpi_backend.config import SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, INVOICE_DOWNLOAD_FOLDER, SUPPLIERS, TIMEZONE
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
-from mpi_backend.utils.new_invoice_convertor import convert_invoice
+from mpi_backend.utils.invoice_convertor import convert_invoice
 
 EXCLUDED_SENDERS = [
     "info@wwps.co", "bmwpsupply@gmail.com", "billing@ysplumbing.com",
