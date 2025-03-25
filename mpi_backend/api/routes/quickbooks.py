@@ -53,8 +53,16 @@ def migrate_invoice_to_QB(
 
         line_item_df['account'] = line_item_df['account'].replace([None, 'None'], '')
 
-        if '' in line_item_df['account'].values:
-            raise HTTPException(status_code=400, detail="Unmatched items or sheet names are present.")
+        # Identify missing accounts and log invoice details
+        unmatched_items = line_item_df[line_item_df['account'] == '']
+        if not unmatched_items.empty:
+            unmatched_references = unmatched_items[['mpi_item', 'ref_no']].drop_duplicates()
+            unmatched_references_list = unmatched_references.to_dict(orient='records')
+
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unmatched items or sheet names are present, 'unmatched_references': {unmatched_references_list}"
+            )
 
         line_item_df = line_item_df.astype(str)
         float_columns = ['qty', 'cost','amount']
