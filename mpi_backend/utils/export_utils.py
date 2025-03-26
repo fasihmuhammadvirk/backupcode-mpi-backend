@@ -48,4 +48,4 @@ def extract_supplier_id(file_path):
     for company, code in company_codes.items():
         if company in file_path:
             return code, company
-    return 1 # need to return some default supplier
+    return 1, "unknown" # need to return some default supplier
