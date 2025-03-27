@@ -29,9 +29,41 @@ def get_mapping_by_mpi_type(db: Session = Depends(get_db), token: str = Depends(
 
 
 @router.get("/{supplier_id}", response_model=List[ItemMappingsResponse])
-def get_mapping_by_supplier_id(supplier_id: int, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+def get_mapping_by_supplier_id(
+    supplier_id: int, db: Session = Depends(get_db), token: str = Depends(JWTBearer())
+):
+    """
+    Retrieve item mappings for a given supplier ID.
+
+    This endpoint fetches item mappings associated with a specific supplier ID
+    from the database. It uses pagination to handle large datasets by fetching
+    data in batches of a specified size.
+
+    Parameters:
+        supplier_id (int): The ID of the supplier whose item mappings are to be retrieved.
+        db (Session): The database session dependency.
+        token (str): The JWT token for authentication.
+
+    Returns:
+        List[ItemMappingsResponse]: A list of item mappings for the specified supplier.
+
+    Raises:
+        HTTPException: If an error occurs during the retrieval process.
+    """
     try:
-        mappings = ItemsMappingController(db).get_items_mappings_by_supplier_id(supplier_id)
+        # adding pagination to handle the large data
+        batch_size = 100  # Adjust based on expected dataset size
+        mappings = []
+        offset = 0
+
+        while True:
+            batch = ItemsMappingController(db).get_items_mappings_by_supplier_id(supplier_id, limit=batch_size, offset=offset)
+            if not batch:
+                break
+            mappings.extend(batch)
+            offset += batch_size  # Move to the next batch
+
         return mappings
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch item mapping by supplier id: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch item mapping: {e}")
