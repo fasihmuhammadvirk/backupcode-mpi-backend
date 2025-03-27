@@ -8,7 +8,7 @@ from sqlalchemy.orm import Query
 class InvoiceItem(Base):
     __tablename__ = 'invoice_items'
 
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True, index=True)
     filename = Column(String)
     sheet_name = Column(String)
     mpi_item = Column(String, default='No Match')
