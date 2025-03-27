@@ -342,11 +342,14 @@ class InvoiceItemController:
         if size == 0:
             if col_param: # select distinct values of certain column
                 column = getattr(InvoiceItem, col_param, None)
-                return list(set(row[0] for row in query.order_by(None).with_entities(column).distinct()))
+                if column is None:
+                    raise HTTPException(status_code=400, detail=f"Invalid column name: {col_param}")
+
+                return [row[0] for row in query.with_entities(column).distinct().order_by(column).all()]
 
             results = query.all()
             size=1
-            total = len(results)
+            total = results.count()
         else:
             total = query.count()
             query = query.limit(size).offset((page - 1) * size)
