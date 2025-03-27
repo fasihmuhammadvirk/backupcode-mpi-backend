@@ -349,7 +349,7 @@ class InvoiceItemController:
 
             results = query.all()
             size=1
-            total = results.count()
+            total = query.count()
         else:
             total = query.count()
             query = query.limit(size).offset((page - 1) * size)
