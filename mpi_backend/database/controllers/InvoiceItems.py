@@ -254,15 +254,59 @@ class InvoiceItemController:
         customer_jobs = db.query(InvoiceItem.customer_job).distinct().all()
         return customer_jobs
 
-    def get_data_by_column_name(self, column_name, filter_context):
+    def get_data_by_column_name(self, column_name, filter_context, comparison_filters):
         """
         Used to generates drop down filters for data-review table header.
         Args:
         column_name: the column we want the values for.
         filter_context: the previous selected columns / previous applied filters
         """
+
         my_column_name = getattr(InvoiceItem, column_name)
         query = self.db_context.query(distinct(my_column_name))
+
+        # applying comparison (>,<= etc) filters
+        for comp_filter in comparison_filters:
+            if not hasattr(InvoiceItem, comp_filter['column']):
+                raise HTTPException(status_code=400, detail=f"Invalid column name: {comp_filter['column']}")
+
+            column = getattr(InvoiceItem, comp_filter['column'])
+
+            # Special handling for 'amount' column (string to float conversion)
+            if comp_filter['column'] == "amount":
+                column = cast(column, Float)
+
+            # Handle type casting for comparison filters
+            try:
+                if comp_filter['column'] == "amount":
+                    try:
+                        value = float(comp_filter['value'])
+                    except ValueError:
+                        continue # Skip invalid float conversion
+                elif column.type.python_type == int:
+                    value = int(comp_filter['value'])
+                elif column.type.python_type == float:
+                    value = float(comp_filter['value'])
+                elif column.type.python_type == date:
+                    value = date.fromisoformat(comp_filter['value'])
+                else:
+                    value = comp_filter['value']
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail=f"Invalid value type for column: {comp_filter['column']}")
+
+            if comp_filter['operator'] == "gt":
+                query = query.filter(column > value)
+            elif comp_filter['operator'] == "lt":
+                query = query.filter(column < value)
+            elif comp_filter['operator'] == "gte":
+                query = query.filter(column >= value)
+            elif comp_filter['operator'] == "lte":
+                query = query.filter(column <= value)
+            elif comp_filter['operator'] == "eq":
+                query = query.filter(column == value)
+            else:
+                raise HTTPException(status_code=400, detail=f"Invalid operator: {comp_filter['operator']}")
+
 
         if filter_context:  # if there are previous filter selections -> add them in query
             for column in filter_context.keys():
