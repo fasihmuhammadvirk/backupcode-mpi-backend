@@ -61,7 +61,10 @@ def column_mappings(db: Session = Depends(get_db),
     if payload: filter_context = payload["filter_context"]
     else: filter_context = None
 
-    distinct_values = InvoiceItemController(db).get_data_by_column_name(column_name, filter_context)
+    if payload: comparison_filters = payload['comparison_filters']
+    else: comparison_filters = None
+
+    distinct_values = InvoiceItemController(db).get_data_by_column_name(column_name, filter_context, comparison_filters)
     return distinct_values
 
 
