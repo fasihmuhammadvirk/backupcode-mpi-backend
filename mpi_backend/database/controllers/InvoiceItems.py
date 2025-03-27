@@ -325,36 +325,20 @@ class InvoiceItemController:
             else:
                 raise HTTPException(status_code=400, detail=f"Invalid operator: {comp_filter.operator}")
 
-        # Tax ordering logic (Move Tax-related rows to the end)
-        tax_order = case(
-            (
-                (InvoiceItem.description == 'Tax'),1),
-            else_=0
-        )
-
-        # Apply ordering from request
-        order_clauses = []
-        latest_invoice_order = func.max(InvoiceItem.id).over(partition_by=InvoiceItem.invoice_id)
-        order_clauses.append(latest_invoice_order.desc())
-        order_clauses.append(InvoiceItem.invoice_id)
-        order_clauses.append(tax_order)
-
-        if request.order_by:
+        if request.order_by: # applying sorting
             for order_filter in request.order_by:
                 if not hasattr(InvoiceItem, order_filter.column):
                     raise HTTPException(status_code=400,
                                         detail=f"Invalid column name for ordering: {order_filter.column}")
 
                 column = getattr(InvoiceItem, order_filter.column)
+
                 if order_filter.order == "asc":
-                    order_clauses.append(column.asc())
+                    query = query.order_by(column.asc())
                 elif order_filter.order == "desc":
-                    order_clauses.append(column.desc())
+                    query = query.order_by(column.desc())
                 else:
                     raise HTTPException(status_code=400, detail=f"Invalid order direction: {order_filter.order}")
-
-        query = query.order_by(*order_clauses)
-
         if size == 0:
             if col_param: # select distinct values of certain column
                 column = getattr(InvoiceItem, col_param, None)
