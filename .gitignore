@@ -168,3 +168,5 @@ mpi_backend/storage/*
 
 # Also, ensure that files inside fixtures are not ignored
 !mpi_backend/storage/fixtures/**
+
+mpi-backend/.vscode/
