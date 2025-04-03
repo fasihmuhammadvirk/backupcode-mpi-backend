@@ -2,10 +2,12 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from fastapi_pagination import add_pagination
 from fastapi.middleware.cors import CORSMiddleware
 import pytz
+from datetime import datetime
 # from apitally.fastapi import ApitallyMiddleware
 
 
@@ -43,13 +45,22 @@ UTC_TZ = pytz.utc  # UTC Time Zone
 async def lifespan(app: FastAPI):
     scheduler = BackgroundScheduler()
     scheduler.add_job(email_download_background_task, "interval", minutes=3, max_instances=20)
-    scheduler.add_job(missing_email_download_background_task,
-                      CronTrigger(hour=5, minute=0, timezone=UTC_TZ),
-                      # Eastern Time: 9:00 PM Previous Day
-                      # European Time: 3:00 AM Same Day
-                      max_instances=1,
-                      replace_existing=True  # Avoids duplicate jobs if restarted
-                      )
+
+    # scheduler.add_job(missing_email_download_background_task,
+    #                   CronTrigger(hour=5, minute=0, timezone=UTC_TZ),
+    #                   # Eastern Time: 9:00 PM Previous Day
+    #                   # European Time: 3:00 AM Same Day
+    #                   max_instances=1,
+    #                   replace_existing=True  # Avoids duplicate jobs if restarted
+    #                   )
+
+    # Run the job only once when the application starts (non-blocking)
+    scheduler.add_job(
+        missing_email_download_background_task,
+        DateTrigger(run_date=datetime.now()),  # Runs once at startup
+        replace_existing=True
+    )
+
     scheduler.start()
     yield
 
