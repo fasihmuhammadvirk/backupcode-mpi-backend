@@ -315,8 +315,8 @@ def missing_email_download_background_task():
         # Email processing
         try:
             mail = login()
-            # filtered_ids = search_last_2_days_emails(mail)
-            filtered_ids = search_emails_between_dates(mail)
+            filtered_ids = search_last_2_days_emails(mail)
+            # filtered_ids = search_emails_between_dates(mail)
 
             if not filtered_ids:
                 logger.info("No new emails to process")
