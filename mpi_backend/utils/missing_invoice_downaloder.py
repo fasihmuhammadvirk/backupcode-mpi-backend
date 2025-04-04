@@ -70,6 +70,65 @@ def login():
 #         return []
 #
 
+def search_emails_between_dates(mail, start_date_str="19-Feb-2025", end_date_str="22-Feb-2025"):
+    """
+    Search for emails between specific dates using IMAP search
+    (SINCE is inclusive, BEFORE is exclusive, so end_date must be +1 day)
+
+    Args:
+        mail: IMAP connection object
+        start_date_str (str): Start date in format 'DD-Mon-YYYY'
+        end_date_str (str): End date in format 'DD-Mon-YYYY' (exclusive, usually one day after actual end)
+
+    Returns:
+        List of filtered email UIDs
+    """
+    try:
+        logger.info(f"Searching for emails from {start_date_str} to {end_date_str} (exclusive)")
+        search_criteria = f'(SINCE "{start_date_str}" BEFORE "{end_date_str}")'
+        result, data = mail.uid('search', None, search_criteria)
+
+        if result != 'OK':
+            logger.error(f"Email search failed: {result}")
+            return []
+
+        raw_email_ids = data[0].split()
+        logger.info(f"Found {len(raw_email_ids)} emails in time frame")
+
+        filtered_email_ids = []
+        for idx, email_id in enumerate(raw_email_ids, 1):
+            try:
+                email_id = email_id.decode('utf-8') if isinstance(email_id, bytes) else email_id
+                logger.debug(f"Processing email {idx}/{len(raw_email_ids)} - UID: {email_id}")
+
+                result, msg_data = mail.uid('fetch', email_id, '(BODY.PEEK[HEADER.FIELDS (FROM)])')
+
+                if result != 'OK':
+                    logger.warning(f"Failed to fetch headers for UID {email_id}: {result}")
+                    continue
+
+                raw_email = msg_data[0][1]
+                msg = email.message_from_bytes(raw_email)
+                from_email = email.utils.parseaddr(msg.get('From', ''))[1]
+
+                if from_email in EXCLUDED_SENDERS:
+                    filtered_email_ids.append(email_id)
+                    logger.debug(f"Email UID {email_id} from excluded sender: {from_email}")
+                else:
+                    logger.debug(f"Email UID {email_id} from non-excluded sender: {from_email}")
+
+            except Exception as e:
+                logger.error(f"Error processing email UID {email_id}: {str(e)}\n{traceback.format_exc()}")
+                continue
+
+        logger.info(f"Found {len(filtered_email_ids)} emails from excluded senders")
+        return filtered_email_ids
+
+    except Exception as e:
+        logger.error(f"Error in search_emails_between_dates: {str(e)}\n{traceback.format_exc()}")
+        return []
+
+
 def search_last_2_days_emails(mail):
     """Search for new emails with error handling"""
     try:
@@ -256,7 +315,8 @@ def missing_email_download_background_task():
         # Email processing
         try:
             mail = login()
-            filtered_ids = search_last_2_days_emails(mail)
+            # filtered_ids = search_last_2_days_emails(mail)
+            filtered_ids = search_emails_between_dates(mail)
 
             if not filtered_ids:
                 logger.info("No new emails to process")
