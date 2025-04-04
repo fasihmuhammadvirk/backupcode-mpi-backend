@@ -39,11 +39,11 @@ class InvoiceItems(BaseModel):
         if isinstance(value, str):
             try:
                 parsed_date = date.fromisoformat(value)
-                return parsed_date.strftime("%m-%d-%Y")
+                return parsed_date.strftime("%m/%d/%Y")
             except ValueError:
                 return value # already is US format, or is invalid
         if isinstance(value, date):
-            return value.strftime("%m-%d-%Y")
+            return value.strftime("%m/%d/%Y")
         return value
 
 class PaginatedInvoiceItemsResponse(BaseModel):
