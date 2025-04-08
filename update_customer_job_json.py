@@ -3,7 +3,7 @@ import json
 
 # File paths
 excel_file = "/Users/fasihmuhammadvirk/Downloads/mappings.xlsm"
-json_file = "../mpi_backend/storage/fixtures/customer-job-mapping.json"
+json_file = "mpi_backend/storage/fixtures/customer-job-mapping.json"
 
 # Step 1: Load the Excel sheet, skip first 3 rows to reach the real header
 df_raw = pd.read_excel(excel_file, sheet_name="Mappings", skiprows=3)

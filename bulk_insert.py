@@ -9,7 +9,7 @@ session = Session(bind=engine)
 
 insertion_count = 0
 
-with open('../mpi_backend/storage/fixtures/item-mapping.json', 'r') as file:
+with open('mpi_backend/storage/fixtures/item-mapping.json', 'r') as file:
     temp_items = json.load(file)
 
 for job in temp_items:
