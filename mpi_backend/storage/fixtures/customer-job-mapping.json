@@ -3186,5 +3186,253 @@
     {
         "customer_job": "80 Pine St",
         "updated_customer_job": "Prestige Construction NY:80 Pine St"
+    },
+    {
+        "customer_job": "2250",
+        "updated_customer_job": "HAP Construction LLC:2250 Broadway"
+    },
+    {
+        "customer_job": "NY Developers:310-322 Grand",
+        "updated_customer_job": "NY Developers:310-322 Grand Concourse"
+    },
+    {
+        "customer_job": "625 F U L T O N S T",
+        "updated_customer_job": "Galaxy Developers:625 Fulton St"
+    },
+    {
+        "customer_job": "11-2431st Dr,",
+        "updated_customer_job": "Blue Sky Builders:1124 31st Dr"
+    },
+    {
+        "customer_job": "243 E A S T202",
+        "updated_customer_job": "Platinum Management Group:241-243 East 202nd St"
+    },
+    {
+        "customer_job": "34-20 Junction Boulevard",
+        "updated_customer_job": "NY Developers:34-20 Junction Blvd"
+    },
+    {
+        "customer_job": "806 E170th St",
+        "updated_customer_job": "Blue Sky Builders:806 East 170th St"
+    },
+    {
+        "customer_job": "88 N1st St Brooklyn, N Y",
+        "updated_customer_job": "Blue Sky Builders:88 North 1st St"
+    },
+    {
+        "customer_job": "77 Kosciuszko Street",
+        "updated_customer_job": "Prestige Construction NY:270 Nostrand Ave"
+    },
+    {
+        "customer_job": "88 NORTH 1",
+        "updated_customer_job": "Blue Sky Builders:88 North 1st St"
+    },
+    {
+        "customer_job": "3020 Valentine Ave",
+        "updated_customer_job": "Platinum Management Group:241-243 East 202nd St"
+    },
+    {
+        "customer_job": "1702 NEWKIRK",
+        "updated_customer_job": "Prospect Homes LLC:1702 Newkirk Ave"
+    },
+    {
+        "customer_job": "346 RUTLAND",
+        "updated_customer_job": "Triple C Builders LLC:346 Rutland Ave"
+    },
+    {
+        "customer_job": "900 NEW YORK AVE",
+        "updated_customer_job": "Triple C Builders LLC:894-900 New York Ave"
+    },
+    {
+        "customer_job": "790 Liberty Ave",
+        "updated_customer_job": "Blue Sky Builders:790 Liberty Ave"
+    },
+    {
+        "customer_job": "555 W45th St",
+        "updated_customer_job": "B Contractors:555 West 45th St"
+    },
+    {
+        "customer_job": "210 CLARKSON",
+        "updated_customer_job": "NY Developers:210 Clarkson Ave"
+    },
+    {
+        "customer_job": "2366 BEDFORD AVENUE",
+        "updated_customer_job": "Manhattan Management Realty LLC:2366 Bedford Ave"
+    },
+    {
+        "customer_job": "310 GRANDCONCORSE",
+        "updated_customer_job": "NY Developers:310-322 Grand Concourse"
+    },
+    {
+        "customer_job": "555 West 45Th St",
+        "updated_customer_job": "B Contractors:555 West 45th St"
+    },
+    {
+        "customer_job": "555 W 45th St",
+        "updated_customer_job": "B Contractors:555 West 45th St"
+    },
+    {
+        "customer_job": "89 UNION",
+        "updated_customer_job": "Galaxy Developers:89 Union Ave"
+    },
+    {
+        "customer_job": "89 UNION ST",
+        "updated_customer_job": "Galaxy Developers:89 Union Ave"
+    },
+    {
+        "customer_job": "19 Montauk Avenue",
+        "updated_customer_job": "Blue Sky Builders:19 Montauk Ave"
+    },
+    {
+        "customer_job": "2201 Beverley Road",
+        "updated_customer_job": "Manhattan Management Realty LLC:2201 Beverly Rd"
+    },
+    {
+        "customer_job": "1584 Fulton St",
+        "updated_customer_job": "Park Developers & Builders:1584 Fulton St"
+    },
+    {
+        "customer_job": "228 B E R R Y",
+        "updated_customer_job": "Blue Sky Builders:228 Berry St"
+    },
+    {
+        "customer_job": "3230 Third Ave",
+        "updated_customer_job": "Platinum Management Group:3230 3rd Ave"
+    },
+    {
+        "customer_job": "378 E165th St",
+        "updated_customer_job": "Platinum Management Group:378 East 165th St"
+    },
+    {
+        "customer_job": "556 Baltic St",
+        "updated_customer_job": "CNS Builders:556 Baltic St"
+    },
+    {
+        "customer_job": "133 Kent Ave",
+        "updated_customer_job": "Prestige Construction NY:133 Kent Ave"
+    },
+    {
+        "customer_job": "133 Kent Avenue",
+        "updated_customer_job": "Prestige Construction NY:133 Kent Ave"
+    },
+    {
+        "customer_job": "555 West 45th Street",
+        "updated_customer_job": "B Contractors:555 West 45th St"
+    },
+    {
+        "customer_job": "790 Liberty Avenue",
+        "updated_customer_job": "Blue Sky Builders:790 Liberty Ave"
+    },
+    {
+        "customer_job": "12 Rockwell Pl,",
+        "updated_customer_job": "Galaxy Developers:625 Fulton St"
+    },
+    {
+        "customer_job": "205 Cabrini Blvd",
+        "updated_customer_job": "BB Empire Corp:205 Cabrini Blvd"
+    },
+    {
+        "customer_job": "43 G E R R Y",
+        "updated_customer_job": "Service Call - New:Other"
+    },
+    {
+        "customer_job": "43 GERY ST APT 5A",
+        "updated_customer_job": "Service Call - New:Other"
+    },
+    {
+        "customer_job": "554 W46th St,",
+        "updated_customer_job": "B Contractors:554 West 46th St"
+    },
+    {
+        "customer_job": "558 Sackett St",
+        "updated_customer_job": "Blue Sky Builders:558 Sackett St"
+    },
+    {
+        "customer_job": "69 Hope St",
+        "updated_customer_job": "Blue Sky Builders:69 Hope St"
+    },
+    {
+        "customer_job": "883 M Y R T L E",
+        "updated_customer_job": "Service Call - New:Other"
+    },
+    {
+        "customer_job": "1584 Fulton Street",
+        "updated_customer_job": "Park Developers & Builders:1584 Fulton St"
+    },
+    {
+        "customer_job": "MPI PLUMBING - 395 CARROLL ST",
+        "updated_customer_job": "Galaxy Developers:395 Carroll St"
+    },
+    {
+        "customer_job": "1584 FULTON ST",
+        "updated_customer_job": "Park Developers & Builders:1584 Fulton St"
+    },
+    {
+        "customer_job": "200 Walworth St.",
+        "updated_customer_job": "200 walworth St"
+    },
+    {
+        "customer_job": "SERVICE",
+        "updated_customer_job": "Service Call - New:Other"
+    },
+    {
+        "customer_job": "378 E 165th St",
+        "updated_customer_job": "Platinum Management Group:378 East 165th St"
+    },
+    {
+        "customer_job": "622 11th Avenue",
+        "updated_customer_job": "B Contractors:622 11th Ave"
+    },
+    {
+        "customer_job": "886 East 24th Street",
+        "updated_customer_job": "NYEG Corp:886 East 24th St"
+    },
+    {
+        "customer_job": "128 W E S T167",
+        "updated_customer_job": "B Contractors:122 West 167 St"
+    },
+    {
+        "customer_job": "43gerry",
+        "updated_customer_job": "Service Call - New:Other"
+    },
+    {
+        "customer_job": "62211thave",
+        "updated_customer_job": "B Contractors:622 11th Ave"
+    },
+    {
+        "customer_job": "16 SPENCER",
+        "updated_customer_job": "B Contractors:16 Spencer St"
+    },
+    {
+        "customer_job": "228 BERRY ST",
+        "updated_customer_job": "Blue Sky Builders:228 Berry St"
+    },
+    {
+        "customer_job": "554 W 46th St",
+        "updated_customer_job": "B Contractors:554 West 46th St"
+    },
+    {
+        "customer_job": "622 11th ave",
+        "updated_customer_job": "B Contractors:622 11th Ave"
+    },
+    {
+        "customer_job": "622 11Th Ave",
+        "updated_customer_job": "B Contractors:622 11th Ave"
+    },
+    {
+        "customer_job": "1975 Creston Ave",
+        "updated_customer_job": "Service Call - New:Other"
+    },
+    {
+        "customer_job": "43 Gerry St",
+        "updated_customer_job": "Service Call - New:Other"
+    },
+    {
+        "customer_job": "622 11th Ave",
+        "updated_customer_job": "B Contractors:622 11th Ave"
+    },
+    {
+        "customer_job": "205 Cabrini Boulevard",
+        "updated_customer_job": "BB Empire Corp:205 Cabrini Blvd"
     }
 ]

@@ -5,7 +5,7 @@ from mpi_backend.database.models import CustomerJobMapping
 from mpi_backend.config import SQLALCHEMY_DATABASE_URI
 engine = create_engine(SQLALCHEMY_DATABASE_URI)
 session = Session(bind=engine)
-with open('mpi_backend/storage/fixtures/customer-job-mapping.json', 'r') as file:
+with open('../mpi_backend/storage/fixtures/customer-job-mapping.json', 'r') as file:
     customer_jobs = json.load(file)
 
 print(customer_jobs[:5])

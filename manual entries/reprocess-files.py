@@ -31,7 +31,7 @@ def check_empty_mpi_item_and_description(invoice_items):
     # Check if any object has both mpi_item and mpi_description as empty strings
     return any(item.mpi_item == '' and item.mpi_description == '' for item in invoice_items)
 
-directory_path = "mpi_backend\\storage"
+directory_path = "../mpi_backend/storage"
 xlsx_files = find_pdf_files(directory_path)
 print (f'Found {len(xlsx_files)} invoices.')
 
