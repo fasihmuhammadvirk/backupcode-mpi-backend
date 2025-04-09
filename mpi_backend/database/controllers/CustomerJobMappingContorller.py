@@ -46,19 +46,21 @@ class CustomerJobMappingController:
             self.db_context.rollback()
             raise Exception(f"Error updating customer job mapping: {str(e)}")
 
-    def add_new_mappings(self, excel_file):
+    @staticmethod
+    def add_new_mappings(excel_file, db):
         """
-        Processes the Excel file to update customer job mappings.
+                Processes the Excel file to update customer job mappings.
 
-        :param excel_file: File-like object of the Excel sheet
-        :return: Summary message string
-        """
+                :param excel_file: File-like object of the Excel sheet
+                :return: Summary message string
+                """
         try:
+
             total_entries = update_customer_job_mappings_json(excel_file)
 
-            insert_customer_job_in_db()
+            insert_customer_job_in_db(db)
 
-            update_existing_invoice_items(self.db_context)
+            update_existing_invoice_items(db)
 
         except ValueError as ve:
             raise ValueError(f"Invalid data in Excel file: {str(ve)}")
@@ -71,3 +73,4 @@ class CustomerJobMappingController:
             raise Exception(f"Error updating customer job mapping: {str(e)}")
 
         return f"Added {total_entries} new customer job mappings and updated existing invoice items"
+

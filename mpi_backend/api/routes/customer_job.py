@@ -1,7 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
-import pandas as pd
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.database.controllers import CustomerJobMappingController
 
@@ -29,10 +28,10 @@ async def update_customer_job_mappings(
             )
 
         # Read file object
-        excel_file = file.file
+        # excel_file = file.file
 
         # You can add a check here if needed to validate contents
-        message = CustomerJobMappingController.add_new_mappings(excel_file)
+        message = CustomerJobMappingController.add_new_mappings(excel_file=file.file, db=db)
 
         return {
             "status": "success",

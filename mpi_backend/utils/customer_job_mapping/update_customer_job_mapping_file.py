@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-def update_customer_job_mappings_json(excel_file, json_file="../../storage/fixtures/customer-job-mapping.json"):
+def update_customer_job_mappings_json(excel_file, json_file="mpi_backend/storage/fixtures/customer-job-mapping.json"):
     """
     Update the customer job mappings JSON file based on the provided Excel file.
 
@@ -105,5 +105,5 @@ def update_customer_job_mappings_json(excel_file, json_file="../../storage/fixtu
 # Run the function
 if __name__ == "__main__":
     excel_file = "/Users/fasihmuhammadvirk/Downloads/mappings.xlsm"
-    json_file = "../../storage/fixtures/customer-job-mapping.json"
+    json_file = "mpi_backend/storage/fixtures/customer-job-mapping.json"
     update_customer_job_mappings_json(excel_file, json_file)

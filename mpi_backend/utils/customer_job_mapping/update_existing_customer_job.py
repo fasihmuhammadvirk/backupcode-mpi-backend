@@ -1,5 +1,5 @@
 import logging
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session
 from sqlalchemy import create_engine
 from mpi_backend.database.models import CustomerJobMapping, InvoiceItem
 from mpi_backend.config import SQLALCHEMY_DATABASE_URI
@@ -31,7 +31,7 @@ def update_existing_invoice_items(db):
         # Fetch customer job mappings
         try:
             mappings = db.query(CustomerJobMapping).all()
-            logger.info("📥 Fetched %d customer job mappings.", len(mappings))
+            logger.info("Fetched %d customer job mappings.", len(mappings))
         except Exception as e:
             raise Exception(f"Error fetching customer job mappings: {str(e)}")
 
@@ -43,7 +43,7 @@ def update_existing_invoice_items(db):
         # Fetch all invoice items
         try:
             invoice_items = db.query(InvoiceItem).all()
-            logger.info("📦 Fetched %d invoice items.", len(invoice_items))
+            logger.info("Fetched %d invoice items.", len(invoice_items))
         except Exception as e:
             raise Exception(f"Error fetching invoice items: {str(e)}")
 
@@ -70,9 +70,9 @@ def update_existing_invoice_items(db):
 
 
 def main():
+    # Setup DB connection
     engine = create_engine(SQLALCHEMY_DATABASE_URI)
-    SessionLocal = sessionmaker(bind=engine)
-    db = SessionLocal()
+    db = Session(bind=engine)
 
     try:
         update_existing_invoice_items(db)
