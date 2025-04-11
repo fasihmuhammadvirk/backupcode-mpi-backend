@@ -486,9 +486,26 @@ class InvoiceItemController:
             func.avg(InvoiceItem.cost).label('average_cost')
         ).first()
 
-        total_qty = aggregates.total_qty or 0
-        total_amount = float(aggregates.total_amount or 0)
-        average_cost = float(aggregates.average_cost or 0)
+        # Handle None values and ensure all values are of basic Python types
+        total_qty = 0 if aggregates.total_qty is None else int(aggregates.total_qty)
+        
+        # Handle potential Decimal objects or None values for amount
+        if aggregates.total_amount is None:
+            total_amount = 0.0
+        else:
+            try:
+                total_amount = float(aggregates.total_amount)
+            except (TypeError, ValueError):
+                total_amount = 0.0
+                
+        # Handle potential Decimal objects or None values for cost
+        if aggregates.average_cost is None:
+            average_cost = 0.0
+        else:
+            try:
+                average_cost = float(aggregates.average_cost)
+            except (TypeError, ValueError):
+                average_cost = 0.0
 
         return {
             "total_qty": total_qty,
