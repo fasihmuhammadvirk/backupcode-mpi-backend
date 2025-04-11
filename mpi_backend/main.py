@@ -55,11 +55,11 @@ async def lifespan(app: FastAPI):
     #                   )
 
     # Run the job only once when the application starts (non-blocking)
-    scheduler.add_job(
-        missing_email_download_background_task,
-        DateTrigger(run_date=datetime.now()),  # Runs once at startup
-        replace_existing=True
-    )
+    #scheduler.add_job(
+    #    missing_email_download_background_task,
+    #    DateTrigger(run_date=datetime.now()),  # Runs once at startup
+    #    replace_existing=True
+    #)
 
     scheduler.start()
     yield
