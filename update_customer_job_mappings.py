@@ -28,14 +28,19 @@ def update_existing_invoice_items(db, output_file="mpi_backend/storage/fixtures/
             # Convert the customer job to lowercase for comparison
             customer_job_normalized = item.customer_job.lower()
 
-            if customer_job_normalized in mapping_dict:
+            if customer_job_normalized in mapping_dict.keys():
                 new_job = mapping_dict[customer_job_normalized]
                 if new_job != item.customer_job:
                     item.customer_job = new_job
                     updated_count += 1
             else:
                 # If customer job is not in mappings, add it to the missing list
-                missing_customer_jobs.append(item.customer_job)
+                if item.customer_job in missing_customer_jobs:
+                    pass
+                elif item.customer_job in mapping_dict.values():
+                    pass
+                else:
+                    missing_customer_jobs.append(item.customer_job)
 
         # Commit changes to DB
         db.commit()
