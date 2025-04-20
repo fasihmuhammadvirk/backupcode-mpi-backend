@@ -2,7 +2,7 @@ from datetime import datetime
 from sqlalchemy import asc, desc, distinct, case, cast, Float, func
 from fastapi import HTTPException, BackgroundTasks
 from typing import List, Dict
-from datetime import date,datetime, timedelta
+from datetime import date, datetime, timedelta
 from math import ceil
 from mpi_backend.database.models import InvoiceItem
 from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
@@ -10,6 +10,7 @@ from mpi_backend.database.controllers.CustomerJobMappingContorller import Custom
 from mpi_backend.database.schemas import InvoiceItems as InvoiceItemsResponse
 from mpi_backend.database.schemas import PriceHistoryResponse
 from mpi_backend.utils.export_utils import extract_supplier_id
+import math
 
 
 class InvoiceItemController:
@@ -37,7 +38,7 @@ class InvoiceItemController:
             class_=row['Class'],
             memo=row['Memo'],
             buyer=row['Buyer'],
-            date_added= row['email_date'],
+            date_added=row['email_date'],
             export_status="Pending"
         )
         with self.db_context() as db:
@@ -46,10 +47,10 @@ class InvoiceItemController:
 
     def invoice_exists(self, reference_no, vendor):
         with self.db_context() as db:
-            matched_invoice = db.query(InvoiceItem).filter_by(ref_no=reference_no, vendor= vendor).first()
+            matched_invoice = db.query(InvoiceItem).filter_by(ref_no=reference_no, vendor=vendor).first()
             return matched_invoice is not None
 
-    def get_invoice_items(self, invoice_id= None):
+    def get_invoice_items(self, invoice_id=None):
         query = self.db_context.query(InvoiceItem)
         if invoice_id:
             query = query.filter(InvoiceItem.invoice_id == invoice_id)
@@ -60,8 +61,9 @@ class InvoiceItemController:
 
         return invoices_items
 
-    def get_invoice_items_by_filters(self, supplier=None, from_date=None, to_date=None, job_location=None, export_status=None,
-                                     page: int = 1,page_size: int = 10):
+    def get_invoice_items_by_filters(self, supplier=None, from_date=None, to_date=None, job_location=None,
+                                     export_status=None,
+                                     page: int = 1, page_size: int = 10):
         query = self.db_context.query(InvoiceItem)
 
         if supplier is not None and 'All' not in supplier:  # only apply supplier filter if it's provided.
@@ -99,7 +101,6 @@ class InvoiceItemController:
         query = self.db_context.query(InvoiceItem)
         total = query.count()
         return total
-
 
     def get_invoice_items_by_ids(self, ids):
         query = self.db_context.query(InvoiceItem)
@@ -154,7 +155,7 @@ class InvoiceItemController:
                 return False
         return True
 
-    def delete_invoice_items(self, invoice_id,db):
+    def delete_invoice_items(self, invoice_id, db):
         items = db.query(InvoiceItem).filter_by(invoice_id=invoice_id).all()
         for item in items:
             db.delete(item)
@@ -177,15 +178,14 @@ class InvoiceItemController:
     def get_hidden_items(self):
         """Fetch all hidden invoice items."""
         try:
-            items = self.db_context.query(InvoiceItem).execution_options(include_all=True)\
-                    .filter(InvoiceItem.is_active.is_(False))\
-                    .all()
+            items = self.db_context.query(InvoiceItem).execution_options(include_all=True) \
+                .filter(InvoiceItem.is_active.is_(False)) \
+                .all()
             hidden_items = [item for item in items if not item.is_active]
             invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in hidden_items]
             return invoices_items
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
-
 
     def update_invoice_items(self, items: List[Dict], background_tasks: BackgroundTasks):
         for item_data in items:
@@ -209,10 +209,12 @@ class InvoiceItemController:
                 background_tasks.add_task(self.update_mpi_field, item_data['item'], 'mpi_description',
                                           item_data['mpi_description'])
 
-            if item_data['customer_job'] != item.customer_job: # customer job was updated
+            if item_data['customer_job'] != item.customer_job:  # customer job was updated
                 background_tasks.add_task(self.update_customer_job, item.customer_job, 'customer_job',
                                           item_data['customer_job'])
-                CustomerJobMappingController(self.db_context).update_mappings_table(old_customer_job=item.customer_job,new_customer_job=item_data['customer_job'])
+                CustomerJobMappingController(self.db_context).update_mappings_table(old_customer_job=item.customer_job,
+                                                                                    new_customer_job=item_data[
+                                                                                        'customer_job'])
 
             for key, value in item_data.items():  # update items
                 setattr(item, key, value)
@@ -225,7 +227,8 @@ class InvoiceItemController:
         self.db_context.commit()
 
     def update_customer_job(self, item_value: str, field_name: str, new_value: str):
-        self.db_context.query(InvoiceItem).filter(InvoiceItem.customer_job == item_value).update({field_name: new_value})
+        self.db_context.query(InvoiceItem).filter(InvoiceItem.customer_job == item_value).update(
+            {field_name: new_value})
         self.db_context.commit()
 
     def update_mappings_table(self, updated_values: dict):
@@ -282,7 +285,7 @@ class InvoiceItemController:
                     try:
                         value = float(comp_filter['value'])
                     except ValueError:
-                        continue # Skip invalid float conversion
+                        continue  # Skip invalid float conversion
                 elif column.type.python_type == int:
                     value = int(comp_filter['value'])
                 elif column.type.python_type == float:
@@ -307,7 +310,6 @@ class InvoiceItemController:
             else:
                 raise HTTPException(status_code=400, detail=f"Invalid operator: {comp_filter['operator']}")
 
-
         if filter_context:  # if there are previous filter selections -> add them in query
             for column in filter_context.keys():
                 filter_column = getattr(InvoiceItem, column)
@@ -316,7 +318,7 @@ class InvoiceItemController:
         distinct_values = query.order_by(my_column_name.asc()).all()
         return [value[0] for value in distinct_values if value[0] is not None]
 
-    def apply_filters(self, request,page, size, col_param=None):
+    def apply_filters(self, request, page, size, col_param=None):
         query = self.db_context.query(InvoiceItem)
 
         # applying 'IN' filters dynamically
@@ -344,7 +346,7 @@ class InvoiceItemController:
                     try:
                         value = float(comp_filter.value)
                     except ValueError:
-                        continue # Skip invalid float conversion
+                        continue  # Skip invalid float conversion
                 elif column.type.python_type == int:
                     value = int(comp_filter.value)
                 elif column.type.python_type == float:
@@ -369,7 +371,7 @@ class InvoiceItemController:
             else:
                 raise HTTPException(status_code=400, detail=f"Invalid operator: {comp_filter.operator}")
 
-        if request.order_by: # applying sorting
+        if request.order_by:  # applying sorting
             for order_filter in request.order_by:
                 if not hasattr(InvoiceItem, order_filter.column):
                     raise HTTPException(status_code=400,
@@ -384,7 +386,7 @@ class InvoiceItemController:
                 else:
                     raise HTTPException(status_code=400, detail=f"Invalid order direction: {order_filter.order}")
         if size == 0:
-            if col_param: # select distinct values of certain column
+            if col_param:  # select distinct values of certain column
                 column = getattr(InvoiceItem, col_param, None)
                 if column is None:
                     raise HTTPException(status_code=400, detail=f"Invalid column name: {col_param}")
@@ -392,7 +394,7 @@ class InvoiceItemController:
                 return [row[0] for row in query.with_entities(column).distinct().order_by(column).all()]
 
             results = query.all()
-            size=1
+            size = 1
             total = query.count()
         else:
             total = query.count()
@@ -419,10 +421,9 @@ class InvoiceItemController:
         response = [
             PriceHistoryResponse(
                 ref_no=item.ref_no, date=item.date.strftime("%m-%d-%Y"),
-                cost=item.cost, qty=item.qty, invoice_id= str(item.invoice_id))
+                cost=item.cost, qty=item.qty, invoice_id=str(item.invoice_id))
             for item in matched_items]
         return response
-
 
     def get_aggregates(self, request):
         query = self.db_context.query(InvoiceItem)
@@ -446,7 +447,6 @@ class InvoiceItemController:
             if comp_filter.column == "amount":
                 column = cast(func.replace(column, ',', ''), Float)
 
-            # Handle type casting for comparison filters
             try:
                 if comp_filter.column == "amount":
                     try:
@@ -486,14 +486,33 @@ class InvoiceItemController:
             func.avg(InvoiceItem.cost).label('average_cost')
         ).first()
 
-        total_qty = aggregates.total_qty or 0
-        total_amount = float(aggregates.total_amount or 0)
-        average_cost = float(aggregates.average_cost or 0)
+        total_qty = 0 if aggregates.total_qty is None else int(aggregates.total_qty)
+
+        if aggregates.total_amount is None:
+            total_amount = 0.0
+        else:
+            try:
+                total_amount = float(aggregates.total_amount)
+            except (TypeError, ValueError):
+                total_amount = 0.0
+
+        if aggregates.average_cost is None:
+            average_cost = 0.0
+        else:
+            try:
+                average_cost = float(aggregates.average_cost)
+            except (TypeError, ValueError):
+                average_cost = 0.0
+
+        def sanitize_float(value: float) -> float:
+            if math.isinf(value) or math.isnan(value):
+                return 0.0
+            return round(value, 2)
 
         return {
             "total_qty": total_qty,
-            "total_amount": round(total_amount, 2),
-            "average_cost": round(average_cost, 2)
+            "total_amount": sanitize_float(total_amount),
+            "average_cost": sanitize_float(average_cost)
         }
 
     def calculate_price_increase(self, item_numbers):
@@ -512,7 +531,7 @@ class InvoiceItemController:
         target_date = current_date - timedelta(days=365)  # Date 1 year ago
         result = []
 
-        if not item_numbers: # No items to process
+        if not item_numbers:  # No items to process
             return result
 
         base_query = self.db_context.query(InvoiceItem)

@@ -72,6 +72,23 @@
         "updated_customer_job": "200 walworth St"
     },
     {
+        "customer_job": "Invoice I-0055232",
+        "updated_customer_job": "200 walworth St"
+    },
+
+    {
+        "customer_job": "MPI",
+        "updated_customer_job": "200 walworth St"
+    },
+    {
+        "customer_job": "MPI Plumbing Corp.",
+        "updated_customer_job": "200 walworth St"
+    },
+    {
+        "customer_job": "MPI PLUMBING CORP.",
+        "updated_customer_job": "200 walworth St"
+    },
+    {
         "customer_job": "NBE PLUMBING CORP.",
         "updated_customer_job": "200 walworth St"
     },
@@ -100,6 +117,10 @@
         "updated_customer_job": "225 Skillman, LLC"
     },
     {
+        "customer_job": "275 SKILLMAN ST",
+        "updated_customer_job": "275 Skillman"
+    },
+    {
         "customer_job": "275 SKILLMAN",
         "updated_customer_job": "275 Skillman"
     },
@@ -122,6 +143,10 @@
     {
         "customer_job": "380 ARBUCKLE AVE",
         "updated_customer_job": "380 ARBUCKLE AVE"
+    },
+    {
+        "customer_job": "42 SKILLMAN",
+        "updated_customer_job": "42 Skillman St"
     },
     {
         "customer_job": "42 SKILLMAN ST",
@@ -165,6 +190,10 @@
     },
     {
         "customer_job": "122 W 167th St",
+        "updated_customer_job": "B Contractors:122 West 167 St"
+    },
+    {
+        "customer_job": "167 St",
         "updated_customer_job": "B Contractors:122 West 167 St"
     },
     {
@@ -508,6 +537,10 @@
         "updated_customer_job": "Blue Sky Builders:285 Rutland Rd"
     },
     {
+        "customer_job": "290 UNION A",
+        "updated_customer_job": "Blue Sky Builders:290 Union Ave"
+    },
+    {
         "customer_job": "290 Union Ave",
         "updated_customer_job": "Blue Sky Builders:290 Union Ave"
     },
@@ -680,6 +713,10 @@
         "updated_customer_job": "BQBP Electronics:1513 Nostrand Ave"
     },
     {
+        "customer_job": "314 KEAP ST",
+        "updated_customer_job": "BQBP Electronics:312-314 Keap St"
+    },
+    {
         "customer_job": "312 KEAP ST",
         "updated_customer_job": "BQBP Electronics:312-314 Keap St"
     },
@@ -689,6 +726,10 @@
     },
     {
         "customer_job": "311 WILSON",
+        "updated_customer_job": "BQBP Electronics:313 Wilson Ave"
+    },
+    {
+        "customer_job": "313 WILSON",
         "updated_customer_job": "BQBP Electronics:313 Wilson Ave"
     },
     {
@@ -715,6 +756,11 @@
         "customer_job": "BQBP Electronics:385 Classon Ave",
         "updated_customer_job": "BQBP Electronics:385 Classon Ave"
     },
+    {
+        "customer_job": "396 SOUTH 5",
+        "updated_customer_job": "BQBP Electronics:396 South 5th St"
+    },
+
     {
         "customer_job": "396 SOUTH 5 ST",
         "updated_customer_job": "BQBP Electronics:396 South 5th St"
@@ -921,6 +967,10 @@
     },
     {
         "customer_job": "161 COURT",
+        "updated_customer_job": "Busa Builders:161 Court Street"
+    },
+    {
+        "customer_job": "161 COURT ST",
         "updated_customer_job": "Busa Builders:161 Court Street"
     },
     {
@@ -1264,6 +1314,10 @@
         "updated_customer_job": "Concept Equities:253 Nostrand Ave."
     },
     {
+        "customer_job": "253 NOSTRAND AVENUE",
+        "updated_customer_job": "Concept Equities:253 Nostrand Ave."
+    },
+    {
         "customer_job": "Concept Equities:253 Nostrand Ave.",
         "updated_customer_job": "Concept Equities:253 Nostrand Ave."
     },
@@ -1400,6 +1454,10 @@
         "updated_customer_job": "Galaxy Developers:89 Union Ave"
     },
     {
+        "customer_job": "215-225 WEST 28",
+        "updated_customer_job": "HAP Construction LLC:215-225 West 28 St"
+    },
+    {
         "customer_job": "215 W 28",
         "updated_customer_job": "HAP Construction LLC:215-225 West 28 St"
     },
@@ -1409,6 +1467,10 @@
     },
     {
         "customer_job": "215 WEST 28TH ST",
+        "updated_customer_job": "HAP Construction LLC:215-225 West 28 St"
+    },
+    {
+        "customer_job": "215 WEST 28th",
         "updated_customer_job": "HAP Construction LLC:215-225 West 28 St"
     },
     {
@@ -1604,6 +1666,11 @@
         "updated_customer_job": "MZS Realty:1045 Ward Ave"
     },
     {
+        "customer_job": "1045 Ward Ave",
+        "updated_customer_job": "MZS Realty:1045 Ward Ave"
+    },
+
+    {
         "customer_job": "1045 Ward Avenue",
         "updated_customer_job": "MZS Realty:1045 Ward Ave"
     },
@@ -1736,6 +1803,10 @@
         "updated_customer_job": "NYEG Corp:886 East 24th St"
     },
     {
+        "customer_job": "886 E24th St",
+        "updated_customer_job": "NYEG Corp:886 East 24th St"
+    },
+    {
         "customer_job": "886 E 24th St",
         "updated_customer_job": "NYEG Corp:886 East 24th St"
     },
@@ -1746,6 +1817,10 @@
     {
         "customer_job": "NYEG Corp:886 East 24th St",
         "updated_customer_job": "NYEG Corp:886 East 24th St"
+    },
+    {
+        "customer_job": "136-21 hillside",
+        "updated_customer_job": "Platinum Management Group:136-21 Hillside Ave"
     },
     {
         "customer_job": "136-21 Hillside Ave",
@@ -1892,6 +1967,10 @@
         "updated_customer_job": "Precision Mechanical:36-20 Steinway St"
     },
     {
+        "customer_job": "`1702 NEWKIRK",
+        "updated_customer_job": "Prospect Homes LLC:1702 Newkirk Ave"
+    },
+    {
         "customer_job": "1702 Newkirk Ave",
         "updated_customer_job": "Prospect Homes LLC:1702 Newkirk Ave"
     },
@@ -2033,12 +2112,17 @@
     },
     {
         "customer_job": "Regal Builders:933 Rogers Ave",
-        "updated_customer_job": "Regal Builders:933 Rogers Ave"
+        "updated_customer_job": "Regal Builders:933 Rogers Ave" 
     },
     {
         "customer_job": "263 Franklin Ave",
         "updated_customer_job": "RL Group:263 Franklin Ave"
     },
+    {
+        "customer_job": "263 Franklin",
+        "updated_customer_job": "RL Group:263 Franklin Ave"
+    },
+    
     {
         "customer_job": "RL Group:263 Franklin Ave",
         "updated_customer_job": "RL Group:263 Franklin Ave"
@@ -2217,6 +2301,10 @@
     },
     {
         "customer_job": "278 division",
+        "updated_customer_job": "Service Call - New:Other"
+    },
+    {
+        "customer_job": "347 FLUSHING",
         "updated_customer_job": "Service Call - New:Other"
     },
     {
@@ -2408,6 +2496,14 @@
         "updated_customer_job": "Strekte:312 Broadway"
     },
     {
+        "customer_job": "VAN BRUNT",
+        "updated_customer_job": "Strekte:434 Van Brunt St."
+    },
+    {
+        "customer_job": "434 VAN BRUNT",
+        "updated_customer_job": "Strekte:434 Van Brunt St."
+    },
+    {
         "customer_job": "432 van brunt",
         "updated_customer_job": "Strekte:434 Van Brunt St."
     },
@@ -2457,6 +2553,10 @@
     },
     {
         "customer_job": "1162 Broadway",
+        "updated_customer_job": "The Jay Group:1162 Broadway"
+    },
+    {
+        "customer_job": "1162 BROADWAY",
         "updated_customer_job": "The Jay Group:1162 Broadway"
     },
     {
@@ -2572,6 +2672,14 @@
         "updated_customer_job": "Triple C Builders LLC:2037 59th St"
     },
     {
+        "customer_job": "211 TROY AVE",
+        "updated_customer_job": "Triple C Builders LLC:209-213 Troy Ave"
+    },
+    {
+        "customer_job": "209 TROY AVE",
+        "updated_customer_job": "Triple C Builders LLC:209-213 Troy Ave"
+    },
+    {
         "customer_job": "209-213 Troy Ave",
         "updated_customer_job": "Triple C Builders LLC:209-213 Troy Ave"
     },
@@ -2580,7 +2688,15 @@
         "updated_customer_job": "Triple C Builders LLC:209-213 Troy Ave"
     },
     {
+        "customer_job": "335 FENIMORE ST",
+        "updated_customer_job": "Triple C Builders LLC:335 Fenimore Ave"
+    },
+    {
         "customer_job": "335 Fenimore Ave",
+        "updated_customer_job": "Triple C Builders LLC:335 Fenimore Ave"
+    },
+    {
+        "customer_job": "335 Fenimore",
         "updated_customer_job": "Triple C Builders LLC:335 Fenimore Ave"
     },
     {
@@ -2628,6 +2744,10 @@
         "updated_customer_job": "Triple C Builders LLC:901 Myrtle"
     },
     {
+        "customer_job": "953 Dean StBrooklyn, NY 11238",
+        "updated_customer_job": "Twin Group Associates Inc:953 Dean St"
+    },
+    {
         "customer_job": "953 DEAN ST",
         "updated_customer_job": "Twin Group Associates Inc:953 Dean St"
     },
@@ -2672,6 +2792,10 @@
         "updated_customer_job": "Waterfront Management:979 Lafayette Ave"
     },
     {
+        "customer_job": "1173 Rogers Avenue",
+        "updated_customer_job": "Westmount Equities LLC:1173 Rogers Ave"
+    },
+    {
         "customer_job": "1173 Rogers Ave",
         "updated_customer_job": "Westmount Equities LLC:1173 Rogers Ave"
     },
@@ -2694,6 +2818,10 @@
     {
         "customer_job": "Westmount Equities LLC:28 Rutledge St",
         "updated_customer_job": "Westmount Equities LLC:28 Rutledge St"
+    },
+    {
+        "customer_job": "303 POWEL",
+        "updated_customer_job": "Westmount Equities LLC:303 Powell St"
     },
     {
         "customer_job": "303 POWELL",
@@ -2812,6 +2940,10 @@
         "updated_customer_job": "200 walworth St"
     },
     {
+        "customer_job": "DROP OFF AT 200 WAQLWOORTH",
+        "updated_customer_job": "200 walworth St"
+    },
+    {
         "customer_job": "933 ROGERS AVE",
         "updated_customer_job": "Regal Builders:933 Rogers Ave"
     },
@@ -2882,6 +3014,10 @@
     {
         "customer_job": "527 Grand Ave",
         "updated_customer_job": "Twin Group Associates Inc:527 Grand Ave"
+    },
+    {
+        "customer_job": "7755 vleigh",
+        "updated_customer_job": "QBH Construction Corp:141-15 78th Ave"
     },
     {
         "customer_job": "7755 VLEIGH PL",
@@ -2996,6 +3132,11 @@
         "updated_customer_job": "Manhattan Management Realty LLC:2201 Beverly Rd"
     },
     {
+        "customer_job": "2201 Beverley",
+        "updated_customer_job": "Manhattan Management Realty LLC:2201 Beverly Rd"
+    },
+    
+    {
         "customer_job": "310 GRAND CONCOURSE",
         "updated_customer_job": "NY Developers:310-322 Grand Concourse"
     },
@@ -3037,6 +3178,10 @@
     },
     {
         "customer_job": "34-20 Junction Blvd",
+        "updated_customer_job": "NY Developers:34-20 Junction Blvd"
+    },
+    {
+        "customer_job": "34-20 Junction",
         "updated_customer_job": "NY Developers:34-20 Junction Blvd"
     },
     {
@@ -3308,6 +3453,11 @@
         "updated_customer_job": "CNS Builders:556 Baltic St"
     },
     {
+        "customer_job": "556 Baltic Street",
+        "updated_customer_job": "CNS Builders:556 Baltic Street"
+    },
+
+    {
         "customer_job": "133 Kent Ave",
         "updated_customer_job": "Prestige Construction NY:133 Kent Ave"
     },
@@ -3341,6 +3491,10 @@
     },
     {
         "customer_job": "554 W46th St,",
+        "updated_customer_job": "B Contractors:554 West 46th St"
+    },
+    {
+        "customer_job": "554 West 46th St",
         "updated_customer_job": "B Contractors:554 West 46th St"
     },
     {
@@ -3434,5 +3588,139 @@
     {
         "customer_job": "205 Cabrini Boulevard",
         "updated_customer_job": "BB Empire Corp:205 Cabrini Blvd"
+    },
+
+    {
+        "customer_job": "670 Myrtle Ave. #234",
+        "updated_customer_job": "670 Myrtle Ave"
+    },
+    {
+        "customer_job": "670 MYRTLE AVE",
+        "updated_customer_job": "670 Myrtle Ave"
+    },
+    {
+        "customer_job": "670 MYRTLE AVEW",
+        "updated_customer_job": "670 Myrtle Ave"
+    },
+    {
+        "customer_job": "670 Myrtle Ave",
+        "updated_customer_job": "670 Myrtle Ave"
+    },
+    {
+        "customer_job": "Z V I N E W G U Y T O O K B Y M I S T A K E",
+        "updated_customer_job": "ZVI NEW GUY TOOK BY MISTAKE"
+    },
+    {
+        "customer_job": "57 S 6th St Brooklyn",
+        "updated_customer_job": "57 South 6th St"
+    },
+    {
+        "customer_job": "57 South 6th Street",
+        "updated_customer_job": "57 South 6th St"
+    },
+    {
+        "customer_job": "57 South6th St,",
+        "updated_customer_job": "57 South 6th St"
+    },
+    {
+        "customer_job": "1770 59th St",
+        "updated_customer_job": "1770 59th St"
+    },
+    {
+        "customer_job": "1770 59th St.",
+        "updated_customer_job": "1770 59th St"
+    },
+    {
+        "customer_job": "1770 59th Street",
+        "updated_customer_job": "1770 59th St"
+    },
+    {
+        "customer_job": "1770 59 ST",
+        "updated_customer_job": "1770 59th St"
+    },
+    {
+        "customer_job": "1770 59th Street.",
+        "updated_customer_job": "1770 59th St"
+    },
+    {
+        "customer_job": "1770 59th StBrooklyn, NY 11204",
+        "updated_customer_job": "1770 59th St"
+    },
+    {
+        "customer_job": "810 E170th St Bronx, N Y10459",
+        "updated_customer_job": "Blue Sky Builders:810 East 170th St"
+    },
+    {
+        "customer_job": "268 METROPOLITAN",
+        "updated_customer_job": "Blue Sky Builders:268 Metropolitan Ave"
+    },
+    {
+        "customer_job": "225 SKILMAN ST.",
+        "updated_customer_job": "225 Skilman St"
+    },
+    {
+        "customer_job": "275 SKILLMAN STREET",
+        "updated_customer_job": "225 Skilman St"
+    },
+    {
+        "customer_job": "1702 NEWKIRK-TAUBER",
+        "updated_customer_job": "Prospect Homes LLC:1702 Newkirk Ave"
+    },
+    {
+        "customer_job": "63 ROEBLING STREET",
+        "updated_customer_job": "63 Roebling St"
+    },
+    {
+        "customer_job": "1157 MYRTLE",
+        "updated_customer_job": "BROOKLYN GC, LLC:1157 Myrtle Ave."
+    },
+    {
+        "customer_job": "135  PROSPECT AVE",
+        "updated_customer_job": "Rock Builders:135-137 Prospect Ave"
+    },
+    {
+        "customer_job": "135 PROSPECT AVE",
+        "updated_customer_job": "Rock Builders:135-137 Prospect Ave"
+    },
+
+    {
+        "customer_job": "CASH TICKET",
+        "updated_customer_job": "Service Call - New:Other"
+    },
+    {
+        "customer_job": "255 SKILLMAN STREET",
+        "updated_customer_job": "225 Skilman St"
+    },
+    {
+        "customer_job": "SAFTY FIRE SRINKLER",
+        "updated_customer_job": "Service Call - New:Other"
+    },
+    {
+        "customer_job": "1763 W Farms Rd,",
+        "updated_customer_job": "City Wide Builders:1763 W Farms Rd"
+    },
+    {
+        "customer_job": "2150 Clinton Avenue",
+        "updated_customer_job": "B Contractors:2150 Clinton Ave"
+    },
+    {
+        "customer_job": "311 Pin St",
+        "updated_customer_job": "Strekte:311 Pine St"
+    },
+    {
+        "customer_job": "311 pine pickup",
+        "updated_customer_job": "Strekte:311 Pine St"
+    },
+    {
+        "customer_job": "1770 59th StBrooklyn, NY 11204",
+        "updated_customer_job": "1770 59th St"
+    },
+    
+
+    {
+        "customer_job": "98-08 Queens Boulevard",
+        "updated_customer_job": "NY Developers:98-08 Queens Blvd"
     }
+
+
 ]
