@@ -150,7 +150,7 @@ def export_all_invoices(request: ExportToExcelFilterRequest,
         ids = list(set(ids) - set(request.excluded_rows_ids))
 
     # ids = list(set(ids))  # make row ids of items to be exported in list to be unique, no repetition.
-    return export_invoices (ids,request.columns,db=db)
+    return export_invoices(ids, request.columns, db=db)
 
 @router.post("/export")
 def export_invoices(
@@ -180,11 +180,7 @@ def export_invoices(
     upload_file(file_path, file_key=f'Exports/{filename}', is_invoice=False) # upload to s3 to be exported
     download_url = get_presigned_url(file_key=f'Exports/{filename}', is_invoice=False)
 
-    # track & manage invoice export status
-    InvoiceItemController(db).set_export_status_to_sent(ids) # update line item export status to sent
-    invoice_ids = {item.invoice_id for item in items if item.invoice_id} # get all distinct invoice-ids to check & update invoice level export status
-    for invoice_id in invoice_ids:
-        if InvoiceItemController(db).is_exported(invoice_id):
-            InvoiceController(db).set_invoice_is_exported(invoice_id)
+    # Removing the status update code completely
+    # No longer marking items as sent when exporting to Excel
 
     return download_url
