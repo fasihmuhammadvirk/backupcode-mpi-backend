@@ -10,18 +10,38 @@ class CustomerJobMappingController:
         with self.db_context() as db:
             query_result = db.query(CustomerJobMapping).all()
 
-            data = [(item.id, item.customer_job, item.updated_customer_job) for item in query_result]
+            # Process mappings to fix whitespace
+            processed_data = []
+            for item in query_result:
+                cust_job = item.customer_job
+                updated_job = item.updated_customer_job
+                
+                # Trim whitespace
+                if cust_job:
+                    cust_job = cust_job.strip()
+                if updated_job:
+                    updated_job = updated_job.strip()
+
+                processed_data.append((item.id, cust_job, updated_job))
+                
             columns = ['id', 'customer_job', 'updated_customer_job']
-            customer_job_mappings = pd.DataFrame(data, columns=columns)
+            customer_job_mappings = pd.DataFrame(processed_data, columns=columns)
             return customer_job_mappings
 
-    def update_mappings_table(self, old_customer_job,new_customer_job):
+    def update_mappings_table(self, old_customer_job, new_customer_job):
         """
-        Updates or inserts a customer job mapping record. This will be used as reference to all future data.
+        Updates or inserts a customer job mapping record.
+        Used as reference for all future data.
         """
         try:
+            # Clean inputs - trim whitespace
+            if old_customer_job:
+                old_customer_job = old_customer_job.strip()
+            if new_customer_job:
+                new_customer_job = new_customer_job.strip()
+            
             # Check if mapping already exists for the original customer_job
-            existing_mapping =  self.db_context.query(CustomerJobMapping).filter(
+            existing_mapping = self.db_context.query(CustomerJobMapping).filter(
                 CustomerJobMapping.customer_job == old_customer_job
             ).first()
 
