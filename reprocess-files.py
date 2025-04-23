@@ -162,64 +162,100 @@ import pandas as pd
 import uuid
 from datetime import datetime
 from mpi_backend.database import get_db
-from mpi_backend.database.controllers import InvoiceItemController
+from mpi_backend.database.controllers import InvoiceItemController, InvoiceController
 from mpi_backend.database.models import Invoice
-from mpi_backend.main import process_extracted_data  # Make sure this points to the actual definition
+from mpi_backend.main import process_extracted_data
 from contextlib import contextmanager
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 directory_path = "mpi_backend/storage"
 
-# Utility to find all .pdf files deeply nested
-def find_pdf_files(directory):
-    pdf_files = []
-    for root, dirs, files in os.walk(directory):
-        for file in files:
-            if file.lower().endswith(".pdf"):
-                full_path = os.path.join(root, file)
-                if full_path.count(os.sep) > 3:
-                    pdf_files.append(full_path)
-    return pdf_files
 
-# Utility to check if any item has both mpi_item and mpi_description as empty
 def check_empty_mpi_item_and_description(invoice_items):
-    return any(item.mpi_item == '' and item.mpi_description == '' for item in invoice_items)
+    """Check if any invoice item has both mpi_item and mpi_description as empty."""
+    return any(item.mpi_item == '' and item.mpi_description == '' 
+              for item in invoice_items)
 
-# Reprocess logic for invoices with job code "556"
+
 def reprocess_556_jobs():
+    """Reprocess all invoices that have job address containing '556'."""
     db_context = contextmanager(get_db)
-    pdf_files = find_pdf_files(directory_path)
     reprocessed_ids = []
+    error_invoices = []
+    skipped_invoices = []
 
     with db_context() as db:
-        for file in pdf_files:
-            filename = os.path.basename(file)
-            matched_invoice = db.query(Invoice).filter_by(filename=filename).first()
-            if not matched_invoice:
-                continue
+        # Get all invoices from database
+        all_invoices = db.query(Invoice).all()
+        logger.info(f"Found {len(all_invoices)} total invoices in database")
 
-            invoice_id = str(matched_invoice.id)
-            xlsx_path = file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
-            if not os.path.exists(xlsx_path):
-                continue
-
+        for invoice in all_invoices:
             try:
-                df = pd.read_excel(xlsx_path)
+                # Get the invoice items to check job address
+                invoice_items = InvoiceItemController(db).get_invoice_items(
+                    invoice_id=str(invoice.id)
+                )
+                
+                if not invoice_items:
+                    logger.warning(f"No items found for invoice {invoice.id}")
+                    skipped_invoices.append(str(invoice.id))
+                    continue
+
+                # Check if any item has job address 556
+                has_556_job = False
+                for item in invoice_items:
+                    if item.customer_job and '556' in str(item.customer_job):
+                        has_556_job = True
+                        break
+
+                if not has_556_job:
+                    continue
+
+                # If we found a 556 job, check if it needs reprocessing
+                if check_empty_mpi_item_and_description(invoice_items):
+                    # Get the original file path
+                    file_path = os.path.join(directory_path, invoice.filename)
+                    xlsx_path = file_path.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
+
+                    if not os.path.exists(xlsx_path):
+                        logger.error(f"XLSX file not found for invoice {invoice.id}")
+                        error_invoices.append(str(invoice.id))
+                        continue
+
+                    # Delete existing items and reprocess
+                    InvoiceItemController(db).delete_invoice_items(str(invoice.id), db)
+                    process_extracted_data([file_path.replace("\\", "/")], 
+                                        uuid.UUID(str(invoice.id)))
+                    reprocessed_ids.append(str(invoice.id))
+                    logger.info(f"Successfully reprocessed invoice ID: {invoice.id}")
+                else:
+                    logger.info(f"Skipping invoice {invoice.id} - no empty MPI items")
+                    skipped_invoices.append(str(invoice.id))
+
             except Exception as e:
-                print(f"❌ Failed to read {xlsx_path}: {e}")
-                continue
+                logger.error(f"Error processing invoice {invoice.id}: {str(e)}")
+                error_invoices.append(str(invoice.id))
 
-            # Check if 'Customer Job' field contains '556'
-            if not df.empty and 'Customer Job' in df.columns:
-                if df['Customer Job'].astype(str).str.contains("556").any():
-                    invoice_items = InvoiceItemController(db).get_invoice_items(invoice_id=invoice_id)
-                    if check_empty_mpi_item_and_description(invoice_items):
-                        InvoiceItemController(db).delete_invoice_items(invoice_id, db)
-                        process_extracted_data([file.replace("\\", "/")], uuid.UUID(invoice_id))
-                        reprocessed_ids.append(invoice_id)
-                        print(f"🔄 Reprocessed invoice ID: {invoice_id}")
+    # Print summary
+    logger.info("\n=== Processing Summary ===")
+    logger.info(f"✅ Successfully reprocessed: {len(reprocessed_ids)} invoices")
+    logger.info(f"📋 Reprocessed Invoice IDs: {reprocessed_ids}")
+    
+    if skipped_invoices:
+        logger.info(f"⏭️  Skipped invoices: {len(skipped_invoices)}")
+        logger.debug(f"Skipped invoice IDs: {skipped_invoices}")
+    
+    if error_invoices:
+        logger.warning(f"❌ Invoices with errors: {len(error_invoices)}")
+        logger.debug(f"Error invoice IDs: {error_invoices}")
 
-    print(f"\n✅ Reprocessed {len(reprocessed_ids)} invoices with job description containing '556'")
-    print("🧾 Invoice IDs:", reprocessed_ids)
 
 if __name__ == "__main__":
     reprocess_556_jobs()
