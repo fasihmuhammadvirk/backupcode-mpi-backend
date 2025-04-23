@@ -157,18 +157,19 @@
 # print('\n')
 # print(invoice_ids)
 
-
 import os
 import pandas as pd
 import uuid
+from datetime import datetime
 from mpi_backend.database import get_db
-from mpi_backend.database.controllers import InvoiceController, InvoiceItemController
+from mpi_backend.database.controllers import InvoiceItemController
 from mpi_backend.database.models import Invoice
-from mpi_backend.main import process_extracted_data, check_empty_mpi_item_and_description  # adjust path if needed
+from mpi_backend.main import process_extracted_data  # Make sure this points to the actual definition
 from contextlib import contextmanager
 
 directory_path = "mpi_backend/storage"
 
+# Utility to find all .pdf files deeply nested
 def find_pdf_files(directory):
     pdf_files = []
     for root, dirs, files in os.walk(directory):
@@ -179,13 +180,18 @@ def find_pdf_files(directory):
                     pdf_files.append(full_path)
     return pdf_files
 
+# Utility to check if any item has both mpi_item and mpi_description as empty
+def check_empty_mpi_item_and_description(invoice_items):
+    return any(item.mpi_item == '' and item.mpi_description == '' for item in invoice_items)
+
+# Reprocess logic for invoices with job code "556"
 def reprocess_556_jobs():
     db_context = contextmanager(get_db)
-    xlsx_files = find_pdf_files(directory_path)
+    pdf_files = find_pdf_files(directory_path)
     reprocessed_ids = []
 
     with db_context() as db:
-        for file in xlsx_files:
+        for file in pdf_files:
             filename = os.path.basename(file)
             matched_invoice = db.query(Invoice).filter_by(filename=filename).first()
             if not matched_invoice:
@@ -199,7 +205,7 @@ def reprocess_556_jobs():
             try:
                 df = pd.read_excel(xlsx_path)
             except Exception as e:
-                print(f"Failed to read {xlsx_path}: {e}")
+                print(f"❌ Failed to read {xlsx_path}: {e}")
                 continue
 
             # Check if 'Customer Job' field contains '556'
@@ -210,10 +216,10 @@ def reprocess_556_jobs():
                         InvoiceItemController(db).delete_invoice_items(invoice_id, db)
                         process_extracted_data([file.replace("\\", "/")], uuid.UUID(invoice_id))
                         reprocessed_ids.append(invoice_id)
-                        print(f"Reprocessed invoice ID: {invoice_id}")
+                        print(f"🔄 Reprocessed invoice ID: {invoice_id}")
 
     print(f"\n✅ Reprocessed {len(reprocessed_ids)} invoices with job description containing '556'")
-    print("Invoice IDs:", reprocessed_ids)
+    print("🧾 Invoice IDs:", reprocessed_ids)
 
 if __name__ == "__main__":
     reprocess_556_jobs()
