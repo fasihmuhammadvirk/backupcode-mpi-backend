@@ -160,13 +160,17 @@
 import os
 import pandas as pd
 import uuid
+import requests
 from datetime import datetime
-from mpi_backend.database import get_db
-from mpi_backend.database.controllers import InvoiceItemController, InvoiceController
-from mpi_backend.database.models import Invoice
-from mpi_backend.main import process_extracted_data
-from contextlib import contextmanager
 import logging
+from mpi_backend.database import get_db
+from mpi_backend.database.controllers import InvoiceItemController, InvoiceController, SupplierController
+from mpi_backend.database.models import Invoice
+from mpi_backend.utils.invoice_convertor import convert_invoice
+from mpi_backend.utils.extracted_data_processor import process_extracted_data
+from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
+from mpi_backend.utils.s3_utils import get_presigned_url
+from contextlib import contextmanager
 
 # Configure logging
 logging.basicConfig(
@@ -174,14 +178,6 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-directory_path = "mpi_backend/storage"
-
-
-def check_empty_mpi_item_and_description(invoice_items):
-    """Check if any invoice item has both mpi_item and mpi_description as empty."""
-    return any(item.mpi_item == '' and item.mpi_description == '' 
-              for item in invoice_items)
 
 
 def reprocess_556_jobs():
@@ -218,26 +214,58 @@ def reprocess_556_jobs():
                 if not has_556_job:
                     continue
 
-                # If we found a 556 job, check if it needs reprocessing
-                if check_empty_mpi_item_and_description(invoice_items):
-                    # Get the original file path
-                    file_path = os.path.join(directory_path, invoice.filename)
-                    xlsx_path = file_path.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
-
-                    if not os.path.exists(xlsx_path):
-                        logger.error(f"XLSX file not found for invoice {invoice.id}")
-                        error_invoices.append(str(invoice.id))
+                # If we found a 556 job, reprocess the entire invoice
+                invoice_id = str(invoice.id)
+                supplier = SupplierController(db).get_supplier_by_id(invoice.supplier_id)
+                
+                # Get the invoice file from S3
+                invoice_url = get_presigned_url(file_key=f'{supplier}/{invoice_id}')
+                
+                if not invoice_url:
+                    logger.error(f"Couldn't fetch invoice {invoice_id} from S3")
+                    error_invoices.append(invoice_id)
+                    continue
+                
+                # Create supplier folder if it doesn't exist
+                upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{supplier}'
+                if not os.path.exists(upload_folder):
+                    os.makedirs(upload_folder)
+                
+                # Download the invoice file
+                try:
+                    response = requests.get(invoice_url)
+                    if response.status_code != 200:
+                        logger.error(f"Failed to download invoice {invoice_id}: Status {response.status_code}")
+                        error_invoices.append(invoice_id)
                         continue
-
-                    # Delete existing items and reprocess
-                    InvoiceItemController(db).delete_invoice_items(str(invoice.id), db)
-                    process_extracted_data([file_path.replace("\\", "/")], 
-                                        uuid.UUID(str(invoice.id)))
-                    reprocessed_ids.append(str(invoice.id))
-                    logger.info(f"Successfully reprocessed invoice ID: {invoice.id}")
-                else:
-                    logger.info(f"Skipping invoice {invoice.id} - no empty MPI items")
-                    skipped_invoices.append(str(invoice.id))
+                        
+                    with open(os.path.join(upload_folder, invoice.filename), 'wb') as file:
+                        file.write(response.content)
+                except Exception as e:
+                    logger.error(f"Failed to download invoice {invoice_id}: {str(e)}")
+                    error_invoices.append(invoice_id)
+                    continue
+                
+                # Delete existing invoice and items
+                logger.info(f"Deleting existing invoice and items for {invoice_id}")
+                InvoiceItemController(db).delete_invoice_items(invoice_id, db)
+                InvoiceController(db).delete_invoice(invoice_id, db)
+                
+                # Convert and process the invoice
+                logger.info(f"Converting and processing invoice {invoice_id}")
+                converted_files, failed_files = convert_invoice(supplier)
+                process_extracted_data(converted_files, failed_files)
+                
+                # Clean up temporary files
+                files_to_remove = [f for f in os.listdir(upload_folder)]
+                for filename in files_to_remove:
+                    try:
+                        os.remove(os.path.join(upload_folder, filename))
+                    except Exception as e:
+                        logger.warning(f"Failed to remove temp file {filename}: {str(e)}")
+                
+                reprocessed_ids.append(invoice_id)
+                logger.info(f"Successfully reprocessed invoice ID: {invoice_id}")
 
             except Exception as e:
                 logger.error(f"Error processing invoice {invoice.id}: {str(e)}")
