@@ -1,158 +1,219 @@
-from mpi_backend.database.controllers import SupplierController, InvoiceController, InvoiceItemController
-from mpi_backend.database.models import Invoice, InvoiceItem
-from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
-from mpi_backend.database.controllers import ItemsMappingController,TempItemsMappingController,UnmappedItemsController
-from mpi_backend.utils.invoice_convertor import convert_invoice
-from mpi_backend.utils.auth.auth_bearer import JWTBearer
-from mpi_backend.utils.s3_utils import get_presigned_url
-from mpi_backend.database import get_db
-from contextlib import contextmanager
-import re
-from datetime import datetime
+# from mpi_backend.database.controllers import SupplierController, InvoiceController, InvoiceItemController
+# from mpi_backend.database.models import Invoice, InvoiceItem
+# from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
+# from mpi_backend.database.controllers import ItemsMappingController,TempItemsMappingController,UnmappedItemsController
+# from mpi_backend.utils.invoice_convertor import convert_invoice
+# from mpi_backend.utils.auth.auth_bearer import JWTBearer
+# from mpi_backend.utils.s3_utils import get_presigned_url
+# from mpi_backend.database import get_db
+# from contextlib import contextmanager
+# import re
+# from datetime import datetime
+# import os
+# import pandas as pd
+# import uuid
+#
+#
+# db = contextmanager(get_db)
+# def find_pdf_files(directory):
+#     xlsx_files = []
+#     for root, dirs, files in os.walk(directory):
+#         for file in files:
+#             if file.endswith(".pdf") or file.endswith(".PDF"):
+#                 # Get the full file path
+#                 full_path = os.path.join(root, file)
+#                 if full_path.count(os.sep) > 3:
+#                     xlsx_files.append(full_path)
+#
+#     return xlsx_files
+#
+# def check_empty_mpi_item_and_description(invoice_items):
+#     # Check if any object has both mpi_item and mpi_description as empty strings
+#     return any(item.mpi_item == '' and item.mpi_description == '' for item in invoice_items)
+#
+# directory_path = "mpi_backend/storage"
+# xlsx_files = find_pdf_files(directory_path)
+# print (f'Found {len(xlsx_files)} invoices.')
+#
+# invoice_ids = []
+#
+# def process_extracted_data(converted_files, id):
+#
+#     db = contextmanager(get_db)
+#
+#     temp_items = TempItemsMappingController(db).get_temp_items_mappings()
+#     item_mappings = ItemsMappingController(db).get_items_mappings()
+#
+#     for file in converted_files:
+#         extracted_data = pd.read_excel(file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
+#
+#
+#         if InvoiceItemController(db).invoice_exists(str(extracted_data['Ref NO'][0])) :
+#             print(f'Invoice with REF-NO-> {str(extracted_data["Ref NO"][0])} already processed and is being skipped!')
+#             continue
+#
+#         extracted_data.insert(0, 'Sheet Name', '')
+#         extracted_data['MpiItem'] = 'No Match'
+#         extracted_data['MpiDescription'] = 'No Match'
+#         extracted_data['email_date'] = extract_email_date(file)
+#
+#         extracted_data = extracted_data.apply(search_replace, args=(temp_items, item_mappings,), axis=1)
+#
+#         extracted_customer_job = extracted_data['Customer Job'][0]
+#         extracted_data['Customer Job'] = extracted_customer_job
+#
+#         extracted_data = extracted_data.fillna({'Qty': 0, 'Cost': 0, 'Class': '', 'Memo': '', 'Ref NO': '',
+#                                                 'PO #': '', 'Customer Job': '', 'Buyer': '',
+#                                                 'Date': datetime.today().strftime('%m/%d/%Y')})
+#
+#         for index, row in extracted_data.iterrows():  # every item has its own record
+#             InvoiceItemController(db).insert_invoice_items(row, file.rsplit('/')[-1], id)
+#
+#
+# def extract_email_date(path):
+#     date_pattern = re.compile(r'\b\d{1,2}-\d{1,2}-\d{4}\b')
+#     match = date_pattern.search(path)
+#
+#     if match:
+#         extracted_date = match.group()
+#         date_obj = datetime.strptime(extracted_date, '%m-%d-%Y')
+#     else:
+#         date_obj = datetime.today()
+#
+#     # Convert the date to "year-month-day" format
+#     formatted_date = date_obj.strftime('%Y-%m-%d')
+#     return formatted_date
+#
+#
+# def search_replace(row, temp_items, item_mappings):
+#
+#     item = row['Item']
+#
+#     # Searching in temp_items
+#     temp_match = temp_items[temp_items['original_item_number'] == item]
+#     if not temp_match.empty:
+#         row['MpiItem'] = temp_match.iloc[0]['temporary_item_number']
+#         row['MpiDescription'] = temp_match.iloc[0]['description']
+#         row['Sheet Name'] = ''
+#         return row
+#
+#     # Searching in item_mappings
+#     for column in item_mappings.columns:
+#         mapping_match = item_mappings[item_mappings[column] == item]
+#         if not mapping_match.empty:
+#             row['MpiItem'] = mapping_match.iloc[0]['mpi_code']
+#             row['MpiDescription'] = mapping_match.iloc[0]['description']
+#             sheet_name = mapping_match.iloc[0]['google_sheet_name']
+#             row['Sheet Name'] = sheet_name
+#             return row
+#
+#     # will only be triggered if no mapping is found
+#     supplier_id, _ = extract_supplier_id(row['Vendor'])
+#     if not UnmappedItemsController(db).is_item_code_present(row['Item']):
+#         UnmappedItemsController(db).insert_unmapped_item(row['Item'],row['Description'],supplier_id)
+#
+#     return row
+#
+# def extract_supplier_id(file_path):
+#     company_codes = {
+#         "BMW Plumbing Supplies": 1,
+#         "World Wide Plumbing": 2,
+#         "Y & S Plumbing Supply": 3,
+#         "Supreme Plumbing Supply": 4,
+#         "Pyramid Plumbing": 5,
+#         "ABC Opus Services": 6,
+#         "Park Plumbing Supply": 7,
+#         "Gotham Plumbing Supply": 8,
+#         "FW Webb Plumbing Supply": 9,
+#         "Flow Mark Plumbing Supply": 10
+#     }
+#     for company, code in company_codes.items():
+#         if company in file_path:
+#             return code, company
+#     return 1 # need to return some default supplier
+#
+#
+# reprocessed = 0
+# with db() as db:
+#     for invoice in xlsx_files:
+#         filename = os.path.basename(invoice)
+#         matched_invoice = db.query(Invoice).filter_by(filename=filename).first()
+#
+#         if not matched_invoice: continue
+#         invoice_id = str(matched_invoice.id)
+#
+#
+#         invoice_items = InvoiceItemController(db).get_invoice_items(invoice_id=invoice_id)
+#
+#         if check_empty_mpi_item_and_description(invoice_items): # any one record is empty, process them again
+#             InvoiceItemController(db).delete_invoice_items(invoice_id, db)  # delete previous ingested invoice items
+#             contents = pd.read_excel(invoice.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
+#             process_extracted_data([invoice.replace("\\", "/")], uuid.UUID(invoice_id))
+#
+#             reprocessed +=1
+#             invoice_ids.append(invoice_id)
+#
+# print(f'reprocessed {reprocessed} invoices.')
+# print('\n')
+# print(invoice_ids)
+
+
 import os
 import pandas as pd
 import uuid
-
-
-db = contextmanager(get_db)
-def find_pdf_files(directory):
-    xlsx_files = []
-    for root, dirs, files in os.walk(directory):
-        for file in files:
-            if file.endswith(".pdf") or file.endswith(".PDF"):
-                # Get the full file path
-                full_path = os.path.join(root, file)
-                if full_path.count(os.sep) > 3:
-                    xlsx_files.append(full_path)
-
-    return xlsx_files
-
-def check_empty_mpi_item_and_description(invoice_items):
-    # Check if any object has both mpi_item and mpi_description as empty strings
-    return any(item.mpi_item == '' and item.mpi_description == '' for item in invoice_items)
+from mpi_backend.database import get_db
+from mpi_backend.database.controllers import InvoiceController, InvoiceItemController
+from mpi_backend.database.models import Invoice
+from mpi_backend.main import process_extracted_data, check_empty_mpi_item_and_description  # adjust path if needed
+from contextlib import contextmanager
 
 directory_path = "mpi_backend/storage"
-xlsx_files = find_pdf_files(directory_path)
-print (f'Found {len(xlsx_files)} invoices.')
 
-invoice_ids = []
+def find_pdf_files(directory):
+    pdf_files = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.lower().endswith(".pdf"):
+                full_path = os.path.join(root, file)
+                if full_path.count(os.sep) > 3:
+                    pdf_files.append(full_path)
+    return pdf_files
 
-def process_extracted_data(converted_files, id):
+def reprocess_556_jobs():
+    db_context = contextmanager(get_db)
+    xlsx_files = find_pdf_files(directory_path)
+    reprocessed_ids = []
 
-    db = contextmanager(get_db)
+    with db_context() as db:
+        for file in xlsx_files:
+            filename = os.path.basename(file)
+            matched_invoice = db.query(Invoice).filter_by(filename=filename).first()
+            if not matched_invoice:
+                continue
 
-    temp_items = TempItemsMappingController(db).get_temp_items_mappings()
-    item_mappings = ItemsMappingController(db).get_items_mappings()
+            invoice_id = str(matched_invoice.id)
+            xlsx_path = file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
+            if not os.path.exists(xlsx_path):
+                continue
 
-    for file in converted_files:
-        extracted_data = pd.read_excel(file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
+            try:
+                df = pd.read_excel(xlsx_path)
+            except Exception as e:
+                print(f"Failed to read {xlsx_path}: {e}")
+                continue
 
+            # Check if 'Customer Job' field contains '556'
+            if not df.empty and 'Customer Job' in df.columns:
+                if df['Customer Job'].astype(str).str.contains("556").any():
+                    invoice_items = InvoiceItemController(db).get_invoice_items(invoice_id=invoice_id)
+                    if check_empty_mpi_item_and_description(invoice_items):
+                        InvoiceItemController(db).delete_invoice_items(invoice_id, db)
+                        process_extracted_data([file.replace("\\", "/")], uuid.UUID(invoice_id))
+                        reprocessed_ids.append(invoice_id)
+                        print(f"Reprocessed invoice ID: {invoice_id}")
 
-        if InvoiceItemController(db).invoice_exists(str(extracted_data['Ref NO'][0])) :
-            print(f'Invoice with REF-NO-> {str(extracted_data["Ref NO"][0])} already processed and is being skipped!')
-            continue
+    print(f"\n✅ Reprocessed {len(reprocessed_ids)} invoices with job description containing '556'")
+    print("Invoice IDs:", reprocessed_ids)
 
-        extracted_data.insert(0, 'Sheet Name', '')
-        extracted_data['MpiItem'] = 'No Match'
-        extracted_data['MpiDescription'] = 'No Match'
-        extracted_data['email_date'] = extract_email_date(file)
-
-        extracted_data = extracted_data.apply(search_replace, args=(temp_items, item_mappings,), axis=1)
-
-        extracted_customer_job = extracted_data['Customer Job'][0]
-        extracted_data['Customer Job'] = extracted_customer_job
-
-        extracted_data = extracted_data.fillna({'Qty': 0, 'Cost': 0, 'Class': '', 'Memo': '', 'Ref NO': '',
-                                                'PO #': '', 'Customer Job': '', 'Buyer': '',
-                                                'Date': datetime.today().strftime('%m/%d/%Y')})
-
-        for index, row in extracted_data.iterrows():  # every item has its own record
-            InvoiceItemController(db).insert_invoice_items(row, file.rsplit('/')[-1], id)
-
-
-def extract_email_date(path):
-    date_pattern = re.compile(r'\b\d{1,2}-\d{1,2}-\d{4}\b')
-    match = date_pattern.search(path)
-
-    if match:
-        extracted_date = match.group()
-        date_obj = datetime.strptime(extracted_date, '%m-%d-%Y')
-    else:
-        date_obj = datetime.today()
-
-    # Convert the date to "year-month-day" format
-    formatted_date = date_obj.strftime('%Y-%m-%d')
-    return formatted_date
-
-
-def search_replace(row, temp_items, item_mappings):
-
-    item = row['Item']
-
-    # Searching in temp_items
-    temp_match = temp_items[temp_items['original_item_number'] == item]
-    if not temp_match.empty:
-        row['MpiItem'] = temp_match.iloc[0]['temporary_item_number']
-        row['MpiDescription'] = temp_match.iloc[0]['description']
-        row['Sheet Name'] = ''
-        return row
-
-    # Searching in item_mappings
-    for column in item_mappings.columns:
-        mapping_match = item_mappings[item_mappings[column] == item]
-        if not mapping_match.empty:
-            row['MpiItem'] = mapping_match.iloc[0]['mpi_code']
-            row['MpiDescription'] = mapping_match.iloc[0]['description']
-            sheet_name = mapping_match.iloc[0]['google_sheet_name']
-            row['Sheet Name'] = sheet_name
-            return row
-
-    # will only be triggered if no mapping is found
-    supplier_id, _ = extract_supplier_id(row['Vendor'])
-    if not UnmappedItemsController(db).is_item_code_present(row['Item']):
-        UnmappedItemsController(db).insert_unmapped_item(row['Item'],row['Description'],supplier_id)
-
-    return row
-
-def extract_supplier_id(file_path):
-    company_codes = {
-        "BMW Plumbing Supplies": 1,
-        "World Wide Plumbing": 2,
-        "Y & S Plumbing Supply": 3,
-        "Supreme Plumbing Supply": 4,
-        "Pyramid Plumbing": 5,
-        "ABC Opus Services": 6,
-        "Park Plumbing Supply": 7,
-        "Gotham Plumbing Supply": 8,
-        "FW Webb Plumbing Supply": 9,
-        "Flow Mark Plumbing Supply": 10
-    }
-    for company, code in company_codes.items():
-        if company in file_path:
-            return code, company
-    return 1 # need to return some default supplier
-
-
-reprocessed = 0
-with db() as db:
-    for invoice in xlsx_files:
-        filename = os.path.basename(invoice)
-        matched_invoice = db.query(Invoice).filter_by(filename=filename).first()
-
-        if not matched_invoice: continue
-        invoice_id = str(matched_invoice.id)
-
-
-        invoice_items = InvoiceItemController(db).get_invoice_items(invoice_id=invoice_id)
-
-        if check_empty_mpi_item_and_description(invoice_items): # any one record is empty, process them again
-            InvoiceItemController(db).delete_invoice_items(invoice_id, db)  # delete previous ingested invoice items
-            contents = pd.read_excel(invoice.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
-            process_extracted_data([invoice.replace("\\", "/")], uuid.UUID(invoice_id))
-
-            reprocessed +=1
-            invoice_ids.append(invoice_id)
-
-print(f'reprocessed {reprocessed} invoices.')
-print('\n')
-print(invoice_ids)
+if __name__ == "__main__":
+    reprocess_556_jobs()
