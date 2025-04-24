@@ -176,6 +176,10 @@
         "customer_job": "59 GRAND",
         "updated_customer_job": "A Y MGMT:59 Grand street"
     },
+        {
+        "customer_job": "GRAND 59",
+        "updated_customer_job": "A Y MGMT:59 Grand street"
+    },
     {
         "customer_job": "59 GRAND ST",
         "updated_customer_job": "A Y MGMT:59 Grand street"
@@ -3388,6 +3392,10 @@
         "customer_job": "900 NEW YORK AVE",
         "updated_customer_job": "Triple C Builders LLC:894-900 New York Ave"
     },
+        {
+        "customer_job": "900 NEW YORK",
+        "updated_customer_job": "Triple C Builders LLC:894-900 New York Ave"
+    },
     {
         "customer_job": "790 Liberty Ave",
         "updated_customer_job": "Blue Sky Builders:790 Liberty Ave"
@@ -3454,7 +3462,7 @@
     },
     {
         "customer_job": "556 Baltic Street",
-        "updated_customer_job": "CNS Builders:556 Baltic Street"
+        "updated_customer_job": "CNS Builders:556 Baltic St"
     },
 
     {
@@ -3551,6 +3559,10 @@
     },
     {
         "customer_job": "62211thave",
+        "updated_customer_job": "B Contractors:622 11th Ave"
+    },
+    {
+        "customer_job": "62211th Ave",
         "updated_customer_job": "B Contractors:622 11th Ave"
     },
     {
@@ -3656,11 +3668,11 @@
     },
     {
         "customer_job": "225 SKILMAN ST.",
-        "updated_customer_job": "225 Skilman St"
+        "updated_customer_job": "225 Skillman, LLC"
     },
     {
         "customer_job": "275 SKILLMAN STREET",
-        "updated_customer_job": "225 Skilman St"
+        "updated_customer_job": "275 Skillman, LLC"
     },
     {
         "customer_job": "1702 NEWKIRK-TAUBER",
@@ -3689,7 +3701,7 @@
     },
     {
         "customer_job": "255 SKILLMAN STREET",
-        "updated_customer_job": "225 Skilman St"
+        "updated_customer_job": "225 Skillman, LLC"
     },
     {
         "customer_job": "SAFTY FIRE SRINKLER",
