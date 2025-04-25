@@ -138,16 +138,27 @@ def extract_po(filename):
 
 
 def extract_buyer(filename):
-    tables = tabula.read_pdf(filename, pages=1, area=(215, 243, 215 + 30, 243 + 93), guess=False,
-                             pandas_options={'dtype': str})
-    buyer = ""
-    if len(tables[0]):
-        if {'Bu ye r'}.issubset(tables[0]):
-            buyer = tables[0]['Bu ye r'][0]
-            buyer = ''.join(buyer.split())
-        else :
-            buyer = tables[0]['Buyer'][0]
-    return buyer
+    try:
+        tables = tabula.read_pdf(filename, pages=1, area=(215, 243, 215 + 30, 243 + 94), guess=False,
+                                 pandas_options={'dtype': str})
+        if not tables or tables[0].empty:
+            print("No table data found.")
+            return ""
+
+        df = tables[0]
+
+        # Handle the specific case where buyer is split across two columns
+        if 'Buyer' in df.columns and 'Unnamed: 0' in df.columns:
+            first = str(df['Buyer'].iloc[0]).strip()
+            last = str(df['Unnamed: 0'].iloc[0]).strip()
+            return f"{first} {last}"
+
+        return ""
+
+    except Exception as e:
+        print("Error during PDF parsing:", e)
+        return ""
+
 
 
 def check_for_unique_invoices(filename, supplier):
