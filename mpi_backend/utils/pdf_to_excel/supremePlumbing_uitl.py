@@ -242,6 +242,8 @@ def extract_tax(filename, page):
 
     if "NYS (8.875%)" in lastPageData:
         return lastPageData.split("NYS (8.875%)", 1)[-1].split('\n')[1]
+    elif "Tax:" in lastPageData:
+        return lastPageData.split("(8.875%)", 1)[-1].split('$')[1].split()[0]
     elif "(8.875%)" in lastPageData:
         return lastPageData.split("(8.875%):", 1)[-1].split('\n')[1]
 
