@@ -361,7 +361,7 @@ def extract_invoice_items(tables):
 
         table.dropna(subset=['Qty', 'Description', 'Cost', 'Amount'], inplace=True)
 
-        table['Amount'] = table['Amount'].str.replace(',', '').str.replace('$', '').astype(float)
+        table['Amount'] = table['Amount'].str.replace(',', '').str.replace(':','').str.replace('$', '').astype(float)
         table['Cost'] = table['Cost'].str.replace(',', '').str.replace('$', '').astype(float)
         table['Qty'] = table['Qty'].astype(str).str.replace(',', '').astype(float)
         table['Qty'] = table['Qty'].astype(int)
@@ -404,6 +404,8 @@ def extract_tax(filename, page):
                 tax = lastPageData.split("(8.875%):", 1)[-1].split('\n')[1]
             elif "(8.875%)" in lastPageData:
                 tax = lastPageData.split("(8.875%)", 1)[-1].split("\n")[0].strip()
+            elif "(8.13%):" in lastPageData:
+                tax = lastPageData.split("(8.13%):", 1)[-1].split('\n')[1]
             elif "(8.13%)" in lastPageData:
                 tax = lastPageData.split("(8.13%)", 1)[-1].split("\n")[0].strip()
             else:
