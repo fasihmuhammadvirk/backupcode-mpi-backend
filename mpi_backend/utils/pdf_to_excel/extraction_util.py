@@ -28,8 +28,8 @@ def extract_tax_etc(filename):
                                               guess=False)
 
     if 'M e rc h a n d is e' in str(financial_details_table[0].columns.values):
-        financial_details_table = tabula.read_pdf(filename, pages=len(tables),
-                                                  area=(650.95, 410.77, 650 + 84, 430 + 164.67), guess=False)
+        financial_details_table = tabula.read_pdf(filename, pages=len(tables), area=(650.95, 410.77, 650+84, 430+164.67),
+                                              guess=False)
 
         tax = str(financial_details_table[0]).split('T a x ( 00 4 )')[-1]
         tax = ''.join(tax.split())
@@ -83,8 +83,18 @@ def extract_invoice_info(filename, pages =1, check = False ,supplier = "default"
     tables = None
 
     if supplier == "default":
-        tables = tabula.read_pdf(filename, pages=pages, area=(245, 21, 245 + 30, 21 + 160), guess=False,
-                                 columns=[20,98], pandas_options={'dtype': str})
+        # in case we need it in the future
+        # tables = tabula.read_pdf(filename, pages=pages, area=(245, 21, 245 + 30, 21 + 160), guess=False,
+        #                          columns=[20,98], pandas_options={'dtype': str})
+        tables = tabula.read_pdf(
+            filename,
+            pages=pages,
+            area=(245, 21, 300 + 30 , 21 + 160),  # Adjusted the area with the provided dimensions
+            guess=False,
+            columns=[20, 98],  # Adjust column positions (can tweak these as needed)
+            pandas_options={'dtype': str}
+        )
+
         try :
             if {'Unnamed: 0', 'Inv oi ce #', 'Inv oi ce D at e'}.issubset(tables[0].columns.values):
                 if len(tables[0])==0: # if dataframe is empty - fix for misprinting / misplacement
@@ -139,8 +149,10 @@ def extract_po(filename):
 
 def extract_buyer(filename):
     try:
-        tables = tabula.read_pdf(filename, pages=1, area=(215, 243, 215 + 30, 243 + 94), guess=False,
+
+        tables = tabula.read_pdf(filename, pages=1, area=(210, 243, 290, 243 + 94), guess=False,
                                  pandas_options={'dtype': str})
+
         if not tables or tables[0].empty:
             print("No table data found.")
             return ""
@@ -151,14 +163,32 @@ def extract_buyer(filename):
         if 'Buyer' in df.columns and 'Unnamed: 0' in df.columns:
             first = str(df['Buyer'].iloc[0]).strip()
             last = str(df['Unnamed: 0'].iloc[0]).strip()
+
             return f"{first} {last}"
+        elif 'Buyer' in df.columns:
+            first = str(df['Buyer'].iloc[0]).strip()
+            return first
+
+        elif 'Bu ye r' in df.columns:
+            s = str(df['Bu ye r'].iloc[0]).strip()
+            parts = re.match(r"([a-zA-Z\s]*)([\d\s\-]*)", s.replace(" ", ""))
+            name, number = parts.group(1), re.sub(r"\D", "", parts.group(2))
+
+            if name and number:
+                number = re.sub(r"(\d{3})(\d{3})(\d{2})", r"\1-\2-\3", number[:8])
+                result = f"{name} {number}"
+            elif name:
+                result = name
+            else:
+                result = number
+
+            return result
 
         return ""
 
     except Exception as e:
         print("Error during PDF parsing:", e)
         return ""
-
 
 
 def check_for_unique_invoices(filename, supplier):
@@ -196,9 +226,8 @@ def check_for_unique_invoices(filename, supplier):
             for page in doc:
                 try:
                     text = page.get_text()
-                    invoice_num = text.split('Invoice #:', 1)[-1].split('\n', 2)[0].strip()
-                except:
-                    continue
+                    invoice_num = text.split('Invoice #:',1)[-1].split('\n',2)[0].strip()
+                except: continue
                 if len(invoice_num) >= 5: unique_invoices.append(invoice_num)
 
     elif supplier == "Ferguson":
