@@ -7,6 +7,7 @@ from fastapi_pagination import Page,paginate
 from datetime import date
 import os
 import requests
+from math import ceil
 from mpi_backend.database.controllers import SupplierController, InvoiceController, InvoiceItemController
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
@@ -48,7 +49,7 @@ def get_invoices(
         return invoices
 
     except Exception as e:
-        raise HTTPException(status_code=404, detail=f"No Records Found!")
+        raise HTTPException(status_code=404, detail="No Records Found!")
 
 
 @router.get("/all")
@@ -59,7 +60,7 @@ def get_invoices(db: Session = Depends(get_db),token: str = Depends(JWTBearer())
         return invoices
     except Exception as e:
         logger.error(f'Error occured while fetching all invoices -> {e}')
-        raise HTTPException(status_code=500, detail=f"An Error occured while fetching invoices.")
+        raise HTTPException(status_code=500, detail="An Error occured while fetching invoices.")
 
 
 @router.get("/download")
@@ -90,6 +91,13 @@ async def upload_and_process_invoice(supplier_id : int, file: UploadFile = File(
 
     converted_files, failed_files = convert_invoice(supplier)
     process_extracted_data(converted_files, failed_files)
+    
+    # Check if any invoices failed validation but don't change the response structure
+    for file_path in converted_files:
+        file_name = os.path.basename(file_path)
+        invoice = db.query(InvoiceController(db).db_context.query).filter_by(filename=file_name).first()
+        if invoice and invoice.status == "FAILED":
+            logger.warning(f"Invoice {file_name} failed validation (missing ref number, amount, or date)")
 
     [os.remove(os.path.join(upload_folder, filename)) for filename in os.listdir(upload_folder)] # delete files after it's processed
 
@@ -122,6 +130,13 @@ async def process_again(invoice_id : str, db: Session = Depends(get_db),
 
     converted_files, failed_files = convert_invoice(supplier)
     process_extracted_data(converted_files, failed_files)
+
+    # Check if reprocessed invoice failed validation but don't change response structure
+    for file_path in converted_files:
+        file_name = os.path.basename(file_path)
+        new_invoice = db.query(InvoiceController(db).db_context.query).filter_by(filename=file_name).first()
+        if new_invoice and new_invoice.status == "FAILED":
+            logger.warning(f"Reprocessed invoice {file_name} failed validation (missing ref number, amount, or date)")
 
     [os.remove(os.path.join(upload_folder, filename)) for filename in os.listdir(upload_folder)] # delete files after it's processed
     return {"status": "Invoice reprocessing successful."}
