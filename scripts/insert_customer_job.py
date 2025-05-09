@@ -10,7 +10,7 @@ SessionLocal = sessionmaker(bind=engine)
 session = SessionLocal()
 
 # Load JSON data
-json_file = 'mpi_backend/storage/fixtures/customer-job-mapping.json'
+json_file = '../mpi_backend/storage/fixtures/customer-job-mapping.json'
 with open(json_file, 'r') as file:
     json_mappings = json.load(file)
 
