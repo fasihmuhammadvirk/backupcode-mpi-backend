@@ -170,7 +170,8 @@ def extract_buyer(filename):
             return first
 
         elif 'Bu ye r' in df.columns:
-            s = str(df['Bu ye r'].iloc[0]).strip()
+            s = str(df['Bu ye r'].iloc[0]).strip().replace(',','')
+
             parts = re.match(r"([a-zA-Z\s]*)([\d\s\-]*)", s.replace(" ", ""))
             name, number = parts.group(1), re.sub(r"\D", "", parts.group(2))
 
