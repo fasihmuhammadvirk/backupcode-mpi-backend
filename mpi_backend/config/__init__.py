@@ -21,10 +21,20 @@ AWS_SERVER_SECRET_KEY = os.getenv("SECRET_ACCESS_KEY")
 REGION = os.getenv("REGION")
 BUCKET_NAME = os.getenv("BUCKET_NAME")
 
+# Handle the port safely for different environments
+def get_db_port():
+    port = POSTGRES_PORT
+    if port is None or (isinstance(port, str) and (port.strip() == '' or port.lower() == 'none')):
+        return 5432
+    try:
+        return int(port)
+    except (ValueError, TypeError):
+        return 5432
+
 SQLALCHEMY_DATABASE_URI = f"postgresql://{POSTGRES_USERNAME}:" \
                           f"{POSTGRES_PASSWORD}@" \
                           f"{POSTGRES_HOST}:" \
-                          f"{POSTGRES_PORT}/" \
+                          f"{get_db_port()}/" \
                           f"{POSTGRES_DB}"
 
 SMTP_SERVER = os.getenv("SMTP_SERVER")

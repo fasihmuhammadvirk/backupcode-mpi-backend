@@ -2,16 +2,20 @@
 import os
 import sys
 import logging
-from contextlib import contextmanager
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 # Add the parent directory to the Python path to allow imports to work
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, parent_dir)
 
-# Now imports from the project will work
-from mpi_backend.database import get_db
-from mpi_backend.database.models import InvoiceItem
-
+# Import database models and configuration
+try:
+    from mpi_backend.database.models import InvoiceItem
+    from mpi_backend.config import SQLALCHEMY_DATABASE_URI
+except Exception as e:
+    print(f"Failed to import database modules: {str(e)}")
+    sys.exit(1)
 
 # Configure logging
 logging.basicConfig(
@@ -29,9 +33,12 @@ def update_no_match_items():
     
     After updating, verify the results.
     """
-    db_context = contextmanager(get_db)
-    
-    with db_context() as db:
+    try:
+        # Create database connection directly
+        engine = create_engine(SQLALCHEMY_DATABASE_URI)
+        SessionLocal = sessionmaker(bind=engine)
+        db = SessionLocal()
+        
         # Query directly from the database for 'No Match' items
         no_match_items = db.query(InvoiceItem).filter(
             InvoiceItem.mpi_item == "No Match"
@@ -82,8 +89,12 @@ def update_no_match_items():
         # Print update summary
         logger.info("\n=== Update Summary ===")
         logger.info(f"✅ Successfully updated: {updated_count} items")
-        logger.info(f"  - Items categorized as 'UIDI-Job Material': {material_count}")
-        logger.info(f"  - Items categorized as 'UIDI-Job Equipment': {equipment_count}")
+        logger.info(
+            f"  - Items as 'UIDI-Job Material': {material_count}"
+        )
+        logger.info(
+            f"  - Items as 'UIDI-Job Equipment': {equipment_count}"
+        )
         if error_count:
             logger.warning(f"❌ Items with errors: {error_count}")
         
@@ -105,8 +116,12 @@ def update_no_match_items():
         
         logger.info("\n=== Verification Results ===")
         logger.info(f"'No Match' items remaining: {remaining}")
-        logger.info(f"'UIDI-Job Material' items in database: {material_items}")
-        logger.info(f"'UIDI-Job Equipment' items in database: {equipment_items}")
+        logger.info(
+            f"'UIDI-Job Material' items in database: {material_items}"
+        )
+        logger.info(
+            f"'UIDI-Job Equipment' items in database: {equipment_items}"
+        )
         
         # Sample some items to verify proper categorization
         material_samples = db.query(InvoiceItem).filter(
@@ -118,7 +133,9 @@ def update_no_match_items():
         ).limit(3).all()
         
         if material_samples:
-            logger.info("\n--- Sample 'UIDI-Job Material' Items (cost < 100) ---")
+            logger.info(
+                "\n--- Sample 'UIDI-Job Material' Items (cost < 100) ---"
+            )
             for item in material_samples:
                 desc = item.description
                 if desc and len(desc) > 50:
@@ -129,7 +146,9 @@ def update_no_match_items():
                 )
         
         if equipment_samples:
-            logger.info("\n--- Sample 'UIDI-Job Equipment' Items (cost >= 100) ---")
+            logger.info(
+                "\n--- Sample 'UIDI-Job Equipment' Items (cost >= 100) ---"
+            )
             for item in equipment_samples:
                 desc = item.description
                 if desc and len(desc) > 50:
@@ -138,6 +157,15 @@ def update_no_match_items():
                     f"Item ID: {item.id}, Cost: ${item.cost:.2f}, "
                     f"Description: {desc}"
                 )
+        
+        # Close the database session
+        db.close()
+        
+    except Exception as e:
+        logger.error(f"Error during database operation: {str(e)}")
+        logger.error("Please check your database configuration")
+        if hasattr(e, '__cause__') and e.__cause__:
+            logger.error(f"Cause: {str(e.__cause__)}")
 
 
 if __name__ == "__main__":
