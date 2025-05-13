@@ -4,4 +4,5 @@ from mpi_backend.database.schemas.InvoiceItems import InvoiceItems,UpdateInvoice
 from mpi_backend.database.schemas.ItemMappingsListResponse import ItemMappingsResponse,ItemMappingsByMpiTypeResponse,UpdateMappingRequest
 from mpi_backend.database.schemas.Filters import FilterRequest, SendtoQBFilterRequest, ExportToExcelFilterRequest
 from mpi_backend.database.schemas.PriceHistory import PriceHistoryRequest,PriceHistoryResponse
+from mpi_backend.database.schemas.SyncMappings import SyncMappingsResponse
 
