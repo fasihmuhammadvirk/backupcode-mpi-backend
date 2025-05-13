@@ -49,23 +49,25 @@ def migrate_invoice_to_QB(
 
         # Create DataFrame and handle possible missing fields
         try:
+            # First get reference numbers before creating DataFrame
+            ref_numbers = [getattr(item, 'ref_no', 'unknown') for item in line_items]
+            
             line_item_df = pd.DataFrame([vars(item) for item in line_items])
             
             # Get sheet_name from DataFrame - this will fail with KeyError if missing
-            sheet_names = line_item_df['sheet_name']
+            line_item_df['sheet_name']
             
-        except KeyError as e:
-            # Get reference numbers to help with debugging
-            ref_numbers = []
-            try:
-                if 'ref_no' in line_item_df.columns:
-                    ref_numbers = line_item_df['ref_no'].dropna().unique().tolist()
-            except:
-                pass
-                
+        except KeyError:
+            # Just use the reference numbers we collected before the error
             raise HTTPException(
                 status_code=400,
                 detail=f"Missing sheet_name data. Reference numbers: {ref_numbers}"
+            )
+        except Exception as e:
+            # For any other exception, also return reference numbers
+            raise HTTPException(
+                status_code=400,
+                detail=f"Error processing data: {str(e)}. Reference numbers: {ref_numbers}"
             )
             
         # Apply classification with error handling
