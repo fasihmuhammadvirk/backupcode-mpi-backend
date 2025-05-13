@@ -19,12 +19,15 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest, db: Session = Depe
     filtered_data = InvoiceItemController(db).apply_filters(request,page=1, size=0)
     invoice_ids = [item.invoice_id for item in filtered_data['items']]
 
-    if request.excluded_invoice_ids: # un selected items from frontend
-        invoice_ids = [invoice_id for invoice_id in invoice_ids if invoice_id not in request.excluded_invoice_ids]
+    if request.excluded_invoice_ids:  # un selected items from frontend
+        invoice_ids = [
+            invoice_id for invoice_id in invoice_ids 
+            if invoice_id not in request.excluded_invoice_ids
+        ]
 
-    invoice_ids = list(set(invoice_ids)) # make invoice-ids in list to be unique, no repetition.
+    invoice_ids = list(set(invoice_ids))  # make invoice-ids in list to be unique
 
-    return  migrate_invoice_to_QB(invoice_ids, db=db)
+    return migrate_invoice_to_QB(invoice_ids, db=db)
 
 
 @router.post("/migrate")
@@ -39,17 +42,45 @@ def migrate_invoice_to_QB(
 
         tax = 0
         for item in line_items:
-            if item.sheet_name == '(TAX)': tax = float(item.amount.replace(',',''))
+            if item.sheet_name == '(TAX)':
+                tax = float(item.amount.replace(',', ''))
 
         line_items = [item for item in line_items if item.sheet_name != '(TAX)']
 
+        # Create DataFrame and handle possible missing fields
         line_item_df = pd.DataFrame([vars(item) for item in line_items])
-        line_item_df['account'] = line_item_df['sheet_name'].apply(lambda sheet_name: ItemClassificationController(db).get_classification(sheet_name))
+        
+        # Verify sheet_name column exists
+        if 'sheet_name' not in line_item_df.columns:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing sheet_name data in invoice {invoice_id}"
+            )
+            
+        # Apply classification with error handling
+        def get_classification_safe(sheet_name):
+            if not sheet_name:
+                return ''
+            return ItemClassificationController(db).get_classification(sheet_name)
+            
+        line_item_df['account'] = line_item_df['sheet_name'].apply(get_classification_safe)
 
-        line_item_df.loc[line_item_df['mpi_item'] == 'UIDI-Job Materials Purchased', 'account'] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased' # also map temporary item numbers
-        line_item_df.loc[line_item_df['mpi_item'] == 'UIDI-Job Equipment', 'account'] = 'UnInvoiced JIP:Cost Of Materials:Job Equipments Purchased'
-        line_item_df.loc[line_item_df['mpi_item'] == 'UIDI-Sprinkler specialty item', 'account'] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
-        line_item_df.loc[line_item_df['mpi_item'] == 'UIDI-Drainage Material', 'account'] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
+        # Map specific items to accounts
+        line_item_df.loc[
+            line_item_df['mpi_item'] == 'UIDI-Job Materials Purchased', 'account'
+        ] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
+        
+        line_item_df.loc[
+            line_item_df['mpi_item'] == 'UIDI-Job Equipment', 'account'
+        ] = 'UnInvoiced JIP:Cost Of Materials:Job Equipments Purchased'
+        
+        line_item_df.loc[
+            line_item_df['mpi_item'] == 'UIDI-Sprinkler specialty item', 'account'
+        ] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
+        
+        line_item_df.loc[
+            line_item_df['mpi_item'] == 'UIDI-Drainage Material', 'account'
+        ] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
 
         line_item_df['account'] = line_item_df['account'].replace([None, 'None'], '')
 
@@ -65,7 +96,7 @@ def migrate_invoice_to_QB(
             )
 
         line_item_df = line_item_df.astype(str)
-        float_columns = ['qty', 'cost','amount']
+        float_columns = ['qty', 'cost', 'amount']
         line_item_df[float_columns] = line_item_df[float_columns].astype(float)
 
         batch_entry = line_item_df.groupby(['account', 'ref_no', 'customer_job']).agg({
@@ -81,13 +112,24 @@ def migrate_invoice_to_QB(
         batch_entry['terms'] = ''
         batch_entry['bill due'] = ''
 
-        batch_entry.rename(columns = {'date':'Date', 'ref_no':'Ref', 'amount':'Amount', 'customer_job':'Customer Job', 'class_':'Class', 'memo':'Memo'}, inplace=True)
-        batch_entry = batch_entry[['Date','Ref','vendor','terms','bill due','account','Amount','Memo','Customer Job','Class']]
+        batch_entry.rename(columns = {
+            'date': 'Date', 
+            'ref_no': 'Ref', 
+            'amount': 'Amount', 
+            'customer_job': 'Customer Job', 
+            'class_': 'Class', 
+            'memo': 'Memo'
+        }, inplace=True)
+        
+        batch_entry = batch_entry[[
+            'Date', 'Ref', 'vendor', 'terms', 'bill due', 
+            'account', 'Amount', 'Memo', 'Customer Job', 'Class'
+        ]]
         all_batch_entries.append(batch_entry)
 
         # track & manage invoice export status
-        invoice_item_ids = [item.id for item in line_item_copy if item.id] # get all line item row ids
-        InvoiceItemController(db).set_export_status_to_sent(invoice_item_ids)  # update line item export status to sent
+        invoice_item_ids = [item.id for item in line_item_copy if item.id]
+        InvoiceItemController(db).set_export_status_to_sent(invoice_item_ids)
 
         if InvoiceItemController(db).is_exported(str(invoice_id)):
             InvoiceController(db).set_invoice_is_exported(str(invoice_id))
@@ -95,7 +137,16 @@ def migrate_invoice_to_QB(
     final_batch_entry = pd.concat(all_batch_entries, ignore_index=True)
     exported_file_path = export_batch_entry_to_excel(final_batch_entry)
     file_name = os.path.basename(exported_file_path)
-    upload_file(exported_file_path, file_key=f'Exports/{file_name}', is_invoice=False)  # upload to s3 to be exported
-    download_url = get_presigned_url(file_key=f'Exports/{file_name}', is_invoice=False)
+    
+    # Upload to S3 and get download URL
+    upload_file(
+        exported_file_path, 
+        file_key=f'Exports/{file_name}', 
+        is_invoice=False
+    )
+    download_url = get_presigned_url(
+        file_key=f'Exports/{file_name}', 
+        is_invoice=False
+    )
 
     return download_url
