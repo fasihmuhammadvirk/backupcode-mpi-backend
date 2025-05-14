@@ -102,7 +102,7 @@ class InvoiceItemController:
         total = query.count()
         return total
 
-    def get_invoice_items_by_ids(self, ids):
+    def get_invoice_items_by_ids(self, ids, order_by=None):
         query = self.db_context.query(InvoiceItem)
 
         # if ids:
@@ -111,6 +111,22 @@ class InvoiceItemController:
 
         if ids:
             query = query.filter(InvoiceItem.id.in_(ids))
+
+        # Apply ordering if provided
+        if order_by:
+            for order_filter in order_by:
+                if not hasattr(InvoiceItem, order_filter.column):
+                    raise HTTPException(status_code=400,
+                                        detail=f"Invalid column name for ordering: {order_filter.column}")
+
+                column = getattr(InvoiceItem, order_filter.column)
+
+                if order_filter.order == "asc":
+                    query = query.order_by(column.asc())
+                elif order_filter.order == "desc":
+                    query = query.order_by(column.desc())
+                else:
+                    raise HTTPException(status_code=400, detail=f"Invalid order direction: {order_filter.order}")
 
         items = query.all()
 
@@ -391,7 +407,38 @@ class InvoiceItemController:
                 if column is None:
                     raise HTTPException(status_code=400, detail=f"Invalid column name: {col_param}")
 
-                return [row[0] for row in query.with_entities(column).distinct().order_by(column).all()]
+                # When using order_by with distinct, we need to include the ordered columns in the selection
+                if request.order_by:
+                    select_columns = [column]
+                    order_columns = []
+                    
+                    for order_filter in request.order_by:
+                        if hasattr(InvoiceItem, order_filter.column):
+                            order_col = getattr(InvoiceItem, order_filter.column)
+                            order_columns.append(order_col)
+                            # Add to select columns if not already there
+                            if order_col not in select_columns:
+                                select_columns.append(order_col)
+                    
+                    # Query with both the requested column and the order columns
+                    query_with_columns = query.with_entities(*select_columns).distinct()
+                    
+                    # Apply ordering
+                    for order_filter in request.order_by:
+                        if hasattr(InvoiceItem, order_filter.column):
+                            order_col = getattr(InvoiceItem, order_filter.column)
+                            if order_filter.order == "asc":
+                                query_with_columns = query_with_columns.order_by(order_col.asc())
+                            else:
+                                query_with_columns = query_with_columns.order_by(order_col.desc())
+                    
+                    results = query_with_columns.all()
+                    
+                    # Extract just the requested column values
+                    return [row[0] for row in results]
+                else:
+                    # Original behavior for queries without order_by
+                    return [row[0] for row in query.with_entities(column).distinct().order_by(column).all()]
 
             results = query.all()
             size = 1

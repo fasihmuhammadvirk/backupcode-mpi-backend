@@ -11,6 +11,7 @@ import os
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.database.controllers import InvoiceItemController, InvoiceController
 from mpi_backend.database.schemas import InvoiceItems, UpdateInvoiceItemRequest, PaginatedInvoiceItemsResponse, ExportToExcelFilterRequest
+from mpi_backend.database.schemas.Filters import OrderByFilter
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.export_utils import convert_items_to_dataframe
 from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
@@ -150,18 +151,19 @@ def export_all_invoices(request: ExportToExcelFilterRequest,
         ids = list(set(ids) - set(request.excluded_rows_ids))
 
     # ids = list(set(ids))  # make row ids of items to be exported in list to be unique, no repetition.
-    return export_invoices(ids, request.columns, db=db)
+    return export_invoices(ids, request.columns, order_by=request.order_by, db=db)
 
 @router.post("/export")
 def export_invoices(
         ids: List[int],
         columns: Optional[List[str]] = None,
+        order_by: Optional[List[OrderByFilter]] = None,
         db: Session = Depends(get_db),
         token: str = Depends(JWTBearer()),
 ):
     columns = [col.replace('class_', 'Class') for col in columns]  # fix to handle column mismatch
 
-    items = InvoiceItemController(db).get_invoice_items_by_ids(ids)
+    items = InvoiceItemController(db).get_invoice_items_by_ids(ids, order_by=order_by)
     items_df = convert_items_to_dataframe(items)
 
     upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/Exports/'
