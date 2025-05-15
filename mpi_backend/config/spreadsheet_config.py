@@ -23,7 +23,7 @@ GOOGLE_API_KEY = os.environ.get(
 # Default output file path for storing extracted mapping data
 DEFAULT_OUTPUT_FILE = os.environ.get(
     "MAPPING_OUTPUT_FILE", 
-    "storage/fixtures/item-mapping.json"
+    "mpi_backend/storage/fixtures/item-mapping.json"
 )
 
 # Sheets to skip during synchronization

@@ -564,6 +564,7 @@ class GoogleSheetDataExtractor:
                     item_mapping = {
                         "mpi_code": mpi_code,
                         "description": combined_description,
+                        "size": size if size else "",  # Add size as a separate field
                         "supplier_name": supplier,
                         "supplier_id": self.supplier_ids[supplier],
                         "supplier_item_ids": cleaned_value,

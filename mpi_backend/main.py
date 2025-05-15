@@ -48,13 +48,22 @@ async def lifespan(app: FastAPI):
     scheduler = BackgroundScheduler()
     # scheduler.add_job(email_download_background_task, "interval", minutes=3, max_instances=20)
 
+    # Run the sync_mappings job on a 30-minute interval
     scheduler.add_job(
         perform_sync_mapping_task,
         "interval",
-        minutes=60,
+        minutes=30,
         replace_existing=True,
         max_instances=1
     )
+    #
+    # # Also run the sync_mappings job immediately on startup
+    # scheduler.add_job(
+    #     perform_sync_mapping_task,
+    #     DateTrigger(run_date=datetime.now()),
+    #     replace_existing=True,
+    #     id="startup_sync_mappings"
+    # )
 
     # scheduler.add_job(missing_email_download_background_task,
     #                   CronTrigger(hour=5, minute=0, timezone=UTC_TZ),

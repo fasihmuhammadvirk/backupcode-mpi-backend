@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from apscheduler.triggers.interval import IntervalTrigger
 
-from mpi_backend.database import get_db
+from mpi_backend.database import get_db, SessionLocal
 from mpi_backend.database.controllers import ItemsMappingController
 from mpi_backend.database.models import InvoiceItem, ItemsMapping 
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
@@ -55,8 +55,12 @@ def perform_sync_mapping_task(db: Session = None):
     
     # If db is not provided, create a new session
     if db is None:
-        with get_db() as db_session:
+        # Create a new database session properly instead of using get_db() as a context manager
+        db_session = SessionLocal()
+        try:
             return _perform_sync_internal(db_session)
+        finally:
+            db_session.close()
     else:
         return _perform_sync_internal(db)
 
@@ -71,6 +75,10 @@ def _perform_sync_internal(db: Session):
         
         # Step 1: Extract data from Google Sheets
         temp_output_file = f"{DEFAULT_OUTPUT_FILE}.temp"
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(temp_output_file), exist_ok=True)
+        
         extractor = GoogleSheetDataExtractor(
             sheet_id=DEFAULT_SHEET_ID,
             api_key=GOOGLE_API_KEY,
@@ -165,20 +173,6 @@ def _perform_sync_internal(db: Session):
     finally:
         sync_task_running = False
 
-
-def setup_sync_job(scheduler):
-    """
-    Register the sync task with the provided scheduler.
-    This function should be called from the main application startup.
-    
-    Args:
-        scheduler: The BackgroundScheduler instance to use
-    """
-    logger.info("Setting up sync mapping job with the main scheduler")
-
-    logger.info("Scheduled sync task to run every hour")
-
-
 @router.post("/mapping", response_model=SyncMappingsResponse)
 def sync_mapping(
     background_tasks: BackgroundTasks,
@@ -202,7 +196,7 @@ def sync_mapping(
         )
     
     # Start sync in the background
-    background_tasks.add_task(perform_sync_task, db)
+    background_tasks.add_task(perform_sync_mapping_task, db)
     
     return SyncMappingsResponse(
         success=True,
