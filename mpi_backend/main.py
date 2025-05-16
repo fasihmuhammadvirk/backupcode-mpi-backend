@@ -20,7 +20,7 @@ from mpi_backend.api.routes import quickbooks
 from mpi_backend.api.routes import signin
 from mpi_backend.api.routes import filters
 from mpi_backend.api.routes import sync_mappings
-from mpi_backend.api.routes.sync_mappings import perform_sync_mapping_task
+from mpi_backend.api.routes.sync_mappings import perform_sync_mapping_task, perform_update_all_mappings
 from mpi_backend.config import LOG_LEVEL
 from mpi_backend.utils.invoice_downaloder import email_download_background_task
 from mpi_backend.utils.missing_invoice_downaloder import missing_email_download_background_task
@@ -53,6 +53,15 @@ async def lifespan(app: FastAPI):
         perform_sync_mapping_task,
         "interval",
         minutes=30,
+        replace_existing=True,
+        max_instances=1
+    )
+
+    # Run the update_all_mappings job every 24 hours
+    scheduler.add_job(
+        perform_update_all_mappings,
+        CronTrigger(hour=3, minute=0, timezone=UTC_TZ),  # Run at 3 AM UTC
+        id="update_all_mappings_daily",
         replace_existing=True,
         max_instances=1
     )

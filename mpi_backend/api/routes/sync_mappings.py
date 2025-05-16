@@ -301,26 +301,30 @@ def update_invalid_mappings(
         }
 
 
-@router.post("/update-all-mappings")
-def update_all_mappings(
-    db: Session = Depends(get_db),
-    token: str = Depends(JWTBearer())
-):
+def perform_update_all_mappings(db: Session = None):
     """
-    Update all invoice items by applying the latest mappings from the 
-    ItemsMapping table.
+    Internal implementation of update_all_mappings that can be called
+    directly from the scheduler without authentication.
     
-    This is useful for propagating mapping changes to all related invoice items 
-    after bulk changes to the mappings table or data migrations.
-    
+    Args:
+        db: Database session. If None, a new session is created.
+        
     Returns:
         Dict with status and count of updated items
     """
+    # Create a new session if one wasn't provided
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+    else:
+        close_db = False
+        
     try:
         # Fetch all mappings
         mappings = db.query(ItemsMapping).all()
         
         if not mappings:
+            logger.info("No mappings found to apply")
             return {
                 "status": "success",
                 "message": "No mappings found to apply"
@@ -379,6 +383,10 @@ def update_all_mappings(
                 )
                 db.rollback()
         
+        logger.info(
+            f"Update complete: {total_updated_count} items updated from "
+            f"{total_mappings_processed} mappings"
+        )
         return {
             "status": "success",
             "message": (f"{total_updated_count} items updated from "
@@ -387,9 +395,31 @@ def update_all_mappings(
     
     except Exception as e:
         logger.error(f"Failed to update all mappings: {str(e)}")
-        db.rollback()
+        if db.is_active:
+            db.rollback()
         return {
             "status": "error",
             "message": f"Failed to update all mappings: {str(e)}"
-        } 
+        }
+    finally:
+        if close_db and db is not None:
+            db.close()
+
+
+@router.post("/update-all-mappings")
+def update_all_mappings(
+    db: Session = Depends(get_db),
+    token: str = Depends(JWTBearer())
+):
+    """
+    Update all invoice items by applying the latest mappings from the 
+    ItemsMapping table.
+    
+    This is useful for propagating mapping changes to all related invoice items 
+    after bulk changes to the mappings table or data migrations.
+    
+    Returns:
+        Dict with status and count of updated items
+    """
+    return perform_update_all_mappings(db) 
     
