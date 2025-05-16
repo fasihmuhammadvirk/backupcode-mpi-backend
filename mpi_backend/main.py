@@ -46,7 +46,7 @@ UTC_TZ = pytz.utc  # UTC Time Zone
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler = BackgroundScheduler()
-    # scheduler.add_job(email_download_background_task, "interval", minutes=3, max_instances=20)
+    scheduler.add_job(email_download_background_task, "interval", minutes=3, max_instances=20)
 
     # Run the sync_mappings job on a 30-minute interval
     scheduler.add_job(

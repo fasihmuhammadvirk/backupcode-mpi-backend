@@ -6,9 +6,15 @@ isn't "No Match" and doesn't start with "UIDI", then export them to Excel.
 
 import pandas as pd
 import os
+import sys
 from sqlalchemy import and_, not_, or_
 from sqlalchemy.orm import Session
 import uuid
+
+# Add the parent directory to sys.path to allow imports from mpi_backend
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+sys.path.insert(0, project_root)
 
 # Import database components
 from mpi_backend.database import SessionLocal
@@ -50,7 +56,7 @@ def export_to_excel(items, output_dir=None):
         # Get the directory two levels up from this script
         # (script is in scripts/, so two levels up is project root)
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        output_dir = os.path.dirname(os.path.dirname(script_dir))
+        output_dir = os.path.dirname(script_dir)
     
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
@@ -104,10 +110,14 @@ def upload_to_s3_and_get_link(local_file_path, s3_file_key):
         upload_file(local_file_path, s3_file_key, is_invoice=False)
         
         # Generate presigned URL
-        presigned_url = get_presigned_url(s3_file_key, expiration_time=3600, is_invoice=False)
+        presigned_url = get_presigned_url(
+            s3_file_key, 
+            expiration_time=3600, 
+            is_invoice=False
+        )
         
         print(f"Download link: {presigned_url}")
-        print(f"Link will expire in 1 hour")
+        print("Link will expire in 1 hour")
         
         return presigned_url
     except Exception as e:
@@ -125,16 +135,22 @@ def main():
         local_file_path, s3_file_key = export_to_excel(items)
         
         if local_file_path:
-            download_link = upload_to_s3_and_get_link(local_file_path, s3_file_key)
+            download_link = upload_to_s3_and_get_link(
+                local_file_path, 
+                s3_file_key
+            )
             if download_link:
-                print(f"File uploaded to S3 successfully.")
+                print("File uploaded to S3 successfully.")
                 print(f"Download link: {download_link}")
             else:
-                print("Failed to generate download link. File is available locally at:")
+                print(
+                    "Failed to generate download link. "
+                    "File is available locally at:"
+                )
                 print(local_file_path)
     finally:
         db.close()
 
 
 if __name__ == "__main__":
-    main() 
+    main()
