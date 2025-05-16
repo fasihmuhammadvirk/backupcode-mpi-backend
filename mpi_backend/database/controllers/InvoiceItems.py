@@ -11,7 +11,9 @@ from mpi_backend.database.schemas import InvoiceItems as InvoiceItemsResponse
 from mpi_backend.database.schemas import PriceHistoryResponse
 from mpi_backend.utils.export_utils import extract_supplier_id
 import math
+import logging
 
+logger = logging.getLogger(__name__)
 
 class InvoiceItemController:
     def __init__(self, db):
@@ -196,28 +198,65 @@ class InvoiceItemController:
             item = self.db_context.query(InvoiceItem).filter(InvoiceItem.id == item_id).first()
             if not item:
                 raise HTTPException(status_code=404, detail=f"Invoice item with ID {item_id} not found")
+            
+            # Get the new MPI item value, defaulting to current value if not in request
+            new_mpi_item = item_data.get('mpi_item', item.mpi_item)
+            
+            # Check if it's a valid MPI item (not "No Match" and not starting with "UIDI")
+            is_valid_mpi = (new_mpi_item and 
+                            new_mpi_item.lower() != "no match" and 
+                            not new_mpi_item.startswith("UIDI"))
+            
+            # Get sheet_name from request, defaulting to current value if not provided
+            new_sheet_name = item_data.get('sheet_name', item.sheet_name)
+            
+            # Only validate sheet_name for valid MPI items
+            if is_valid_mpi and not new_sheet_name and new_mpi_item != item.mpi_item:
+                # Debug logging to see what's causing the issue
+                logger.error(f"Validation failed: mpi_item={new_mpi_item}, sheet_name={new_sheet_name}, data={item_data}")
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Sheet name is required when updating to a valid MPI item '{new_mpi_item}'. Please provide a sheet name for item {item_data.get('item')}."
+                )
 
-            # Check for updates in mpi_item and mpi_description and customer_job and make updates on whole table
-            # item_data -- > coming from request
-            # item -- > its associated record in database
-            if item_data['mpi_item'] != item.mpi_item:  # mpi_item code is changed
+            # Rest of the method remains the same
+            # Process MPI item updates if changed
+            if 'mpi_item' in item_data and item_data['mpi_item'] != item.mpi_item:
                 background_tasks.add_task(self.update_mpi_field, item_data['item'], 'mpi_item',
-                                          item_data['mpi_item'])
+                                        item_data['mpi_item'])
+            
+            # Process MPI description updates if changed
+            if 'mpi_description' in item_data and item_data['mpi_description'] != item.mpi_description:
+                background_tasks.add_task(self.update_mpi_field, item_data['item'], 'mpi_description',
+                                        item_data['mpi_description'])
+
+            # Process sheet_name updates if changed
+            if 'sheet_name' in item_data and item_data['sheet_name'] != item.sheet_name:
+                background_tasks.add_task(self.update_mpi_field, item_data['item'], 'sheet_name',
+                                        item_data['sheet_name'])
+            
+            # Update mappings table with all the data
+            if ('mpi_item' in item_data and item_data['mpi_item'] != item.mpi_item) or \
+               ('sheet_name' in item_data and item_data['sheet_name'] != item.sheet_name):
+                # Ensure item_data has the sheet_name from either the request or the current item
+                if 'sheet_name' not in item_data:
+                    item_data['sheet_name'] = item.sheet_name
+                    
                 background_tasks.add_task(self.update_mappings_table, item_data)
 
-            if item_data['mpi_description'] != item.mpi_description:  # mpi_item description is changed
-                background_tasks.add_task(self.update_mpi_field, item_data['item'], 'mpi_description',
-                                          item_data['mpi_description'])
-
-            if item_data['customer_job'] != item.customer_job:  # customer job was updated
+            # Process customer job updates
+            if 'customer_job' in item_data and item_data['customer_job'] != item.customer_job:
                 background_tasks.add_task(self.update_customer_job, item.customer_job, 'customer_job',
-                                          item_data['customer_job'])
-                CustomerJobMappingController(self.db_context).update_mappings_table(old_customer_job=item.customer_job,
-                                                                                    new_customer_job=item_data[
-                                                                                        'customer_job'])
+                                         item_data['customer_job'])
+                CustomerJobMappingController(self.db_context).update_mappings_table(
+                    old_customer_job=item.customer_job,
+                    new_customer_job=item_data['customer_job']
+                )
 
-            for key, value in item_data.items():  # update items
-                setattr(item, key, value)
+            # Update the item with all provided fields
+            for key, value in item_data.items():
+                if hasattr(item, key):  # Only update fields that exist on the model
+                    setattr(item, key, value)
 
             self.db_context.add(item)
         self.db_context.commit()
@@ -232,14 +271,42 @@ class InvoiceItemController:
         self.db_context.commit()
 
     def update_mappings_table(self, updated_values: dict):
-        supplier_id, _ = extract_supplier_id(updated_values['vendor'])
-        mapping_data = {
-            "supplier_item_ids": updated_values['item'],
-            "description": updated_values['mpi_description'],
-            "mpi_code": updated_values['mpi_item'],
-            "google_sheet_name": updated_values['sheet_name']
-        }
-        ItemsMappingController(self.db_context).update_mapping(supplier_id, mapping_data)
+        try:
+            supplier_id, _ = extract_supplier_id(updated_values.get('vendor', ''))
+            
+            # Get the MPI item code
+            mpi_item = updated_values.get('mpi_item', '')
+            
+            # Check if it's a valid MPI item
+            is_valid_mpi = (mpi_item and 
+                           mpi_item.lower() != "no match" and 
+                           not mpi_item.startswith("UIDI"))
+            
+            # For valid MPI items, ensure sheet_name is provided
+            if is_valid_mpi and not updated_values.get('sheet_name'):
+                logger.error(f"Cannot update mapping - sheet_name missing for valid MPI item: {updated_values}")
+                return  # Skip the mapping update
+            
+            # Create mapping data with all available fields
+            mapping_data = {
+                "supplier_item_ids": updated_values.get('item', ''),
+                "description": updated_values.get('mpi_description', ''),
+                "mpi_code": updated_values.get('mpi_item', ''),
+                "google_sheet_name": updated_values.get('sheet_name', '')
+            }
+            
+            # Log what we're about to do
+            logger.info(f"Updating mapping with data: {mapping_data}")
+            
+            # Only update the mapping if we have a supplier_id and supplier_item_ids
+            if supplier_id and mapping_data["supplier_item_ids"]:
+                ItemsMappingController(self.db_context).update_mapping(supplier_id, mapping_data)
+            else:
+                logger.error(f"Missing required data for mapping update: supplier_id={supplier_id}, item={mapping_data['supplier_item_ids']}")
+        
+        except Exception as e:
+            # Log any errors that occur
+            logger.error(f"Error in update_mappings_table: {str(e)}")
 
     def sort(self, db, column, sort_order):
         if sort_order == 'ascending':
