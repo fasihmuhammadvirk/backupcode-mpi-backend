@@ -20,6 +20,7 @@ from mpi_backend.api.routes import quickbooks
 from mpi_backend.api.routes import signin
 from mpi_backend.api.routes import filters
 from mpi_backend.api.routes import sync_mappings
+from mpi_backend.api.routes import price_comparison
 from mpi_backend.api.routes.sync_mappings import perform_sync_mapping_task, perform_update_all_mappings
 from mpi_backend.config import LOG_LEVEL
 from mpi_backend.utils.invoice_downaloder import email_download_background_task
@@ -65,7 +66,7 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
         max_instances=1
     )
-    #
+
     # # Also run the sync_mappings job immediately on startup
     # scheduler.add_job(
     #     perform_sync_mapping_task,
@@ -122,6 +123,7 @@ def register_routes(app):
     app.include_router(quickbooks.router)
     app.include_router(filters.router)
     app.include_router(sync_mappings.router)
+    app.include_router(price_comparison.router)
 
 
 register_routes(app)
