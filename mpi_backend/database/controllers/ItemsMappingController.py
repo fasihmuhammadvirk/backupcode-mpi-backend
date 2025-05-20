@@ -1,6 +1,11 @@
 from mpi_backend.database.models import ItemsMapping, InvoiceItem
 import pandas as pd
 import logging
+from typing import Dict, Any
+from sqlalchemy import or_
+
+from mpi_backend.utils.export_utils import extract_supplier_id
+from mpi_backend.database import SessionLocal
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -9,6 +14,29 @@ logger = logging.getLogger(__name__)
 class ItemsMappingController:
     def __init__(self, db):
         self.db_context = db
+
+    @classmethod
+    def execute_update_all_mappings_task(cls, db=None):
+        """
+        Execute the update all mappings task with proper session management.
+        
+        Args:
+            db: Database session. If None, a new session is created.
+            
+        Returns:
+            Dict with update operation details
+        """
+        # If db is not provided, create a new session
+        if db is None:
+            db_session = SessionLocal()
+            try:
+                mapping_controller = cls(db_session)
+                return mapping_controller.update_all_mappings()
+            finally:
+                db_session.close()
+        else:
+            mapping_controller = cls(db)
+            return mapping_controller.update_all_mappings()
 
     def get_items_mappings(self):
         # Check if db_context is callable (session factory) or a Session object
@@ -140,6 +168,167 @@ class ItemsMappingController:
                 )
             except Exception as e:
                 logger.error(f"Failed to propagate mapping changes: {str(e)}")
+
+    def update_invalid_mappings(self) -> Dict[str, Any]:
+        """
+        Update all items with invalid mappings by finding matches in the 
+        ItemsMapping table.
+        
+        Returns:
+            Dict with status and count of updated items
+        """
+        try:
+            db = self._get_db_session()
+            
+            # Get items with invalid mappings
+            invalid_items = db.query(InvoiceItem).filter(
+                or_(
+                    InvoiceItem.mpi_item.ilike("no match"),
+                    InvoiceItem.mpi_item.startswith("UIDI")
+                )
+            ).all()
+            
+            if not invalid_items:
+                return {
+                    "status": "success",
+                    "message": "No invalid mappings found"
+                }
+            
+            # Fetch all existing mappings
+            mappings = db.query(ItemsMapping).all()
+            
+            # Create a lookup dictionary for efficient searching
+            # Using supplier_item_ids and supplier_id as a compound key
+            mapping_lookup = {}
+            for mapping in mappings:
+                key = (f"{mapping.supplier_item_ids.lower()}-"
+                       f"{mapping.supplier_id}")
+                mapping_lookup[key] = mapping
+            
+            # Update invalid items if mappings are found
+            updated_count = 0
+            
+            for item in invalid_items:
+                # Try to find match by item number and supplier
+                supplier_id, _ = extract_supplier_id(item.vendor)
+                
+                # Look for a match in the mappings
+                key = (f"{item.item.lower()}-{supplier_id}" 
+                       if item.item else "")
+                mapping = mapping_lookup.get(key)
+                
+                if mapping:
+                    # Update the item with the mapping information
+                    item.mpi_item = mapping.mpi_code
+                    item.mpi_description = mapping.description
+                    item.sheet_name = mapping.google_sheet_name
+                    updated_count += 1
+            
+            # Commit the changes
+            db.commit()
+            
+            return {
+                "status": "success",
+                "message": f"{updated_count} items updated"
+            }
+        
+        except Exception as e:
+            logger.error(f"Failed to update invalid mappings: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Failed to update invalid mappings: {str(e)}"
+            }
+
+    def update_all_mappings(self) -> Dict[str, Any]:
+        """
+        Update all invoice items by applying the latest mappings.
+        
+        Returns:
+            Dict with status and count of updated items
+        """
+        try:
+            db = self._get_db_session()
+            
+            # Fetch all mappings
+            mappings = db.query(ItemsMapping).all()
+            
+            if not mappings:
+                logger.info("No mappings found to apply")
+                return {
+                    "status": "success",
+                    "message": "No mappings found to apply"
+                }
+            
+            # Process each mapping to update related invoice items
+            total_updated_count = 0
+            total_mappings_processed = 0
+            
+            for mapping in mappings:
+                total_mappings_processed += 1
+                try:
+                    # Get vendor name from supplier_id
+                    from mpi_backend.database.models import Supplier
+                    supplier = db.query(Supplier).filter_by(
+                        id=mapping.supplier_id
+                    ).first()
+                    
+                    if not supplier:
+                        logger.warning(
+                            f"Supplier with ID {mapping.supplier_id} not found"
+                        )
+                        continue
+                        
+                    # Find all invoice items that match this item number and supplier
+                    matching_items = db.query(InvoiceItem).filter(
+                        InvoiceItem.item == mapping.supplier_item_ids,
+                        InvoiceItem.vendor.contains(supplier.supplier_name)
+                    ).all()
+                    
+                    if not matching_items:
+                        continue
+                        
+                    # Update all matching items
+                    item_updated_count = 0
+                    for item in matching_items:
+                        item.mpi_item = mapping.mpi_code
+                        item.mpi_description = mapping.description
+                        item.sheet_name = mapping.google_sheet_name
+                        item_updated_count += 1
+                    
+                    total_updated_count += item_updated_count
+                    logger.info(
+                        f"Updated {item_updated_count} items for mapping "
+                        f"{mapping.supplier_item_ids}"
+                    )
+                    
+                    # Commit after each mapping batch to avoid large transactions
+                    db.commit()
+                    
+                except Exception as e:
+                    logger.error(
+                        f"Error updating items for mapping "
+                        f"{mapping.supplier_item_ids}: {str(e)}"
+                    )
+                    db.rollback()
+            
+            logger.info(
+                f"Update complete: {total_updated_count} items updated from "
+                f"{total_mappings_processed} mappings"
+            )
+            return {
+                "status": "success",
+                "message": (f"{total_updated_count} items updated from "
+                            f"{total_mappings_processed} mappings")
+            }
+        
+        except Exception as e:
+            logger.error(f"Failed to update all mappings: {str(e)}")
+            if db and db.is_active:
+                db.rollback()
+            return {
+                "status": "error",
+                "message": f"Failed to update all mappings: {str(e)}"
+            }
     
     def _propagate_mapping_changes(self, db, supplier_id, item_number, 
                                   new_mpi_code, new_description, sheet_name):

@@ -21,7 +21,7 @@ from mpi_backend.api.routes import signin
 from mpi_backend.api.routes import filters
 from mpi_backend.api.routes import sync_mappings
 from mpi_backend.api.routes import price_comparison
-from mpi_backend.api.routes.sync_mappings import perform_sync_mapping_task, perform_update_all_mappings
+from mpi_backend.database.controllers import GoogleSheetSyncController, ItemsMappingController
 from mpi_backend.config import LOG_LEVEL
 from mpi_backend.utils.invoice_downaloder import email_download_background_task
 from mpi_backend.utils.missing_invoice_downaloder import missing_email_download_background_task
@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
 
     # Run the sync_mappings job on a 30-minute interval
     scheduler.add_job(
-        perform_sync_mapping_task,
+        GoogleSheetSyncController.execute_sync_task,
         "interval",
         minutes=30,
         replace_existing=True,
@@ -60,28 +60,21 @@ async def lifespan(app: FastAPI):
 
     # Run the update_all_mappings job every 24 hours
     scheduler.add_job(
-        perform_update_all_mappings,
+        ItemsMappingController.execute_update_all_mappings_task,
         CronTrigger(hour=3, minute=0, timezone=UTC_TZ),  # Run at 3 AM UTC
         id="update_all_mappings_daily",
         replace_existing=True,
         max_instances=1
     )
 
-    # # Also run the sync_mappings job immediately on startup
-    # scheduler.add_job(
-    #     perform_sync_mapping_task,
-    #     DateTrigger(run_date=datetime.now()),
-    #     replace_existing=True,
-    #     id="startup_sync_mappings"
-    # )
-
-    # scheduler.add_job(missing_email_download_background_task,
-    #                   CronTrigger(hour=5, minute=0, timezone=UTC_TZ),
-    #                   # Eastern Time: 9:00 PM Previous Day
-    #                   # European Time: 3:00 AM Same Day
-    #                   max_instances=1,
-    #                   replace_existing=True  # Avoids duplicate jobs if restarted
-    #                   )
+    # checking for any missing invocies
+    scheduler.add_job(missing_email_download_background_task,
+                      CronTrigger(hour=5, minute=0, timezone=UTC_TZ),
+                      # Eastern Time: 9:00 PM Previous Day
+                      # European Time: 3:00 AM Same Day
+                      max_instances=1,
+                      replace_existing=True  # Avoids duplicate jobs if restarted
+                      )
 
     # Run the job only once when the application starts (non-blocking)
     #scheduler.add_job(

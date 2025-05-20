@@ -6,11 +6,20 @@ import os
 import json
 import logging
 from typing import Dict, List, Any, Set, Tuple
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
 from mpi_backend.database.controllers import ItemsMappingController
 from mpi_backend.utils.google_sheets import GoogleSheetDataExtractor
+from mpi_backend.config.spreadsheet_config import (
+    DEFAULT_SHEET_ID,
+    DEFAULT_OUTPUT_FILE,
+    GOOGLE_API_KEY,
+    SKIP_SHEETS,
+    MAPPING_CONFIG
+)
+from mpi_backend.database import SessionLocal
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -18,6 +27,10 @@ logger = logging.getLogger(__name__)
 
 class GoogleSheetSyncController:
     """Controller for synchronizing data from Google Sheets to the database."""
+
+    # Class level variables to track sync status
+    _sync_task_running = False
+    _last_sync_time = None
 
     def __init__(self, db: Session):
         """
@@ -29,6 +42,93 @@ class GoogleSheetSyncController:
         self.db = db
         self.mapping_controller = ItemsMappingController(db)
         
+    @classmethod
+    def execute_sync_task(cls, db: Session = None):
+        """
+        Execute the sync task with proper session management.
+        
+        Args:
+            db: Database session. If None, a new session is created.
+            
+        Returns:
+            Dict with sync operation details
+        """
+        # If db is not provided, create a new session
+        if db is None:
+            db_session = SessionLocal()
+            try:
+                sync_controller = cls(db_session)
+                return sync_controller.perform_sync_task()
+            finally:
+                db_session.close()
+        else:
+            sync_controller = cls(db)
+            return sync_controller.perform_sync_task()
+
+    @classmethod
+    def get_sync_status(cls) -> Dict[str, Any]:
+        """
+        Get the current sync status.
+        
+        Returns:
+            Dict with sync status information
+        """
+        return {
+            "is_running": cls._sync_task_running,
+            "last_sync_time": (cls._last_sync_time.isoformat() 
+                             if cls._last_sync_time else None)
+        }
+
+    def perform_sync_task(self) -> Dict[str, Any]:
+        """
+        Performs the sync operation if no sync task is currently running.
+        
+        Returns:
+            Dict with sync operation details
+        """
+        # If task is already running, skip this run
+        if self.__class__._sync_task_running:
+            logger.info("Sync task already running, skipping this run")
+            return {
+                "success": False,
+                "message": "Task already running",
+                "skipped": True
+            }
+
+        try:
+            self.__class__._sync_task_running = True
+            logger.info("Starting sync task...")
+
+            # Perform the sync operation
+            result = self.sync_sheet_mappings(
+                sheet_id=DEFAULT_SHEET_ID,
+                output_file=DEFAULT_OUTPUT_FILE,
+                api_key=GOOGLE_API_KEY,
+                skip_sheets=SKIP_SHEETS,
+                batch_size=MAPPING_CONFIG["batch_size"],
+                fuzzy_threshold=MAPPING_CONFIG["fuzzy_threshold"]
+            )
+
+            # Update last sync time on success
+            if result.get("success"):
+                self.__class__._last_sync_time = datetime.now()
+
+            return {
+                **result,
+                "timestamp": self.__class__._last_sync_time
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to sync mappings: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Failed to sync mappings: {str(e)}",
+                "timestamp": datetime.now()
+            }
+
+        finally:
+            self.__class__._sync_task_running = False
+
     def sync_sheet_mappings(
         self,
         sheet_id: str,
