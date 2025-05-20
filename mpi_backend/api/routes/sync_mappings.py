@@ -63,58 +63,69 @@ def sync_status(token: str = Depends(JWTBearer())):
     """
     return GoogleSheetSyncController.get_sync_status()
 
-
 @router.post("/update-invalid-mappings")
 def update_invalid_mappings(
-    db: Session = Depends(get_db),
-    token: str = Depends(JWTBearer())
+        background_tasks: BackgroundTasks,
+        db: Session = Depends(get_db),
+        token: str = Depends(JWTBearer())
 ):
     """
-    Update all items with invalid mappings by finding matches in the 
+    Syncs mappings from Google Sheets, then updates invalid mappings.
+    Update all items with invalid mappings by finding matches in the
     ItemsMapping table.
-    
+
     Targets items where:
     - mpi_item is exactly "no match" (case insensitive)
     - mpi_item starts with "UIDI"
-    
+
     For each item, tries to find a match in the ItemsMapping table based on the
     org_item (item) and org_description (description) fields.
-    
+
     Returns:
         Dict with status and count of updated items
     """
+    sync_controller = GoogleSheetSyncController(db)
+    status = sync_controller.get_sync_status()
+
+    if not status["is_running"]:
+        background_tasks.add_task(GoogleSheetSyncController.execute_sync_task, db)
+
     controller = ItemsMappingController(db)
     return controller.update_invalid_mappings()
 
-
 @router.post("/update-all-mappings")
 def update_all_mappings(
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    token: str = Depends(JWTBearer())
+        background_tasks: BackgroundTasks,
+        db: Session = Depends(get_db),
+        token: str = Depends(JWTBearer())
 ):
     """
-    Update all invoice items by applying the latest mappings from the 
+    Syncs mappings from Google Sheets, then
+    Update all invoice items by applying the latest mappings from the
     ItemsMapping table.
-    
-    This is useful for propagating mapping changes to all related invoice items 
+
+    This is useful for propagating mapping changes to all related invoice items
     after bulk changes to the mappings table or data migrations.
-    
+
     The task runs in the background to prevent blocking the application.
-    
+
     Returns:
         Dict with status message indicating the task has been started
+
     """
-    # Start the update process in the background using the controller method
+    sync_controller = GoogleSheetSyncController(db)
+    status = sync_controller.get_sync_status()
+
+    if not status["is_running"]:
+        background_tasks.add_task(GoogleSheetSyncController.execute_sync_task, db)
+
     background_tasks.add_task(
         ItemsMappingController.execute_update_all_mappings_task,
         db
     )
-    
-    # Return immediate response
+
     return {
         "status": "success",
-        "message": "Update all mappings task has been started in background",
+        "message": "Sync + Update all mappings task has been started in background",
         "timestamp": datetime.now().isoformat()
-    } 
-    
+    }
