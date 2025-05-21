@@ -6,7 +6,7 @@ from mpi_backend.database.controllers import ItemsMappingController
 from mpi_backend.database.schemas import ItemMappingsResponse,ItemMappingsByMpiTypeResponse,UpdateMappingRequest
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 
-router = APIRouter(prefix="/mapping")
+router = APIRouter(prefix="/mapping", tags=['Item Mappings'])
 
 
 @router.post("")

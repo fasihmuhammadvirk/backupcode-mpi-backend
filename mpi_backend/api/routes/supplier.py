@@ -5,7 +5,7 @@ from mpi_backend.database import get_db
 from mpi_backend.database.controllers import SupplierController
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 
-router = APIRouter(prefix="/supplier")
+router = APIRouter(prefix="/supplier", tags=["Supplier"])
 
 
 @router.get("")

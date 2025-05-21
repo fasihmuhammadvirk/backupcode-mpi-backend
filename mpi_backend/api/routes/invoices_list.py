@@ -17,7 +17,7 @@ from mpi_backend.utils.s3_utils import get_presigned_url
 import logging
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/invoice")
+router = APIRouter(prefix="/invoice",tags=["Invoices"])
 
 
 @router.get("", response_model=PaginatedInvoiceResponse)

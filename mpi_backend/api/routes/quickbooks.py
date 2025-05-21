@@ -12,7 +12,7 @@ from mpi_backend.utils.pdf_to_excel.formatting_util import export_batch_entry_to
 from mpi_backend.utils.s3_utils import upload_file, get_presigned_url
 import os
 
-router = APIRouter(prefix="/quickbooks")
+router = APIRouter(prefix="/quickbooks",tags=["QuickBooks"])
 
 @router.post("/migrate-all")
 def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest, db: Session = Depends(get_db)):

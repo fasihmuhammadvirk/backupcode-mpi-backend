@@ -10,7 +10,7 @@ from mpi_backend.utils.pdf_to_excel.formatting_util import export_price_history_
 from mpi_backend.utils.s3_utils import upload_file, get_presigned_url
 import os
 
-router = APIRouter(prefix="/filter")
+router = APIRouter(prefix="/filter",tags=["Filtering Data"])
 
 
 @router.get("/get-locations", response_model=List[str])

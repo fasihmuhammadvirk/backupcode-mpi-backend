@@ -17,7 +17,7 @@ from mpi_backend.utils.export_utils import convert_items_to_dataframe
 from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
 from mpi_backend.utils.s3_utils import upload_file, get_presigned_url
 from mpi_backend.database.schemas.InvoiceItems import ToggleVisibilityRequest
-router = APIRouter(prefix="/invoice-items")
+router = APIRouter(prefix="/invoice-items",tags=["Invoice Items"])
 
 
 @router.get("/all", response_model=Page[InvoiceItems])
