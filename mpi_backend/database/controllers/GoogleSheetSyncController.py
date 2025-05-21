@@ -36,6 +36,7 @@ class GoogleSheetSyncController:
     _current_operation = None  # Can be 'sync', 'update_no_match_uidi', 'update_all'
     _last_update_no_match_uidi_time = None
     _last_update_all_time = None
+    _last_update_invalid_time = None  # For backward compatibility
 
     def __init__(self, db: Session):
         """
@@ -54,7 +55,7 @@ class GoogleSheetSyncController:
         
         Args:
             db: Database session. If None, a new session is created.
-            operation: The operation being performed ('sync', 'update_invalid', or 'update_all')
+            operation: The operation being performed ('sync', 'update_no_match_uidi', or 'update_all')
             
         Returns:
             Dict with sync operation details
@@ -80,15 +81,27 @@ class GoogleSheetSyncController:
             Dict with sync status information including which operation is running
             and when each operation was last run
         """
+        # Use _last_update_no_match_uidi_time if available, fall back to _last_update_invalid_time for backward compatibility
+        last_no_match_uidi_time = (
+            cls._last_update_no_match_uidi_time or 
+            cls._last_update_invalid_time
+        )
+        
         return {
             "is_running": cls._sync_task_running,
             "current_operation": cls._current_operation,
-            "last_sync_time": (cls._last_sync_time.isoformat() 
-                             if cls._last_sync_time else None),
-            "last_update_no_match_uidi_time": (cls._last_update_invalid_time.isoformat()
-                                      if cls._last_update_invalid_time else None),
-            "last_update_all_time": (cls._last_update_all_time.isoformat()
-                                   if cls._last_update_all_time else None)
+            "last_sync_time": (
+                cls._last_sync_time.isoformat() 
+                if cls._last_sync_time else None
+            ),
+            "last_update_no_match_uidi_time": (
+                last_no_match_uidi_time.isoformat()
+                if last_no_match_uidi_time else None
+            ),
+            "last_update_all_time": (
+                cls._last_update_all_time.isoformat()
+                if cls._last_update_all_time else None
+            )
         }
 
     def perform_sync_task(self, operation: str = 'sync') -> Dict[str, Any]:

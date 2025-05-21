@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sync", tags=["Sync Mapping"])
 
 
+
 @router.post("/mapping", response_model=SyncMappingsResponse)
 def sync_mapping(
     background_tasks: BackgroundTasks,
@@ -37,16 +38,16 @@ def sync_mapping(
     status = sync_controller.get_sync_status()
     
     if status["is_running"]:
-        # Convert operation name to user-friendly format
+        # Operation display names mapping
         operation_display = {
-            "sync": "Sync",
-            "update_invalid": "Update No Match / UIDI Mappings",
-            "update_all": "Update All Mappings"
+            "sync": "Synchronization",
+            "update_no_match_uidi": "No Match / UIDI Update",
+            "update_all": "Full Update"
         }.get(status['current_operation'], status['current_operation'])
         
         return SyncMappingsResponse(
             success=False,
-            message=f"Cannot start Sync: A {operation_display} operation is already running",
+            message=f"Cannot start operation: {operation_display} is already in progress",
             timestamp=datetime.now()
         )
     
@@ -63,16 +64,29 @@ def sync_mapping(
 @router.get("/status")
 def sync_status(token: str = Depends(JWTBearer())):
     """
-    Check the status of the sync task.
+    Check the status of synchronization tasks.
     
     Returns:
-        Dict with the current status of the sync task, including which operation is running
-        and when each operation was last run
+        dict: Current sync status including running operations and timestamps
     """
-    status = GoogleSheetSyncController.get_sync_status()
+    sync_controller = GoogleSheetSyncController()
+    status = sync_controller.get_sync_status()
     
-    # No additional processing needed as the controller now returns all necessary information
-    return status
+    # Format the response with clear status information
+    operation_display = {
+        None: "No operation in progress",
+        "sync": "Synchronizing data",
+        "update_no_match_uidi": "Updating No Match / UIDI Mappings",
+        "update_all": "Updating All Mappings"
+    }
+    
+    return {
+        "status": "running" if status["is_running"] else "idle",
+        "current_operation": operation_display.get(status["current_operation"], status["current_operation"]),
+        "last_sync_time": status["last_sync_time"],
+        "last_no_match_uidi_update": status["last_update_no_match_uidi_time"],
+        "last_full_update": status["last_update_all_time"]
+    }
 
 @router.post("/update-no-match-uidi-mappings")
 def update_no_match_uidi_mappings(
@@ -82,12 +96,14 @@ def update_no_match_uidi_mappings(
 ):
     """
     Syncs mappings from Google Sheets, then updates No Match / UIDI mappings.
+    
     Update all items with No Match / UIDI mappings by finding matches in the
     ItemsMapping table.
 
     Targets items where:
     - mpi_item is exactly "no match" (case insensitive)
     - mpi_item starts with "UIDI"
+    - mpi_item is None or empty
 
     For each item, tries to find a match in the ItemsMapping table based on the
     org_item (item) and org_description (description) fields.
@@ -101,27 +117,37 @@ def update_no_match_uidi_mappings(
     if status["is_running"]:
         # Convert operation name to user-friendly format
         operation_display = {
-            "sync": "Sync",
-            "update_invalid": "Update No Match / UIDI Mappings",
-            "update_all": "Update All Mappings"
+            "sync": "Synchronization",
+            "update_no_match_uidi": "No Match / UIDI Update",
+            "update_all": "Full Update"
         }.get(status['current_operation'], status['current_operation'])
         
         return {
             "status": "error",
-            "message": f"Cannot start Update No Match / UIDI Mappings: A {operation_display} operation is already running",
+            "message": f"Cannot start operation: {operation_display} is already in progress",
             "timestamp": datetime.now().isoformat()
         }
 
-    # Start sync with update_no_match_uidi operation
-    background_tasks.add_task(GoogleSheetSyncController.execute_sync_task, db, 'update_no_match_uidi')
-
-    controller = ItemsMappingController(db)
-    result = controller.update_no_match_uidi_mappings()
-    
-    return {
-        **result,
-        "timestamp": datetime.now().isoformat()
-    }
+    try:
+        # Start sync with update_no_match_uidi operation
+        background_tasks.add_task(
+            GoogleSheetSyncController.execute_sync_task, 
+            db, 
+            'update_no_match_uidi'
+        )
+        
+        return {
+            "status": "success",
+            "message": "No Match / UIDI update task has been started in the background",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Failed to start No Match / UIDI update: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Failed to start No Match / UIDI update: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
 
 @router.post("/update-all-mappings")
 def update_all_mappings(
@@ -149,28 +175,34 @@ def update_all_mappings(
     if status["is_running"]:
         # Convert operation name to user-friendly format
         operation_display = {
-            "sync": "Sync",
-            "update_invalid": "Update No Match / UIDI Mappings",
-            "update_all": "Update All Mappings"
+            "sync": "Synchronization",
+            "update_no_match_uidi": "No Match / UIDI Update",
+            "update_all": "Full Update"
         }.get(status['current_operation'], status['current_operation'])
         
         return {
             "status": "error",
-            "message": f"Cannot start Update All Mappings: A {operation_display} operation is already running",
+            "message": f"Cannot start operation: {operation_display} is already in progress",
             "timestamp": datetime.now().isoformat()
         }
 
-    # Start sync with update_all operation
-    background_tasks.add_task(GoogleSheetSyncController.execute_sync_task, db, 'update_all')
+    try:
+        # Start sync with update_all operation
+        background_tasks.add_task(
+            GoogleSheetSyncController.execute_sync_task,
+            db,
+            'update_all'
+        )
 
-    # Start the update all mappings task
-    background_tasks.add_task(
-        ItemsMappingController.execute_update_all_mappings_task,
-        db
-    )
-
-    return {
-        "status": "success",
-        "message": "Sync + Update all mappings task has been started in background",
-        "timestamp": datetime.now().isoformat()
-    }
+        return {
+            "status": "success",
+            "message": "Full update task has been started in the background",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Failed to start full update: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Failed to start full update: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }

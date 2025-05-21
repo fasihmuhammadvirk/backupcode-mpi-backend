@@ -187,92 +187,90 @@ class ItemsMappingController:
             except Exception as e:
                 logger.error(f"Failed to propagate mapping changes: {str(e)}")
 
-    def update_invalid_mappings(self) -> Dict[str, Any]:
+    def update_no_match_uidi_mappings(self) -> Dict[str, Any]:
         """
-        Update all items with No Match / UIDI mappings by finding matches in the 
-        ItemsMapping table.
+        Update only items with No Match / UIDI mappings.
         
         Returns:
-            Dict with status and count of updated items
+            Dict with update operation details
         """
-        # Check if a sync task is already running
         from mpi_backend.database.controllers import GoogleSheetSyncController
-        status = GoogleSheetSyncController.get_sync_status()
         
-        if status["is_running"] and status["current_operation"] != "update_invalid":
+        # Check if a sync task is already running (except if it's another update_no_match_uidi)
+        status = GoogleSheetSyncController.get_sync_status()
+        if status["is_running"] and status["current_operation"] != "update_no_match_uidi":
             # Convert operation name to user-friendly format
             operation_display = {
-                "sync": "Sync",
-                "update_invalid": "Update No Match / UIDI Mappings",
-                "update_all": "Update All Mappings"
+                "sync": "Synchronization",
+                "update_no_match_uidi": "No Match / UIDI Update",
+                "update_all": "Full Update"
             }.get(status['current_operation'], status['current_operation'])
             
-            logger.info(f"Cannot start Update No Match / UIDI Mappings: A {operation_display} operation is already running")
+            logger.info(f"Cannot start operation: {operation_display} is already in progress")
             return {
                 "status": "error",
-                "message": f"Cannot start Update No Match / UIDI Mappings: A {operation_display} operation is already running"
+                "message": f"Cannot start operation: {operation_display} is already in progress"
             }
             
+        db = self._get_db_session()
         try:
-            db = self._get_db_session()
-            
-            # Get items with invalid mappings
-            invalid_items = db.query(InvoiceItem).filter(
+            # Get items with No Match / UIDI mappings
+            no_match_items = db.query(InvoiceItem).filter(
                 or_(
-                    InvoiceItem.mpi_item.ilike("no match"),
-                    InvoiceItem.mpi_item.startswith("UIDI")
+                    InvoiceItem.mpi_code.is_(None),
+                    InvoiceItem.mpi_code == "",
+                    InvoiceItem.mpi_code == "No Match / UIDI"
                 )
             ).all()
             
-            if not invalid_items:
+            if not no_match_items:
                 return {
                     "status": "success",
-                    "message": "No invalid mappings found"
+                    "message": "No items with No Match / UIDI found"
                 }
-            
-            # Fetch all existing mappings
-            mappings = db.query(ItemsMapping).all()
-            
-            # Create a lookup dictionary for efficient searching
-            # Using supplier_item_ids and supplier_id as a compound key
-            mapping_lookup = {}
-            for mapping in mappings:
-                key = (f"{mapping.supplier_item_ids.lower()}-"
-                       f"{mapping.supplier_id}")
-                mapping_lookup[key] = mapping
-            
-            # Update invalid items if mappings are found
+                
+            # Get all mappings
+            mappings = self.get_items_mappings()
+            if mappings.empty:
+                return {
+                    "status": "error",
+                    "message": "No mappings available"
+                }
+                
+            # Update No Match / UIDI items if mappings are found
             updated_count = 0
-            
-            for item in invalid_items:
-                # Try to find match by item number and supplier
-                supplier_id, _ = extract_supplier_id(item.vendor)
-                
-                # Look for a match in the mappings
-                key = (f"{item.item.lower()}-{supplier_id}" 
-                       if item.item else "")
-                mapping = mapping_lookup.get(key)
-                
-                if mapping:
-                    # Update the item with the mapping information
-                    item.mpi_item = mapping.mpi_code
-                    item.mpi_description = mapping.description
-                    item.sheet_name = mapping.google_sheet_name
-                    updated_count += 1
-            
-            # Commit the changes
+            for item in no_match_items:
+                # Find matching mapping
+                matched = False
+                for _, mapping in mappings.iterrows():
+                    supplier_item_ids = mapping['supplier_item_ids']
+                    if not supplier_item_ids:
+                        continue
+                        
+                    if str(item.supplier_item_id) in supplier_item_ids.split(','):
+                        item.mpi_code = mapping['mpi_code']
+                        updated_count += 1
+                        matched = True
+                        break
+                        
+                # If no match found, set to "No Match / UIDI"
+                if not matched:
+                    item.mpi_code = "No Match / UIDI"
+                    
             db.commit()
             
             return {
                 "status": "success",
-                "message": f"{updated_count} items updated"
+                "message": f"Updated {updated_count} items with No Match / UIDI mappings",
+                "updated_count": updated_count
             }
-        
+            
         except Exception as e:
-            logger.error(f"Failed to update invalid mappings: {str(e)}")
+            db.rollback()
+            logger.error(f"Failed to update No Match / UIDI mappings: {str(e)}")
             return {
                 "status": "error",
-                "message": f"Failed to update invalid mappings: {str(e)}"
+                "message": f"Failed to update No Match / UIDI mappings: {str(e)}"
             }
 
     def update_all_mappings(self) -> Dict[str, Any]:
