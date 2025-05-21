@@ -62,14 +62,17 @@ def sync_mapping(
 
 
 @router.get("/status")
-def sync_status(token: str = Depends(JWTBearer())):
+def sync_status(
+    db: Session = Depends(get_db),
+    token: str = Depends(JWTBearer())
+):
     """
     Check the status of synchronization tasks.
     
     Returns:
         dict: Current sync status including running operations and timestamps
     """
-    sync_controller = GoogleSheetSyncController()
+    sync_controller = GoogleSheetSyncController(db)
     status = sync_controller.get_sync_status()
     
     # Format the response with clear status information
