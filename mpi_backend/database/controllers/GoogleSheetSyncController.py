@@ -31,6 +31,11 @@ class GoogleSheetSyncController:
     # Class level variables to track sync status
     _sync_task_running = False
     _last_sync_time = None
+    
+    # Track which operation is running and last run times
+    _current_operation = None  # Can be 'sync', 'update_no_match_uidi', 'update_all'
+    _last_update_no_match_uidi_time = None
+    _last_update_all_time = None
 
     def __init__(self, db: Session):
         """
@@ -43,12 +48,13 @@ class GoogleSheetSyncController:
         self.mapping_controller = ItemsMappingController(db)
         
     @classmethod
-    def execute_sync_task(cls, db: Session = None):
+    def execute_sync_task(cls, db: Session = None, operation: str = 'sync'):
         """
         Execute the sync task with proper session management.
         
         Args:
             db: Database session. If None, a new session is created.
+            operation: The operation being performed ('sync', 'update_invalid', or 'update_all')
             
         Returns:
             Dict with sync operation details
@@ -58,12 +64,12 @@ class GoogleSheetSyncController:
             db_session = SessionLocal()
             try:
                 sync_controller = cls(db_session)
-                return sync_controller.perform_sync_task()
+                return sync_controller.perform_sync_task(operation)
             finally:
                 db_session.close()
         else:
             sync_controller = cls(db)
-            return sync_controller.perform_sync_task()
+            return sync_controller.perform_sync_task(operation)
 
     @classmethod
     def get_sync_status(cls) -> Dict[str, Any]:
@@ -71,33 +77,43 @@ class GoogleSheetSyncController:
         Get the current sync status.
         
         Returns:
-            Dict with sync status information
+            Dict with sync status information including which operation is running
+            and when each operation was last run
         """
         return {
             "is_running": cls._sync_task_running,
+            "current_operation": cls._current_operation,
             "last_sync_time": (cls._last_sync_time.isoformat() 
-                             if cls._last_sync_time else None)
+                             if cls._last_sync_time else None),
+            "last_update_no_match_uidi_time": (cls._last_update_invalid_time.isoformat()
+                                      if cls._last_update_invalid_time else None),
+            "last_update_all_time": (cls._last_update_all_time.isoformat()
+                                   if cls._last_update_all_time else None)
         }
 
-    def perform_sync_task(self) -> Dict[str, Any]:
+    def perform_sync_task(self, operation: str = 'sync') -> Dict[str, Any]:
         """
         Performs the sync operation if no sync task is currently running.
         
+        Args:
+            operation: The operation being performed ('sync', 'update_invalid', or 'update_all')
+            
         Returns:
             Dict with sync operation details
         """
         # If task is already running, skip this run
         if self.__class__._sync_task_running:
-            logger.info("Sync task already running, skipping this run")
+            logger.info(f"A {self.__class__._current_operation} task is already running, skipping this run")
             return {
                 "success": False,
-                "message": "Task already running",
+                "message": f"A {self.__class__._current_operation} task is already running",
                 "skipped": True
             }
 
         try:
             self.__class__._sync_task_running = True
-            logger.info("Starting sync task...")
+            self.__class__._current_operation = operation
+            logger.info(f"Starting {operation} task...")
 
             # Perform the sync operation
             result = self.sync_sheet_mappings(
@@ -112,22 +128,31 @@ class GoogleSheetSyncController:
             # Update last sync time on success
             if result.get("success"):
                 self.__class__._last_sync_time = datetime.now()
+                
+                # Update the appropriate timestamp based on operation
+                if operation == 'update_no_match_uidi':
+                    self.__class__._last_update_no_match_uidi_time = datetime.now()
+                elif operation == 'update_all':
+                    self.__class__._last_update_all_time = datetime.now()
 
             return {
                 **result,
-                "timestamp": self.__class__._last_sync_time
+                "timestamp": self.__class__._last_sync_time,
+                "operation": operation
             }
 
         except Exception as e:
-            logger.error(f"Failed to sync mappings: {str(e)}")
+            logger.error(f"Failed to sync mappings during {operation}: {str(e)}")
             return {
                 "success": False,
-                "message": f"Failed to sync mappings: {str(e)}",
-                "timestamp": datetime.now()
+                "message": f"Failed to sync mappings during {operation}: {str(e)}",
+                "timestamp": datetime.now(),
+                "operation": operation
             }
 
         finally:
             self.__class__._sync_task_running = False
+            self.__class__._current_operation = None
 
     def sync_sheet_mappings(
         self,

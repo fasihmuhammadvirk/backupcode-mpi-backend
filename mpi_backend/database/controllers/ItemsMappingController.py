@@ -26,6 +26,24 @@ class ItemsMappingController:
         Returns:
             Dict with update operation details
         """
+        # Check if a sync task is already running
+        from mpi_backend.database.controllers import GoogleSheetSyncController
+        status = GoogleSheetSyncController.get_sync_status()
+        
+        if status["is_running"]:
+            # Convert operation name to user-friendly format
+            operation_display = {
+                "sync": "Sync",
+                "update_invalid": "Update Invalid Mappings",
+                "update_all": "Update All Mappings"
+            }.get(status['current_operation'], status['current_operation'])
+            
+            logger.info(f"Cannot start Update All Mappings: A {operation_display} operation is already running")
+            return {
+                "status": "error",
+                "message": f"Cannot start Update All Mappings: A {operation_display} operation is already running"
+            }
+            
         # If db is not provided, create a new session
         if db is None:
             db_session = SessionLocal()
@@ -171,12 +189,30 @@ class ItemsMappingController:
 
     def update_invalid_mappings(self) -> Dict[str, Any]:
         """
-        Update all items with invalid mappings by finding matches in the 
+        Update all items with No Match / UIDI mappings by finding matches in the 
         ItemsMapping table.
         
         Returns:
             Dict with status and count of updated items
         """
+        # Check if a sync task is already running
+        from mpi_backend.database.controllers import GoogleSheetSyncController
+        status = GoogleSheetSyncController.get_sync_status()
+        
+        if status["is_running"] and status["current_operation"] != "update_invalid":
+            # Convert operation name to user-friendly format
+            operation_display = {
+                "sync": "Sync",
+                "update_invalid": "Update No Match / UIDI Mappings",
+                "update_all": "Update All Mappings"
+            }.get(status['current_operation'], status['current_operation'])
+            
+            logger.info(f"Cannot start Update No Match / UIDI Mappings: A {operation_display} operation is already running")
+            return {
+                "status": "error",
+                "message": f"Cannot start Update No Match / UIDI Mappings: A {operation_display} operation is already running"
+            }
+            
         try:
             db = self._get_db_session()
             
@@ -246,6 +282,24 @@ class ItemsMappingController:
         Returns:
             Dict with status and count of updated items
         """
+        # Check if a sync task is already running
+        from mpi_backend.database.controllers import GoogleSheetSyncController
+        status = GoogleSheetSyncController.get_sync_status()
+        
+        if status["is_running"] and status["current_operation"] != "update_all":
+            # Convert operation name to user-friendly format
+            operation_display = {
+                "sync": "Sync",
+                "update_invalid": "Update Invalid Mappings",
+                "update_all": "Update All Mappings"
+            }.get(status['current_operation'], status['current_operation'])
+            
+            logger.info(f"Cannot start Update All Mappings: A {operation_display} operation is already running")
+            return {
+                "status": "error",
+                "message": f"Cannot start Update All Mappings: A {operation_display} operation is already running"
+            }
+            
         try:
             db = self._get_db_session()
             

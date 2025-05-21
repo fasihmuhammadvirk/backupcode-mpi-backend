@@ -13,7 +13,7 @@ from mpi_backend.database.controllers.PriceComparisonController import (
 
 router = APIRouter(
     prefix="/price-comparison",
-    tags=["price-comparison"]
+    tags=["Price Comparison"]
 )
 
 
