@@ -149,7 +149,6 @@ def extract_po(filename):
 
 def extract_buyer(filename):
     try:
-
         tables = tabula.read_pdf(filename, pages=1, area=(210, 243, 290, 243 + 94), guess=False,
                                  pandas_options={'dtype': str})
 
@@ -163,29 +162,68 @@ def extract_buyer(filename):
         if 'Buyer' in df.columns and 'Unnamed: 0' in df.columns:
             first = str(df['Buyer'].iloc[0]).strip()
             last = str(df['Unnamed: 0'].iloc[0]).strip()
-
             return f"{first} {last}"
+
         elif 'Buyer' in df.columns:
-            first = str(df['Buyer'].iloc[0]).strip()
-            return first
+            buyer_text = str(df['Buyer'].iloc[0]).strip()
+            return buyer_text
 
-        elif 'Bu ye r' in df.columns:
-            s = str(df['Bu ye r'].iloc[0]).strip().replace(',','')
+        elif 'Bu ye r' in df.columns and 'Unnamed: 0' in df.columns:
+            s = str(df['Bu ye r'].iloc[0]).strip()
 
-            parts = re.match(r"([a-zA-Z\s]*)([\d\s\-]*)", s.replace(" ", ""))
-            name, number = parts.group(1), re.sub(r"\D", "", parts.group(2))
+            # First, check if it's a simple number or float
+            try:
+                # If it's a simple number or float, return as is
+                float_val = float(s.replace(',', ''))
+                return str(float_val) if float_val != int(float_val) else str(int(float_val))
+            except ValueError:
+                # Not a simple number, proceed with text processing
+                pass
 
-            if name and number:
-                number = re.sub(r"(\d{3})(\d{3})(\d{2})", r"\1-\2-\3", number[:8])
-                result = f"{name} {number}"
-            elif name:
-                result = name
-            else:
-                result = number
+            # Try to extract phone number with various formats
+            phone_patterns = [
+                r'(\d[\s\(\)\-\d]{9,})',  # Matches phone numbers with various separators
+                r'(\d{3}[-.\s]?\d{3}[-.\s]?\d{4})',  # Standard US/Canada format
+                r'(\(\d{3}\)\s*\d{3}[-.]?\d{4})',  # (123) 456-7890 format
+                r'(\d{1}\s*\(\d{3}\)\s*\d{3}[-.]?\d{4})'  # 1 (123) 456-7890 format
+            ]
 
-            return result
+            # Preserve original for fallback
+            original_s = s
+            # Remove any commas that might interfere with parsing
+            s = s.replace(',', '')
 
-        return ""
+            # Find the first matching phone number pattern
+            phone_number = None
+            for pattern in phone_patterns:
+                match = re.search(pattern, s)
+                if match:
+                    phone_number = match.group(1).strip()
+                    # Only use if we have a name before the number
+                    if s.split(phone_number)[0].strip():
+                        name = s.split(phone_number)[0].strip()
+                        return f"{name} {phone_number}"
+
+            # If no phone number found or no name before number, try to split by last space
+            parts = re.match(r"([a-zA-Z\s]*)([\d\s\-\.]*)", original_s.replace(" ", ""))
+            if parts:
+                name, number = parts.group(1).strip(), re.sub(r"[^\d\.]", "", parts.group(2))
+                if name and number:
+                    # Format the number if it's long enough and looks like a phone number
+                    if len(number) == 10 and '.' not in number:
+                        number = re.sub(r"(\d{3})(\d{3})(\d{4})", r"(\1) \2-\3", number)
+                    return f"{name} {number}"
+                elif name:
+                    return name
+                elif number:
+                    # If it's just a number, return it as is (could be a simple number or float)
+                    try:
+                        float_val = float(number)
+                        return str(float_val) if float_val != int(float_val) else str(int(float_val))
+                    except ValueError:
+                        return number
+
+        return s if 's' in locals() else ""
 
     except Exception as e:
         print("Error during PDF parsing:", e)
