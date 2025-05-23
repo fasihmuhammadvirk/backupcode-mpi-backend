@@ -34,7 +34,7 @@ class PriceComparisonController:
         to_date: date,
         page: int = 1,
         size: int = 10
-    ) -> dict[str, any]:
+    ):
         """
         Get distinct items that were used within the specified date range.
         Excludes items with 'No Match' or 'UIDI' in the description.
@@ -152,7 +152,7 @@ class PriceComparisonController:
         to_date: Optional[date] = None,
         page: int = 1,
         size: int = 10
-    ) -> Dict[str, Any]:
+    ):
         """
         Search for MPI items by item code with optional date range filtering.
         Returns items starting with the search term first, then items containing the term.
