@@ -6,10 +6,14 @@ import logging
 
 from mpi_backend.database.models.ItemsMapping import ItemsMapping
 from mpi_backend.database.models.InvoiceItems import InvoiceItem
+from mpi_backend.database.models.invoice import Invoice
 from mpi_backend.database.models.Suppliers import Supplier
 from mpi_backend.database.schemas.PriceComparison import (
-    ItemInfo,
-    ItemPriceResponse
+    ItemInfo, 
+    ItemPriceResponse,
+    SupplierPriceInfo,
+    SupplierCheapestItemsResponse,
+    PaginatedItemInfoResponse
 )
 
 logger = logging.getLogger(__name__)
@@ -74,21 +78,24 @@ class PriceComparisonController:
             # Calculate total pages
             pages = (total + size - 1) // size if size > 0 else 1
             
-            return {
-                "items": [
-                    ItemInfo(
-                        id=item.id,
-                        mpi_item=item.mpi_item,
-                        original_item=item.original_item,
-                        mpi_description=item.mpi_description
-                    )
-                    for item in items
-                ],
-                "total": total,
-                "page": page,
-                "size": size,
-                "pages": pages
-            }
+            # Format response
+            items = [
+                ItemInfo(
+                    id=item.id,
+                    mpi_item=item.mpi_item,
+                    original_item=item.original_item,
+                    mpi_description=item.mpi_description
+                )
+                for item in items
+            ]
+            
+            return PaginatedItemInfoResponse(
+                items=items,
+                total=total,
+                page=page,
+                size=size,
+                pages=pages
+            )
         except Exception as e:
             logger.error(f"Error fetching items in date range: {str(e)}")
             raise
@@ -229,13 +236,13 @@ class PriceComparisonController:
                 for item in paginated_results
             ]
             
-            return {
-                'items': items,
-                'total': total,
-                'page': page,
-                'size': size,
-                'pages': (total + size - 1) // size
-            }
+            return PaginatedItemInfoResponse(
+                items=items,
+                total=total,
+                page=page,
+                size=size,
+                pages=(total + size - 1) // size if size > 0 else 1
+            )
             
         except Exception as e:
             logger.error(f"Error searching MPI items: {str(e)}")

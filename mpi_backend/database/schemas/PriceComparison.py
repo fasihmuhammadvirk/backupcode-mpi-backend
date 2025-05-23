@@ -64,4 +64,21 @@ class ItemSearchRequest(BaseModel):
         }
 
 class PaginatedItemInfoResponse(PaginatedResponse[ItemInfo]):
-    pass
+    """Paginated response for ItemInfo."""
+    class Config:
+        schema_extra = {
+            "example": {
+                "items": [
+                    {
+                        "id": 1,
+                        "mpi_item": "ITEM001",
+                        "original_item": "ORIG001",
+                        "mpi_description": "Sample item description"
+                    }
+                ],
+                "total": 1,
+                "page": 1,
+                "size": 10,
+                "pages": 1
+            }
+        }
