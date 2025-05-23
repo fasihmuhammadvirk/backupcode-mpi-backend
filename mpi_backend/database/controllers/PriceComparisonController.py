@@ -156,96 +156,93 @@ class PriceComparisonController:
         """
         Search for MPI items by item code with optional date range filtering.
         Returns items starting with the search term first, then items containing the term.
+        
+        Args:
+            search_term (str): The term to search for in MPI items
+            from_date (Optional[date]): Filter items after this date
+            to_date (Optional[date]): Filter items before this date
+            page (int): Page number for pagination (1-based)
+            size (int): Number of items per page
+            
+        Returns:
+            PaginatedItemInfoResponse: Paginated list of matching items
         """
         try:
             db = self._get_db_session()
             search_term = (search_term or '').upper().strip()
             
-            if not search_term:
-                return {
-                    'items': [],
-                    'total': 0,
-                    'page': page,
-                    'size': size,
-                    'pages': 0
-                }
-                
-            # Prepare date filters
-            date_filters = []
-            if from_date:
-                date_filters.append(InvoiceItem.date >= from_date)
-            if to_date:
-                date_filters.append(InvoiceItem.date <= to_date)
+            if not search_term or len(search_term) < 1:
+                return PaginatedItemInfoResponse(
+                    items=[],
+                    total=0,
+                    page=page,
+                    size=size,
+                    pages=0
+                )
             
-            # Base query for searching MPI items
-            base_filters = [
-                InvoiceItem.mpi_item != 'No Match',
-                InvoiceItem.mpi_description.notlike('%No Match%'),
-                ~InvoiceItem.mpi_item.contains('UIDI'),
-                ~InvoiceItem.mpi_description.contains('UIDI'),
-                ~InvoiceItem.mpi_item.like('%10 Materials%'),
-                InvoiceItem.mpi_item != ''
-            ]
-            
-            # Add date filters if provided
-            if date_filters:
-                base_filters.extend(date_filters)
-            
-            base_query = db.query(
+            # Build base query with common filters
+            query = db.query(
                 InvoiceItem.id,
                 InvoiceItem.mpi_item,
                 InvoiceItem.item.label('original_item'),
-                InvoiceItem.mpi_description,
-                InvoiceItem.date
-            ).filter(and_(*base_filters))
+                InvoiceItem.mpi_description
+            ).filter(
+                InvoiceItem.mpi_item != 'No Match',
+                InvoiceItem.mpi_item != '',
+                ~InvoiceItem.mpi_item.like('%10 Materials%'),
+                ~InvoiceItem.mpi_item.contains('UIDI')
+            )
             
-            # Get items that start with the search term (case sensitive)
-            starts_with_query = base_query.filter(
-                InvoiceItem.mpi_item.like(f'{search_term}%')
-            ).order_by(InvoiceItem.mpi_item.asc())
+            # Add search term filter
+            search_filter = or_(
+                InvoiceItem.mpi_item.like(f'{search_term}%'),  # Starts with
+                InvoiceItem.mpi_item.like(f'%{search_term}%')   # Contains
+            )
+            query = query.filter(search_filter)
             
-            # Get items that contain the search term but don't start with it
-            contains_query = base_query.filter(
-                and_(
-                    ~InvoiceItem.mpi_item.like(f'{search_term}%'),
-                    InvoiceItem.mpi_item.like(f'%{search_term}%')
-                )
-            ).order_by(InvoiceItem.mpi_item.asc())
+            # Add date range filters if provided
+            if from_date:
+                query = query.filter(InvoiceItem.date >= from_date)
+            if to_date:
+                query = query.filter(InvoiceItem.date <= to_date)
             
-            # Get results from both queries
-            starts_with_results = starts_with_query.distinct().all()
-            contains_results = contains_query.distinct().all()
-            
-            # Combine results with priority to 'starts with' matches
-            all_results = list(starts_with_results) + list(contains_results)
+            # Get total count for pagination
+            total = query.distinct().count()
             
             # Apply pagination
-            total = len(all_results)
-            start = (page - 1) * size
-            end = start + size
-            paginated_results = all_results[start:end]
+            items = query.distinct()\
+                        .order_by(
+                            InvoiceItem.mpi_item.like(f'{search_term}%').desc(),  # Starts with first
+                            InvoiceItem.mpi_item.asc()  # Then sort alphabetically
+                        )\
+                        .offset((page - 1) * size)\
+                        .limit(size)\
+                        .all()
             
             # Format response
-            items = [
+            formatted_items = [
                 ItemInfo(
                     id=item.id,
                     mpi_item=item.mpi_item or '',
                     original_item=item.original_item or '',
                     mpi_description=item.mpi_description or ''
                 )
-                for item in paginated_results
+                for item in items
             ]
             
+            # Calculate total pages
+            pages = (total + size - 1) // size if size > 0 else 1
+            
             return PaginatedItemInfoResponse(
-                items=items,
+                items=formatted_items,
                 total=total,
                 page=page,
                 size=size,
-                pages=(total + size - 1) // size if size > 0 else 1
+                pages=pages
             )
             
         except Exception as e:
-            logger.error(f"Error searching MPI items: {str(e)}")
+            logger.error(f"Error in search_mpi_items: {str(e)}", exc_info=True)
             raise
             
     def get_cheapest_prices_per_supplier(self, items: List[ItemInfo]) -> List[dict]:
