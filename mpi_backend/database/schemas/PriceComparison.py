@@ -1,7 +1,17 @@
 from pydantic import BaseModel, Field, validator
 from datetime import date, datetime
 from typing import Optional, List, Dict, Any, Union
+from pydantic.generics import GenericModel
+from typing import TypeVar, Generic
 
+T = TypeVar('T')
+
+class PaginatedResponse(GenericModel, Generic[T]):
+    items: List[T]
+    total: int
+    page: int
+    size: int
+    pages: int
 
 class PriceComparisonDateRange(BaseModel):
     """Schema for date range input in price comparison endpoints."""
@@ -33,3 +43,25 @@ class SupplierCheapestItemsResponse(ItemInfo):
         ..., 
         description="List of suppliers with their lowest prices for this item"
     )
+
+class ItemSearchRequest(BaseModel):
+    """Schema for MPI item search request."""
+    query: str = Field(..., description="Search term for MPI items")
+    from_date: Optional[date] = Field(None, description="Start date for filtering (YYYY-MM-DD)")
+    to_date: Optional[date] = Field(None, description="End date for filtering (YYYY-MM-DD)")
+    page: int = Field(1, ge=1, description="Page number (1-based)")
+    size: int = Field(10, ge=1, le=100, description="Number of items per page")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "query": "C",
+                "from_date": "2025-01-01",
+                "to_date": "2025-12-31",
+                "page": 1,
+                "size": 10
+            }
+        }
+
+class PaginatedItemInfoResponse(PaginatedResponse[ItemInfo]):
+    pass
