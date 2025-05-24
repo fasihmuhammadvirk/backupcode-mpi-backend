@@ -1,7 +1,7 @@
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query, Path
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Union
 from sqlalchemy import or_
 
 from mpi_backend.database import get_db
@@ -12,7 +12,10 @@ from mpi_backend.database.schemas.PriceComparison import (
     SupplierPriceInfo,
     PriceComparisonDateRange,
     ItemSearchRequest,
-    SupplierCheapestItemsResponse
+    SupplierCheapestItemsResponse,
+    EnrichedItemPriceResponse,
+    PaginatedEnrichedItemResponse,
+    DateRangeWithExclusions
 )
 from mpi_backend.database.controllers.PriceComparisonController import (
     PriceComparisonController
@@ -26,41 +29,13 @@ router = APIRouter(
 )
 
 
-@router.post("/search-items", response_model=PaginatedItemInfoResponse)
-async def search_mpi_items(
-    search_request: ItemSearchRequest,
-    db: Session = Depends(get_db),
-    token: str = Depends(JWTBearer())
-):
-    """
-    Search for MPI items by item code with optional date range filtering.
-    Returns items starting with the search term first, then items containing the term.
-    
-    Example request body:
-    {
-        "query": "C",
-        "from_date": "2025-01-01",
-        "to_date": "2025-12-31",
-        "page": 1,
-        "size": 10
-    }
-    """
-    try:
-        controller = PriceComparisonController(db)
-        return controller.search_mpi_items(
-            search_term=search_request.query,
-            from_date=search_request.from_date,
-            to_date=search_request.to_date,
-            page=search_request.page,
-            size=search_request.size
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# Removed search-items endpoint
 
 
 @router.post("/dropdown-items", response_model=PaginatedItemInfoResponse)
 async def get_dropdown_items(
     date_range: PriceComparisonDateRange,
+    query: Optional[str] = Query(None, description="Optional search term for filtering items"),
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     size: int = Query(10, ge=1, le=100, description="Number of items per page"),
     db: Session = Depends(get_db),
@@ -68,9 +43,26 @@ async def get_dropdown_items(
 ):
     """
     Get paginated distinct items that were used within the specified date range.
+    
+    If a query parameter is provided, the endpoint will perform a search using the same
+    logic as the search-items endpoint and return filtered results.
+    
+    If no query parameter is provided, it returns all items within the date range.
     """
     try:
         controller = PriceComparisonController(db)
+        
+        # If query parameter is provided, use search functionality
+        if query:
+            return controller.search_mpi_items(
+                search_term=query,
+                from_date=date_range.from_date,
+                to_date=date_range.to_date,
+                page=page,
+                size=size
+            )
+        
+        # Otherwise, use the original functionality
         return controller.get_items_in_date_range(
             from_date=date_range.from_date,
             to_date=date_range.to_date,
@@ -81,40 +73,65 @@ async def get_dropdown_items(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/selected-items", response_model=List[ItemPriceResponse])
+@router.post("/selected-items", response_model=PaginatedEnrichedItemResponse)
 async def get_selected_items_prices(
     items: List[ItemInfo],
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    size: int = Query(10, ge=1, le=100, description="Number of items per page"),
     db: Session = Depends(get_db),
     token: str = Depends(JWTBearer())
 ):
     """
-    Get the most recent prices for the specified items.
+    Get the most recent prices for the specified items with supplier information.
+    
+    Returns a paginated list of items with their cheapest price and all supplier options.
+    Each item includes the lowest unit price and a list of suppliers with their prices.
     """
     try:
         controller = PriceComparisonController(db)
-        return controller.get_items_prices(items)
+        
+        # Always use the enriched response with supplier information and pagination
+        return controller.get_enriched_items_with_suppliers(
+            items=items,
+            page=page,
+            size=size
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/supplier-cheapest-items", response_model=List[SupplierCheapestItemsResponse])
-async def get_supplier_cheapest_items(
-    items: List[ItemInfo],
+# Removed supplier-cheapest-items endpoint
+
+
+@router.post("/selected-items-by-date-range", response_model=PaginatedEnrichedItemResponse)
+async def get_items_by_date_range(
+    request: DateRangeWithExclusions,
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    size: int = Query(10, ge=1, le=100, description="Number of items per page"),
     db: Session = Depends(get_db),
     token: str = Depends(JWTBearer())
 ):
     """
-    Get the lowest unit price per supplier for each item.
+    Get items within a date range with supplier information, optionally excluding specific items.
     
-    Returns a list of items with their suppliers and the lowest price
-    offered by each supplier for that item.
+    Returns a paginated list of items with their cheapest price and all supplier options.
+    Each item includes the lowest unit price and a list of suppliers with their prices.
+    
+    Example request body:
+    {
+        "from_date": "2025-01-01",
+        "to_date": "2025-12-31",
+        "unselected_items": ["ITEM001", "ITEM002"]
+    }
     """
     try:
         controller = PriceComparisonController(db)
-        result = controller.get_cheapest_prices_per_supplier(items)
-        return result
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch supplier prices: {str(e)}"
+        return controller.get_items_by_date_range_with_suppliers(
+            from_date=request.from_date,
+            to_date=request.to_date,
+            unselected_items=request.unselected_items,
+            page=page,
+            size=size
         )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
