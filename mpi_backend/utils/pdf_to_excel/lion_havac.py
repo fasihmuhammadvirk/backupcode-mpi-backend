@@ -6,9 +6,9 @@ import re
 import os
 import logging
 from typing import Tuple
-from src.utils.formatting_util import save_final_data
-from src.utils.extraction_util import read_invoice
-from src.utils.supremePlumbing_uitl import get_pages
+from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
+from mpi_backend.utils.pdf_to_excel.extraction_util import read_invoice
+from mpi_backend.utils.pdf_to_excel.supremePlumbing_uitl import get_pages
 
 # Original area definitions (preserved for backward compatibility)
 area1 = [205.5, 16.67, 205.5 + 390, 16.67 + 573]
