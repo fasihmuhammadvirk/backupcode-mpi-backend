@@ -83,7 +83,7 @@ class PriceComparisonController:
             # Format response
             items = [
                 ItemInfo(
-                    id=item.id,
+                    id=item.id,  # Use the database item ID
                     mpi_item=item.mpi_item,
                     original_item=item.original_item,
                     mpi_description=item.mpi_description
@@ -134,7 +134,7 @@ class PriceComparisonController:
                 # Create response with only the required fields
                 result.append(
                     ItemPriceResponse(
-                        id=item.id,
+                        id=item.id,  # Use the item ID from the request
                         mpi_item=item.mpi_item or '',
                         original_item=item.original_item or '',
                         mpi_description=item.mpi_description or '',
@@ -237,7 +237,7 @@ class PriceComparisonController:
             # Format response
             formatted_items = [
                 ItemInfo(
-                    id=item.id,
+                    id=item.id,  # Use the database item ID
                     mpi_item=item.mpi_item or '',
                     original_item=item.original_item or '',
                     mpi_description=item.mpi_description or ''
@@ -353,6 +353,20 @@ class PriceComparisonController:
             paginated_items = items[start_idx:end_idx] if total_items > 0 else []
             
             for item in paginated_items:
+                # If item ID is not provided, try to find it based on mpi_item
+                item_id = item.id
+                if item_id is None:
+                    # Look up the item ID based on mpi_item
+                    invoice_item = db.query(InvoiceItem.id).filter(
+                        InvoiceItem.mpi_item == item.mpi_item
+                    ).first()
+                    
+                    if invoice_item:
+                        item_id = invoice_item.id
+                    else:
+                        # If we still can't find an ID, use 0 as a placeholder
+                        item_id = 0
+                
                 # Get all prices for this item across all suppliers
                 all_prices = db.query(
                     InvoiceItem.vendor,
@@ -398,7 +412,7 @@ class PriceComparisonController:
                 # Create enriched response
                 result.append(
                     EnrichedItemPriceResponse(
-                        id=item.id,
+                        id=item_id,  # Use the looked-up item ID from database
                         mpi_item=item.mpi_item or "",
                         original_item=item.original_item or "",
                         mpi_description=item.mpi_description or "",
@@ -494,7 +508,7 @@ class PriceComparisonController:
             # Format items to ItemInfo objects
             item_infos = [
                 ItemInfo(
-                    id=item.id,
+                    id=item.id,  # Use the database item ID
                     mpi_item=item.mpi_item or '',
                     original_item=item.original_item or '',
                     mpi_description=item.mpi_description or ''
@@ -509,6 +523,20 @@ class PriceComparisonController:
             result = []
             
             for item in item_infos:
+                # If item ID is not provided, try to find it based on mpi_item
+                item_id = item.id
+                if item_id is None:
+                    # Look up the item ID based on mpi_item
+                    invoice_item = db.query(InvoiceItem.id).filter(
+                        InvoiceItem.mpi_item == item.mpi_item
+                    ).first()
+                    
+                    if invoice_item:
+                        item_id = invoice_item.id
+                    else:
+                        # If we still can't find an ID, use 0 as a placeholder
+                        item_id = 0
+                
                 # Get all prices for this item across all suppliers
                 all_prices = db.query(
                     InvoiceItem.vendor,
@@ -556,7 +584,7 @@ class PriceComparisonController:
                 # Create enriched response
                 result.append(
                     EnrichedItemPriceResponse(
-                        id=item.id,
+                        id=item.id,  # Use the item ID from the request
                         mpi_item=item.mpi_item or "",
                         original_item=item.original_item or "",
                         mpi_description=item.mpi_description or "",

@@ -21,7 +21,7 @@ class PriceComparisonDateRange(BaseModel):
 
 class ItemInfo(BaseModel):
     """Schema for basic item information."""
-    id: int = Field(..., description="Unique identifier for the item")
+    id: Optional[int] = Field(None, description="Unique identifier for the item")
     mpi_item: str = Field(..., description="MPI item code")
     original_item: str = Field(..., description="Original item code")
     mpi_description: str = Field(..., description="MPI item description")
