@@ -68,14 +68,14 @@ async def lifespan(app: FastAPI):
     )
 
     # checking for any missing invocies
-    scheduler.add_job(missing_email_download_background_task,
-                      CronTrigger(hour=5, minute=0, timezone=UTC_TZ),
-                      # Eastern Time: 9:00 PM Previous Day
-                      # European Time: 3:00 AM Same Day
-                      max_instances=1,
-                      replace_existing=True  # Avoids duplicate jobs if restarted
-                      )
-
+    #scheduler.add_job(missing_email_download_background_task,
+    #                 CronTrigger(hour=5, minute=0, timezone=UTC_TZ),
+    #                  # Eastern Time: 9:00 PM Previous Day
+    #                  # European Time: 3:00 AM Same Day
+    #                  max_instances=1,
+    #                  replace_existing=True  # Avoids duplicate jobs if restarted
+    #                  )
+    #
     # Run the job only once when the application starts (non-blocking)
     #scheduler.add_job(
     #    missing_email_download_background_task,
