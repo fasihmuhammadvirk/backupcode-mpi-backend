@@ -75,8 +75,20 @@ def migrate_invoice_to_QB(
             if not sheet_name:
                 return ''
             return ItemClassificationController(db).get_classification(sheet_name)
-            
-        line_item_df['account'] = line_item_df['sheet_name'].apply(get_classification_safe)
+        
+        # First, identify items with class 'A'
+        class_a_mask = line_item_df['class_'] == 'A'
+        
+        # Initialize the account column
+        line_item_df['account'] = ''
+        
+        # For class 'A' items, directly assign the special account
+        if class_a_mask.any():  # Only if there are any class 'A' items
+            line_item_df.loc[class_a_mask, 'account'] = 'UnInvoiced JIP:Subcontractors Expense:Labor & Material:Additional Material'
+        
+        # Only apply sheet_name classification to non-class 'A' items
+        if (~class_a_mask).any():  # Only if there are any non-class 'A' items
+            line_item_df.loc[~class_a_mask, 'account'] = line_item_df.loc[~class_a_mask, 'sheet_name'].apply(get_classification_safe)
 
         # Map specific items to accounts
         line_item_df.loc[
