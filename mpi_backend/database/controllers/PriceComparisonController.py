@@ -378,14 +378,16 @@ class PriceComparisonController:
                 ).filter(
                     InvoiceItem.mpi_item == item.mpi_item,
                     InvoiceItem.cost.isnot(None),
-                    InvoiceItem.vendor.isnot(None)
+                    InvoiceItem.vendor.isnot(None),
+                    InvoiceItem.cost > 0  # Exclude zero prices
                 ).all()
                 
                 if not all_prices:
                     continue
                 
                 # Get the absolute cheapest price across all suppliers and dates
-                absolute_cheapest_price = min([float(cost) for _, cost, _ in all_prices if cost is not None])
+                # Only consider prices greater than zero
+                absolute_cheapest_price = min([float(cost) for _, cost, _ in all_prices if cost is not None and float(cost) > 0])
                 
                 # Get the lowest price per supplier for this item
                 supplier_prices_dict = {}
