@@ -85,7 +85,7 @@ def migrate_invoice_to_QB(
         
         # For class 'A' items, assign to Material:Additional Material
         if class_a_mask.any():  # Only if there are any class 'A' items
-            line_item_df.loc[class_a_mask, 'account'] = 'UnInvoiced JIP:Subcontractors Material:Additional Material'
+            line_item_df.loc[class_a_mask, 'account'] = 'UnInvoiced JIP:Material:Additional Material'
         
         # For class 'L' items, assign to Expense:Labor
         if class_l_mask.any():  # Only if there are any class 'L' items
