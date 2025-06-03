@@ -76,41 +76,48 @@ def migrate_invoice_to_QB(
                 return ''
             return ItemClassificationController(db).get_classification(sheet_name)
         
-        # Identify items with class 'A' and 'L'
-        class_a_mask = line_item_df['class_'] == 'A'
-        class_l_mask = line_item_df['class_'] == 'L'
-        
         # Initialize the account column
         line_item_df['account'] = ''
         
-        # For class 'A' items, assign to Material:Additional Material
-        if class_a_mask.any():  # Only if there are any class 'A' items
-            line_item_df.loc[class_a_mask, 'account'] = 'UnInvoiced JIP:Material:Additional Material'
+        # Identify invoices (by ref_no) that have ANY class 'A' or 'L' items
+        invoices_with_class_a = line_item_df[line_item_df['class_'] == 'A']['ref_no'].unique()
+        invoices_with_class_l = line_item_df[line_item_df['class_'] == 'L']['ref_no'].unique()
         
-        # For class 'L' items, assign to Expense:Labor
-        if class_l_mask.any():  # Only if there are any class 'L' items
-            line_item_df.loc[class_l_mask, 'account'] = 'UnInvoiced JIP:Subcontractors Expense:Labor'
+        # For invoices with ANY class 'A' item, assign ALL items to Additional Material
+        if len(invoices_with_class_a) > 0:
+            class_a_invoice_mask = line_item_df['ref_no'].isin(invoices_with_class_a)
+            line_item_df.loc[class_a_invoice_mask, 'account'] = 'UnInvoiced JIP:Material:Additional Material'
         
-        # Only apply sheet_name classification to items that are not class 'A' or 'L'
-        non_special_class_mask = ~(class_a_mask | class_l_mask)
-        if non_special_class_mask.any():  # Only if there are any non-special class items
-            line_item_df.loc[non_special_class_mask, 'account'] = line_item_df.loc[non_special_class_mask, 'sheet_name'].apply(get_classification_safe)
+        # For invoices with ANY class 'L' item, assign ALL items to Labor (only if not already assigned to class A)
+        if len(invoices_with_class_l) > 0:
+            class_l_invoice_mask = line_item_df['ref_no'].isin(invoices_with_class_l) & (line_item_df['account'] == '')
+            line_item_df.loc[class_l_invoice_mask, 'account'] = 'UnInvoiced JIP:Subcontractors Expense:Labor'
+        
+        # For all remaining items (invoices with no class A or L), apply normal logic
+        unassigned_mask = line_item_df['account'] == ''
+        
+        # Apply sheet_name classification to unassigned items
+        if unassigned_mask.any():
+            line_item_df.loc[unassigned_mask, 'account'] = line_item_df.loc[unassigned_mask, 'sheet_name'].apply(get_classification_safe)
 
-        # Map specific items to accounts
+        # Map specific items to accounts (only for items still unassigned after class logic)
+        # This ensures class A and L invoices don't get overridden
+        unassigned_mask = line_item_df['account'] == ''
+        
         line_item_df.loc[
-            line_item_df['mpi_item'] == 'UIDI-Job Materials Purchased', 'account'
+            (line_item_df['mpi_item'] == 'UIDI-Job Materials Purchased') & unassigned_mask, 'account'
         ] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
         
         line_item_df.loc[
-            line_item_df['mpi_item'] == 'UIDI-Job Equipment', 'account'
+            (line_item_df['mpi_item'] == 'UIDI-Job Equipment') & unassigned_mask, 'account'
         ] = 'UnInvoiced JIP:Cost Of Materials:Job Equipments Purchased'
         
         line_item_df.loc[
-            line_item_df['mpi_item'] == 'UIDI-Sprinkler specialty item', 'account'
+            (line_item_df['mpi_item'] == 'UIDI-Sprinkler specialty item') & unassigned_mask, 'account'
         ] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
         
         line_item_df.loc[
-            line_item_df['mpi_item'] == 'UIDI-Drainage Material', 'account'
+            (line_item_df['mpi_item'] == 'UIDI-Drainage Material') & unassigned_mask, 'account'
         ] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
 
         line_item_df['account'] = line_item_df['account'].replace([None, 'None'], '')
