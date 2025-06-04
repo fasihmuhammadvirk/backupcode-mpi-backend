@@ -8,3 +8,4 @@ from mpi_backend.database.controllers.UnmappedItems import UnmappedItemsControll
 from mpi_backend.database.controllers.TemporaryItemMappingController import TempItemsMappingController
 from mpi_backend.database.controllers.ItemClassification import ItemClassificationController
 from mpi_backend.database.controllers.GoogleSheetSyncController import GoogleSheetSyncController
+from mpi_backend.database.controllers.statement_controller import StatementController

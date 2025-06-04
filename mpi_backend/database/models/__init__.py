@@ -7,3 +7,6 @@ from mpi_backend.database.models.TemporaryItemMapping import TempItemMapping
 from mpi_backend.database.models.User import User
 from mpi_backend.database.models.UnmappedItems import UnmappedItems
 from mpi_backend.database.models.ItemClassification import ItemClassification
+from mpi_backend.database.models.statement_models import (
+    PlumbingSupplier, PlumbingStatement, PlumbingInvoice
+)
