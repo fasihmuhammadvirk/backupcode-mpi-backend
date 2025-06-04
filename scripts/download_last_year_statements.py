@@ -24,18 +24,19 @@ Options:
 """
 
 import sys
-import os
 import argparse
 import logging
 import imaplib
 import email
 import re
+import traceback
 from pathlib import Path
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 from contextlib import contextmanager
 from typing import List, Optional, Dict, Any
-from collections import defaultdict
 import time
+from dateutil.relativedelta import relativedelta
+from email.utils import parsedate_to_datetime
 
 # Add the parent directory to the path so we can import mpi_backend
 sys.path.append(str(Path(__file__).parent.parent))
@@ -46,7 +47,7 @@ from mpi_backend.config import (
 )
 from mpi_backend.database import get_db
 from mpi_backend.database.models.statement_models import (
-    PlumbingSupplier, PlumbingStatement, PlumbingInvoice
+    PlumbingSupplier, PlumbingStatement
 )
 from mpi_backend.utils.statement_extractor.extractor import StatementExtractor
 from mpi_backend.utils.s3_utils import upload_file
@@ -56,6 +57,25 @@ from mpi_backend.database.controllers.statement_controller import (
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+# Statement sender emails (using same pattern as invoice EXCLUDED_SENDERS)
+STATEMENT_SENDERS = [  # Statement sender emails to include
+    "info@wwps.co",
+    "bmwpsupply@gmail.com", 
+    "billing@ysplumbing.com",
+    "accounting@supremeplumbingnj.com",
+    "orders@supremeplumbingnj.com",
+    "billing@pyramidps.com",
+    "purchasing@pyramidps.com",
+    "breindy@parkplumbingsupply.com",
+    "accounting@kjpsinc.com",
+    "billing@afsupply.com",
+    "ar@opusoperations.com",
+    "AR@opusoperations.com",
+    "billing@flowmarksupply.com",
+    "mendy@flowmarksupply.com",
+    "Info@wwps.co"
+]
 
 # Statement suppliers that send monthly statements
 STATEMENT_SUPPLIERS = [
@@ -85,20 +105,9 @@ SUPPLIER_EMAIL_PATTERNS = {
     "Flow Mark Plumbing Supply": ["flow mark", "flowmarksupply"]
 }
 
-# Keywords that indicate statement emails
-STATEMENT_KEYWORDS = [
-    'monthly statement',
-    'statement',
-    'aging report',
-    'account statement',
-    'monthly aging',
-    'balance forward',
-    'account summary'
-]
-
 
 class StatementDownloader:
-    """Enhanced statement downloader for historical data"""
+    """Enhanced statement downloader for historical data using invoice logic"""
     
     def __init__(self, dry_run=False, force=False, verbose=False):
         self.dry_run = dry_run
@@ -127,7 +136,8 @@ class StatementDownloader:
             handlers=[
                 logging.StreamHandler(),
                 logging.FileHandler(
-                    f'statement_download_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+                    f'statement_download_'
+                    f'{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
                 )
             ]
         )
@@ -183,21 +193,27 @@ class StatementDownloader:
         except Exception as e:
             logger.warning(f"Error closing database connection: {str(e)}")
     
-    def generate_date_ranges(self, from_months_ago: int, to_months_ago: int) -> List[tuple]:
+    def generate_date_ranges(self, from_months_ago: int, 
+                            to_months_ago: int) -> List[tuple]:
         """Generate date ranges for each month to search"""
         date_ranges = []
         current_date = datetime.now(TIMEZONE)
         
         for months_back in range(to_months_ago, from_months_ago + 1):
-            # Calculate target month
-            target_date = current_date - timedelta(days=months_back * 30)
+            # Calculate target month using relativedelta for accurate arithmetic
+            target_date = current_date - relativedelta(months=months_back)
             
             # Get first and last day of that month
             first_day = target_date.replace(day=1)
+            # Get last day of the month
             if target_date.month == 12:
-                last_day = target_date.replace(year=target_date.year + 1, month=1, day=1) - timedelta(days=1)
+                last_day = (target_date.replace(year=target_date.year + 1, 
+                                               month=1, day=1) - 
+                           timedelta(days=1))
             else:
-                last_day = target_date.replace(month=target_date.month + 1, day=1) - timedelta(days=1)
+                last_day = (target_date.replace(month=target_date.month + 1, 
+                                               day=1) - 
+                           timedelta(days=1))
             
             date_ranges.append((first_day, last_day))
         
@@ -229,73 +245,109 @@ class StatementDownloader:
             self.db_session.rollback()
             raise
     
-    def detect_supplier_from_email(self, email_subject: str, sender_email: str) -> Optional[str]:
-        """Detect supplier from email subject and sender"""
+    def detect_supplier_from_email(self, email_subject: str, 
+                                  sender_email: str) -> Optional[str]:
+        """Detect supplier from email subject and sender - invoice logic"""
         try:
             subject = (email_subject or "").lower()
             sender = (sender_email or "").lower()
             
             for supplier_name, patterns in SUPPLIER_EMAIL_PATTERNS.items():
                 for pattern in patterns:
-                    if pattern.lower() in subject or pattern.lower() in sender:
+                    pattern_lower = pattern.lower()
+                    if pattern_lower in subject or pattern_lower in sender:
+                        logger.debug(
+                            f"Detected supplier '{supplier_name}' from "
+                            f"pattern '{pattern}' in subject: '{email_subject}' "
+                            f"or sender: '{sender_email}'"
+                        )
                         return supplier_name
             
             # Log unknown suppliers for manual review
-            logger.warning(f"Unknown supplier - Subject: {email_subject}, Sender: {sender_email}")
-            return None
+            logger.warning(
+                f"Unknown supplier - Subject: '{email_subject}', "
+                f"Sender: '{sender_email}'"
+            )
+            return "no_supplier"
             
         except Exception as e:
             logger.error(f"Error detecting supplier: {str(e)}")
-            return None
+            return "no_supplier"
     
-    def extract_statement_date_from_subject(self, subject: str) -> Optional[datetime]:
+    def extract_statement_date_from_subject(self, 
+                                           subject: str) -> Optional[datetime]:
         """Extract statement date from email subject"""
         try:
+            if not subject:
+                return datetime.now()
+                
             # Common patterns for statement dates in subjects
             date_patterns = [
-                r'(\d{1,2}/\d{1,2}/\d{2,4})',  # MM/DD/YYYY or M/D/YY
-                r'(\d{1,2}-\d{1,2}-\d{2,4})',  # MM-DD-YYYY
-                r'(\w+\s+\d{4})',              # Month YYYY (e.g., "April 2024")
+                r'(\d{1,2}/\d{1,2}/\d{4})',    # MM/DD/YYYY or M/D/YYYY
+                r'(\d{1,2}/\d{1,2}/\d{2})',    # MM/DD/YY or M/D/YY  
+                r'(\d{1,2}-\d{1,2}-\d{4})',    # MM-DD-YYYY
+                r'(\d{1,2}-\d{1,2}-\d{2})',    # MM-DD-YY
+                r'(\w+\s+\d{4})',              # Month YYYY 
                 r'(\d{4}-\d{2})',              # YYYY-MM
+                r'(\d{2}/\d{4})',              # MM/YYYY
             ]
             
             for pattern in date_patterns:
                 match = re.search(pattern, subject)
                 if match:
                     date_str = match.group(1)
-                    try:
-                        # Try different date formats
-                        for fmt in ['%m/%d/%Y', '%m/%d/%y', '%m-%d-%Y', 
-                                    '%B %Y', '%Y-%m']:
-                            try:
-                                return datetime.strptime(date_str, fmt)
-                            except ValueError:
-                                continue
-                    except Exception:
-                        continue
+                    logger.debug(
+                        f"Found date pattern '{date_str}' in subject: "
+                        f"'{subject}'"
+                    )
+                    
+                    # Try different date formats
+                    formats_to_try = [
+                        '%m/%d/%Y', '%m/%d/%y', 
+                        '%m-%d-%Y', '%m-%d-%y',
+                        '%B %Y', '%b %Y',
+                        '%Y-%m', '%m/%Y'
+                    ]
+                    
+                    for fmt in formats_to_try:
+                        try:
+                            parsed_date = datetime.strptime(date_str, fmt)
+                            logger.debug(
+                                f"Successfully parsed date '{date_str}' "
+                                f"with format '{fmt}' -> {parsed_date}"
+                            )
+                            return parsed_date
+                        except ValueError:
+                            continue
             
-            # Default to current month if no date found
+            # If no date found in subject, default to current month
+            logger.debug(
+                f"No date pattern found in subject: '{subject}', "
+                f"using current month"
+            )
             return datetime.now()
             
         except Exception as e:
-            logger.error(f"Date extraction failed: {str(e)}")
+            logger.error(
+                f"Date extraction failed for subject '{subject}': {str(e)}"
+            )
             return datetime.now()
     
-    def search_emails_for_date_range(self, start_date: datetime, end_date: datetime) -> List[str]:
-        """Search for statement emails in a specific date range"""
+    def search_emails_for_date_range(self, start_date: datetime, 
+                                    end_date: datetime) -> List[str]:
+        """Search for statement emails in date range - using invoice logic"""
         try:
             # Format dates for IMAP search
             since_date = start_date.strftime('%d-%b-%Y')
             before_date = (end_date + timedelta(days=1)).strftime('%d-%b-%Y')
             
-            logger.info(f"Searching emails from {since_date} to {end_date.strftime('%d-%b-%Y')}")
+            logger.info(
+                f"Searching emails from {since_date} to "
+                f"{end_date.strftime('%d-%b-%Y')}"
+            )
             
-            # Build search criteria
-            keyword_criteria = []
-            for keyword in STATEMENT_KEYWORDS:
-                keyword_criteria.append(f'SUBJECT "{keyword}"')
-            
-            search_query = f'(SINCE {since_date} BEFORE {before_date} ({" OR ".join(keyword_criteria)}))'
+            # Search all emails in timeframe first (like invoice downloader)
+            search_query = f'(SINCE {since_date} BEFORE {before_date})'
             
             if self.verbose:
                 logger.debug(f"Search query: {search_query}")
@@ -306,17 +358,69 @@ class StatementDownloader:
                 logger.error(f"Email search failed: {result}")
                 return []
             
-            email_ids = data[0].split() if data[0] else []
-            self.stats['emails_found'] += len(email_ids)
+            raw_email_ids = data[0].split() if data[0] else []
+            logger.info(f"Found {len(raw_email_ids)} emails in time frame")
             
-            logger.info(f"Found {len(email_ids)} potential statement emails")
-            return [eid.decode('utf-8') if isinstance(eid, bytes) else eid for eid in email_ids]
+            # Filter emails like invoice downloader (by sender + subject)
+            filtered_email_ids = []
+            for idx, email_id in enumerate(raw_email_ids, 1):
+                try:
+                    email_id = (email_id.decode('utf-8') 
+                               if isinstance(email_id, bytes) else email_id)
+                    logger.debug(
+                        f"Processing email {idx}/{len(raw_email_ids)} - "
+                        f"UID: {email_id}"
+                    )
+
+                    # Always use BODY.PEEK to never mark emails as read
+                    result, msg_data = self.mail.uid(
+                        'fetch', email_id, 
+                        '(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)])'
+                    )
+
+                    if result != 'OK':
+                        logger.warning(
+                            f"Failed to fetch headers for UID {email_id}: "
+                            f"{result}"
+                        )
+                        continue
+
+                    raw_email = msg_data[0][1]
+                    msg = email.message_from_bytes(raw_email)
+                    from_email = email.utils.parseaddr(msg.get('From', ''))[1]
+                    subject = msg.get('Subject', '').lower()
+
+                    # Filter by statement senders AND subject keyword
+                    # (case-insensitive)
+                    if (from_email in STATEMENT_SENDERS and 
+                        'monthly statement' in subject):
+                        filtered_email_ids.append(email_id)
+                        logger.debug(
+                            f"Statement email UID {email_id} from: {from_email}"
+                        )
+
+                except Exception as e:
+                    logger.error(
+                        f"Error processing email UID {email_id}: {str(e)}"
+                        f"\n{traceback.format_exc()}"
+                    )
+                    continue
+            
+            self.stats['emails_found'] += len(filtered_email_ids)
+            logger.info(
+                f"Found {len(filtered_email_ids)} statement emails"
+            )
+            return filtered_email_ids
             
         except Exception as e:
-            logger.error(f"Error searching emails: {str(e)}")
+            logger.error(
+                f"Error searching emails: {str(e)}"
+                f"\n{traceback.format_exc()}"
+            )
             return []
     
-    def statement_already_exists(self, supplier_name: str, statement_date: datetime) -> bool:
+    def statement_already_exists(self, supplier_name: str, 
+                                statement_date: datetime) -> bool:
         """Check if statement already exists for supplier and month"""
         try:
             # Get supplier
@@ -330,11 +434,17 @@ class StatementDownloader:
             # Check if statement exists for this month/year
             month_start = statement_date.replace(day=1)
             if statement_date.month == 12:
-                next_month = statement_date.replace(year=statement_date.year + 1, month=1, day=1)
+                next_month = statement_date.replace(
+                    year=statement_date.year + 1, month=1, day=1
+                )
             else:
-                next_month = statement_date.replace(month=statement_date.month + 1, day=1)
+                next_month = statement_date.replace(
+                    month=statement_date.month + 1, day=1
+                )
             
-            existing_statement = self.db_session.query(PlumbingStatement).filter(
+            existing_statement = self.db_session.query(
+                PlumbingStatement
+            ).filter(
                 PlumbingStatement.supplier_id == supplier.id,
                 PlumbingStatement.statement_date >= month_start.date(),
                 PlumbingStatement.statement_date < next_month.date()
@@ -346,11 +456,14 @@ class StatementDownloader:
             logger.error(f"Error checking statement existence: {str(e)}")
             return False
     
-    def download_attachments_from_email(self, email_id: str, base_folder: Path) -> List[str]:
-        """Download PDF attachments from a specific email"""
+    def download_attachments_from_email(self, email_id: str, 
+                                       base_folder: Path) -> List[str]:
+        """Download PDF attachments from email - using invoice logic"""
         try:
-            # Fetch email
-            result, response = self.mail.uid('fetch', email_id, '(BODY.PEEK[])')
+            # Always use BODY.PEEK to never mark emails as read
+            result, response = self.mail.uid(
+                'fetch', email_id, '(BODY.PEEK[])'
+            )
             if result != 'OK' or not response or not response[0]:
                 logger.error(f"Failed to fetch email UID {email_id}")
                 return []
@@ -369,20 +482,46 @@ class StatementDownloader:
             
             # Detect supplier
             supplier_name = self.detect_supplier_from_email(subject, sender)
-            if not supplier_name:
-                logger.warning(f"Cannot detect supplier for email {email_id}, skipping")
+            if supplier_name == "no_supplier":
+                logger.warning(
+                    f"Cannot detect supplier for email {email_id}, skipping"
+                )
                 return []
+            
+            # Date handling (same as invoice downloader)
+            date_header = email_message.get('Date', '')
+            if not date_header:
+                logger.warning(
+                    "No Date header in email, using current time"
+                )
+                date_time_obj = datetime.now(TIMEZONE)
+            else:
+                try:
+                    date_time_obj = parsedate_to_datetime(
+                        date_header
+                    ).astimezone(TIMEZONE)
+                except Exception as date_error:
+                    logger.error(
+                        f"Date parsing failed: {str(date_error)}, "
+                        f"using current time"
+                    )
+                    date_time_obj = datetime.now(TIMEZONE)
             
             # Extract statement date
             statement_date = self.extract_statement_date_from_subject(subject)
             
             # Check if already exists (unless force mode)
-            if not self.force and self.statement_already_exists(supplier_name, statement_date):
-                logger.info(f"Statement already exists for {supplier_name} - {statement_date.strftime('%Y-%m')}, skipping")
+            if not self.force and self.statement_already_exists(
+                supplier_name, statement_date
+            ):
+                logger.info(
+                    f"Statement already exists for {supplier_name} - "
+                    f"{statement_date.strftime('%Y-%m')}, skipping"
+                )
                 self.stats['skipped_existing'] += 1
                 return []
             
-            # Download attachments
+            # Download attachments (using invoice structure)
             downloaded_files = []
             
             for part in email_message.walk():
@@ -391,20 +530,31 @@ class StatementDownloader:
                             part.get('Content-Disposition') is not None):
                         
                         filename = part.get_filename()
-                        if not filename or not filename.lower().endswith(('.pdf', '.PDF')):
+                        if (not filename or 
+                            not filename.lower().endswith(('.pdf', '.PDF'))):
                             continue
                         
-                        # Create supplier folder
-                        supplier_folder = base_folder / supplier_name.replace(' ', '_')
+                        # Create folder structure like invoice downloader
+                        inner_dir = (
+                            f'{date_time_obj.month}-{date_time_obj.day}-'
+                            f'{date_time_obj.year}'
+                        )
+                        supplier_folder = base_folder / supplier_name
                         supplier_folder.mkdir(parents=True, exist_ok=True)
+                        inner_dir_path = supplier_folder / inner_dir
+                        inner_dir_path.mkdir(parents=True, exist_ok=True)
                         
                         # Create unique filename
                         month_year = statement_date.strftime('%Y-%m')
-                        unique_filename = f"{supplier_name.replace(' ', '_')}_{month_year}_{filename}"
-                        filepath = supplier_folder / unique_filename
+                        unique_filename = (
+                            f"{supplier_name}_{month_year}_{filename}"
+                        )
+                        filepath = inner_dir_path / unique_filename
                         
                         if self.dry_run:
-                            logger.info(f"[DRY RUN] Would download: {unique_filename}")
+                            logger.info(
+                                f"[DRY RUN] Would download: {unique_filename}"
+                            )
                             downloaded_files.append(str(filepath))
                         else:
                             # Save file
@@ -416,13 +566,19 @@ class StatementDownloader:
                             self.stats['pdfs_downloaded'] += 1
                 
                 except Exception as part_error:
-                    logger.error(f"Error processing attachment in email {email_id}: {str(part_error)}")
+                    logger.error(
+                        f"Error processing attachment in email {email_id}: "
+                        f"{str(part_error)}\n{traceback.format_exc()}"
+                    )
                     continue
             
             return downloaded_files
             
         except Exception as e:
-            logger.error(f"Error downloading attachments from email {email_id}: {str(e)}")
+            logger.error(
+                f"Error downloading attachments from email {email_id}: "
+                f"{str(e)}\n{traceback.format_exc()}"
+            )
             self.stats['errors'] += 1
             return []
     
@@ -463,7 +619,9 @@ class StatementDownloader:
                 upload_file(file_path, file_key, is_invoice=False)
                 logger.info(f"Uploaded to S3: {file_key}")
             except Exception as s3_error:
-                logger.warning(f"S3 upload failed for {file_path}: {str(s3_error)}")
+                logger.warning(
+                    f"S3 upload failed for {file_path}: {str(s3_error)}"
+                )
                 # Don't fail the whole process for S3 issues
             
             self.stats['statements_processed'] += 1
@@ -473,55 +631,78 @@ class StatementDownloader:
             return True
             
         except Exception as e:
-            logger.error(f"Error processing statement {file_path}: {str(e)}")
+            logger.error(
+                f"Error processing statement {file_path}: {str(e)}"
+                f"\n{traceback.format_exc()}"
+            )
             self.stats['errors'] += 1
             return False
     
-    def download_statements_for_period(self, from_months_ago: int, to_months_ago: int, 
-                                     supplier_filter: Optional[List[str]] = None) -> Dict[str, Any]:
+    def download_statements_for_period(self, from_months_ago: int, 
+                                      to_months_ago: int, 
+                                      supplier_filter: Optional[List[str]] = None) -> Dict[str, Any]:
         """Main method to download statements for a period"""
         try:
             # Ensure suppliers exist in database
             self.ensure_suppliers_exist()
             
             # Generate date ranges
-            date_ranges = self.generate_date_ranges(from_months_ago, to_months_ago)
+            date_ranges = self.generate_date_ranges(
+                from_months_ago, to_months_ago
+            )
             
-            # Setup download directory
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            base_folder = Path(INVOICE_DOWNLOAD_FOLDER) / f"historical_statements_{timestamp}"
+            # Setup download directory (like invoice downloader)
+            time_window_start = datetime.now(TIMEZONE) - timedelta(minutes=3)
+            base_folder = (
+                f"{time_window_start.strftime('%d-%b-%Y_%H-%M-%S')} - "
+                f"{datetime.now(TIMEZONE).strftime('%d-%b-%Y_%H-%M-%S')}"
+            )
+            base_folder_path = (Path(INVOICE_DOWNLOAD_FOLDER) / 
+                               "historical_statements" / base_folder)
             
             if not self.dry_run:
-                base_folder.mkdir(parents=True, exist_ok=True)
-                logger.info(f"Created download directory: {base_folder}")
+                base_folder_path.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Created download directory: {base_folder_path}")
             
             # Process each date range
             all_downloaded_files = []
             
             for start_date, end_date in date_ranges:
-                logger.info(f"Processing period: {start_date.strftime('%Y-%m')} to {end_date.strftime('%Y-%m')}")
+                logger.info(
+                    f"Processing period: {start_date.strftime('%Y-%m')} "
+                    f"to {end_date.strftime('%Y-%m')}"
+                )
                 
                 # Search for emails in this period
-                email_ids = self.search_emails_for_date_range(start_date, end_date)
+                email_ids = self.search_emails_for_date_range(
+                    start_date, end_date
+                )
                 self.stats['emails_searched'] += len(email_ids)
                 
                 # Process each email
                 for email_id in email_ids:
                     try:
-                        downloaded_files = self.download_attachments_from_email(email_id, base_folder)
+                        downloaded_files = self.download_attachments_from_email(
+                            email_id, base_folder_path
+                        )
                         all_downloaded_files.extend(downloaded_files)
                         
                         # Small delay to be nice to the email server
                         time.sleep(0.1)
                         
                     except Exception as email_error:
-                        logger.error(f"Error processing email {email_id}: {str(email_error)}")
+                        logger.error(
+                            f"Error processing email {email_id}: "
+                            f"{str(email_error)}\n{traceback.format_exc()}"
+                        )
                         self.stats['errors'] += 1
                         continue
             
             # Process downloaded files
             if not self.dry_run:
-                logger.info(f"Processing {len(all_downloaded_files)} downloaded files...")
+                logger.info(
+                    f"Processing {len(all_downloaded_files)} downloaded files..."
+                )
                 
                 for file_path in all_downloaded_files:
                     try:
@@ -534,23 +715,34 @@ class StatementDownloader:
                                     break
                             
                             if not file_supplier:
-                                logger.info(f"Skipping {file_path} - not in supplier filter")
+                                logger.info(
+                                    f"Skipping {file_path} - "
+                                    f"not in supplier filter"
+                                )
                                 continue
                         
                         self.process_statement_file(file_path)
                         
                     except Exception as process_error:
-                        logger.error(f"Error processing file {file_path}: {str(process_error)}")
+                        logger.error(
+                            f"Error processing file {file_path}: "
+                            f"{str(process_error)}\n{traceback.format_exc()}"
+                        )
                         self.stats['errors'] += 1
                         continue
                 
                 # Clean up temporary files
                 try:
                     import shutil
-                    shutil.rmtree(base_folder)
-                    logger.info(f"Cleaned up temporary directory: {base_folder}")
+                    shutil.rmtree(base_folder_path)
+                    logger.info(
+                        f"Cleaned up temporary directory: {base_folder_path}"
+                    )
                 except Exception as cleanup_error:
-                    logger.warning(f"Failed to clean up {base_folder}: {str(cleanup_error)}")
+                    logger.warning(
+                        f"Failed to clean up {base_folder_path}: "
+                        f"{str(cleanup_error)}"
+                    )
             
             # Return results
             return {
@@ -561,7 +753,10 @@ class StatementDownloader:
             }
             
         except Exception as e:
-            logger.error(f"Error in download_statements_for_period: {str(e)}")
+            logger.error(
+                f"Error in download_statements_for_period: {str(e)}"
+                f"\n{traceback.format_exc()}"
+            )
             return {
                 'success': False,
                 'error': str(e),
@@ -618,7 +813,7 @@ Examples:
         '--to-months-ago', 
         type=int, 
         default=0,
-        help='Number of months ago to end at (default: 0, meaning current month)'
+        help='Number of months ago to end at (default: 0, current month)'
     )
     
     parser.add_argument(
@@ -659,7 +854,10 @@ Examples:
         sys.exit(1)
     
     # Show what will be processed
-    print(f"Processing statements from {args.from_months_ago} months ago to {args.to_months_ago} months ago")
+    print(
+        f"Processing statements from {args.from_months_ago} months ago "
+        f"to {args.to_months_ago} months ago"
+    )
     if args.dry_run:
         print("DRY RUN MODE - No files will be downloaded or processed")
     if args.force:
@@ -682,7 +880,10 @@ Examples:
             downloader.print_summary()
             
             if result['success']:
-                print(f"\n✅ Successfully completed! Processed {result['files_processed']} files.")
+                print(
+                    f"\n✅ Successfully completed! "
+                    f"Processed {result['files_processed']} files."
+                )
                 sys.exit(0)
             else:
                 print(f"\n❌ Failed: {result['error']}")
