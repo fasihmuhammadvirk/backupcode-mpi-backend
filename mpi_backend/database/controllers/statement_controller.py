@@ -1,0 +1,508 @@
+from datetime import datetime, date
+from typing import List, Optional, Dict, Any
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import and_, or_, extract, func
+from math import ceil
+import logging
+
+from mpi_backend.database.models.statement_models import (
+    PlumbingSupplier, PlumbingStatement, PlumbingInvoice
+)
+from mpi_backend.database.models.invoice import Invoice
+from mpi_backend.database.models.InvoiceItems import InvoiceItem
+
+logger = logging.getLogger(__name__)
+
+
+class StatementController:
+    """Controller for managing statement operations and reconciliation"""
+    
+    def __init__(self, db: Session):
+        self.db = db
+    
+    def get_supplier_by_name_or_id(self, supplier: str) -> Optional[PlumbingSupplier]:
+        """Get supplier by name or ID"""
+        try:
+            # Try to get by ID first
+            if supplier.isdigit():
+                supplier_obj = self.db.query(PlumbingSupplier).filter(
+                    PlumbingSupplier.id == int(supplier)
+                ).first()
+                if supplier_obj:
+                    return supplier_obj
+            
+            # Try to get by name
+            return self.db.query(PlumbingSupplier).filter(
+                PlumbingSupplier.name.ilike(f"%{supplier}%")
+            ).first()
+            
+        except Exception as e:
+            logger.error(f"Error getting supplier: {str(e)}")
+            return None
+    
+    def get_statements_in_date_range(
+        self, 
+        supplier_id: int, 
+        from_date: date, 
+        to_date: date
+    ) -> List[PlumbingStatement]:
+        """Get statements for a supplier within date range"""
+        try:
+            return self.db.query(PlumbingStatement).filter(
+                and_(
+                    PlumbingStatement.supplier_id == supplier_id,
+                    PlumbingStatement.statement_date >= from_date,
+                    PlumbingStatement.statement_date <= to_date
+                )
+            ).order_by(PlumbingStatement.statement_date.desc()).all()
+            
+        except Exception as e:
+            logger.error(f"Error getting statements in date range: {str(e)}")
+            return []
+    
+    def get_statement_invoices(self, statement_id: int) -> List[PlumbingInvoice]:
+        """Get all invoices for a specific statement"""
+        try:
+            return self.db.query(PlumbingInvoice).filter(
+                PlumbingInvoice.statement_id == statement_id
+            ).all()
+            
+        except Exception as e:
+            logger.error(f"Error getting statement invoices: {str(e)}")
+            return []
+    
+    def check_invoice_exists_in_system(
+        self, 
+        invoice_number: str, 
+        supplier_id: int,
+        invoice_date: Optional[date] = None
+    ) -> Dict[str, Any]:
+        """
+        Check if an invoice exists in our system
+        Returns dict with status and details
+        """
+        try:
+            # First check in InvoiceItem table (main system invoices)
+            query = self.db.query(InvoiceItem).join(Invoice).filter(
+                and_(
+                    InvoiceItem.ref_no == invoice_number,
+                    Invoice.supplier_id == supplier_id
+                )
+            )
+            
+            # Add date filter if provided (within reasonable range)
+            if invoice_date:
+                date_start = datetime.combine(invoice_date, datetime.min.time())
+                date_end = datetime.combine(invoice_date, datetime.max.time())
+                query = query.filter(
+                    InvoiceItem.date.between(date_start, date_end)
+                )
+            
+            system_invoice = query.first()
+            
+            if system_invoice:
+                return {
+                    'status': 'Found',
+                    'matched': True,
+                    'system_invoice_id': str(system_invoice.invoice_id),
+                    'system_ref_no': system_invoice.ref_no,
+                    'system_date': system_invoice.date,
+                    'system_amount': float(system_invoice.amount) if system_invoice.amount else 0.0,
+                    'customer_job': system_invoice.customer_job,
+                    'export_status': system_invoice.export_status
+                }
+            else:
+                return {
+                    'status': 'Not Found',
+                    'matched': False,
+                    'system_invoice_id': None,
+                    'system_ref_no': None,
+                    'system_date': None,
+                    'system_amount': None,
+                    'customer_job': None,
+                    'export_status': None
+                }
+                
+        except Exception as e:
+            logger.error(f"Error checking invoice existence: {str(e)}")
+            return {
+                'status': 'Error',
+                'matched': False,
+                'error': str(e)
+            }
+    
+    def reconcile_statement_with_system(
+        self, 
+        supplier: str, 
+        from_date: str, 
+        to_date: str,
+        status: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Main reconciliation method that compares statement invoices with system invoices
+        
+        Args:
+            supplier: Supplier name or ID
+            from_date: Start date in MM/YYYY format
+            to_date: End date in MM/YYYY format  
+            status: Optional filter for invoice status
+            
+        Returns:
+            Dict with reconciliation results
+        """
+        try:
+            # Parse dates from MM/YYYY format
+            from_month, from_year = map(int, from_date.split('/'))
+            to_month, to_year = map(int, to_date.split('/'))
+            
+            from_date_obj = date(from_year, from_month, 1)
+            # Get last day of to_month
+            if to_month == 12:
+                to_date_obj = date(to_year + 1, 1, 1)
+            else:
+                to_date_obj = date(to_year, to_month + 1, 1)
+            
+            # Get supplier
+            supplier_obj = self.get_supplier_by_name_or_id(supplier)
+            if not supplier_obj:
+                return {
+                    'success': False,
+                    'error': f'Supplier not found: {supplier}'
+                }
+            
+            # Get statements in date range
+            statements = self.get_statements_in_date_range(
+                supplier_obj.id, from_date_obj, to_date_obj
+            )
+            
+            if not statements:
+                return {
+                    'success': False,
+                    'error': f'No statements found for {supplier_obj.name} in the specified date range'
+                }
+            
+            # Process each statement
+            reconciliation_results = []
+            overall_stats = {
+                'total_statements': len(statements),
+                'total_statement_invoices': 0,
+                'matched_invoices': 0,
+                'unmatched_invoices': 0,
+                'total_statement_amount': 0.0,
+                'total_matched_amount': 0.0
+            }
+            
+            for statement in statements:
+                statement_invoices = self.get_statement_invoices(statement.id)
+                statement_result = {
+                    'statement_id': statement.id,
+                    'statement_date': statement.statement_date.isoformat() if statement.statement_date else None,
+                    'account_number': statement.account_number,
+                    'total_amount': float(statement.total_amount) if statement.total_amount else 0.0,
+                    'total_invoices': len(statement_invoices),
+                    'pdf_filename': statement.pdf_filename,
+                    'invoices': []
+                }
+                
+                overall_stats['total_statement_invoices'] += len(statement_invoices)
+                overall_stats['total_statement_amount'] += float(statement.total_amount) if statement.total_amount else 0.0
+                
+                # Check each invoice in the statement
+                for stmt_invoice in statement_invoices:
+                    # Apply status filter if provided
+                    if status and status.lower() != 'all':
+                        # We'll determine status based on matching
+                        pass
+                    
+                    # Check if invoice exists in system
+                    match_result = self.check_invoice_exists_in_system(
+                        stmt_invoice.invoice_number,
+                        supplier_obj.id,
+                        stmt_invoice.invoice_date
+                    )
+                    
+                    invoice_result = {
+                        'statement_invoice_id': stmt_invoice.id,
+                        'invoice_number': stmt_invoice.invoice_number,
+                        'invoice_date': stmt_invoice.invoice_date.isoformat() if stmt_invoice.invoice_date else None,
+                        'customer_po': stmt_invoice.customer_po,
+                        'original_amount': float(stmt_invoice.original_amount) if stmt_invoice.original_amount else 0.0,
+                        'payment_date': stmt_invoice.payment_date.isoformat() if stmt_invoice.payment_date else None,
+                        'amount_paid': float(stmt_invoice.amount_paid) if stmt_invoice.amount_paid else 0.0,
+                        'balance': float(stmt_invoice.balance) if stmt_invoice.balance else 0.0,
+                        'reconciliation_status': 'Processed' if match_result['matched'] else 'Failed',
+                        'match_details': match_result
+                    }
+                    
+                    # Apply status filter
+                    if status and status.lower() != 'all':
+                        if status.lower() == 'processed' and not match_result['matched']:
+                            continue
+                        elif status.lower() == 'failed' and match_result['matched']:
+                            continue
+                    
+                    statement_result['invoices'].append(invoice_result)
+                    
+                    # Update stats
+                    if match_result['matched']:
+                        overall_stats['matched_invoices'] += 1
+                        overall_stats['total_matched_amount'] += float(stmt_invoice.original_amount) if stmt_invoice.original_amount else 0.0
+                    else:
+                        overall_stats['unmatched_invoices'] += 1
+                
+                reconciliation_results.append(statement_result)
+            
+            return {
+                'success': True,
+                'supplier': {
+                    'id': supplier_obj.id,
+                    'name': supplier_obj.name
+                },
+                'date_range': {
+                    'from_date': from_date,
+                    'to_date': to_date,
+                    'from_date_parsed': from_date_obj.isoformat(),
+                    'to_date_parsed': to_date_obj.isoformat()
+                },
+                'statistics': overall_stats,
+                'statements': reconciliation_results
+            }
+            
+        except ValueError as e:
+            return {
+                'success': False,
+                'error': f'Invalid date format. Use MM/YYYY format: {str(e)}'
+            }
+        except Exception as e:
+            logger.error(f"Error in reconciliation: {str(e)}")
+            return {
+                'success': False,
+                'error': f'Reconciliation failed: {str(e)}'
+            }
+    
+    def get_all_suppliers(self) -> List[PlumbingSupplier]:
+        """Get all active statement suppliers"""
+        try:
+            return self.db.query(PlumbingSupplier).filter(
+                PlumbingSupplier.is_active == "Active"
+            ).order_by(PlumbingSupplier.name).all()
+            
+        except Exception as e:
+            logger.error(f"Error getting suppliers: {str(e)}")
+            return []
+    
+    def get_statements_summary(
+        self, 
+        supplier_id: Optional[int] = None,
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """Get summary of recent statements"""
+        try:
+            query = self.db.query(PlumbingStatement).join(PlumbingSupplier)
+            
+            if supplier_id:
+                query = query.filter(PlumbingStatement.supplier_id == supplier_id)
+            
+            statements = query.order_by(
+                PlumbingStatement.statement_date.desc()
+            ).limit(limit).all()
+            
+            return [
+                {
+                    'id': stmt.id,
+                    'supplier_name': stmt.supplier.name,
+                    'statement_date': stmt.statement_date.isoformat() if stmt.statement_date else None,
+                    'total_amount': float(stmt.total_amount) if stmt.total_amount else 0.0,
+                    'total_invoices': stmt.total_invoices,
+                    'account_number': stmt.account_number,
+                    'pdf_filename': stmt.pdf_filename
+                }
+                for stmt in statements
+            ]
+            
+        except Exception as e:
+            logger.error(f"Error getting statements summary: {str(e)}")
+            return []
+    
+    def get_statement_invoice_data(
+        self,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None, 
+        supplier_name: Optional[str] = None,
+        status: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Dict[str, Any]:
+        """
+        Get statement invoice data with filters and pagination
+        
+        Args:
+            from_date: Start date filter (DD/MM/YYYY converted to date)
+            to_date: End date filter (DD/MM/YYYY converted to date)
+            supplier_name: Supplier name filter
+            status: Invoice status filter (Processed/Failed)
+            page: Page number (1-based)
+            page_size: Number of items per page
+            
+        Returns:
+            Dict with invoice data and pagination metadata
+        """
+        try:
+            # Build base query joining all necessary tables
+            query = (
+                self.db.query(PlumbingInvoice, PlumbingStatement, PlumbingSupplier)
+                .join(PlumbingStatement, PlumbingInvoice.statement_id == PlumbingStatement.id)
+                .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
+            )
+            
+            # Apply date filters on statement_date
+            if from_date:
+                query = query.filter(PlumbingStatement.statement_date >= from_date)
+            if to_date:
+                query = query.filter(PlumbingStatement.statement_date <= to_date)
+            
+            # Apply supplier filter
+            if supplier_name:
+                query = query.filter(
+                    PlumbingSupplier.name.ilike(f"%{supplier_name}%")
+                )
+            
+            # Get total count before pagination
+            total_count = query.count()
+            
+            # Order by statement date (most recent first) BEFORE pagination
+            query = query.order_by(PlumbingStatement.statement_date.desc())
+            
+            # Apply pagination
+            offset = (page - 1) * page_size
+            query = query.offset(offset).limit(page_size)
+            
+            # Execute query
+            results = query.all()
+            
+            # Process results and apply status filter if needed
+            invoice_data = []
+            for plumbing_invoice, plumbing_statement, plumbing_supplier in results:
+                # Determine reconciliation status by checking system
+                reconciliation_status = "Unknown"
+                if status:
+                    # Check if invoice exists in system for status filtering
+                    match_result = self.check_invoice_exists_in_system(
+                        plumbing_invoice.invoice_number,
+                        plumbing_supplier.id,
+                        plumbing_invoice.invoice_date
+                    )
+                    reconciliation_status = "Processed" if match_result['matched'] else "Failed"
+                    
+                    # Apply status filter
+                    if status.lower() != "all":
+                        if status.lower() == "processed" and not match_result['matched']:
+                            continue
+                        elif status.lower() == "failed" and match_result['matched']:
+                            continue
+                
+                invoice_data.append({
+                    'invoice_number': plumbing_invoice.invoice_number,
+                    'invoice_date': (
+                        plumbing_invoice.invoice_date.isoformat() 
+                        if plumbing_invoice.invoice_date else None
+                    ),
+                    'customer_po': plumbing_invoice.customer_po,
+                    'statement_date': (
+                        plumbing_statement.statement_date.isoformat() 
+                        if plumbing_statement.statement_date else None
+                    ),
+                    'supplier_name': plumbing_supplier.name,
+                    'status': reconciliation_status,
+                    'original_amount': (
+                        float(plumbing_invoice.original_amount) 
+                        if plumbing_invoice.original_amount else 0.0
+                    ),
+                    'balance': (
+                        float(plumbing_invoice.balance) 
+                        if plumbing_invoice.balance else 0.0
+                    ),
+                    'statement_id': plumbing_statement.id,
+                    'invoice_id': plumbing_invoice.id
+                })
+            
+            # Calculate pagination metadata
+            total_pages = ceil(total_count / page_size) if page_size > 0 else 1
+            
+            return {
+                'success': True,
+                'data': invoice_data,
+                'pagination': {
+                    'current_page': page,
+                    'page_size': page_size,
+                    'total_results': len(invoice_data),  # Actual results after status filter
+                    'total_pages': total_pages,
+                    'has_next': page < total_pages,
+                    'has_previous': page > 1
+                },
+                'filters_applied': {
+                    'from_date': from_date.isoformat() if from_date else None,
+                    'to_date': to_date.isoformat() if to_date else None,
+                    'supplier_name': supplier_name,
+                    'status': status
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting statement invoice data: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'data': [],
+                'pagination': {
+                    'current_page': page,
+                    'page_size': page_size,
+                    'total_results': 0,
+                    'total_pages': 0,
+                    'has_next': False,
+                    'has_previous': False
+                }
+            } 
+    
+    def get_statement_by_id(self, statement_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Get statement by ID with supplier information for PDF download
+        
+        Args:
+            statement_id: ID of the statement
+            
+        Returns:
+            Dict with statement and supplier info, or None if not found
+        """
+        try:
+            result = (
+                self.db.query(PlumbingStatement, PlumbingSupplier)
+                .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
+                .filter(PlumbingStatement.id == statement_id)
+                .first()
+            )
+            
+            if not result:
+                return None
+                
+            statement, supplier = result
+            
+            return {
+                'statement_id': statement.id,
+                'supplier_name': supplier.name,
+                'statement_date': (
+                    statement.statement_date.isoformat() 
+                    if statement.statement_date else None
+                ),
+                'account_number': statement.account_number,
+                'total_amount': (
+                    float(statement.total_amount) 
+                    if statement.total_amount else 0.0
+                ),
+                'total_invoices': statement.total_invoices,
+                'pdf_filename': statement.pdf_filename
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting statement by ID {statement_id}: {str(e)}")
+            return None 

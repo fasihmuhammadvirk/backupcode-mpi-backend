@@ -2,6 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError, DBAPIError
 from sqlalchemy.orm import sessionmaker, declarative_base
 from psycopg2 import OperationalError as Psycopg2OperationalError
+from contextlib import contextmanager
 
 from mpi_backend.config import SQLALCHEMY_DATABASE_URI
 
@@ -18,6 +19,19 @@ Base = declarative_base()
 
 
 def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        try:
+            db.close()
+        except (OperationalError, DBAPIError, Psycopg2OperationalError):
+            pass
+
+
+@contextmanager
+def db_context():
+    """Context manager for database sessions"""
     db = SessionLocal()
     try:
         yield db

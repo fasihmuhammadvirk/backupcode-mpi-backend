@@ -21,10 +21,12 @@ from mpi_backend.api.routes import signin
 from mpi_backend.api.routes import filters
 from mpi_backend.api.routes import sync_mappings
 from mpi_backend.api.routes import price_comparison
+from mpi_backend.api.routes import statements
 from mpi_backend.database.controllers import GoogleSheetSyncController, ItemsMappingController
 from mpi_backend.config import LOG_LEVEL
 from mpi_backend.utils.invoice_downaloder import email_download_background_task
 from mpi_backend.utils.missing_invoice_downaloder import missing_email_download_background_task
+from mpi_backend.utils.statement_downloader import statement_download_background_task
 
 from mpi_backend.utils.invoice_convertor import convert_invoice
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
@@ -48,6 +50,15 @@ UTC_TZ = pytz.utc  # UTC Time Zone
 async def lifespan(app: FastAPI):
     scheduler = BackgroundScheduler()
     scheduler.add_job(email_download_background_task, "interval", minutes=3, max_instances=20)
+
+    # Add statement downloader - runs every hour
+    scheduler.add_job(
+        statement_download_background_task, 
+        "interval", 
+        hours=1, 
+        max_instances=1,  # Only one instance at a time
+        replace_existing=True
+    )
 
     # Run the sync_mappings job on a 30-minute interval
     scheduler.add_job(
@@ -117,6 +128,7 @@ def register_routes(app):
     app.include_router(filters.router)
     app.include_router(sync_mappings.router)
     app.include_router(price_comparison.router)
+    app.include_router(statements.router)
 
 
 register_routes(app)
