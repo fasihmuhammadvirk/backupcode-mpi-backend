@@ -3,6 +3,9 @@ from typing import Optional
 from sqlalchemy.orm import Session
 from datetime import datetime
 import logging
+import os
+import requests
+from pathlib import Path
 
 from mpi_backend.database import get_db
 from mpi_backend.database.controllers.statement_controller import (
@@ -10,6 +13,8 @@ from mpi_backend.database.controllers.statement_controller import (
 )
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.s3_utils import get_presigned_url
+from mpi_backend.utils.statement_extractor.extractor import StatementExtractor
+from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 
 logger = logging.getLogger(__name__)
 
@@ -289,4 +294,64 @@ def download_statement_pdf(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
         )
+
+
+@router.post("/reprocess")
+def reprocess_statement(
+    statement_id: int = Query(
+        ..., 
+        description="ID of the statement to reprocess"
+    ),
+    db: Session = Depends(get_db),
+    token: str = Depends(JWTBearer())
+):
+    """
+    Reprocess a monthly statement.
+    
+    This endpoint triggers the reprocessing of a statement.
+    
+    **Parameters:**
+    - **statement_id**: The ID of the statement to reprocess
+    
+    **Returns:**
+    - **status**: Status of the reprocessing operation
+    - **message**: Additional information about the operation
+    
+    **Example:**
+    ```
+    POST /statements/reprocess?statement_id=123
+    ```
+    """
+    try:
+        logger.info(
+            f"Reprocessing statement with ID: {statement_id}"
+        )
         
+        # Get statement details
+        controller = StatementController(db)
+        result = controller.reprocess_statement(statement_id)
+        
+        if not result['success']:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Failed to reprocess statement: "
+                    f"{result.get('error', 'Unknown error')}"
+                )
+            )
+        
+        logger.info(
+            f"Successfully reprocessed statement {statement_id}"
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in statement reprocessing endpoint: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+ 

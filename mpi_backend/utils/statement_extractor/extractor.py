@@ -6,6 +6,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Optional
+import re
 
 from mpi_backend.utils.statement_extractor.statement_utils import (
     extract_text_from_pdf,
@@ -104,167 +105,413 @@ class StatementExtractor:
             }
     
     def extract_invoice_data(self):
-        """Extract invoice data from all pages of the PDF"""
+        """Extract invoice data from all pages of the PDF with improved detection"""
         try:
-            # Define the extraction area and columns
-            extraction_area = [233.70, 28.05, 668.95, 582.01]  # coordinates
-            column_positions = [
-                83.35, 150.81, 264.05, 345.20, 415.89, 495.11, 582.01
+            # Try multiple extraction strategies for better accuracy
+            strategies = [
+                # Strategy 1: Auto-detect tables without fixed coordinates
+                {"method": "auto", "area": None, "columns": None},
+                
+                # Strategy 2: Use lattice method for well-structured tables
+                {"method": "lattice", "area": None, "columns": None},
+                
+                # Strategy 3: Updated coordinates based on Y&S format
+                {"method": "stream", "area": [200, 25, 700, 580], "columns": None},
+                
+                # Strategy 4: Original method as fallback
+                {"method": "stream", "area": [233.70, 28.05, 668.95, 582.01], 
+                 "columns": [83.35, 150.81, 264.05, 345.20, 415.89, 495.11, 582.01]}
             ]
             
-            # Read all pages and combine data
             all_data = []
+            page_count = self.metadata.get('page_count', 1)
             
-            for page_num in range(1, self.metadata.get('page_count', 1) + 1):
-                try:
-                    # Extract data from this page
-                    page_data = tabula.read_pdf(
-                        self.pdf_path,
-                        pages=page_num,
-                        area=extraction_area,
-                        columns=column_positions,
-                        pandas_options={'header': None}
-                    )[0]
-                    
-                    if not page_data.empty:
-                        # Add source page column
-                        page_data['source_page'] = page_num
-                        all_data.append(page_data)
-                        logger.info(
-                            f"Extracted {len(page_data)} rows from page "
-                            f"{page_num}"
-                        )
+            for page_num in range(1, page_count + 1):
+                page_extracted = False
+                
+                for strategy_idx, strategy in enumerate(strategies):
+                    try:
+                        logger.info(f"Trying strategy {strategy_idx + 1} for page {page_num}")
                         
-                except Exception as e:
-                    logger.warning(
-                        f"Could not extract from page {page_num}: {str(e)}"
-                    )
-                    continue
+                        # Configure extraction parameters
+                        extraction_params = {
+                            'pages': page_num,
+                            'pandas_options': {'header': None}
+                        }
+                        
+                        # Add strategy-specific parameters
+                        if strategy["area"]:
+                            extraction_params['area'] = strategy["area"]
+                        if strategy["columns"]:
+                            extraction_params['columns'] = strategy["columns"]
+                            
+                        # Use lattice for well-structured tables
+                        if strategy["method"] == "lattice":
+                            extraction_params['lattice'] = True
+                        elif strategy["method"] == "stream":
+                            extraction_params['stream'] = True
+                        # auto method uses default tabula settings
+                        
+                        # Extract data
+                        page_tables = tabula.read_pdf(self.pdf_path, **extraction_params)
+                        
+                        if page_tables and len(page_tables) > 0:
+                            page_data = page_tables[0]
+                            
+                            # Validate extracted data quality
+                            if self._validate_extracted_data(page_data):
+                                page_data['source_page'] = page_num
+                                page_data['extraction_method'] = strategy["method"]
+                                all_data.append(page_data)
+                                logger.info(
+                                    f"Successfully extracted {len(page_data)} rows "
+                                    f"from page {page_num} using strategy {strategy_idx + 1}"
+                                )
+                                page_extracted = True
+                                break  # Move to next page
+                        
+                    except Exception as e:
+                        logger.debug(
+                            f"Strategy {strategy_idx + 1} failed for page {page_num}: {str(e)}"
+                        )
+                        continue
+                
+                if not page_extracted:
+                    logger.warning(f"Could not extract data from page {page_num}")
             
             if all_data:
                 # Combine all pages
                 self.combined_data = pd.concat(all_data, ignore_index=True)
                 
-                # Set column names
-                self.combined_data.columns = [
-                    'Invoice Number', 'Invoice Date', 'Customer PO', 
-                    'Original Inv Amount', 'Payment Date', 'Amount Paid', 
-                    'Invoice Balance', 'source_page'
-                ]
+                # Detect and set proper column names
+                self._detect_and_set_column_names()
                 
                 # Clean and process the data
                 self._clean_extracted_data()
                 
                 logger.info(
-                    f"Successfully extracted {len(self.combined_data)} "
-                    f"total rows"
+                    f"Successfully extracted {len(self.combined_data)} total rows"
                 )
                 return True
             else:
-                logger.error("No data extracted from any page")
+                logger.error("No data extracted from any page using any strategy")
                 return False
                 
         except Exception as e:
             logger.error(f"Error extracting invoice data: {str(e)}")
             return False
     
+    def _validate_extracted_data(self, data):
+        """Validate if extracted data looks like invoice data"""
+        if data.empty or len(data) < 2:
+            return False
+        
+        # Check if we have reasonable number of columns (should be 6-8 for invoice data)
+        if len(data.columns) < 5 or len(data.columns) > 10:
+            return False
+        
+        # Check if first few rows contain reasonable data
+        # Look for patterns that suggest this is invoice data
+        sample_text = ' '.join(str(data.iloc[0:min(3, len(data))].values.flatten()))
+        
+        # Should contain some numeric patterns and not just headers
+        has_numbers = bool(re.search(r'\d+', sample_text))
+        has_invoice_indicators = any(word.lower() in sample_text.lower() 
+                                   for word in ['invoice', 'amount', 'balance', 'date', 'payment'])
+        
+        # Should not be mostly headers or empty
+        non_empty_ratio = sum(1 for cell in data.iloc[0].values if pd.notna(cell) and str(cell).strip()) / len(data.columns)
+        
+        return has_numbers and non_empty_ratio > 0.3
+    
+    def _detect_and_set_column_names(self):
+        """Detect and set appropriate column names based on content"""
+        if self.combined_data.empty:
+            return
+        
+        # Standard column names for Y&S statements
+        standard_columns = [
+            'Invoice Number', 'Invoice Date', 'Customer PO', 
+            'Original Inv Amount', 'Payment Date', 'Amount Paid', 
+            'Invoice Balance'
+        ]
+        
+        # Get the actual number of data columns (excluding metadata columns)
+        data_columns = [col for col in self.combined_data.columns 
+                       if col not in ['source_page', 'extraction_method']]
+        
+        num_data_cols = len(data_columns)
+        
+        # Map columns based on typical Y&S statement structure
+        if num_data_cols >= 7:
+            # Full 7-column structure
+            column_mapping = {
+                data_columns[0]: 'Invoice Number',
+                data_columns[1]: 'Invoice Date', 
+                data_columns[2]: 'Customer PO',
+                data_columns[3]: 'Original Inv Amount',
+                data_columns[4]: 'Payment Date',
+                data_columns[5]: 'Amount Paid',
+                data_columns[6]: 'Invoice Balance'
+            }
+        elif num_data_cols == 6:
+            # Missing one column - likely Payment Date
+            column_mapping = {
+                data_columns[0]: 'Invoice Number',
+                data_columns[1]: 'Invoice Date',
+                data_columns[2]: 'Customer PO', 
+                data_columns[3]: 'Original Inv Amount',
+                data_columns[4]: 'Amount Paid',
+                data_columns[5]: 'Invoice Balance'
+            }
+        elif num_data_cols == 5:
+            # Missing two columns - likely PO and Payment Date
+            column_mapping = {
+                data_columns[0]: 'Invoice Number',
+                data_columns[1]: 'Invoice Date',
+                data_columns[2]: 'Original Inv Amount',
+                data_columns[3]: 'Amount Paid', 
+                data_columns[4]: 'Invoice Balance'
+            }
+        else:
+            # Less than 5 columns - use generic names
+            column_mapping = {
+                data_columns[i]: f'Column_{i+1}' for i in range(num_data_cols)
+            }
+        
+        # Apply the mapping
+        self.combined_data = self.combined_data.rename(columns=column_mapping)
+        
+        logger.info(f"Set column names: {list(column_mapping.values())}")
+    
     def _clean_extracted_data(self):
-        """Clean and process the extracted data"""
+        """Clean and process the extracted data with improved filtering"""
         if self.combined_data.empty:
             return
         
         try:
-            # Remove rows where Invoice Number is empty or contains header text
-            self.combined_data = self.combined_data[
-                self.combined_data['Invoice Number'].notna() & 
-                ~self.combined_data['Invoice Number'].astype(str).str.contains(
-                    'Invoice|Number|DATE|AMOUNT|PAYMENT', case=False, na=False
-                )
-            ].copy()
+            logger.info(f"Starting data cleaning with {len(self.combined_data)} rows")
             
-            # Clean and convert date columns
+            # First, remove completely empty rows
+            self.combined_data = self.combined_data.dropna(how='all')
+            
+            # Clean up invoice number column specifically
+            if 'Invoice Number' in self.combined_data.columns:
+                # Remove rows where Invoice Number is clearly invalid
+                invalid_patterns = [
+                    r'^(Invoice|Number|umber|nvoice|DATE|AMOUNT|PAYMENT|Customer|P/O|Original|Balance)$',
+                    r'^[^\w\d-]+$',  # Only special characters
+                    r'^\s*$',        # Only whitespace
+                ]
+                
+                # Combine all invalid patterns
+                combined_pattern = '|'.join(invalid_patterns)
+                
+                # Filter out invalid invoice numbers
+                valid_mask = (
+                    self.combined_data['Invoice Number'].notna() & 
+                    ~self.combined_data['Invoice Number'].astype(str).str.match(
+                        combined_pattern, case=False, na=False
+                    ) &
+                    (self.combined_data['Invoice Number'].astype(str).str.len() > 0)
+                )
+                
+                self.combined_data = self.combined_data[valid_mask].copy()
+                
+                # Clean up partial invoice numbers (like "umber" -> should be filtered out)
+                # Keep only rows where invoice number looks reasonable
+                invoice_mask = (
+                    self.combined_data['Invoice Number'].astype(str).str.len() >= 3
+                ) & (
+                    # Should contain at least one digit or be a reasonable invoice pattern
+                    self.combined_data['Invoice Number'].astype(str).str.contains(
+                        r'\d|^[A-Z]+[-]?\d', case=False, na=False
+                    )
+                )
+                
+                self.combined_data = self.combined_data[invoice_mask].copy()
+            
+            # Clean invoice numbers further - remove common OCR errors
+            if 'Invoice Number' in self.combined_data.columns:
+                def clean_invoice_number(inv_num):
+                    if pd.isna(inv_num):
+                        return None
+                    
+                    inv_str = str(inv_num).strip()
+                    
+                    # Skip obviously invalid values
+                    if len(inv_str) < 2 or inv_str.lower() in [
+                        'invoice', 'number', 'umber', 'nvoice', 'customer', 'p/o'
+                    ]:
+                        return None
+                    
+                    # Clean up common OCR errors and formatting
+                    cleaned = re.sub(r'^[^\w\d]*', '', inv_str)  # Remove leading special chars
+                    cleaned = re.sub(r'[^\w\d-]*$', '', cleaned)  # Remove trailing special chars
+                    
+                    return cleaned if len(cleaned) >= 2 else None
+                
+                self.combined_data['Invoice Number'] = self.combined_data['Invoice Number'].apply(
+                    clean_invoice_number
+                )
+                
+                # Remove rows where cleaning resulted in None
+                self.combined_data = self.combined_data[
+                    self.combined_data['Invoice Number'].notna()
+                ].copy()
+            
+            # Clean and convert date columns with better error handling
             date_columns = ['Invoice Date', 'Payment Date']
             for col in date_columns:
                 if col in self.combined_data.columns:
-                    self.combined_data[col] = self._clean_dates(
+                    self.combined_data[col] = self._clean_dates_improved(
                         self.combined_data[col]
                     )
             
-            # Clean and convert amount columns
+            # Clean and convert amount columns with better error handling
             amount_columns = [
                 'Original Inv Amount', 'Amount Paid', 'Invoice Balance'
             ]
             for col in amount_columns:
                 if col in self.combined_data.columns:
-                    self.combined_data[col] = self._clean_amounts(
+                    self.combined_data[col] = self._clean_amounts_improved(
                         self.combined_data[col]
                     )
             
+            # Clean Customer PO column
+            if 'Customer PO' in self.combined_data.columns:
+                def clean_po(po_val):
+                    if pd.isna(po_val):
+                        return None
+                    
+                    po_str = str(po_val).strip()
+                    
+                    # Skip header-like values
+                    if po_str.lower() in ['customer', 'p/o', 'po', '#']:
+                        return None
+                    
+                    return po_str if po_str else None
+                
+                self.combined_data['Customer PO'] = self.combined_data['Customer PO'].apply(clean_po)
+            
             # Add metadata columns
-            self.combined_data['Statement Date'] = self.metadata.get(
-                'statement_date', ''
-            )
-            self.combined_data['Account Number'] = self.metadata.get(
-                'account_number', ''
-            )
-            self.combined_data['Supplier'] = self.metadata.get(
-                'supplier_name', ''
-            )
+            self.combined_data['Statement Date'] = self.metadata.get('statement_date', '')
+            self.combined_data['Account Number'] = self.metadata.get('account_number', '')
+            self.combined_data['Supplier'] = self.metadata.get('supplier_name', '')
             
             # Calculate missing balances
             self._calculate_missing_balances()
             
-            logger.info(
-                f"Cleaned data: {len(self.combined_data)} rows remaining"
-            )
+            # Final validation - remove rows that still don't look like valid invoices
+            if len(self.combined_data) > 0:
+                # Keep rows that have either an invoice number OR a reasonable amount
+                valid_invoice_mask = (
+                    (self.combined_data.get('Invoice Number', pd.Series(dtype=object)).notna()) |
+                    (self.combined_data.get('Original Inv Amount', pd.Series(dtype=object)).notna() & 
+                     (self.combined_data.get('Original Inv Amount', pd.Series(dtype=object)) != 0))
+                )
+                
+                self.combined_data = self.combined_data[valid_invoice_mask].copy()
+            
+            logger.info(f"Data cleaning complete: {len(self.combined_data)} rows remaining")
+            
+            # Log sample of cleaned data for debugging
+            if len(self.combined_data) > 0:
+                logger.info("Sample of cleaned data:")
+                for i in range(min(3, len(self.combined_data))):
+                    row = self.combined_data.iloc[i]
+                    logger.info(f"  Row {i}: Invoice={row.get('Invoice Number')}, "
+                              f"Date={row.get('Invoice Date')}, "
+                              f"Amount={row.get('Original Inv Amount')}")
             
         except Exception as e:
             logger.error(f"Error cleaning data: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
     
-    def _clean_dates(self, date_series):
-        """Clean and standardize date formats"""
+    def _clean_dates_improved(self, date_series):
+        """Clean and standardize date formats with improved error handling"""
         def parse_date(date_str):
             if pd.isna(date_str) or str(date_str).strip() == '':
                 return None
             
+            date_str = str(date_str).strip()
+            
+            # Skip obvious non-dates
+            if date_str.lower() in ['date', 'payment', 'invoice', 'original', 'amount']:
+                return None
+            
             try:
-                # Try different date formats
-                for fmt in ('%m/%d/%y', '%m/%d/%Y', '%d/%m/%y', '%d/%m/%Y'):
+                # Try different date formats common in statements
+                date_formats = [
+                    '%m/%d/%y', '%m/%d/%Y', '%d/%m/%y', '%d/%m/%Y',
+                    '%Y-%m-%d', '%m-%d-%Y', '%d-%m-%Y',
+                    '%m/%d/%y', '%m.%d.%y', '%m.%d.%Y'
+                ]
+                
+                for fmt in date_formats:
                     try:
-                        return pd.to_datetime(
-                            str(date_str).strip(), format=fmt
-                        ).date()
+                        parsed_date = pd.to_datetime(date_str, format=fmt).date()
+                        # Validate reasonable date range (1990-2030)
+                        if 1990 <= parsed_date.year <= 2030:
+                            return parsed_date
                     except ValueError:
                         continue
                 
                 # Try pandas auto-parsing as last resort
-                return pd.to_datetime(str(date_str)).date()
+                parsed_date = pd.to_datetime(date_str, errors='coerce')
+                if parsed_date and not pd.isna(parsed_date):
+                    date_obj = parsed_date.date()
+                    if 1990 <= date_obj.year <= 2030:
+                        return date_obj
+                
+                return None
                 
             except Exception:
                 return None
         
         return date_series.apply(parse_date)
     
-    def _clean_amounts(self, amount_series):
-        """Clean and convert amount strings to decimal values"""
+    def _clean_amounts_improved(self, amount_series):
+        """Clean and convert amount strings to decimal values with improved error handling"""
         def parse_amount(amount_str):
             if pd.isna(amount_str) or str(amount_str).strip() == '':
                 return None
             
+            amount_str = str(amount_str).strip()
+            
+            # Skip obvious non-amounts
+            if amount_str.lower() in ['amount', 'payment', 'invoice', 'original', 'balance', 'date']:
+                return None
+            
             try:
-                # Remove currency symbols, commas, and spaces
-                clean_str = str(amount_str).replace(
-                    '$', ''
-                ).replace(',', '').strip()
+                # Handle various currency and formatting patterns
+                # Remove currency symbols, spaces, and common formatting
+                clean_str = re.sub(r'[$£€¥₹]', '', amount_str)  # Currency symbols
+                clean_str = re.sub(r'[,\s]', '', clean_str)      # Commas and spaces
+                clean_str = clean_str.strip()
                 
-                # Handle parentheses for negative amounts
+                # Handle negative amounts in parentheses
                 if '(' in clean_str and ')' in clean_str:
-                    clean_str = '-' + clean_str.replace(
-                        '(', ''
-                    ).replace(')', '')
+                    clean_str = '-' + re.sub(r'[()]', '', clean_str)
                 
-                return Decimal(clean_str)
-            except (InvalidOperation, ValueError):
+                # Handle negative signs
+                clean_str = clean_str.replace('−', '-')  # Replace minus sign with hyphen
+                
+                # Validate that it looks like a number
+                if not re.match(r'^-?\d*\.?\d+$', clean_str):
+                    return None
+                
+                decimal_value = Decimal(clean_str)
+                
+                # Validate reasonable amount range (-1M to 1M for statements)
+                if abs(decimal_value) > 1000000:
+                    logger.warning(f"Suspicious amount value: {decimal_value}")
+                
+                return decimal_value
+                
+            except (InvalidOperation, ValueError, Exception) as e:
+                logger.debug(f"Could not parse amount '{amount_str}': {str(e)}")
                 return None
         
         return amount_series.apply(parse_amount)
