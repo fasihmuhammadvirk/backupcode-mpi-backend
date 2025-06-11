@@ -637,18 +637,42 @@ class StatementController:
             try:
                 from mpi_backend.utils.statement_extractor.extractor import StatementExtractor
                 
-                # Get the supplier name from the existing statement record
-                supplier_name = statement_info['supplier_name']
-                logger.info(f"Using existing statement supplier: {supplier_name}")
+                # FRESH SUPPLIER DETECTION: Don't use old (potentially wrong) supplier
+                # Instead, let the system re-detect supplier from filename and PDF
+                old_supplier_name = statement_info['supplier_name']
+                logger.info(f"🔄 REPROCESSING: Old supplier was: {old_supplier_name}")
+                logger.info(f"🔍 FRESH DETECTION: Re-detecting supplier from filename and PDF content...")
                 
-                # Create extractor with database session and supplier name
+                # Try to detect supplier from filename first (using our improved logic)
+                filename_detected_supplier = self._detect_supplier_from_filename(pdf_filename)
+                if filename_detected_supplier:
+                    logger.info(f"📄 Filename detected supplier: {filename_detected_supplier}")
+                else:
+                    logger.warning(f"⚠️  Could not detect supplier from filename: {pdf_filename}")
+                
+                # Create extractor WITHOUT pre-set supplier name to allow fresh detection
                 extractor = StatementExtractor(
                     pdf_path=str(pdf_path),
                     save_to_db=True,
                     save_to_excel=False,
                     db_session=self.db,
-                    supplier_name=supplier_name  # Pass the known supplier name
+                    supplier_name=filename_detected_supplier  # Use filename-detected or None for PDF detection
                 )
+                
+                # Verify what supplier was actually detected
+                detected_supplier = extractor.detect_supplier()
+                logger.info(f"🎯 FINAL DETECTED SUPPLIER: {detected_supplier}")
+                
+                # Compare with old assignment
+                if old_supplier_name != detected_supplier:
+                    logger.warning(f"🚨 SUPPLIER CHANGE DETECTED!")
+                    logger.warning(f"   OLD: {old_supplier_name}")
+                    logger.warning(f"   NEW: {detected_supplier}")
+                    logger.warning(f"   This indicates the previous assignment was incorrect!")
+                else:
+                    logger.info(f"✅ Supplier assignment confirmed: {detected_supplier}")
+                
+                final_supplier_name = detected_supplier
                 
                 # Extract all pages
                 extract_success = extractor.extract_all_pages()
@@ -687,7 +711,9 @@ class StatementController:
                         'original_statement_id': statement_id,
                         'new_statement_id': new_statement_id,
                         'invoices_processed': new_invoice_count,
-                        'supplier_name': supplier_name,
+                        'supplier_name': final_supplier_name,
+                        'old_supplier_name': old_supplier_name,
+                        'supplier_changed': old_supplier_name != final_supplier_name,
                         'statement_date': statement_info['statement_date'],
                         'pdf_filename': pdf_filename
                     }
@@ -732,6 +758,19 @@ class StatementController:
             except Exception:
                 pass
         return 'Unknown'
+    
+    def _detect_supplier_from_filename(self, filename: str) -> Optional[str]:
+        """
+        Detect supplier from PDF filename using the same logic as statement_downloader
+        This ensures consistency with the download process
+        """
+        try:
+            # Import the function from statement_downloader
+            from mpi_backend.utils.statement_downloader import extract_supplier_from_filename
+            return extract_supplier_from_filename(filename)
+        except Exception as e:
+            logger.warning(f"Could not detect supplier from filename {filename}: {str(e)}")
+            return None
     
     def reprocess_all_statements(self, supplier_name: Optional[str] = None, max_statements: int = 100) -> Dict[str, Any]:
         """
