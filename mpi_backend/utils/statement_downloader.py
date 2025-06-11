@@ -2,11 +2,15 @@ import imaplib
 import email
 import re
 import logging
+import traceback
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
+from email.utils import parsedate_to_datetime
 
-from mpi_backend.config import SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, TIMEZONE
+from mpi_backend.config import (
+    SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, TIMEZONE, INVOICE_DOWNLOAD_FOLDER
+)
 from mpi_backend.utils.statement_extractor.extractor import StatementExtractor
 from mpi_backend.database.models.statement_models import (
     PlumbingSupplier, PlumbingStatement
@@ -17,8 +21,24 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-# Statement download folder (separate from invoices)
-STATEMENT_DOWNLOAD_FOLDER = "mpi_backend/storage/statements"
+# Statement suppliers - using EXCLUDED_SENDERS pattern from invoices
+STATEMENT_SENDERS = [  # Statement sender emails to include
+    "info@wwps.co",
+    "bmwpsupply@gmail.com", 
+    "billing@ysplumbing.com",
+    "accounting@supremeplumbingnj.com",
+    "orders@supremeplumbingnj.com",
+    "billing@pyramidps.com",
+    "purchasing@pyramidps.com",
+    "breindy@parkplumbingsupply.com",
+    "accounting@kjpsinc.com",
+    "billing@afsupply.com",
+    "ar@opusoperations.com",
+    "AR@opusoperations.com",
+    "billing@flowmarksupply.com",
+    "mendy@flowmarksupply.com",
+    "Info@wwps.co"
+]
 
 # Suppliers that send monthly statements
 STATEMENT_SUPPLIERS = [
@@ -37,58 +57,36 @@ STATEMENT_SUPPLIERS = [
 
 def login():
     """Establish IMAP connection with error handling"""
-    mail = None
     try:
         mail = imaplib.IMAP4_SSL(SMTP_SERVER)
         mail.login(LOGIN_EMAIL, LOGIN_PWD)
         mail.select('inbox')
         logger.info("Successfully connected to mailbox for statements")
         return mail
-    except imaplib.IMAP4.error as imap_error:
-        logger.error(f"IMAP connection failed: {str(imap_error)}")
-        raise
     except Exception as e:
-        logger.error(f"Unexpected error during login: {str(e)}")
-        if mail:
-            mail.logout()
+        logger.error(f"IMAP connection failed: {str(e)}")
         raise
 
 
 def search_statement_emails(mail):
-    """Search for statement emails without marking as read"""
+    """Search for statement emails using same logic as invoice downloader"""
     try:
-        # Search for emails from the last 30 days with statement keywords
-        search_date = (datetime.now(TIMEZONE) - timedelta(days=30)).strftime(
-            '%d-%b-%Y'
-        )
-        logger.info(f"Searching for statement emails since {search_date}")
-
-        # Search for emails with statement keywords in subject
-        statement_keywords = [
-            'monthly statement',
-            'statement',
-            'aging report',
-            'account statement',
-            'monthly aging'
-        ]
+        # Search for emails from last 30 days (similar to invoice logic)
+        date_30_days_ago = (datetime.now(TIMEZONE) - 
+                           timedelta(days=30)).strftime('%d-%b-%Y')
+        logger.info(f"Searching for statement emails since {date_30_days_ago}")
         
-        search_criteria = []
-        for keyword in statement_keywords:
-            search_criteria.append(f'SUBJECT "{keyword}"')
-        
-        # Combine with date criteria
-        search_query = (
-            f'(SINCE {search_date} ({" OR ".join(search_criteria)}))'
-        )
-        
-        result, data = mail.uid('search', None, search_query)
+        # Search all emails in timeframe first
+        result, data = mail.uid('search', None, 
+                               f'(SINCE "{date_30_days_ago}")')
         if result != 'OK':
             logger.error(f"Statement email search failed: {result}")
             return []
 
         raw_email_ids = data[0].split()
-        logger.info(f"Found {len(raw_email_ids)} potential statement emails")
+        logger.info(f"Found {len(raw_email_ids)} emails in time frame")
 
+        # Filter emails by statement criteria (like invoice EXCLUDED_SENDERS)
         filtered_email_ids = []
         for idx, email_id in enumerate(raw_email_ids, 1):
             try:
@@ -101,6 +99,7 @@ def search_statement_emails(mail):
                     f"UID: {email_id}"
                 )
 
+                # Always use BODY.PEEK to never mark emails as read
                 result, msg_data = mail.uid(
                     'fetch', 
                     email_id, 
@@ -118,8 +117,10 @@ def search_statement_emails(mail):
                 from_email = email.utils.parseaddr(msg.get('From', ''))[1]
                 subject = msg.get('Subject', '').lower()
 
-                # Check if it's a statement email
-                if any(keyword in subject for keyword in statement_keywords):
+                # Check if from statement sender AND has statement keyword 
+                # (case-insensitive)
+                if (from_email in STATEMENT_SENDERS and 
+                        'monthly statement' in subject):
                     filtered_email_ids.append(email_id)
                     logger.debug(
                         f"Statement email UID {email_id} from: {from_email}, "
@@ -129,6 +130,7 @@ def search_statement_emails(mail):
             except Exception as e:
                 logger.error(
                     f"Error processing email UID {email_id}: {str(e)}"
+                    f"\n{traceback.format_exc()}"
                 )
                 continue
 
@@ -136,7 +138,10 @@ def search_statement_emails(mail):
         return filtered_email_ids
 
     except Exception as e:
-        logger.error(f"Error in search_statement_emails: {str(e)}")
+        logger.error(
+            f"Error in search_statement_emails: {str(e)}"
+            f"\n{traceback.format_exc()}"
+        )
         return []
 
 
@@ -144,7 +149,7 @@ def get_statement_supplier(
     email_subject: str, 
     supplier_email: str
 ) -> Optional[str]:
-    """Detect supplier from statement email"""
+    """Detect supplier from statement email - similar to invoice logic"""
     try:
         subject = (email_subject or "").lower()
         supplier_email = (supplier_email or "").lower()
@@ -172,10 +177,10 @@ def get_statement_supplier(
             return "Flow Mark Plumbing Supply"
         else:
             logger.warning(f"Unknown supplier for statement: {email_subject}")
-            return None
+            return "no_supplier"
     except Exception as e:
         logger.error(f"Supplier detection failed: {str(e)}")
-        return None
+        return "no_supplier"
 
 
 def extract_statement_date_from_subject(subject: str) -> Optional[datetime]:
@@ -271,28 +276,65 @@ def statement_already_exists(
 
 
 def download_statement_attachments(email_message, base_folder_path: Path):
-    """Download statement attachments"""
+    """Download statement attachments - using invoice downloader logic"""
     try:
-        processed_files = []
+        supplier_name = "unknown"
+        processed_parts = 0
+        saved_attachments = 0
         
-        for part in email_message.walk():
+        for part_idx, part in enumerate(email_message.walk(), 1):
+            processed_parts += 1
             try:
-                if (part.get_content_maintype() != 'multipart' and 
-                        part.get('Content-Disposition') is not None):
+                payload = part.get_payload()
+                payload_text = (' '.join(str(p) for p in payload) 
+                               if isinstance(payload, list) 
+                               else str(payload))
+
+                if ((part.get_content_maintype() != 'multipart' and 
+                     part.get('Content-Disposition') is not None) or
+                        ('customer of World Wide' in payload_text)):
                     
-                    # Get supplier info
-                    supplier_name = get_statement_supplier(
-                        email_message.get('Subject', ''),
-                        email_message.get('From', '')
-                    )
-                    
-                    if not supplier_name:
-                        logger.warning(
-                            "Could not determine supplier, skipping"
+                    # Supplier detection (similar to invoice logic)
+                    try:
+                        logger.info(
+                            f"Statement email with Subject: "
+                            f"{email_message.get('Subject')}"
                         )
-                        continue
+                        supplier_name = get_statement_supplier(
+                            email_message.get('Subject', ''),
+                            email_message.get('Return-Path', '')
+                        )
+                        if supplier_name == "no_supplier":
+                            logger.warning(
+                                "Skipping email with undetermined supplier"
+                            )
+                            return []
+                    except Exception as sup_error:
+                        logger.error(
+                            f"Supplier detection failed: {str(sup_error)}"
+                        )
+                        return []
                     
-                    # Get statement date
+                    # Date handling (same as invoice logic)
+                    date_header = email_message.get('Date', '')
+                    if not date_header:
+                        logger.warning(
+                            "No Date header in email, using current time"
+                        )
+                        date_time_obj = datetime.now(TIMEZONE)
+                    else:
+                        try:
+                            date_time_obj = parsedate_to_datetime(
+                                date_header
+                            ).astimezone(TIMEZONE)
+                        except Exception as date_error:
+                            logger.error(
+                                f"Date parsing failed: {str(date_error)}, "
+                                f"using current time"
+                            )
+                            date_time_obj = datetime.now(TIMEZONE)
+                    
+                    # Statement date from subject
                     statement_date = extract_statement_date_from_subject(
                         email_message.get('Subject', '')
                     )
@@ -307,176 +349,236 @@ def download_statement_attachments(email_message, base_folder_path: Path):
                                 f"{supplier_name} - "
                                 f"{statement_date.strftime('%Y-%m')}, skipping"
                             )
-                            continue
+                            return []
                     
-                    # Create supplier folder
-                    supplier_path = base_folder_path / supplier_name
-                    supplier_path.mkdir(parents=True, exist_ok=True)
+                    # Path construction (similar to invoice structure)
+                    try:
+                        inner_dir = (
+                            f'{date_time_obj.month}-{date_time_obj.day}-'
+                            f'{date_time_obj.year}'
+                        )
+                        supplier_path = base_folder_path / supplier_name
+                        supplier_path.mkdir(parents=True, exist_ok=True)
+                        inner_dir_path = supplier_path / inner_dir
+                        inner_dir_path.mkdir(parents=True, exist_ok=True)
+                    except OSError as dir_error:
+                        logger.error(
+                            f"Directory creation failed: {str(dir_error)}"
+                        )
+                        return []
                     
-                    # Get filename
+                    # File handling (same as invoice logic)
                     filename = part.get_filename()
                     if not filename:
-                        logger.warning("Attachment missing filename, skipping")
+                        logger.warning(
+                            f"Attachment missing filename, skipping of "
+                            f"{email_message.get('Subject')}"
+                        )
                         continue
-                    
+
                     if not filename.lower().endswith(('.pdf', '.PDF')):
                         logger.debug(
                             f"Skipping non-PDF attachment: {filename}"
                         )
                         continue
-                    
-                    # Create unique filename with date
+
+                    # Create unique filename with statement date
                     month_year = statement_date.strftime('%Y-%m')
                     unique_filename = (
                         f"{supplier_name}_{month_year}_{filename}"
                     )
-                    filepath = supplier_path / unique_filename
+                    filepath = inner_dir_path / unique_filename
                     
-                    # Save file
-                    with open(filepath, 'wb') as f:
-                        f.write(part.get_payload(decode=True))
-                        logger.info(
-                            f"Saved statement: {unique_filename} => {filepath}"
+                    try:
+                        with open(filepath, 'wb') as f:
+                            f.write(part.get_payload(decode=True))
+                            saved_attachments += 1
+                            logger.info(
+                                f"Saved statement: {unique_filename} => "
+                                f"{filepath}"
+                            )
+                    except IOError as file_error:
+                        logger.error(
+                            f"Failed to save file {filename}: "
+                            f"{str(file_error)}"
                         )
-                        processed_files.append(str(filepath))
+                        continue
                 
             except Exception as part_error:
-                logger.error(f"Error processing attachment: {str(part_error)}")
+                logger.error(
+                    f"Error processing part {part_idx}: {str(part_error)}"
+                    f"\n{traceback.format_exc()}"
+                )
                 continue
         
-        return processed_files
+        logger.info(
+            f"Processed {processed_parts} MIME parts, "
+            f"saved {saved_attachments} statement attachments"
+        )
+        return saved_attachments > 0
         
     except Exception as e:
-        logger.error(f"Error in download_statement_attachments: {str(e)}")
-        return []
+        logger.error(
+            f"Error in download_statement_attachments: {str(e)}"
+            f"\n{traceback.format_exc()}"
+        )
+        return False
 
 
-def process_statement_file(file_path: str):
-    """Process a downloaded statement file"""
+def process_statement_files(base_folder_path: Path):
+    """Process all downloaded statement files"""
     try:
-        logger.info(f"Processing statement file: {file_path}")
+        logger.info("Starting statement file processing")
+        processed_count = 0
         
-        # Extract data using statement extractor
-        with db_context() as db:
-            extractor = StatementExtractor(
-                pdf_path=file_path,
-                save_excel=False,  # Don't save Excel, just extract to DB
-                db_session=db
-            )
-            
-            success = extractor.extract_all_pages()
-            if success:
-                # Save to database
-                db_success = extractor.save_to_database()
-                if db_success:
-                    logger.info(
-                        f"Successfully processed and saved statement: "
-                        f"{file_path}"
-                    )
-                    
-                    # Upload PDF to S3 for storage
-                    file_key = f"statements/{Path(file_path).name}"
-                    upload_file(file_path, file_key, is_invoice=False)
-                    
-                    return True
-                else:
-                    logger.error(
-                        f"Failed to save statement to database: {file_path}"
-                    )
-            else:
-                logger.error(
-                    f"Failed to extract statement data: {file_path}"
-                )
+        # Find all PDF files in the download directory
+        for pdf_file in base_folder_path.rglob('*.pdf'):
+            try:
+                logger.info(f"Processing statement file: {pdf_file}")
                 
-    except Exception as e:
-        logger.error(f"Error processing statement {file_path}: {str(e)}")
+                # Extract data using statement extractor
+                with db_context() as db:
+                    extractor = StatementExtractor(
+                        pdf_path=str(pdf_file),
+                        save_excel=False,  # Don't save Excel, extract to DB
+                        db_session=db
+                    )
+                    
+                    success = extractor.extract_all_pages()
+                    if success:
+                        # Save to database
+                        db_success = extractor.save_to_database()
+                        if db_success:
+                            logger.info(
+                                f"Successfully processed and saved statement: "
+                                f"{pdf_file}"
+                            )
+                            
+                            # Upload PDF to S3 for storage
+                            file_key = f"statements/{pdf_file.name}"
+                            upload_file(str(pdf_file), file_key, 
+                                       is_invoice=False)
+                            
+                            processed_count += 1
+                        else:
+                            logger.error(
+                                f"Failed to save statement to database: "
+                                f"{pdf_file}"
+                            )
+                    else:
+                        logger.error(
+                            f"Failed to extract statement data: {pdf_file}"
+                        )
+                        
+            except Exception as file_error:
+                logger.error(
+                    f"Error processing statement {pdf_file}: {str(file_error)}"
+                    f"\n{traceback.format_exc()}"
+                )
         
-    return False
+        logger.info(
+            f"Statement processing complete. Processed {processed_count} files"
+        )
+        return processed_count
+        
+    except Exception as e:
+        logger.error(
+            f"Error in process_statement_files: {str(e)}"
+            f"\n{traceback.format_exc()}"
+        )
+        return 0
 
 
 def statement_download_background_task():
-    """Main background task for downloading and processing monthly statements"""
+    """Main background task for downloading and processing monthly statements 
+    using invoice downloader logic"""
     mail = None
     try:
         # Ensure all suppliers exist in database
         with db_context() as db:
             ensure_suppliers_exist(db)
         
-        # Setup directory structure
-        timestamp = datetime.now(TIMEZONE).strftime('%Y-%m-%d_%H-%M-%S')
-        base_folder = f"statements_{timestamp}"
-        base_folder_path = Path(STATEMENT_DOWNLOAD_FOLDER) / base_folder
-        base_folder_path.mkdir(parents=True, exist_ok=True)
-        logger.info(
-            f"Created statement download directory: {base_folder_path}"
-        )
+        # Setup directory structure (same as invoice downloader)
+        try:
+            time_window_start = datetime.now(TIMEZONE) - timedelta(minutes=3)
+            base_folder = (
+                f"{time_window_start.strftime('%d-%b-%Y_%H-%M-%S')} - "
+                f"{datetime.now(TIMEZONE).strftime('%d-%b-%Y_%H-%M-%S')}"
+            )
+            base_folder_path = (Path(INVOICE_DOWNLOAD_FOLDER) / 
+                               "statements" / base_folder)
+            base_folder_path.mkdir(parents=True, exist_ok=True)
+            logger.info(
+                f"Created statement download directory: {base_folder_path}"
+            )
+        except Exception as dir_error:
+            logger.error(f"Directory creation failed: {str(dir_error)}")
+            raise
         
-        # Email processing
-        mail = login()
-        email_ids = search_statement_emails(mail)
-        
-        if not email_ids:
-            logger.info("No new statement emails to process")
-            return
-        
-        logger.info(f"Processing {len(email_ids)} statement emails")
-        processed_files = []
-        
-        for idx, email_id in enumerate(email_ids, 1):
-            try:
-                logger.info(
-                    f"Processing statement email {idx}/{len(email_ids)} - "
-                    f"UID: {email_id}"
-                )
-                
-                # Fetch email (PEEK to not mark as read)
-                result, response = mail.uid(
-                    'fetch', email_id, '(BODY.PEEK[])'
-                )
-                
-                if result != 'OK' or not response or not response[0]:
-                    logger.error(f"Failed to fetch email UID {email_id}")
-                    continue
-                
+        # Email processing (same structure as invoice downloader)
+        try:
+            mail = login()
+            filtered_ids = search_statement_emails(mail)
+            
+            if not filtered_ids:
+                logger.info("No new statement emails to process")
+                return
+            
+            logger.info(f"Processing {len(filtered_ids)} statement emails")
+            for idx, e_id in enumerate(filtered_ids, 1):
                 try:
-                    raw_email = response[0][1].decode('utf-8')
-                except UnicodeDecodeError:
-                    raw_email = response[0][1].decode('latin-1')
-                
-                email_message = email.message_from_string(raw_email)
-                
-                # Download attachments
-                files = download_statement_attachments(
-                    email_message, base_folder_path
-                )
-                processed_files.extend(files)
-                
-            except Exception as email_error:
-                logger.error(
-                    f"Failed to process email UID {email_id}: "
-                    f"{str(email_error)}"
-                )
-                continue
+                    logger.info(
+                        f"Processing statement email "
+                        f"{idx}/{len(filtered_ids)} - UID: {e_id}"
+                    )
+                    
+                    # Always use BODY.PEEK to never mark emails as read
+                    result, response = mail.uid(
+                        'fetch', e_id, '(BODY.PEEK[])'
+                    )
+                    
+                    if result != 'OK' or not response or not response[0]:
+                        logger.error(f"Failed to fetch email UID {e_id}")
+                        continue
+                    
+                    try:
+                        raw_email = response[0][1].decode('utf-8')
+                    except UnicodeDecodeError:
+                        raw_email = response[0][1].decode('latin-1')
+                    
+                    email_message = email.message_from_string(raw_email)
+                    download_statement_attachments(
+                        email_message, base_folder_path
+                    )
+                    
+                except Exception as email_error:
+                    logger.error(
+                        f"Failed to process email UID {e_id}: "
+                        f"{str(email_error)}\n{traceback.format_exc()}"
+                    )
+                    continue
         
-        # Process downloaded files
-        logger.info(
-            f"Processing {len(processed_files)} downloaded statement files"
-        )
-        success_count = 0
+        except Exception as processing_error:
+            logger.error(
+                f"Email processing failed: {str(processing_error)}"
+                f"\n{traceback.format_exc()}"
+            )
+            raise
         
-        for file_path in processed_files:
-            try:
-                if process_statement_file(file_path):
-                    success_count += 1
-            except Exception as process_error:
-                logger.error(
-                    f"Error processing file {file_path}: {str(process_error)}"
-                )
-        
-        logger.info(
-            f"Statement processing complete. Successfully processed "
-            f"{success_count}/{len(processed_files)} files"
-        )
+        # Post-processing (similar to invoice conversion)
+        try:
+            logger.info("Starting statement processing")
+            processed_count = process_statement_files(base_folder_path)
+            logger.info(
+                f"Statement processing complete. "
+                f"Successfully processed {processed_count} files"
+            )
+        except Exception as post_error:
+            logger.error(
+                f"Post-processing failed: {str(post_error)}"
+                f"\n{traceback.format_exc()}"
+            )
+            raise
         
         # Clean up temporary files
         try:
@@ -492,6 +594,7 @@ def statement_download_background_task():
     except Exception as main_error:
         logger.error(
             f"Critical error in statement background task: {str(main_error)}"
+            f"\n{traceback.format_exc()}"
         )
         raise
     

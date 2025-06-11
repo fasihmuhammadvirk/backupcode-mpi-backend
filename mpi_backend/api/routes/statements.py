@@ -299,8 +299,7 @@ def download_statement_pdf(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
         )
-
-
+        
 @router.post("/reprocess")
 def reprocess_statement(
     statement_id: int = Query(
@@ -359,4 +358,4 @@ def reprocess_statement(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
         )
- 
+       
