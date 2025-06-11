@@ -716,6 +716,23 @@ class StatementController:
             except:
                 pass 
     
+    def _get_supplier_name_safe(self, statement: PlumbingStatement) -> str:
+        """Safely get supplier name from a statement, handling session issues"""
+        try:
+            if statement.supplier:
+                return statement.supplier.name
+        except Exception:
+            # If we can't access supplier relationship, try to get it from database
+            try:
+                supplier_obj = self.db.query(PlumbingSupplier).filter(
+                    PlumbingSupplier.id == statement.supplier_id
+                ).first()
+                if supplier_obj:
+                    return supplier_obj.name
+            except Exception:
+                pass
+        return 'Unknown'
+    
     def reprocess_all_statements(self, supplier_name: Optional[str] = None, max_statements: int = 100) -> Dict[str, Any]:
         """
         Reprocess multiple statements with optional filtering
@@ -730,17 +747,19 @@ class StatementController:
         try:
             logger.info(f"Starting bulk reprocessing - Supplier: {supplier_name or 'All'}, Max: {max_statements}")
             
-            # Build query for statements to reprocess
-            query = self.db.query(PlumbingStatement).join(PlumbingSupplier)
+            # Build query for statements to reprocess with eager loading of supplier
+            query = self.db.query(PlumbingStatement).options(joinedload(PlumbingStatement.supplier))
             
             # Apply supplier filter if provided
             if supplier_name:
                 if supplier_name.isdigit():
                     # Filter by supplier ID
-                    query = query.filter(PlumbingSupplier.id == int(supplier_name))
+                    query = query.filter(PlumbingStatement.supplier_id == int(supplier_name))
                 else:
-                    # Filter by supplier name (partial match)
-                    query = query.filter(PlumbingSupplier.name.ilike(f"%{supplier_name}%"))
+                    # Filter by supplier name (partial match) - need to join for this
+                    query = query.join(PlumbingSupplier).filter(
+                        PlumbingSupplier.name.ilike(f"%{supplier_name}%")
+                    )
             
             # Order by most recent first and limit
             statements = query.order_by(PlumbingStatement.statement_date.desc()).limit(max_statements).all()
@@ -773,7 +792,7 @@ class StatementController:
                     # Track result
                     statement_result = {
                         'original_id': statement.id,
-                        'supplier_name': statement.supplier.name if statement.supplier else 'Unknown',
+                        'supplier_name': self._get_supplier_name_safe(statement),
                         'statement_date': statement.statement_date.isoformat() if statement.statement_date else None,
                         'success': result['success']
                     }
@@ -805,7 +824,7 @@ class StatementController:
                     
                     results.append({
                         'original_id': statement.id,
-                        'supplier_name': statement.supplier.name if statement.supplier else 'Unknown',
+                        'supplier_name': self._get_supplier_name_safe(statement),
                         'statement_date': statement.statement_date.isoformat() if statement.statement_date else None,
                         'success': False,
                         'error': str(stmt_error)
