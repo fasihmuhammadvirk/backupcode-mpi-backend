@@ -302,53 +302,103 @@ def download_statement_pdf(
         
 @router.post("/reprocess")
 def reprocess_statement(
-    statement_id: int = Query(
-        ..., 
-        description="ID of the statement to reprocess"
+    statement_id: Optional[str] = Query(
+        None, 
+        description="ID of the statement to reprocess, or 'all' to reprocess all statements"
+    ),
+    supplier_name: Optional[str] = Query(
+        None,
+        description="Supplier name filter for bulk reprocessing (optional)"
+    ),
+    max_statements: int = Query(
+        100,
+        ge=1,
+        le=1000,
+        description="Maximum number of statements to reprocess in bulk (1-1000)"
     ),
     db: Session = Depends(get_db),
     token: str = Depends(JWTBearer())
 ):
     """
-    Reprocess a monthly statement.
+    Reprocess monthly statements.
     
-    This endpoint triggers the reprocessing of a statement.
+    This endpoint supports both single statement and bulk reprocessing.
     
     **Parameters:**
-    - **statement_id**: The ID of the statement to reprocess
+    - **statement_id**: The ID of the statement to reprocess, or 'all' for bulk reprocessing
+    - **supplier_name**: Optional supplier filter for bulk reprocessing
+    - **max_statements**: Maximum number of statements to reprocess in bulk (default: 100)
     
-    **Returns:**
-    - **status**: Status of the reprocessing operation
-    - **message**: Additional information about the operation
-    
-    **Example:**
+    **Single Statement Reprocessing:**
     ```
     POST /statements/reprocess?statement_id=123
     ```
+    
+    **Bulk Reprocessing Examples:**
+    ```
+    # Reprocess all statements (up to 100)
+    POST /statements/reprocess?statement_id=all
+    
+    # Reprocess all statements for specific supplier
+    POST /statements/reprocess?statement_id=all&supplier_name=World Wide Plumbing
+    
+    # Reprocess up to 50 statements
+    POST /statements/reprocess?statement_id=all&max_statements=50
+    ```
+    
+    **Returns:**
+    - **success**: Boolean indicating overall success
+    - **message**: Summary message
+    - **results**: Detailed results for each statement processed
+    - **statistics**: Summary statistics
     """
     try:
-        logger.info(
-            f"Reprocessing statement with ID: {statement_id}"
-        )
-        
-        # Get statement details
         controller = StatementController(db)
-        result = controller.reprocess_statement(statement_id)
         
-        if not result['success']:
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    f"Failed to reprocess statement: "
-                    f"{result.get('error', 'Unknown error')}"
+        # Single statement reprocessing
+        if statement_id and statement_id.lower() != 'all' and statement_id.isdigit():
+            logger.info(f"Reprocessing single statement with ID: {statement_id}")
+            
+            result = controller.reprocess_statement(int(statement_id))
+            
+            if not result['success']:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        f"Failed to reprocess statement: "
+                        f"{result.get('error', 'Unknown error')}"
+                    )
                 )
+            
+            logger.info(f"Successfully reprocessed statement {statement_id}")
+            return result
+        
+        # Bulk reprocessing
+        elif not statement_id or statement_id.lower() == 'all':
+            logger.info(f"Starting bulk reprocessing - Supplier: {supplier_name or 'All'}, Max: {max_statements}")
+            
+            result = controller.reprocess_all_statements(
+                supplier_name=supplier_name,
+                max_statements=max_statements
             )
+            
+            if not result['success']:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        f"Bulk reprocessing failed: "
+                        f"{result.get('error', 'Unknown error')}"
+                    )
+                )
+            
+            logger.info(f"Bulk reprocessing completed: {result['statistics']}")
+            return result
         
-        logger.info(
-            f"Successfully reprocessed statement {statement_id}"
-        )
-        
-        return result
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid statement_id. Must be a number or 'all'"
+            )
         
     except HTTPException:
         raise

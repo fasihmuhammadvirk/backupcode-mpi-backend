@@ -34,7 +34,7 @@ class StatementExtractor:
     """Enhanced Statement Extractor that can save to database and/or Excel"""
     
     def __init__(self, pdf_path, save_to_db=True, save_to_excel=False, 
-                 db_session=None):
+                 db_session=None, supplier_name=None):
         """
         Initialize the statement extractor
         
@@ -43,6 +43,7 @@ class StatementExtractor:
             save_to_db: Whether to save extracted data to database
             save_to_excel: Whether to save extracted data to Excel
             db_session: Optional existing database session
+            supplier_name: Optional supplier name (from email detection) to override PDF detection
         """
         self.pdf_path = pdf_path
         self.pdf_filename = os.path.basename(pdf_path)
@@ -50,6 +51,7 @@ class StatementExtractor:
         self.save_to_excel = save_to_excel
         self.db_session = db_session
         self._should_close_session = False
+        self.email_supplier_name = supplier_name  # Store email-detected supplier name
         
         # Initialize data containers
         self.combined_data = pd.DataFrame()
@@ -72,6 +74,8 @@ class StatementExtractor:
         logger.info(
             f"Save to DB: {save_to_db}, Save to Excel: {save_to_excel}"
         )
+        if supplier_name:
+            logger.info(f"Using email-detected supplier: {supplier_name}")
     
     def __del__(self):
         """Clean up database session if we created it"""
@@ -91,6 +95,11 @@ class StatementExtractor:
             self.metadata = extract_statement_metadata(full_text)
             self.metadata['page_count'] = page_count
             
+            # Override supplier name with email-detected one if available
+            if self.email_supplier_name:
+                self.metadata['supplier_name'] = self.email_supplier_name
+                logger.info(f"Using email-detected supplier: {self.email_supplier_name}")
+            
             # Extract summary data
             self.summary_data = extract_summary_data(full_text)
             
@@ -98,8 +107,9 @@ class StatementExtractor:
             
         except Exception as e:
             logger.error(f"Error extracting metadata: {str(e)}")
+            # Use email supplier name if available, even if metadata extraction fails
             self.metadata = {
-                'supplier_name': '', 
+                'supplier_name': self.email_supplier_name or '', 
                 'statement_date': '', 
                 'account_number': ''
             }
@@ -529,15 +539,26 @@ class StatementExtractor:
                 ] = calculated_balance
     
     def detect_supplier(self) -> Optional[str]:
-        """Detect supplier from the PDF using the statement utils"""
+        """Detect supplier from email information first, then PDF as fallback"""
         try:
+            # Priority 1: Use email-detected supplier name if available
+            if self.email_supplier_name:
+                logger.info(f"Using email-detected supplier: {self.email_supplier_name}")
+                return self.email_supplier_name
+            
+            # Priority 2: Use supplier from metadata if available
             if (hasattr(self, 'metadata') and 
                     self.metadata.get('supplier_name')):
                 return self.metadata['supplier_name']
             
-            # If no metadata available, try to identify from filename or content
+            # Priority 3: Fallback to PDF OCR detection (less reliable)
+            logger.warning("No email supplier provided, falling back to PDF OCR detection")
             full_text, _ = extract_text_from_pdf(self.pdf_path)
             supplier = identify_supplier(full_text)
+            if supplier:
+                logger.info(f"PDF OCR detected supplier: {supplier}")
+            else:
+                logger.warning("PDF OCR could not detect supplier")
             return supplier
             
         except Exception as e:
@@ -780,20 +801,21 @@ class StatementExtractor:
             return results
 
 
-def process_statement(filename, output_path):
+def process_statement(filename, output_path, supplier_name=None):
     """
     Process a statement PDF and save results to Excel
     
     Args:
         filename: Path to the PDF file
         output_path: Path where the output Excel file will be saved
+        supplier_name: Optional supplier name to override PDF detection
         
     Returns:
         bool: True if successful, False otherwise
     """
     # Create an extractor instance
     extractor = StatementExtractor(
-        filename, save_to_db=False, save_to_excel=True
+        filename, save_to_db=False, save_to_excel=True, supplier_name=supplier_name
     )
     
     # Use the new direct approach

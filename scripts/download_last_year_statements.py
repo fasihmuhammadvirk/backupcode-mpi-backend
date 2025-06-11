@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """
-Monthly Statement Downloader and Processor for Last Year
-========================================================
+Monthly Statement and Invoice Downloader for Historical Data
+===========================================================
 
-This script downloads and processes monthly statements from email for the last year.
+This script downloads and processes monthly statements and invoices from email for historical periods.
 It handles:
-- Email connection and search for statement emails
-- PDF download and processing
+- Email connection and search for statement emails (using BODY.PEEK to avoid marking as read)
+- PDF download and processing for statements and associated invoice data
 - Data extraction and database storage
 - S3 upload for storage
 - Duplicate detection and error handling
+- Support for up to 10 years of historical data
+
+The script ensures NO emails are marked as read during processing by using BODY.PEEK commands.
 
 Usage:
     python scripts/download_last_year_statements.py [options]
@@ -17,6 +20,7 @@ Usage:
 Options:
     --from-months-ago INT    Number of months ago to start from (default: 12)
     --to-months-ago INT      Number of months ago to end at (default: 0)
+    --download-all-historical Download all statements and invoices for past 10 years
     --suppliers TEXT         Comma-separated list of suppliers to process
     --dry-run               Preview what would be processed without downloading
     --force                 Reprocess existing statements
@@ -591,12 +595,38 @@ class StatementDownloader:
             
             logger.info(f"Processing statement file: {file_path}")
             
-            # Extract data using statement extractor
+            # Extract supplier name from file path structure
+            # Path structure: base_folder/supplier_name/date_folder/filename
+            supplier_name = None
+            file_path_obj = Path(file_path)
+            
+            if len(file_path_obj.parts) >= 2:
+                # Get the supplier directory name (second to last in path)
+                supplier_dir = file_path_obj.parts[-3]  # Go up 3 levels: filename -> date_folder -> supplier_name
+                # Check if this matches one of our known suppliers
+                if supplier_dir in STATEMENT_SUPPLIERS:
+                    supplier_name = supplier_dir
+                    logger.info(f"Extracted supplier from path: {supplier_name}")
+                else:
+                    # Try to extract from filename if path doesn't work
+                    # Filename format: supplier_name_YYYY-MM_original_filename.pdf
+                    for supplier in STATEMENT_SUPPLIERS:
+                        supplier_underscore = supplier.replace(' ', '_').replace('&', '')
+                        if file_path_obj.name.startswith(supplier_underscore):
+                            supplier_name = supplier
+                            logger.info(f"Extracted supplier from filename: {supplier_name}")
+                            break
+            
+            if not supplier_name:
+                logger.warning(f"Could not extract supplier name for {file_path}, will rely on PDF detection")
+            
+            # Extract data using statement extractor with supplier name
             extractor = StatementExtractor(
                 pdf_path=file_path,
                 save_to_db=True,
                 save_to_excel=False,
-                db_session=self.db_session
+                db_session=self.db_session,
+                supplier_name=supplier_name  # Pass email-detected supplier name
             )
             
             # Extract data
@@ -641,7 +671,15 @@ class StatementDownloader:
     def download_statements_for_period(self, from_months_ago: int, 
                                       to_months_ago: int, 
                                       supplier_filter: Optional[List[str]] = None) -> Dict[str, Any]:
-        """Main method to download statements for a period"""
+        """
+        Main method to download statements for a period
+        
+        Downloads monthly statements which contain detailed invoice data for each supplier.
+        Each statement PDF contains a table of all invoices for that month, so this
+        effectively downloads both statements AND all the invoice records within them.
+        
+        Uses BODY.PEEK to ensure NO emails are marked as read during processing.
+        """
         try:
             # Ensure suppliers exist in database
             self.ensure_suppliers_exist()
@@ -766,7 +804,7 @@ class StatementDownloader:
     def print_summary(self):
         """Print a summary of the operation"""
         print("\n" + "="*60)
-        print("STATEMENT DOWNLOAD SUMMARY")
+        print("STATEMENT AND INVOICE DOWNLOAD SUMMARY")
         print("="*60)
         print(f"Emails searched:       {self.stats['emails_searched']:,}")
         print(f"Emails found:          {self.stats['emails_found']:,}")
@@ -776,94 +814,118 @@ class StatementDownloader:
         print(f"Skipped existing:      {self.stats['skipped_existing']:,}")
         print(f"Errors:                {self.stats['errors']:,}")
         print("="*60)
+        print("📧 No emails were marked as read (used BODY.PEEK)")
+        print("📄 Each statement contains multiple invoice records")
+        print("="*60)
 
 
 def main():
     """Main function with command line argument parsing"""
     parser = argparse.ArgumentParser(
-        description="Download and process monthly statements for the last year",
+        description="Download and process monthly statements and invoices for historical periods (up to 10 years)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Download statements from the last 12 months
+  # Download statements and invoices from the last 12 months
   python scripts/download_last_year_statements.py
   
-  # Download statements from 6 months ago to now
-  python scripts/download_last_year_statements.py --from-months-ago 6
+  # Download statements and invoices from the last 24 months
+  python scripts/download_last_year_statements.py --from-months-ago 24
   
-  # Download only specific suppliers
-  python scripts/download_last_year_statements.py --suppliers "BMW Plumbing Supplies,Y & S Plumbing Supply"
+  # Download 10 years of historical statements and invoices for all suppliers
+  python scripts/download_last_year_statements.py --download-all-historical
   
-  # Dry run to see what would be processed
-  python scripts/download_last_year_statements.py --dry-run
+  # Download for specific suppliers only
+  python scripts/download_last_year_statements.py --suppliers "World Wide Plumbing,Y & S Plumbing Supply"
   
-  # Force reprocess existing statements
-  python scripts/download_last_year_statements.py --force
+  # Preview what would be downloaded without actually processing
+  python scripts/download_last_year_statements.py --download-all-historical --dry-run
         """
     )
     
+    # Time range options
     parser.add_argument(
-        '--from-months-ago', 
-        type=int, 
+        '--from-months-ago',
+        type=int,
         default=12,
         help='Number of months ago to start from (default: 12)'
     )
-    
     parser.add_argument(
-        '--to-months-ago', 
-        type=int, 
+        '--to-months-ago',
+        type=int,
         default=0,
-        help='Number of months ago to end at (default: 0, current month)'
+        help='Number of months ago to end at (default: 0 - current month)'
     )
     
+    # Historical download option
     parser.add_argument(
-        '--suppliers', 
+        '--download-all-historical',
+        action='store_true',
+        help='Download all historical statements and invoices for the past 10 years (overrides --from-months-ago)'
+    )
+    
+    # Supplier filtering
+    parser.add_argument(
+        '--suppliers',
         type=str,
-        help='Comma-separated list of suppliers to process (default: all)'
+        help='Comma-separated list of suppliers to process (e.g., "BMW Plumbing Supplies,World Wide Plumbing")'
     )
     
+    # Processing options
     parser.add_argument(
-        '--dry-run', 
+        '--dry-run',
         action='store_true',
-        help='Preview what would be processed without downloading'
+        help='Preview what would be processed without downloading/processing'
     )
-    
     parser.add_argument(
-        '--force', 
+        '--force',
         action='store_true',
-        help='Reprocess existing statements'
+        help='Reprocess existing statements (skip duplicate check)'
     )
-    
     parser.add_argument(
-        '--verbose', 
+        '--verbose',
         action='store_true',
         help='Enable detailed logging'
     )
     
     args = parser.parse_args()
     
+    # Configure logging level
+    if args.verbose:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+    else:
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s'
+        )
+    
     # Parse supplier filter
     supplier_filter = None
     if args.suppliers:
         supplier_filter = [s.strip() for s in args.suppliers.split(',')]
-        print(f"Filtering for suppliers: {supplier_filter}")
+        logger.info(f"Supplier filter: {supplier_filter}")
     
-    # Validate arguments
-    if args.from_months_ago < args.to_months_ago:
-        print("Error: --from-months-ago must be >= --to-months-ago")
-        sys.exit(1)
+    # Set time range
+    if args.download_all_historical:
+        from_months_ago = 120  # 10 years (12 months * 10)
+        to_months_ago = 0
+        logger.info("🚀 DOWNLOADING ALL HISTORICAL STATEMENTS AND INVOICES (PAST 10 YEARS)")
+        logger.info("This will download statements and associated invoice data from all suppliers for the past 10 years")
+        logger.info("📧 Using BODY.PEEK commands to ensure NO emails are marked as read")
+        if not args.dry_run:
+            confirmation = input("This is a large operation that will process 10 years of data. Continue? (y/N): ")
+            if confirmation.lower() != 'y':
+                print("Operation cancelled.")
+                return
+    else:
+        from_months_ago = args.from_months_ago
+        to_months_ago = args.to_months_ago
+        logger.info(f"📧 Using BODY.PEEK commands to ensure NO emails are marked as read")
     
-    # Show what will be processed
-    print(
-        f"Processing statements from {args.from_months_ago} months ago "
-        f"to {args.to_months_ago} months ago"
-    )
-    if args.dry_run:
-        print("DRY RUN MODE - No files will be downloaded or processed")
-    if args.force:
-        print("FORCE MODE - Existing statements will be reprocessed")
-    
-    # Run the downloader
+    # Create downloader and run
     try:
         with StatementDownloader(
             dry_run=args.dry_run, 
@@ -871,31 +933,41 @@ Examples:
             verbose=args.verbose
         ) as downloader:
             
+            # Download statements for the specified period
             result = downloader.download_statements_for_period(
-                from_months_ago=args.from_months_ago,
-                to_months_ago=args.to_months_ago,
+                from_months_ago=from_months_ago,
+                to_months_ago=to_months_ago,
                 supplier_filter=supplier_filter
             )
             
+            # Print results
             downloader.print_summary()
             
             if result['success']:
-                print(
-                    f"\n✅ Successfully completed! "
-                    f"Processed {result['files_processed']} files."
-                )
-                sys.exit(0)
+                print(f"\n✅ Operation completed successfully!")
+                print(f"Period: {result['period']}")
+                print(f"Files processed: {result['files_processed']}")
+                
+                if args.download_all_historical:
+                    print("\n🎉 Historical download completed!")
+                    print("All available monthly statements and invoices from the past 10 years have been processed.")
+                    print("📧 No emails were marked as read during this process.")
+                    print("Check the summary above for detailed statistics.")
+                else:
+                    print("📧 No emails were marked as read during this process.")
             else:
-                print(f"\n❌ Failed: {result['error']}")
-                sys.exit(1)
+                print(f"\n❌ Operation failed: {result.get('error', 'Unknown error')}")
+                return 1
                 
     except KeyboardInterrupt:
-        print("\n\n⚠️  Operation cancelled by user")
-        sys.exit(1)
+        print("\n⚠️ Operation interrupted by user")
+        return 1
     except Exception as e:
-        print(f"\n❌ Unexpected error: {str(e)}")
-        logger.exception("Unexpected error in main")
-        sys.exit(1)
+        logger.error(f"Critical error: {str(e)}")
+        print(f"\n❌ Critical error: {str(e)}")
+        return 1
+    
+    return 0
 
 
 if __name__ == "__main__":
