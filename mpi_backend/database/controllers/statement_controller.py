@@ -637,12 +637,17 @@ class StatementController:
             try:
                 from mpi_backend.utils.statement_extractor.extractor import StatementExtractor
                 
-                # Create extractor with database session
+                # Get the supplier name from the existing statement record
+                supplier_name = statement_info['supplier_name']
+                logger.info(f"Using existing statement supplier: {supplier_name}")
+                
+                # Create extractor with database session and supplier name
                 extractor = StatementExtractor(
                     pdf_path=str(pdf_path),
                     save_to_db=True,
                     save_to_excel=False,
-                    db_session=self.db
+                    db_session=self.db,
+                    supplier_name=supplier_name  # Pass the known supplier name
                 )
                 
                 # Extract all pages
@@ -682,7 +687,7 @@ class StatementController:
                         'original_statement_id': statement_id,
                         'new_statement_id': new_statement_id,
                         'invoices_processed': new_invoice_count,
-                        'supplier_name': statement_info['supplier_name'],
+                        'supplier_name': supplier_name,
                         'statement_date': statement_info['statement_date'],
                         'pdf_filename': pdf_filename
                     }
@@ -710,3 +715,128 @@ class StatementController:
                     shutil.rmtree(temp_dir)
             except:
                 pass 
+    
+    def reprocess_all_statements(self, supplier_name: Optional[str] = None, max_statements: int = 100) -> Dict[str, Any]:
+        """
+        Reprocess multiple statements with optional filtering
+        
+        Args:
+            supplier_name: Optional supplier name filter
+            max_statements: Maximum number of statements to process
+            
+        Returns:
+            Dict with success status, results, and statistics
+        """
+        try:
+            logger.info(f"Starting bulk reprocessing - Supplier: {supplier_name or 'All'}, Max: {max_statements}")
+            
+            # Build query for statements to reprocess
+            query = self.db.query(PlumbingStatement).join(PlumbingSupplier)
+            
+            # Apply supplier filter if provided
+            if supplier_name:
+                if supplier_name.isdigit():
+                    # Filter by supplier ID
+                    query = query.filter(PlumbingSupplier.id == int(supplier_name))
+                else:
+                    # Filter by supplier name (partial match)
+                    query = query.filter(PlumbingSupplier.name.ilike(f"%{supplier_name}%"))
+            
+            # Order by most recent first and limit
+            statements = query.order_by(PlumbingStatement.statement_date.desc()).limit(max_statements).all()
+            
+            if not statements:
+                return {
+                    'success': False,
+                    'error': f'No statements found for processing (Supplier: {supplier_name or "All"})'
+                }
+            
+            logger.info(f"Found {len(statements)} statements to reprocess")
+            
+            # Initialize tracking
+            results = []
+            statistics = {
+                'total_statements': len(statements),
+                'successful': 0,
+                'failed': 0,
+                'errors': []
+            }
+            
+            # Process each statement
+            for idx, statement in enumerate(statements, 1):
+                try:
+                    logger.info(f"Processing statement {idx}/{len(statements)} - ID: {statement.id}")
+                    
+                    # Reprocess the statement
+                    result = self.reprocess_statement(statement.id)
+                    
+                    # Track result
+                    statement_result = {
+                        'original_id': statement.id,
+                        'supplier_name': statement.supplier.name if statement.supplier else 'Unknown',
+                        'statement_date': statement.statement_date.isoformat() if statement.statement_date else None,
+                        'success': result['success']
+                    }
+                    
+                    if result['success']:
+                        statement_result.update({
+                            'new_id': result['details']['new_statement_id'],
+                            'invoices_processed': result['details']['invoices_processed']
+                        })
+                        statistics['successful'] += 1
+                        logger.info(f"✅ Statement {statement.id} reprocessed successfully")
+                    else:
+                        statement_result['error'] = result.get('error', 'Unknown error')
+                        statistics['failed'] += 1
+                        statistics['errors'].append(f"Statement {statement.id}: {result.get('error', 'Unknown error')}")
+                        logger.error(f"❌ Statement {statement.id} reprocessing failed: {result.get('error')}")
+                    
+                    results.append(statement_result)
+                    
+                    # Small delay to prevent overwhelming the system
+                    import time
+                    time.sleep(0.1)
+                    
+                except Exception as stmt_error:
+                    error_msg = f"Exception processing statement {statement.id}: {str(stmt_error)}"
+                    logger.error(error_msg)
+                    statistics['failed'] += 1
+                    statistics['errors'].append(error_msg)
+                    
+                    results.append({
+                        'original_id': statement.id,
+                        'supplier_name': statement.supplier.name if statement.supplier else 'Unknown',
+                        'statement_date': statement.statement_date.isoformat() if statement.statement_date else None,
+                        'success': False,
+                        'error': str(stmt_error)
+                    })
+                    continue
+            
+            # Compile final results
+            success_rate = (statistics['successful'] / statistics['total_statements']) * 100 if statistics['total_statements'] > 0 else 0
+            
+            logger.info(f"Bulk reprocessing completed: {statistics['successful']}/{statistics['total_statements']} successful ({success_rate:.1f}%)")
+            
+            return {
+                'success': True,
+                'message': f'Bulk reprocessing completed: {statistics["successful"]}/{statistics["total_statements"]} successful ({success_rate:.1f}%)',
+                'statistics': statistics,
+                'results': results,
+                'filter_applied': {
+                    'supplier_name': supplier_name,
+                    'max_statements': max_statements
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in reprocess_all_statements: {str(e)}")
+            return {
+                'success': False,
+                'error': f'Bulk reprocessing failed: {str(e)}',
+                'statistics': {
+                    'total_statements': 0,
+                    'successful': 0,
+                    'failed': 0,
+                    'errors': [str(e)]
+                }
+            } 

@@ -24,19 +24,27 @@ logger = logging.getLogger(__name__)
 # Statement suppliers - using EXCLUDED_SENDERS pattern from invoices
 STATEMENT_SENDERS = [  # Statement sender emails to include
     "info@wwps.co",
-    "bmwpsupply@gmail.com", 
+    "bmwpsupply@gmail.com",
     "billing@ysplumbing.com",
     "accounting@supremeplumbingnj.com",
     "orders@supremeplumbingnj.com",
     "billing@pyramidps.com",
     "purchasing@pyramidps.com",
+    "donotreply@brucesupply.net",
+    "donotreply@certifiedlumber.com",
     "breindy@parkplumbingsupply.com",
     "accounting@kjpsinc.com",
+    "nefcocorp@billtrust.com",
+    "timsfile@awisco.net",
     "billing@afsupply.com",
+    "billing@sparkleening.com",
+    "billing@positive.tech",
     "ar@opusoperations.com",
     "AR@opusoperations.com",
+    "donotreply@cardknox.com",
     "billing@flowmarksupply.com",
     "mendy@flowmarksupply.com",
+    "billing@mpiplumbingcorp.com",
     "Info@wwps.co"
 ]
 
@@ -425,34 +433,153 @@ def download_statement_attachments(email_message, base_folder_path: Path):
         return False
 
 
-def process_statement_files(base_folder_path: Path):
-    """Process all downloaded statement files"""
+def extract_supplier_from_filename(filename: str) -> Optional[str]:
+    """
+    Extract supplier name from statement filename with multiple fallback strategies
+    """
     try:
-        logger.info("Starting statement file processing")
+        basename = filename.replace('.pdf', '').replace('.PDF', '')
+        
+        # Strategy 1: Direct supplier name matching (filename starts with exact supplier name)
+        for supplier in STATEMENT_SUPPLIERS:
+            if basename.startswith(supplier + '_'):
+                logger.info(f"✅ Extracted supplier from filename (direct match): {supplier}")
+                return supplier
+        
+        # Strategy 2: Underscore replacement matching
+        for supplier in STATEMENT_SUPPLIERS:
+            supplier_underscore = supplier.replace(' ', '_').replace('&', '_')
+            if basename.startswith(supplier_underscore + '_'):
+                logger.info(f"✅ Extracted supplier from filename (underscore match): {supplier}")
+                return supplier
+        
+        # Strategy 2b: Special case for Y & S with different underscore patterns
+        for supplier in STATEMENT_SUPPLIERS:
+            if "Y & S" in supplier:
+                patterns = [
+                    "Y_&_S_Plumbing_Supply",
+                    "Y_and_S_Plumbing_Supply", 
+                    "Y_S_Plumbing_Supply",
+                    "YS_Plumbing_Supply"
+                ]
+                for pattern in patterns:
+                    if basename.startswith(pattern + '_'):
+                        logger.info(f"✅ Extracted supplier from filename (Y&S special match): {supplier}")
+                        return supplier
+        
+        # Strategy 3: Pattern matching for special cases
+        basename_lower = basename.lower()
+        if 'bmw' in basename_lower:
+            return "BMW Plumbing Supplies"
+        elif 'world_wide' in basename_lower or 'wwps' in basename_lower:
+            return "World Wide Plumbing"
+        elif 'y_s' in basename_lower or 'ys_' in basename_lower:
+            return "Y & S Plumbing Supply"
+        elif 'supreme' in basename_lower:
+            return "Supreme Plumbing Supply"
+        elif 'pyramid' in basename_lower:
+            return "Pyramid Plumbing"
+        elif 'opus' in basename_lower:
+            return "ABC Opus Services"
+        elif 'park' in basename_lower:
+            return "Park Plumbing Supply"
+        elif 'gotham' in basename_lower:
+            return "Gotham Plumbing Supply"
+        elif 'webb' in basename_lower:
+            return "FW Webb Plumbing Supply"
+        elif 'flow' in basename_lower or 'mark' in basename_lower:
+            return "Flow Mark Plumbing Supply"
+        
+        logger.warning(f"⚠️  Could not extract supplier from filename: {filename}")
+        return None
+        
+    except Exception as e:
+        logger.error(f"❌ Error extracting supplier from filename {filename}: {str(e)}")
+        return None
+
+
+def process_statement_files(base_folder_path: Path):
+    """Process all downloaded statement files with improved supplier detection"""
+    try:
+        logger.info("🚀 Starting statement file processing with improved supplier detection")
         processed_count = 0
         
         # Find all PDF files in the download directory
         for pdf_file in base_folder_path.rglob('*.pdf'):
             try:
-                logger.info(f"Processing statement file: {pdf_file}")
+                logger.info(f"📄 Processing statement file: {pdf_file}")
                 
-                # Extract data using statement extractor
+                # BULLETPROOF supplier name extraction with multiple strategies
+                path_supplier = None
+                filename_supplier = None
+                final_supplier = None
+                
+                # Strategy 1: Extract from file path directory structure
+                if len(pdf_file.parts) >= 3:
+                    supplier_dir = pdf_file.parts[-3]  # supplier_name directory
+                    if supplier_dir in STATEMENT_SUPPLIERS:
+                        path_supplier = supplier_dir
+                        logger.info(f"📁 Path extracted supplier: {path_supplier}")
+                
+                # Strategy 2: Extract from filename (FIXED LOGIC)
+                filename_supplier = extract_supplier_from_filename(pdf_file.name)
+                if filename_supplier:
+                    logger.info(f"📄 Filename extracted supplier: {filename_supplier}")
+                
+                # Strategy 3: Determine final supplier with priority
+                if path_supplier and filename_supplier and path_supplier == filename_supplier:
+                    final_supplier = path_supplier
+                    logger.info(f"🎯 Supplier confirmed by both path and filename: {final_supplier}")
+                elif path_supplier:
+                    final_supplier = path_supplier
+                    logger.info(f"🎯 Using path-extracted supplier: {final_supplier}")
+                elif filename_supplier:
+                    final_supplier = filename_supplier
+                    logger.info(f"🎯 Using filename-extracted supplier: {final_supplier}")
+                else:
+                    logger.error(f"❌ CRITICAL: Could not extract supplier name for {pdf_file}")
+                    logger.error(f"   Path parts: {pdf_file.parts}")
+                    logger.error(f"   Filename: {pdf_file.name}")
+                    logger.error("   This statement will use unreliable PDF OCR detection!")
+                
+                # Log comprehensive supplier information for verification
+                logger.info(f"📊 SUPPLIER DETECTION SUMMARY:")
+                logger.info(f"   📁 Path supplier: {path_supplier}")
+                logger.info(f"   📄 Filename supplier: {filename_supplier}")
+                logger.info(f"   🎯 Final supplier: {final_supplier}")
+                
+                if not final_supplier:
+                    logger.warning(f"Could not extract supplier name for {pdf_file}, will rely on PDF detection")
+                
+                # Extract data using statement extractor with supplier name
                 with db_context() as db:
                     extractor = StatementExtractor(
                         pdf_path=str(pdf_file),
-                        save_excel=False,  # Don't save Excel, extract to DB
-                        db_session=db
+                        save_to_db=True,  # Save to database
+                        save_to_excel=False,  # Don't save Excel
+                        db_session=db,
+                        supplier_name=final_supplier  # Pass the final determined supplier
                     )
+                    
+                    # Verify what supplier the extractor is actually using
+                    detected_supplier = extractor.detect_supplier()
+                    logger.info(f"🔍 StatementExtractor detected supplier: {detected_supplier}")
+                    
+                    # Critical validation: Check for supplier mismatch
+                    if final_supplier and detected_supplier != final_supplier:
+                        logger.error(f"🚨 CRITICAL SUPPLIER MISMATCH DETECTED!")
+                        logger.error(f"   Expected (from email/path): {final_supplier}")
+                        logger.error(f"   StatementExtractor using: {detected_supplier}")
+                        logger.error(f"   PDF File: {pdf_file}")
+                        # This could indicate a serious issue
                     
                     success = extractor.extract_all_pages()
                     if success:
                         # Save to database
                         db_success = extractor.save_to_database()
                         if db_success:
-                            logger.info(
-                                f"Successfully processed and saved statement: "
-                                f"{pdf_file}"
-                            )
+                            logger.info(f"✅ Successfully processed and saved statement: {pdf_file}")
+                            logger.info(f"   Final supplier used: {detected_supplier}")
                             
                             # Upload PDF to S3 for storage
                             file_key = f"statements/{pdf_file.name}"
@@ -461,14 +588,9 @@ def process_statement_files(base_folder_path: Path):
                             
                             processed_count += 1
                         else:
-                            logger.error(
-                                f"Failed to save statement to database: "
-                                f"{pdf_file}"
-                            )
+                            logger.error(f"❌ Failed to save statement to database: {pdf_file}")
                     else:
-                        logger.error(
-                            f"Failed to extract statement data: {pdf_file}"
-                        )
+                        logger.error(f"❌ Failed to extract statement data: {pdf_file}")
                         
             except Exception as file_error:
                 logger.error(
@@ -476,9 +598,7 @@ def process_statement_files(base_folder_path: Path):
                     f"\n{traceback.format_exc()}"
                 )
         
-        logger.info(
-            f"Statement processing complete. Processed {processed_count} files"
-        )
+        logger.info(f"✅ Statement processing complete. Processed {processed_count} files")
         return processed_count
         
     except Exception as e:
