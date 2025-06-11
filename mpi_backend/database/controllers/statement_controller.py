@@ -817,6 +817,7 @@ class StatementController:
                 'total_statements': len(statements),
                 'successful': 0,
                 'failed': 0,
+                'supplier_changes': 0,  # Track supplier changes
                 'errors': []
             }
             
@@ -828,23 +829,47 @@ class StatementController:
                     # Reprocess the statement
                     result = self.reprocess_statement(statement.id)
                     
-                    # Track result
+                    # Track result with proper supplier information
+                    old_supplier_name = self._get_supplier_name_safe(statement)
+                    
                     statement_result = {
                         'original_id': statement.id,
-                        'supplier_name': self._get_supplier_name_safe(statement),
+                        'old_supplier_name': old_supplier_name,
                         'statement_date': statement.statement_date.isoformat() if statement.statement_date else None,
                         'success': result['success']
                     }
                     
                     if result['success']:
+                        # Get the NEW supplier information from reprocessing result
+                        details = result.get('details', {})
+                        new_supplier_name = details.get('supplier_name', old_supplier_name)
+                        supplier_changed = details.get('supplier_changed', False)
+                        
                         statement_result.update({
-                            'new_id': result['details']['new_statement_id'],
-                            'invoices_processed': result['details']['invoices_processed']
+                            'new_id': details.get('new_statement_id'),
+                            'invoices_processed': details.get('invoices_processed'),
+                            'supplier_name': new_supplier_name,  # Use NEW supplier name
+                            'supplier_changed': supplier_changed
                         })
+                        
                         statistics['successful'] += 1
-                        logger.info(f"✅ Statement {statement.id} reprocessed successfully")
+                        
+                        # Track supplier changes
+                        if supplier_changed:
+                            statistics['supplier_changes'] += 1
+                        
+                        # Enhanced logging with supplier change information
+                        if supplier_changed:
+                            logger.warning(f"✅ Statement {statement.id} reprocessed successfully - SUPPLIER CHANGED!")
+                            logger.warning(f"   OLD: {old_supplier_name} → NEW: {new_supplier_name}")
+                        else:
+                            logger.info(f"✅ Statement {statement.id} reprocessed successfully - supplier confirmed: {new_supplier_name}")
                     else:
-                        statement_result['error'] = result.get('error', 'Unknown error')
+                        statement_result.update({
+                            'supplier_name': old_supplier_name,  # Keep old if reprocessing failed
+                            'supplier_changed': False,
+                            'error': result.get('error', 'Unknown error')
+                        })
                         statistics['failed'] += 1
                         statistics['errors'].append(f"Statement {statement.id}: {result.get('error', 'Unknown error')}")
                         logger.error(f"❌ Statement {statement.id} reprocessing failed: {result.get('error')}")
@@ -872,12 +897,18 @@ class StatementController:
             
             # Compile final results
             success_rate = (statistics['successful'] / statistics['total_statements']) * 100 if statistics['total_statements'] > 0 else 0
+            supplier_change_count = statistics['supplier_changes']
             
             logger.info(f"Bulk reprocessing completed: {statistics['successful']}/{statistics['total_statements']} successful ({success_rate:.1f}%)")
+            if supplier_change_count > 0:
+                logger.warning(f"🚨 SUPPLIER CHANGES: {supplier_change_count} statements had supplier corrections!")
+                logger.warning("   This indicates previous misassignments that have now been fixed.")
+            else:
+                logger.info("✅ No supplier changes detected - all assignments were already correct.")
             
             return {
                 'success': True,
-                'message': f'Bulk reprocessing completed: {statistics["successful"]}/{statistics["total_statements"]} successful ({success_rate:.1f}%)',
+                'message': f'Bulk reprocessing completed: {statistics["successful"]}/{statistics["total_statements"]} successful ({success_rate:.1f}%), {supplier_change_count} supplier corrections',
                 'statistics': statistics,
                 'results': results,
                 'filter_applied': {
