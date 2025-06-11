@@ -3,9 +3,6 @@ from typing import Optional
 from sqlalchemy.orm import Session
 from datetime import datetime
 import logging
-import os
-import requests
-from pathlib import Path
 
 from mpi_backend.database import get_db
 from mpi_backend.database.controllers.statement_controller import (
@@ -45,7 +42,7 @@ def get_statement_invoice_data(
     ),
     supplier_name: Optional[str] = Query(
         None,
-        description="Supplier name to filter by"
+        description="Supplier name, supplier ID, or 'All' to filter by"
     ),
     status: Optional[str] = Query(
         None,
@@ -76,7 +73,8 @@ def get_statement_invoice_data(
       (filters by statement_date)
     - **to_date**: End date filter in DD/MM/YYYY format 
       (filters by statement_date)
-    - **supplier_name**: Filter by supplier name (partial match supported)
+    - **supplier_name**: Filter by supplier name (partial match supported), 
+      supplier ID (numeric), or "All" for all suppliers
     - **status**: Filter by reconciliation status 
       ('Processed', 'Failed', 'all')
     - **page**: Page number for pagination (starts from 1)
@@ -99,10 +97,17 @@ def get_statement_invoice_data(
     - **original_amount**: Original invoice amount
     - **balance**: Outstanding balance
     
-    **Example:**
+    **Examples:**
     ```
+    # Filter by date and status
     GET /statements/invoice-data?from_date=01/05/2025&to_date=01/06/2025&
     status=Processed&page=1&page_size=20
+    
+    # Get all suppliers' data
+    GET /statements/invoice-data?supplier_name=All&page=1&page_size=20
+    
+    # Filter by supplier ID
+    GET /statements/invoice-data?supplier_name=3&page=1&page_size=20
     ```
     """
     try:

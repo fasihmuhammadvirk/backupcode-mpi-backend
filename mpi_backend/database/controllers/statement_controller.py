@@ -344,7 +344,7 @@ class StatementController:
         Args:
             from_date: Start date filter (DD/MM/YYYY converted to date)
             to_date: End date filter (DD/MM/YYYY converted to date)
-            supplier_name: Supplier name filter
+            supplier_name: Supplier name/ID filter or "All" for all suppliers
             status: Invoice status filter (Processed/Failed)
             page: Page number (1-based)
             page_size: Number of items per page
@@ -366,11 +366,17 @@ class StatementController:
             if to_date:
                 query = query.filter(PlumbingStatement.statement_date <= to_date)
             
-            # Apply supplier filter
-            if supplier_name:
-                query = query.filter(
-                    PlumbingSupplier.name.ilike(f"%{supplier_name}%")
-                )
+            # Apply supplier filter - support "All", supplier ID, or supplier name
+            if supplier_name and supplier_name.lower() != "all":
+                # Check if supplier_name is a numeric ID
+                if supplier_name.isdigit():
+                    # Filter by supplier ID
+                    query = query.filter(PlumbingSupplier.id == int(supplier_name))
+                else:
+                    # Filter by supplier name (partial match)
+                    query = query.filter(
+                        PlumbingSupplier.name.ilike(f"%{supplier_name}%")
+                    )
             
             # Get total count before pagination
             total_count = query.count()
@@ -449,6 +455,12 @@ class StatementController:
                     'from_date': from_date.isoformat() if from_date else None,
                     'to_date': to_date.isoformat() if to_date else None,
                     'supplier_name': supplier_name,
+                    'supplier_filter_type': (
+                        'all' if supplier_name and supplier_name.lower() == 'all'
+                        else 'id' if supplier_name and supplier_name.isdigit()
+                        else 'name' if supplier_name
+                        else None
+                    ),
                     'status': status
                 }
             }
