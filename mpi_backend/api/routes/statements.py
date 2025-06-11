@@ -10,6 +10,8 @@ from mpi_backend.database.controllers.statement_controller import (
 )
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.s3_utils import get_presigned_url
+from mpi_backend.utils.statement_extractor.extractor import StatementExtractor
+from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,7 @@ def get_statement_invoice_data(
     ),
     supplier_name: Optional[str] = Query(
         None,
-        description="Supplier name to filter by"
+        description="Supplier name, supplier ID, or 'All' to filter by"
     ),
     status: Optional[str] = Query(
         None,
@@ -71,7 +73,8 @@ def get_statement_invoice_data(
       (filters by statement_date)
     - **to_date**: End date filter in DD/MM/YYYY format 
       (filters by statement_date)
-    - **supplier_name**: Filter by supplier name (partial match supported)
+    - **supplier_name**: Filter by supplier name (partial match supported), 
+      supplier ID (numeric), or "All" for all suppliers
     - **status**: Filter by reconciliation status 
       ('Processed', 'Failed', 'all')
     - **page**: Page number for pagination (starts from 1)
@@ -94,10 +97,17 @@ def get_statement_invoice_data(
     - **original_amount**: Original invoice amount
     - **balance**: Outstanding balance
     
-    **Example:**
+    **Examples:**
     ```
+    # Filter by date and status
     GET /statements/invoice-data?from_date=01/05/2025&to_date=01/06/2025&
     status=Processed&page=1&page_size=20
+    
+    # Get all suppliers' data
+    GET /statements/invoice-data?supplier_name=All&page=1&page_size=20
+    
+    # Filter by supplier ID
+    GET /statements/invoice-data?supplier_name=3&page=1&page_size=20
     ```
     """
     try:
@@ -289,4 +299,63 @@ def download_statement_pdf(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
         )
- 
+        
+@router.post("/reprocess")
+def reprocess_statement(
+    statement_id: int = Query(
+        ..., 
+        description="ID of the statement to reprocess"
+    ),
+    db: Session = Depends(get_db),
+    token: str = Depends(JWTBearer())
+):
+    """
+    Reprocess a monthly statement.
+    
+    This endpoint triggers the reprocessing of a statement.
+    
+    **Parameters:**
+    - **statement_id**: The ID of the statement to reprocess
+    
+    **Returns:**
+    - **status**: Status of the reprocessing operation
+    - **message**: Additional information about the operation
+    
+    **Example:**
+    ```
+    POST /statements/reprocess?statement_id=123
+    ```
+    """
+    try:
+        logger.info(
+            f"Reprocessing statement with ID: {statement_id}"
+        )
+        
+        # Get statement details
+        controller = StatementController(db)
+        result = controller.reprocess_statement(statement_id)
+        
+        if not result['success']:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Failed to reprocess statement: "
+                    f"{result.get('error', 'Unknown error')}"
+                )
+            )
+        
+        logger.info(
+            f"Successfully reprocessed statement {statement_id}"
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in statement reprocessing endpoint: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+       

@@ -3,6 +3,11 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, extract, func
 from math import ceil
+# Setup temporary directory for reprocessing
+from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
+import tempfile
+import requests
+from pathlib import Path
 import logging
 
 from mpi_backend.database.models.statement_models import (
@@ -339,7 +344,7 @@ class StatementController:
         Args:
             from_date: Start date filter (DD/MM/YYYY converted to date)
             to_date: End date filter (DD/MM/YYYY converted to date)
-            supplier_name: Supplier name filter
+            supplier_name: Supplier name/ID filter or "All" for all suppliers
             status: Invoice status filter (Processed/Failed)
             page: Page number (1-based)
             page_size: Number of items per page
@@ -361,11 +366,17 @@ class StatementController:
             if to_date:
                 query = query.filter(PlumbingStatement.statement_date <= to_date)
             
-            # Apply supplier filter
-            if supplier_name:
-                query = query.filter(
-                    PlumbingSupplier.name.ilike(f"%{supplier_name}%")
-                )
+            # Apply supplier filter - support "All", supplier ID, or supplier name
+            if supplier_name and supplier_name.lower() != "all":
+                # Check if supplier_name is a numeric ID
+                if supplier_name.isdigit():
+                    # Filter by supplier ID
+                    query = query.filter(PlumbingSupplier.id == int(supplier_name))
+                else:
+                    # Filter by supplier name (partial match)
+                    query = query.filter(
+                        PlumbingSupplier.name.ilike(f"%{supplier_name}%")
+                    )
             
             # Get total count before pagination
             total_count = query.count()
@@ -444,6 +455,12 @@ class StatementController:
                     'from_date': from_date.isoformat() if from_date else None,
                     'to_date': to_date.isoformat() if to_date else None,
                     'supplier_name': supplier_name,
+                    'supplier_filter_type': (
+                        'all' if supplier_name and supplier_name.lower() == 'all'
+                        else 'id' if supplier_name and supplier_name.isdigit()
+                        else 'name' if supplier_name
+                        else None
+                    ),
                     'status': status
                 }
             }
@@ -505,4 +522,191 @@ class StatementController:
             
         except Exception as e:
             logger.error(f"Error getting statement by ID {statement_id}: {str(e)}")
-            return None 
+            return None
+    
+    def reprocess_statement(self, statement_id: int) -> Dict[str, Any]:
+        """
+        Reprocess a statement by downloading PDF from S3 and re-extracting data
+        
+        Args:
+            statement_id: ID of the statement to reprocess
+            
+        Returns:
+            Dict with success status and details
+        """
+        try:
+            # Get statement details
+            statement_info = self.get_statement_by_id(statement_id)
+            if not statement_info:
+                return {
+                    'success': False,
+                    'error': f'Statement with ID {statement_id} not found'
+                }
+            
+            logger.info(f"Starting reprocessing of statement {statement_id}")
+            
+            # Get the statement PDF from S3
+            pdf_filename = statement_info['pdf_filename']
+            if not pdf_filename:
+                return {
+                    'success': False,
+                    'error': f'No PDF file associated with statement {statement_id}'
+                }
+            
+            # Generate S3 key for statement PDF
+            s3_key = f"statements/{pdf_filename}"
+            
+            try:
+                from mpi_backend.utils.s3_utils import get_presigned_url
+                statement_url = get_presigned_url(
+                    file_key=s3_key,
+                    expiration_time=300,  # 5 minutes
+                    is_invoice=False
+                )
+            except Exception as e:
+                logger.error(f"Failed to get presigned URL for {s3_key}: {str(e)}")
+                return {
+                    'success': False,
+                    'error': f'Could not access statement PDF: {str(e)}'
+                }
+            
+            
+            # Create temporary folder
+            temp_dir = Path(INVOICE_DOWNLOAD_FOLDER) / "temp_reprocess" / f"statement_{statement_id}"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Download the PDF file
+            pdf_path = temp_dir / pdf_filename
+            
+            try:
+                response = requests.get(statement_url, timeout=30)
+                if response.status_code != 200:
+                    return {
+                        'success': False,
+                        'error': f'Failed to download PDF: Status {response.status_code}'
+                    }
+                
+                with open(pdf_path, 'wb') as f:
+                    f.write(response.content)
+                
+                logger.info(f"Downloaded PDF to {pdf_path}")
+                
+            except Exception as e:
+                logger.error(f"Failed to download PDF: {str(e)}")
+                return {
+                    'success': False,
+                    'error': f'Failed to download PDF: {str(e)}'
+                }
+            
+            # Delete existing statement and invoice records
+            logger.info(f"Deleting existing records for statement {statement_id}")
+            try:
+                # Delete associated invoices first (foreign key constraint)
+                invoice_count = self.db.query(PlumbingInvoice).filter(
+                    PlumbingInvoice.statement_id == statement_id
+                ).count()
+                
+                self.db.query(PlumbingInvoice).filter(
+                    PlumbingInvoice.statement_id == statement_id
+                ).delete()
+                
+                # Delete the statement
+                statement_deleted = self.db.query(PlumbingStatement).filter(
+                    PlumbingStatement.id == statement_id
+                ).delete()
+                
+                if not statement_deleted:
+                    return {
+                        'success': False,
+                        'error': f'Failed to delete statement {statement_id}'
+                    }
+                
+                self.db.commit()
+                logger.info(f"Deleted statement {statement_id} and {invoice_count} associated invoices")
+                
+            except Exception as e:
+                self.db.rollback()
+                logger.error(f"Failed to delete existing records: {str(e)}")
+                return {
+                    'success': False,
+                    'error': f'Failed to delete existing records: {str(e)}'
+                }
+            
+            # Re-extract and process the statement
+            logger.info(f"Re-extracting data from {pdf_path}")
+            try:
+                from mpi_backend.utils.statement_extractor.extractor import StatementExtractor
+                
+                # Create extractor with database session
+                extractor = StatementExtractor(
+                    pdf_path=str(pdf_path),
+                    save_to_db=True,
+                    save_to_excel=False,
+                    db_session=self.db
+                )
+                
+                # Extract all pages
+                extract_success = extractor.extract_all_pages()
+                if not extract_success:
+                    return {
+                        'success': False,
+                        'error': 'Failed to extract data from PDF'
+                    }
+                
+                # Save to database
+                db_success = extractor.save_to_database()
+                if not db_success:
+                    return {
+                        'success': False,
+                        'error': 'Failed to save extracted data to database'
+                    }
+                
+                # Get the new statement ID
+                new_statement_id = extractor.statement_obj.id if extractor.statement_obj else None
+                new_invoice_count = len(extractor.combined_data) if hasattr(extractor, 'combined_data') else 0
+                
+                logger.info(f"Successfully reprocessed statement. New ID: {new_statement_id}, Invoices: {new_invoice_count}")
+                
+                # Clean up temporary files
+                try:
+                    import shutil
+                    shutil.rmtree(temp_dir)
+                    logger.info(f"Cleaned up temporary directory: {temp_dir}")
+                except Exception as cleanup_error:
+                    logger.warning(f"Failed to clean up {temp_dir}: {str(cleanup_error)}")
+                
+                return {
+                    'success': True,
+                    'message': f'Statement reprocessed successfully',
+                    'details': {
+                        'original_statement_id': statement_id,
+                        'new_statement_id': new_statement_id,
+                        'invoices_processed': new_invoice_count,
+                        'supplier_name': statement_info['supplier_name'],
+                        'statement_date': statement_info['statement_date'],
+                        'pdf_filename': pdf_filename
+                    }
+                }
+                
+            except Exception as e:
+                logger.error(f"Error during re-extraction: {str(e)}")
+                return {
+                    'success': False,
+                    'error': f'Error during re-extraction: {str(e)}'
+                }
+            
+        except Exception as e:
+            logger.error(f"Error in reprocess_statement: {str(e)}")
+            return {
+                'success': False,
+                'error': f'Internal error: {str(e)}'
+            }
+        finally:
+            # Ensure cleanup in case of errors
+            try:
+                temp_dir = Path(INVOICE_DOWNLOAD_FOLDER) / "temp_reprocess" / f"statement_{statement_id}"
+                if temp_dir.exists():
+                    import shutil
+                    shutil.rmtree(temp_dir)
+            except:
+                pass 
