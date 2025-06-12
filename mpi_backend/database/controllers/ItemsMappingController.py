@@ -2,7 +2,7 @@ from mpi_backend.database.models import ItemsMapping, InvoiceItem
 import pandas as pd
 import logging
 import re
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 from sqlalchemy import or_
 
 from mpi_backend.utils.export_utils import extract_supplier_id
@@ -45,18 +45,104 @@ class ItemsMappingController:
                 "status": "error",
                 "message": f"Cannot start Update All Mappings: A {operation_display} operation is already running"
             }
-            
-        # If db is not provided, create a new session
+        
+        # Create a new session for this task if needed
         if db is None:
-            db_session = SessionLocal()
-            try:
-                mapping_controller = cls(db_session)
-                return mapping_controller.update_all_mappings()
-            finally:
-                db_session.close()
-        else:
-            mapping_controller = cls(db)
-            return mapping_controller.update_all_mappings()
+            db = SessionLocal()
+        
+        controller = cls(db)
+        result = controller.update_all_mappings()
+        
+        return result
+
+    def search_clean_item_across_suppliers(self, clean_item: str) -> Dict[str, Any]:
+        """
+        Search for item mappings by clean item code across all suppliers.
+        
+        This method:
+        - Takes a clean item code (from invoice)
+        - Searches across ALL suppliers  
+        - Uses suffix cleaning to compare against database items
+        - Returns all matching mappings found
+        
+        Args:
+            clean_item (str): The clean item code from invoice
+            
+        Returns:
+            Dict containing search results
+        """
+        try:
+            db = self._get_db_session()
+            
+            # Get all mappings from all suppliers
+            all_mappings = db.query(ItemsMapping).all()
+            
+            matches = []
+            
+            for mapping in all_mappings:
+                # First try exact match (clean item vs database item)
+                if mapping.supplier_item_ids == clean_item:
+                    matches.append({
+                        "id": mapping.id,
+                        "supplier_id": mapping.supplier_id,
+                        "supplier_item_ids": mapping.supplier_item_ids,
+                        "mpi_code": mapping.mpi_code,
+                        "description": mapping.description,
+                        "google_sheet_name": mapping.google_sheet_name,
+                        "match_type": "exact",
+                        "supplier_name": self._get_supplier_name(mapping.supplier_id)
+                    })
+                else:
+                    # Try with suffix cleaning (clean database item vs clean item)
+                    cleaned_db_item = clean_supplier_suffix(
+                        mapping.supplier_item_ids, 
+                        mapping.supplier_id
+                    )
+                    
+                    if cleaned_db_item == clean_item:
+                        matches.append({
+                            "id": mapping.id,
+                            "supplier_id": mapping.supplier_id,
+                            "supplier_item_ids": mapping.supplier_item_ids,
+                            "cleaned_supplier_item_ids": cleaned_db_item,
+                            "mpi_code": mapping.mpi_code,
+                            "description": mapping.description,
+                            "google_sheet_name": mapping.google_sheet_name,
+                            "match_type": "cleaned",
+                            "supplier_name": self._get_supplier_name(mapping.supplier_id)
+                        })
+            
+            total_matches = len(matches)
+            
+            return {
+                "found": total_matches > 0,
+                "total_matches": total_matches,
+                "matches": matches,
+                "item_searched": clean_item
+            }
+            
+        except Exception as e:
+            logger.error(f"Error searching clean item across suppliers: {str(e)}")
+            raise Exception(f"Failed to search clean item across suppliers: {str(e)}")
+
+    def _get_supplier_name(self, supplier_id: int) -> str:
+        """
+        Helper method to get supplier name by ID.
+        
+        Args:
+            supplier_id (int): Supplier ID
+            
+        Returns:
+            str: Supplier name or "Unknown Supplier"
+        """
+        try:
+            from mpi_backend.database.models import Supplier
+            db = self._get_db_session()
+            supplier = db.query(Supplier).filter_by(id=supplier_id).first()
+            return supplier.supplier_name if supplier else f"Unknown Supplier (ID: {supplier_id})"
+        except Exception as e:
+            logger.warning(f"Could not fetch supplier name for ID {supplier_id}: {str(e)}")
+            return f"Unknown Supplier (ID: {supplier_id})"
 
     def get_items_mappings(self):
         # Check if db_context is callable (session factory) or a Session object

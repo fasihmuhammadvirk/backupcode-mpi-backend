@@ -19,6 +19,40 @@ def update_item_mappings(request: UpdateMappingRequest, db: Session = Depends(ge
         raise HTTPException(status_code=500, detail=f"Failed to update item mapping : {e}")
 
 
+@router.get("/search-item")
+def search_item_mapping(
+    item: str = Query(..., description="Clean item code from invoice to search for"),
+    db: Session = Depends(get_db), 
+    token: str = Depends(JWTBearer())
+):
+    """
+    Search for item mappings by clean item code across all suppliers.
+    
+    This endpoint:
+    - Takes a clean item code (from invoice)
+    - Searches across ALL suppliers
+    - Uses suffix cleaning to compare against database items
+    - Returns all matching mappings found
+    
+    Args:
+        item (str): The clean item code from invoice
+        
+    Returns:
+        Dict containing:
+        - found: boolean indicating if any mappings were found
+        - total_matches: number of mappings found
+        - matches: list of all matching mappings
+        - item_searched: the clean item that was searched
+    """
+    try:
+        result = ItemsMappingController(db).search_clean_item_across_suppliers(
+            clean_item=item
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to search item mapping: {e}")
+
+
 @router.get("/mpi_types", response_model=ItemMappingsByMpiTypeResponse)
 def get_mapping_by_mpi_type(db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
     try:
