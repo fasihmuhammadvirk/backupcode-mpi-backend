@@ -109,7 +109,7 @@ class GoogleSheetSyncController:
         Performs the sync operation if no sync task is currently running.
         
         Args:
-            operation: The operation being performed ('sync', 'update_invalid', or 'update_all')
+            operation: The operation being performed ('sync', 'update_no_match_uidi', or 'update_all')
             
         Returns:
             Dict with sync operation details
@@ -128,15 +128,23 @@ class GoogleSheetSyncController:
             self.__class__._current_operation = operation
             logger.info(f"Starting {operation} task...")
 
-            # Perform the sync operation
-            result = self.sync_sheet_mappings(
-                sheet_id=DEFAULT_SHEET_ID,
-                output_file=DEFAULT_OUTPUT_FILE,
-                api_key=GOOGLE_API_KEY,
-                skip_sheets=SKIP_SHEETS,
-                batch_size=MAPPING_CONFIG["batch_size"],
-                fuzzy_threshold=MAPPING_CONFIG["fuzzy_threshold"]
-            )
+            # Handle different operations
+            if operation == 'update_no_match_uidi':
+                # Call the mapping controller's update method directly
+                result = self.mapping_controller.update_no_match_uidi_mappings()
+            elif operation == 'update_all':
+                # Call the mapping controller's update all method directly
+                result = self.mapping_controller.update_all_mappings()
+            else:
+                # Default to syncing from Google Sheets
+                result = self.sync_sheet_mappings(
+                    sheet_id=DEFAULT_SHEET_ID,
+                    output_file=DEFAULT_OUTPUT_FILE,
+                    api_key=GOOGLE_API_KEY,
+                    skip_sheets=SKIP_SHEETS,
+                    batch_size=MAPPING_CONFIG["batch_size"],
+                    fuzzy_threshold=MAPPING_CONFIG["fuzzy_threshold"]
+                )
 
             # Update last sync time on success
             if result.get("success"):

@@ -465,66 +465,94 @@ class ItemsMappingController:
                 "message": f"Cannot start operation: {operation_display} is already in progress"
             }
             
-        with self.db_context() as db:
-            try:
-                # Get items with No Match / UIDI mappings - FIXED: use mpi_item instead of mpi_code
-                no_match_items = db.query(InvoiceItem).filter(
-                    or_(
-                        InvoiceItem.mpi_item.is_(None),
-                        InvoiceItem.mpi_item == "",
-                        InvoiceItem.mpi_item == "No Match",
-                        InvoiceItem.mpi_item.like("UIDI%")
-                    )
-                ).all()
+        # Check if db_context is callable (session factory) or a Session object
+        if callable(self.db_context):
+            with self.db_context() as db:
+                return self._perform_uidi_update(db)
+        else:
+            # Direct session object
+            return self._perform_uidi_update(self.db_context)
+
+    def _perform_uidi_update(self, db):
+        """Helper method to perform the actual UIDI update"""
+        try:
+            # Get items with No Match / UIDI mappings - FIXED: use mpi_item instead of mpi_code
+            no_match_items = db.query(InvoiceItem).filter(
+                or_(
+                    InvoiceItem.mpi_item.is_(None),
+                    InvoiceItem.mpi_item == "",
+                    InvoiceItem.mpi_item == "No Match",
+                    InvoiceItem.mpi_item.like("UIDI%")
+                )
+            ).all()
+            
+            if not no_match_items:
+                return {
+                    "status": "success",
+                    "message": "No items with No Match / UIDI found"
+                }
                 
-                if not no_match_items:
-                    return {
-                        "status": "success",
-                        "message": "No items with No Match / UIDI found"
-                    }
-                    
-                # Get ONLY valid permanent mappings for UIDI update
-                # We want real mappings, not temporary placeholders
-                valid_mappings = db.query(ItemsMapping).filter(
-                    ~ItemsMapping.mpi_code.like("UIDI%"),
-                    ItemsMapping.mpi_code != "No Match",
-                    ItemsMapping.mpi_code != "No Match / UIDI",
-                    ItemsMapping.mpi_code.isnot(None),
-                    ItemsMapping.mpi_code != ""
-                ).all()
+            # Get ONLY valid permanent mappings for UIDI update
+            # We want real mappings, not temporary placeholders
+            valid_mappings = db.query(ItemsMapping).filter(
+                ~ItemsMapping.mpi_code.like("UIDI%"),
+                ItemsMapping.mpi_code != "No Match",
+                ItemsMapping.mpi_code != "No Match / UIDI",
+                ItemsMapping.mpi_code.isnot(None),
+                ItemsMapping.mpi_code != ""
+            ).all()
+            
+            if not valid_mappings:
+                return {
+                    "status": "error",
+                    "message": "No valid permanent mappings available"
+                }
                 
-                if not valid_mappings:
-                    return {
-                        "status": "error",
-                        "message": "No valid permanent mappings available"
-                    }
-                    
-                # Update No Match / UIDI items if valid mappings are found
-                updated_count = 0
+            # Update No Match / UIDI items if valid mappings are found
+            updated_count = 0
+            
+            for item in no_match_items:
+                # Find matching mapping using supplier-specific suffix cleaning
+                matched = False
                 
-                for item in no_match_items:
-                    # Find matching mapping using supplier-specific suffix cleaning
-                    matched = False
+                for mapping in valid_mappings:
+                    # Validate this is truly a permanent mapping
+                    if is_temporary_mapping(mapping.mpi_code, mapping.description):
+                        logger.warning(f"Skipping temporary mapping in permanent table: {mapping.mpi_code}")
+                        continue
                     
-                    for mapping in valid_mappings:
-                        # Validate this is truly a permanent mapping
-                        if is_temporary_mapping(mapping.mpi_code, mapping.description):
-                            logger.warning(f"Skipping temporary mapping in permanent table: {mapping.mpi_code}")
-                            continue
-                        
-                        supplier_item_ids = mapping.supplier_item_ids
-                        if not supplier_item_ids:
-                            continue
-                        
-                        # Extract supplier_id from the invoice item's supplier/vendor
-                        supplier_id, _ = self._extract_supplier_id(item.vendor)
-                        
-                        # Clean both items for comparison (strip whitespace and apply suffix cleaning)
-                        clean_invoice_item = str(item.item).strip()
-                        clean_mapping_item = supplier_item_ids.strip()
-                        
-                        # First try exact match
-                        if clean_invoice_item == clean_mapping_item:
+                    supplier_item_ids = mapping.supplier_item_ids
+                    if not supplier_item_ids:
+                        continue
+                    
+                    # Extract supplier_id from the invoice item's supplier/vendor
+                    supplier_id, _ = self._extract_supplier_id(item.vendor)
+                    
+                    # Clean both items for comparison (strip whitespace and apply suffix cleaning)
+                    clean_invoice_item = str(item.item).strip()
+                    clean_mapping_item = supplier_item_ids.strip()
+                    
+                    # First try exact match
+                    if clean_invoice_item == clean_mapping_item:
+                        old_status = item.mpi_item or "Empty"
+                        item.mpi_item = mapping.mpi_code
+                        item.mpi_description = mapping.description
+                        item.sheet_name = mapping.google_sheet_name or ""
+                        updated_count += 1
+                        matched = True
+                        if old_status.startswith("UIDI"):
+                            logger.info(f"UIDI override: {clean_invoice_item} | {old_status} -> {mapping.mpi_code}")
+                        elif old_status == "No Match":
+                            logger.info(f"No Match override: {clean_invoice_item} | No Match -> {mapping.mpi_code}")
+                        else:
+                            logger.info(f"Item update: {clean_invoice_item} | {old_status} -> {mapping.mpi_code}")
+                        break
+                    
+                    # If no exact match, try with suffix cleaning
+                    if supplier_id:
+                        from mpi_backend.utils.item_utils import clean_supplier_suffix
+                        cleaned_mapping_item = clean_supplier_suffix(clean_mapping_item, supplier_id)
+                        if clean_invoice_item == cleaned_mapping_item:
                             old_status = item.mpi_item or "Empty"
                             item.mpi_item = mapping.mpi_code
                             item.mpi_description = mapping.description
@@ -532,52 +560,33 @@ class ItemsMappingController:
                             updated_count += 1
                             matched = True
                             if old_status.startswith("UIDI"):
-                                logger.info(f"UIDI override: {clean_invoice_item} | {old_status} -> {mapping.mpi_code}")
+                                logger.info(f"UIDI override (cleaned): {clean_invoice_item} == {cleaned_mapping_item} | {old_status} -> {mapping.mpi_code}")
                             elif old_status == "No Match":
-                                logger.info(f"No Match override: {clean_invoice_item} | No Match -> {mapping.mpi_code}")
+                                logger.info(f"No Match override (cleaned): {clean_invoice_item} == {cleaned_mapping_item} | No Match -> {mapping.mpi_code}")
                             else:
-                                logger.info(f"Item update: {clean_invoice_item} | {old_status} -> {mapping.mpi_code}")
+                                logger.info(f"Item update (cleaned): {clean_invoice_item} == {cleaned_mapping_item} | {old_status} -> {mapping.mpi_code}")
                             break
                         
-                        # If no exact match, try with suffix cleaning
-                        if supplier_id:
-                            from mpi_backend.utils.item_utils import clean_supplier_suffix
-                            cleaned_mapping_item = clean_supplier_suffix(clean_mapping_item, supplier_id)
-                            if clean_invoice_item == cleaned_mapping_item:
-                                old_status = item.mpi_item or "Empty"
-                                item.mpi_item = mapping.mpi_code
-                                item.mpi_description = mapping.description
-                                item.sheet_name = mapping.google_sheet_name or ""
-                                updated_count += 1
-                                matched = True
-                                if old_status.startswith("UIDI"):
-                                    logger.info(f"UIDI override (cleaned): {clean_invoice_item} == {cleaned_mapping_item} | {old_status} -> {mapping.mpi_code}")
-                                elif old_status == "No Match":
-                                    logger.info(f"No Match override (cleaned): {clean_invoice_item} == {cleaned_mapping_item} | No Match -> {mapping.mpi_code}")
-                                else:
-                                    logger.info(f"Item update (cleaned): {clean_invoice_item} == {cleaned_mapping_item} | {old_status} -> {mapping.mpi_code}")
-                                break
-                            
-                    # If no match found, set to "No Match"
-                    if not matched:
-                        item.mpi_item = "No Match"
-                        item.mpi_description = "No Match"
-                        
-                db.commit()
-                
-                return {
-                    "status": "success",
-                    "message": f"Updated {updated_count} items with No Match / UIDI mappings",
-                    "updated_count": updated_count
-                }
-                
-            except Exception as e:
-                db.rollback()
-                logger.error(f"Failed to update No Match / UIDI mappings: {str(e)}")
-                return {
-                    "status": "error",
-                    "message": f"Failed to update No Match / UIDI mappings: {str(e)}"
-                }
+                # If no match found, set to "No Match"
+                if not matched:
+                    item.mpi_item = "No Match"
+                    item.mpi_description = "No Match"
+                    
+            db.commit()
+            
+            return {
+                "status": "success",
+                "message": f"Updated {updated_count} items with No Match / UIDI mappings",
+                "updated_count": updated_count
+            }
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to update No Match / UIDI mappings: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Failed to update No Match / UIDI mappings: {str(e)}"
+            }
 
     def _extract_supplier_id(self, vendor_name):
         """Helper method to extract supplier ID from vendor name"""
@@ -629,118 +638,137 @@ class ItemsMappingController:
         try:
             from mpi_backend.utils.item_utils import clean_supplier_suffix
             
-            with self.db_context() as db:
-                # Fetch ALL mappings from supplier table - this should apply everything in the mapping table
-                # Note: We include ALL mappings because "Update All" means apply whatever is in the mapping table
-                all_mappings = db.query(ItemsMapping).all()
+            # Check if db_context is callable (session factory) or a Session object
+            if callable(self.db_context):
+                with self.db_context() as db:
+                    return self._perform_all_mappings_update(db)
+            else:
+                # Direct session object
+                return self._perform_all_mappings_update(self.db_context)
                 
-                if not all_mappings:
-                    logger.info("No mappings found in supplier table to apply")
-                    return {
-                        "status": "success",
-                        "message": "No mappings found in supplier table to apply"
-                    }
-                
-                # Separate valid mappings from invalid ones
-                valid_mappings = []
-                
-                for mapping in all_mappings:
-                    # Skip only truly invalid mappings (None, empty, etc.) but allow others
-                    if not mapping.mpi_code or mapping.mpi_code.strip() == "":
-                        logger.warning(f"Skipping mapping with empty MPI code: {mapping.supplier_item_ids}")
-                        continue
-                    
-                    # For "Update All", we want to apply what's in the table, even if it's UIDI
-                    # The business logic is: if it's in the supplier mapping table, apply it
-                    valid_mappings.append(mapping)
-                
-                if not valid_mappings:
-                    logger.info("No valid mappings found to apply after filtering")
-                    return {
-                        "status": "success", 
-                        "message": "No valid mappings found to apply after filtering"
-                    }
-                
-                # Process each mapping to update related invoice items
-                total_updated_count = 0
-                total_mappings_processed = 0
-                
-                for mapping in valid_mappings:
-                    total_mappings_processed += 1
-                    try:
-                        # Get vendor name from supplier_id
-                        from mpi_backend.database.models import Supplier
-                        supplier = db.query(Supplier).filter_by(
-                            id=mapping.supplier_id
-                        ).first()
-                        
-                        if not supplier:
-                            logger.warning(
-                                f"Supplier with ID {mapping.supplier_id} not found"
-                            )
-                            continue
-                            
-                        # Find all invoice items that match this item number and supplier
-                        # Note: Invoice items are clean, but mapping.supplier_item_ids may have suffixes
-                        all_supplier_items = db.query(InvoiceItem).filter(
-                            InvoiceItem.vendor.contains(supplier.supplier_name)
-                        ).all()
-                        
-                        # Find matches using cleaned mapping data vs clean invoice items
-                        matching_items = []
-                        # Strip whitespace from mapping item
-                        clean_mapping_item = mapping.supplier_item_ids.strip()
-                        cleaned_mapping_item = clean_supplier_suffix(clean_mapping_item, mapping.supplier_id)
-                        
-                        for invoice_item in all_supplier_items:
-                            # Clean the invoice item by stripping whitespace
-                            clean_invoice_item = invoice_item.item.strip()
-                            
-                            # First try exact match (clean invoice vs clean mapping)
-                            if clean_invoice_item == clean_mapping_item:
-                                matching_items.append(invoice_item)
-                            # Then try clean invoice vs cleaned mapping (suffix removed)
-                            elif clean_invoice_item == cleaned_mapping_item:
-                                matching_items.append(invoice_item)
-                        
-                        if not matching_items:
-                            continue
-                            
-                        # Update all matching items
-                        item_updated_count = 0
-                        for item in matching_items:
-                            # Apply the mapping from supplier table
-                            item.mpi_item = mapping.mpi_code
-                            item.mpi_description = mapping.description
-                            item.sheet_name = mapping.google_sheet_name or ""
-                            item_updated_count += 1
-                        
-                        total_updated_count += item_updated_count
-                        logger.info(
-                            f"Updated {item_updated_count} items for mapping "
-                            f"{mapping.supplier_item_ids}"
-                        )
-                        
-                        # Commit after each mapping batch to avoid large transactions
-                        db.commit()
-                        
-                    except Exception as e:
-                        logger.error(
-                            f"Error updating items for mapping "
-                            f"{mapping.supplier_item_ids}: {str(e)}"
-                        )
-                        db.rollback()
-                
-                logger.info(
-                    f"Update complete: {total_updated_count} items updated from "
-                    f"{total_mappings_processed} mappings"
-                )
+        except Exception as e:
+            logger.error(f"Failed to update all mappings: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Failed to update all mappings: {str(e)}"
+            }
+
+    def _perform_all_mappings_update(self, db):
+        """Helper method to perform the actual all mappings update"""
+        try:
+            from mpi_backend.utils.item_utils import clean_supplier_suffix
+            
+            # Fetch ALL mappings from supplier table - this should apply everything in the mapping table
+            # Note: We include ALL mappings because "Update All" means apply whatever is in the mapping table
+            all_mappings = db.query(ItemsMapping).all()
+            
+            if not all_mappings:
+                logger.info("No mappings found in supplier table to apply")
                 return {
                     "status": "success",
-                    "message": (f"{total_updated_count} items updated from "
-                                f"{total_mappings_processed} mappings")
+                    "message": "No mappings found in supplier table to apply"
                 }
-        
+            
+            # Separate valid mappings from invalid ones
+            valid_mappings = []
+            
+            for mapping in all_mappings:
+                # Skip only truly invalid mappings (None, empty, etc.) but allow others
+                if not mapping.mpi_code or mapping.mpi_code.strip() == "":
+                    logger.warning(f"Skipping mapping with empty MPI code: {mapping.supplier_item_ids}")
+                    continue
+                
+                # For "Update All", we want to apply what's in the table, even if it's UIDI
+                # The business logic is: if it's in the supplier mapping table, apply it
+                valid_mappings.append(mapping)
+            
+            if not valid_mappings:
+                logger.info("No valid mappings found to apply after filtering")
+                return {
+                    "status": "success", 
+                    "message": "No valid mappings found to apply after filtering"
+                }
+            
+            # Process each mapping to update related invoice items
+            total_updated_count = 0
+            total_mappings_processed = 0
+            
+            for mapping in valid_mappings:
+                total_mappings_processed += 1
+                try:
+                    # Get vendor name from supplier_id
+                    from mpi_backend.database.models import Supplier
+                    supplier = db.query(Supplier).filter_by(
+                        id=mapping.supplier_id
+                    ).first()
+                    
+                    if not supplier:
+                        logger.warning(
+                            f"Supplier with ID {mapping.supplier_id} not found"
+                        )
+                        continue
+                        
+                    # Find all invoice items that match this item number and supplier
+                    # Note: Invoice items are clean, but mapping.supplier_item_ids may have suffixes
+                    all_supplier_items = db.query(InvoiceItem).filter(
+                        InvoiceItem.vendor.contains(supplier.supplier_name)
+                    ).all()
+                    
+                    # Find matches using cleaned mapping data vs clean invoice items
+                    matching_items = []
+                    # Strip whitespace from mapping item
+                    clean_mapping_item = mapping.supplier_item_ids.strip()
+                    cleaned_mapping_item = clean_supplier_suffix(clean_mapping_item, mapping.supplier_id)
+                    
+                    for invoice_item in all_supplier_items:
+                        # Clean the invoice item by stripping whitespace
+                        clean_invoice_item = invoice_item.item.strip()
+                        
+                        # First try exact match (clean invoice vs clean mapping)
+                        if clean_invoice_item == clean_mapping_item:
+                            matching_items.append(invoice_item)
+                        # Then try clean invoice vs cleaned mapping (suffix removed)
+                        elif clean_invoice_item == cleaned_mapping_item:
+                            matching_items.append(invoice_item)
+                    
+                    if not matching_items:
+                        continue
+                        
+                    # Update all matching items
+                    item_updated_count = 0
+                    for item in matching_items:
+                        # Apply the mapping from supplier table
+                        item.mpi_item = mapping.mpi_code
+                        item.mpi_description = mapping.description
+                        item.sheet_name = mapping.google_sheet_name or ""
+                        item_updated_count += 1
+                    
+                    total_updated_count += item_updated_count
+                    logger.info(
+                        f"Updated {item_updated_count} items for mapping "
+                        f"{mapping.supplier_item_ids}"
+                    )
+                    
+                    # Commit after each mapping batch to avoid large transactions
+                    db.commit()
+                    
+                except Exception as e:
+                    logger.error(
+                        f"Error updating items for mapping "
+                        f"{mapping.supplier_item_ids}: {str(e)}"
+                    )
+                    db.rollback()
+            
+            logger.info(
+                f"Update complete: {total_updated_count} items updated from "
+                f"{total_mappings_processed} mappings"
+            )
+            return {
+                "status": "success",
+                "message": (f"{total_updated_count} items updated from "
+                            f"{total_mappings_processed} mappings")
+            }
+            
         except Exception as e:
             logger.error(f"Failed to update all mappings: {str(e)}")
             return {
