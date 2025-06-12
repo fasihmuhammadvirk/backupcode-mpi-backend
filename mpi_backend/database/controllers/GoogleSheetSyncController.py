@@ -130,13 +130,49 @@ class GoogleSheetSyncController:
 
             # Handle different operations
             if operation == 'update_no_match_uidi':
-                # Call the mapping controller's update method directly
+                # First sync from Google Sheets to get latest mappings
+                sync_result = self.sync_sheet_mappings(
+                    sheet_id=DEFAULT_SHEET_ID,
+                    output_file=DEFAULT_OUTPUT_FILE,
+                    api_key=GOOGLE_API_KEY,
+                    skip_sheets=SKIP_SHEETS,
+                    batch_size=MAPPING_CONFIG["batch_size"],
+                    fuzzy_threshold=MAPPING_CONFIG["fuzzy_threshold"]
+                )
+                
+                # If sync failed, return the sync error
+                if not sync_result.get("success"):
+                    return sync_result
+                
+                # Then update No Match / UIDI mappings using the newly synced data
                 result = self.mapping_controller.update_no_match_uidi_mappings()
+                
+                # Combine results
+                result["sync_info"] = f"Synced {sync_result.get('new_mappings_count', 0)} new mappings from Google Sheets first"
+                
             elif operation == 'update_all':
-                # Call the mapping controller's update all method directly
+                # First sync from Google Sheets to get latest mappings
+                sync_result = self.sync_sheet_mappings(
+                    sheet_id=DEFAULT_SHEET_ID,
+                    output_file=DEFAULT_OUTPUT_FILE,
+                    api_key=GOOGLE_API_KEY,
+                    skip_sheets=SKIP_SHEETS,
+                    batch_size=MAPPING_CONFIG["batch_size"],
+                    fuzzy_threshold=MAPPING_CONFIG["fuzzy_threshold"]
+                )
+                
+                # If sync failed, return the sync error
+                if not sync_result.get("success"):
+                    return sync_result
+                
+                # Then update all mappings using the newly synced data
                 result = self.mapping_controller.update_all_mappings()
+                
+                # Combine results
+                result["sync_info"] = f"Synced {sync_result.get('new_mappings_count', 0)} new mappings from Google Sheets first"
+                
             else:
-                # Default to syncing from Google Sheets
+                # Default to syncing from Google Sheets only
                 result = self.sync_sheet_mappings(
                     sheet_id=DEFAULT_SHEET_ID,
                     output_file=DEFAULT_OUTPUT_FILE,

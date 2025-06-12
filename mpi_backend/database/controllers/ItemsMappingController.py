@@ -81,7 +81,62 @@ class ItemsMappingController:
         try:
             matches = []
             
-            with self.db_context() as db:
+            # Check if db_context is callable (session factory) or a Session object
+            if callable(self.db_context):
+                with self.db_context() as db:
+                    # Get only valid permanent mappings from all suppliers (exclude temporary ones)
+                    all_mappings = db.query(ItemsMapping).filter(
+                        ~ItemsMapping.mpi_code.like("UIDI%"),
+                        ItemsMapping.mpi_code != "No Match",
+                        ItemsMapping.mpi_code != "No Match / UIDI",
+                        ItemsMapping.mpi_code.isnot(None),
+                        ItemsMapping.mpi_code != ""
+                    ).all()
+                    
+                    for mapping in all_mappings:
+                        # Additional validation to ensure we don't include temporary mappings
+                        if is_temporary_mapping(mapping.mpi_code, mapping.description):
+                            logger.warning(f"Skipping temporary mapping in search: {mapping.mpi_code}")
+                            continue
+                        
+                        # Clean both items for comparison (strip whitespace)
+                        clean_mapping_item = mapping.supplier_item_ids.strip()
+                        clean_search_item = clean_item.strip()
+                        
+                        # First try exact match (clean item vs clean database item)
+                        if clean_mapping_item == clean_search_item:
+                            matches.append({
+                                "id": mapping.id,
+                                "supplier_id": mapping.supplier_id,
+                                "supplier_item_ids": mapping.supplier_item_ids,
+                                "mpi_code": mapping.mpi_code,
+                                "description": mapping.description,
+                                "google_sheet_name": mapping.google_sheet_name,
+                                "match_type": "exact",
+                                "supplier_name": self._get_supplier_name(mapping.supplier_id)
+                            })
+                        else:
+                            # Try with suffix cleaning (clean database item vs clean item)
+                            cleaned_db_item = clean_supplier_suffix(
+                                clean_mapping_item, 
+                                mapping.supplier_id
+                            )
+                            
+                            if cleaned_db_item == clean_search_item:
+                                matches.append({
+                                    "id": mapping.id,
+                                    "supplier_id": mapping.supplier_id,
+                                    "supplier_item_ids": mapping.supplier_item_ids,
+                                    "cleaned_supplier_item_ids": cleaned_db_item,
+                                    "mpi_code": mapping.mpi_code,
+                                    "description": mapping.description,
+                                    "google_sheet_name": mapping.google_sheet_name,
+                                    "match_type": "cleaned",
+                                    "supplier_name": self._get_supplier_name(mapping.supplier_id)
+                                })
+            else:
+                # Direct session object
+                db = self.db_context
                 # Get only valid permanent mappings from all suppliers (exclude temporary ones)
                 all_mappings = db.query(ItemsMapping).filter(
                     ~ItemsMapping.mpi_code.like("UIDI%"),
@@ -158,7 +213,14 @@ class ItemsMappingController:
         """
         try:
             from mpi_backend.database.models import Supplier
-            with self.db_context() as db:
+            # Check if db_context is callable (session factory) or a Session object
+            if callable(self.db_context):
+                with self.db_context() as db:
+                    supplier = db.query(Supplier).filter_by(id=supplier_id).first()
+                    return supplier.supplier_name if supplier else f"Unknown Supplier (ID: {supplier_id})"
+            else:
+                # Direct session object
+                db = self.db_context
                 supplier = db.query(Supplier).filter_by(id=supplier_id).first()
                 return supplier.supplier_name if supplier else f"Unknown Supplier (ID: {supplier_id})"
         except Exception as e:
@@ -322,94 +384,102 @@ class ItemsMappingController:
             supplier_id (str): The supplier ID for the mapping
             mapping_data (dict): Mapping data containing mpi_code, description, etc.
         """
-        with self.db_context() as db:
-            try:
-                # Clean and validate the mapping data
-                cleaned_data = clean_mapping_data(mapping_data)
-                is_valid, validation_errors = validate_mapping_for_permanent_storage(cleaned_data)
+        # Check if db_context is callable (session factory) or a Session object
+        if callable(self.db_context):
+            with self.db_context() as db:
+                return self._perform_update_mapping(db, supplier_id, mapping_data)
+        else:
+            # Direct session object
+            return self._perform_update_mapping(self.db_context, supplier_id, mapping_data)
+
+    def _perform_update_mapping(self, db, supplier_id: str, mapping_data: dict):
+        try:
+            # Clean and validate the mapping data
+            cleaned_data = clean_mapping_data(mapping_data)
+            is_valid, validation_errors = validate_mapping_for_permanent_storage(cleaned_data)
+            
+            # If this is a temporary mapping, redirect to temporary storage
+            if not is_valid:
+                logger.warning(f"Blocking temporary mapping from permanent storage: {cleaned_data.get('mpi_code')} - {validation_errors}")
                 
-                # If this is a temporary mapping, redirect to temporary storage
-                if not is_valid:
-                    logger.warning(f"Blocking temporary mapping from permanent storage: {cleaned_data.get('mpi_code')} - {validation_errors}")
+                # Save to temporary storage instead
+                try:
+                    self._save_to_temporary_storage(
+                        db, 
+                        cleaned_data.get("supplier_item_ids", ""),
+                        cleaned_data.get("mpi_code", ""),
+                        int(supplier_id)
+                    )
+                    db.commit()
+                    return {
+                        "status": "redirected_to_temporary",
+                        "message": f"Temporary mapping saved to temporary storage instead of permanent mappings",
+                        "validation_errors": validation_errors,
+                        "temporary_mapping_created": True
+                    }
+                except Exception as temp_error:
+                    logger.error(f"Failed to save to temporary storage: {temp_error}")
+                    raise Exception(f"Cannot save temporary mapping: {validation_errors[0] if validation_errors else 'Invalid mapping data'}")
+            
+            # Proceed with permanent mapping (validation passed)
+            is_update = False
+            old_mpi_code = None
+            old_description = None
+            
+            # Check if mapping already exists
+            existing_mapping = db.query(ItemsMapping).filter_by(
+                supplier_id=supplier_id,
+                supplier_item_ids=cleaned_data["supplier_item_ids"]
+            ).first()
+            
+            if existing_mapping:
+                is_update = True
+                old_mpi_code = existing_mapping.mpi_code
+                old_description = existing_mapping.description
+                
+                # Update existing mapping
+                for key, value in cleaned_data.items():
+                    setattr(existing_mapping, key, value)
                     
-                    # Save to temporary storage instead
-                    try:
-                        self._save_to_temporary_storage(
-                            db, 
-                            cleaned_data.get("supplier_item_ids", ""),
-                            cleaned_data.get("mpi_code", ""),
-                            int(supplier_id)
-                        )
-                        db.commit()
-                        return {
-                            "status": "redirected_to_temporary",
-                            "message": f"Temporary mapping saved to temporary storage instead of permanent mappings",
-                            "validation_errors": validation_errors,
-                            "temporary_mapping_created": True
-                        }
-                    except Exception as temp_error:
-                        logger.error(f"Failed to save to temporary storage: {temp_error}")
-                        raise Exception(f"Cannot save temporary mapping: {validation_errors[0] if validation_errors else 'Invalid mapping data'}")
-                
-                # Proceed with permanent mapping (validation passed)
-                is_update = False
-                old_mpi_code = None
-                old_description = None
-                
-                # Check if mapping already exists
-                existing_mapping = db.query(ItemsMapping).filter_by(
-                    supplier_id=supplier_id,
-                    supplier_item_ids=cleaned_data["supplier_item_ids"]
-                ).first()
-                
-                if existing_mapping:
-                    is_update = True
-                    old_mpi_code = existing_mapping.mpi_code
-                    old_description = existing_mapping.description
-                    
-                    # Update existing mapping
-                    for key, value in cleaned_data.items():
-                        setattr(existing_mapping, key, value)
-                        
-                    logger.info(f"Updated permanent mapping: {cleaned_data['supplier_item_ids']} -> {cleaned_data['mpi_code']}")
-                else:
-                    # Create new mapping
-                    db_mapping = ItemsMapping(**cleaned_data, supplier_id=supplier_id)
-                    db.add(db_mapping)
-                    logger.info(f"Created new permanent mapping: {cleaned_data['supplier_item_ids']} -> {cleaned_data['mpi_code']}")
-                
-                # Commit the changes to the mapping
-                db.commit()
-                
-                # If this was an update and the mpi_code or description changed,
-                # propagate the changes to related InvoiceItems
-                if is_update and (
-                    old_mpi_code != cleaned_data.get("mpi_code") or 
-                    old_description != cleaned_data.get("description")
-                ):
-                    try:
-                        self._propagate_mapping_changes(
-                            db, 
-                            supplier_id,
-                            cleaned_data["supplier_item_ids"],
-                            cleaned_data.get("mpi_code", ""),
-                            cleaned_data.get("description", ""),
-                            cleaned_data.get("google_sheet_name", "")
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to propagate mapping changes: {str(e)}")
-                
-                return {
-                    "status": "success",
-                    "message": "Permanent mapping created/updated successfully",
-                    "mapping_type": "permanent",
-                    "is_update": is_update
-                }
-                
-            except Exception as e:
-                db.rollback()
-                logger.error(f"Failed to update mapping: {str(e)}")
-                raise
+                logger.info(f"Updated permanent mapping: {cleaned_data['supplier_item_ids']} -> {cleaned_data['mpi_code']}")
+            else:
+                # Create new mapping
+                db_mapping = ItemsMapping(**cleaned_data, supplier_id=supplier_id)
+                db.add(db_mapping)
+                logger.info(f"Created new permanent mapping: {cleaned_data['supplier_item_ids']} -> {cleaned_data['mpi_code']}")
+            
+            # Commit the changes to the mapping
+            db.commit()
+            
+            # If this was an update and the mpi_code or description changed,
+            # propagate the changes to related InvoiceItems
+            if is_update and (
+                old_mpi_code != cleaned_data.get("mpi_code") or 
+                old_description != cleaned_data.get("description")
+            ):
+                try:
+                    self._propagate_mapping_changes(
+                        db, 
+                        supplier_id,
+                        cleaned_data["supplier_item_ids"],
+                        cleaned_data.get("mpi_code", ""),
+                        cleaned_data.get("description", ""),
+                        cleaned_data.get("google_sheet_name", "")
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to propagate mapping changes: {str(e)}")
+            
+            return {
+                "status": "success",
+                "message": "Permanent mapping created/updated successfully",
+                "mapping_type": "permanent",
+                "is_update": is_update
+            }
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to update mapping: {str(e)}")
+            raise
 
     def _save_to_temporary_storage(self, db: Session, original_item_number: str, 
                                   temporary_item_number: str, supplier_id: int):
@@ -567,10 +637,9 @@ class ItemsMappingController:
                                 logger.info(f"Item update (cleaned): {clean_invoice_item} == {cleaned_mapping_item} | {old_status} -> {mapping.mpi_code}")
                             break
                         
-                # If no match found, set to "No Match"
-                if not matched:
-                    item.mpi_item = "No Match"
-                    item.mpi_description = "No Match"
+                # If no match found, do NOT change the item status
+                # We want to preserve UIDI items as UIDI until a valid mapping is found
+                # Only convert "No Match" to proper mappings, never UIDI to "No Match"
                     
             db.commit()
             
