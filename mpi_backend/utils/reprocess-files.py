@@ -12,6 +12,7 @@ from datetime import datetime
 import os
 import pandas as pd
 import uuid
+from mpi_backend.utils.item_utils import clean_supplier_suffix
 
 
 db = contextmanager(get_db)
@@ -86,30 +87,52 @@ def extract_email_date(path):
 
 
 def search_replace(row, temp_items, item_mappings):
-
-    item = row['Item']
-
-    # Searching in temp_items
-    temp_match = temp_items[temp_items['original_item_number'] == item]
+    """
+    Search for item mappings with supplier-specific suffix cleaning.
+    Maps original_item (supplier_item_ids) to mpi_code.
+    
+    Note: Invoice data is clean, but database mapping data has suffixes that need cleaning.
+    """
+    original_item = row['Item']  # This is the CLEAN supplier_item_ids from invoice
+    supplier_id, _ = extract_supplier_id(row['Vendor'])
+    
+    # Searching in temp_items (temporary_item_mappings table)
+    # First try exact match with clean invoice item
+    temp_match = temp_items[temp_items['original_item_number'] == original_item]
+    
+    # If no exact match and we have supplier_id, clean the DB data and compare with clean invoice item
+    if temp_match.empty and supplier_id:
+        temp_match = temp_items[
+            temp_items['original_item_number'].apply(lambda x: clean_supplier_suffix(x, supplier_id)) == original_item
+        ]
+    
     if not temp_match.empty:
-        row['MpiItem'] = temp_match.iloc[0]['temporary_item_number']
+        row['MpiItem'] = temp_match.iloc[0]['temporary_item_number']  # This is the mpi_code
         row['MpiDescription'] = temp_match.iloc[0]['description']
         row['Sheet Name'] = ''
         return row
 
-    # Searching in item_mappings
-    for column in item_mappings.columns:
-        mapping_match = item_mappings[item_mappings[column] == item]
+    # Searching in item_mappings (supplier_item_mappings table)
+    # Only compare against supplier_item_ids column (not all columns)
+    if 'supplier_item_ids' in item_mappings.columns:
+        # First try exact match with clean invoice item
+        mapping_match = item_mappings[item_mappings['supplier_item_ids'] == original_item]
+        
+        # If no exact match and we have supplier_id, clean the DB mapping data and compare with clean invoice item
+        if mapping_match.empty and supplier_id:
+            mapping_match = item_mappings[
+                item_mappings['supplier_item_ids'].apply(lambda x: clean_supplier_suffix(x, supplier_id)) == original_item
+            ]
+        
         if not mapping_match.empty:
-            row['MpiItem'] = mapping_match.iloc[0]['mpi_code']
+            row['MpiItem'] = mapping_match.iloc[0]['mpi_code']  # This is the target mpi_code
             row['MpiDescription'] = mapping_match.iloc[0]['description']
             sheet_name = mapping_match.iloc[0]['google_sheet_name']
             row['Sheet Name'] = sheet_name
             return row
 
     # will only be triggered if no mapping is found
-    supplier_id, _ = extract_supplier_id(row['Vendor'])
-    if not UnmappedItemsController(db).is_item_code_present(row['Item']):
+    if not UnmappedItemsController(db).is_item_code_present(row['Item'], supplier_id):
         UnmappedItemsController(db).insert_unmapped_item(row['Item'],row['Description'],supplier_id)
 
     return row

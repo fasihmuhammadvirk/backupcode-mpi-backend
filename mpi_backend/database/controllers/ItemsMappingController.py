@@ -1,11 +1,13 @@
 from mpi_backend.database.models import ItemsMapping, InvoiceItem
 import pandas as pd
 import logging
+import re
 from typing import Dict, Any
 from sqlalchemy import or_
 
 from mpi_backend.utils.export_utils import extract_supplier_id
 from mpi_backend.database import SessionLocal
+from mpi_backend.utils.item_utils import clean_supplier_suffix
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -331,10 +333,22 @@ class ItemsMappingController:
                         continue
                         
                     # Find all invoice items that match this item number and supplier
-                    matching_items = db.query(InvoiceItem).filter(
-                        InvoiceItem.item == mapping.supplier_item_ids,
+                    # Note: Invoice items are clean, but mapping.supplier_item_ids may have suffixes
+                    all_supplier_items = db.query(InvoiceItem).filter(
                         InvoiceItem.vendor.contains(supplier.supplier_name)
                     ).all()
+                    
+                    # Find matches using cleaned mapping data vs clean invoice items
+                    matching_items = []
+                    cleaned_mapping_item = clean_supplier_suffix(mapping.supplier_item_ids, mapping.supplier_id)
+                    
+                    for invoice_item in all_supplier_items:
+                        # First try exact match (clean invoice vs original mapping)
+                        if invoice_item.item == mapping.supplier_item_ids:
+                            matching_items.append(invoice_item)
+                        # Then try clean invoice vs cleaned mapping
+                        elif invoice_item.item == cleaned_mapping_item:
+                            matching_items.append(invoice_item)
                     
                     if not matching_items:
                         continue
@@ -385,16 +399,16 @@ class ItemsMappingController:
     def _propagate_mapping_changes(self, db, supplier_id, item_number, 
                                   new_mpi_code, new_description, sheet_name):
         """
-        Propagate mapping changes to all matching InvoiceItems.
+        Propagate mapping changes to all matching InvoiceItems with suffix cleaning.
         
         Updates all InvoiceItem records that:
-        1. Have the same item number (item field)
+        1. Have the same item number (item field) - with suffix cleaning comparison
         2. Belong to the same supplier (determined from vendor field)
         
         Args:
             db: Database session
             supplier_id (str): Supplier ID
-            item_number (str): Item identifier/number
+            item_number (str): Item identifier/number (supplier_item_ids)
             new_mpi_code (str): New MPI code to set
             new_description (str): New description to set
             sheet_name (str): Sheet name to set
@@ -407,15 +421,26 @@ class ItemsMappingController:
             if not supplier:
                 logger.warning(f"Supplier with ID {supplier_id} not found")
                 return
-                
+            
             # Find all invoice items that match this item number and supplier
-            matching_items = db.query(InvoiceItem).filter(
-                InvoiceItem.item == item_number,
+            # Note: Invoice items are clean, but mapping item_number may have suffixes
+            all_invoice_items = db.query(InvoiceItem).filter(
                 InvoiceItem.vendor.contains(supplier.supplier_name)
             ).all()
             
+            matching_items = []
+            cleaned_mapping_item = clean_supplier_suffix(item_number, supplier_id)
+            
+            for invoice_item in all_invoice_items:
+                # First try exact match (invoice item vs mapping item)
+                if invoice_item.item == item_number:
+                    matching_items.append(invoice_item)
+                # Then try cleaned mapping item vs clean invoice item
+                elif invoice_item.item == cleaned_mapping_item:
+                    matching_items.append(invoice_item)
+            
             if not matching_items:
-                logger.info(f"No matching invoice items found for {item_number}")
+                logger.info(f"No matching invoice items found for {item_number} (cleaned: {cleaned_item_number})")
                 return
                 
             # Update all matching items
@@ -428,7 +453,7 @@ class ItemsMappingController:
                 
             # Commit the changes
             db.commit()
-            logger.info(f"Updated {updated_count} invoice items with new mapping data")
+            logger.info(f"Updated {updated_count} invoice items with new mapping data for {item_number}")
             
         except Exception as e:
             logger.error(f"Error propagating mapping changes: {str(e)}")
