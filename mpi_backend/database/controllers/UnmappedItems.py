@@ -1,5 +1,6 @@
 from mpi_backend.database.models import UnmappedItems
 import pandas as pd
+from mpi_backend.utils.item_utils import clean_supplier_suffix
 
 
 class UnmappedItemsController:
@@ -26,14 +27,33 @@ class UnmappedItemsController:
             db.add(new_item)
             db.commit()
 
-    def is_item_code_present(self,item_code):
+    def is_item_code_present(self, item_code, supplier_id=None):
+        """
+        Check if an item code is present in unmapped items with supplier-specific suffix cleaning support.
+        
+        Args:
+            item_code (str): Clean item code from invoice to check
+            supplier_id (int, optional): Supplier ID for targeted suffix cleaning
+            
+        Returns:
+            bool: True if item is present (with or without suffix), False otherwise
+        """
         try:
             with self.db_context() as db:
-                is_present = db.query(UnmappedItems).filter_by(supplier_item_ids=item_code).first()
-            if is_present:
-                return True
-            else:
+                # Get all unmapped items
+                all_unmapped = db.query(UnmappedItems).all()
+                
+                # Check clean invoice item against both original and cleaned DB data
+                for unmapped_item in all_unmapped:
+                    # First try exact match (clean invoice vs DB item)
+                    if unmapped_item.supplier_item_ids == item_code:
+                        return True
+                    # Then try clean invoice vs cleaned DB item
+                    elif supplier_id and clean_supplier_suffix(unmapped_item.supplier_item_ids, supplier_id) == item_code:
+                        return True
+                        
                 return False
+                
         except Exception as e:
             print(f'Unmapped item-{item_code} could not be looked up in db ->{e}')
             return False
