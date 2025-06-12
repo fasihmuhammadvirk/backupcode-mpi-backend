@@ -1,13 +1,20 @@
-from mpi_backend.database.models import ItemsMapping, InvoiceItem
+from mpi_backend.database.models import ItemsMapping, InvoiceItem, TempItemMapping
 import pandas as pd
 import logging
 import re
 from typing import Dict, Any, List, Optional
 from sqlalchemy import or_
+from sqlalchemy.orm import Session
 
 from mpi_backend.utils.export_utils import extract_supplier_id
 from mpi_backend.database import SessionLocal
 from mpi_backend.utils.item_utils import clean_supplier_suffix
+from mpi_backend.utils.mapping_validators import (
+    validate_mapping_for_permanent_storage, 
+    should_use_temporary_storage,
+    is_temporary_mapping,
+    clean_mapping_data
+)
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -74,12 +81,22 @@ class ItemsMappingController:
         try:
             db = self._get_db_session()
             
-            # Get all mappings from all suppliers
-            all_mappings = db.query(ItemsMapping).all()
+            # Get only valid permanent mappings from all suppliers (exclude temporary ones)
+            all_mappings = db.query(ItemsMapping).filter(
+                ~ItemsMapping.mpi_code.like("UIDI%"),
+                ItemsMapping.mpi_code != "No Match",
+                ItemsMapping.mpi_code != "No Match / UIDI",
+                ItemsMapping.mpi_code.isnot(None),
+                ItemsMapping.mpi_code != ""
+            ).all()
             
             matches = []
             
             for mapping in all_mappings:
+                # Additional validation to ensure we don't include temporary mappings
+                if is_temporary_mapping(mapping.mpi_code, mapping.description):
+                    logger.warning(f"Skipping temporary mapping in search: {mapping.mpi_code}")
+                    continue
                 # First try exact match (clean item vs database item)
                 if mapping.supplier_item_ids == clean_item:
                     matches.append({
@@ -144,24 +161,72 @@ class ItemsMappingController:
             logger.warning(f"Could not fetch supplier name for ID {supplier_id}: {str(e)}")
             return f"Unknown Supplier (ID: {supplier_id})"
 
-    def get_items_mappings(self):
+    def get_items_mappings(self, include_temporary: bool = False):
+        """
+        Get item mappings with option to filter out temporary mappings.
+        
+        Args:
+            include_temporary (bool): If False (default), excludes temporary/UIDI mappings
+        """
         # Check if db_context is callable (session factory) or a Session object
         if callable(self.db_context):
             with self.db_context() as db:
-                query_result = db.query(ItemsMapping).all()
+                query = db.query(ItemsMapping)
+                
+                # Filter out temporary mappings unless explicitly requested
+                if not include_temporary:
+                    query = query.filter(
+                        ~ItemsMapping.mpi_code.like("UIDI%"),
+                        ItemsMapping.mpi_code != "No Match",
+                        ItemsMapping.mpi_code != "No Match / UIDI",
+                        ItemsMapping.mpi_code.isnot(None),
+                        ItemsMapping.mpi_code != ""
+                    )
+                
+                query_result = query.all()
+                
+                # Additional validation to catch any temporary mappings that slipped through
+                filtered_results = []
+                for item in query_result:
+                    if include_temporary or not is_temporary_mapping(item.mpi_code, item.description):
+                        filtered_results.append(item)
+                    else:
+                        logger.warning(f"Filtered out temporary mapping: {item.mpi_code}")
+                
                 data = [(item.google_sheet_name, item.mpi_code, item.description, 
                          item.supplier_item_ids, item.supplier_id) 
-                        for item in query_result]
+                        for item in filtered_results]
                 columns = ['google_sheet_name', 'mpi_code', 'description',
                            'supplier_item_ids', 'supplier_id']
                 items_mappings = pd.DataFrame(data, columns=columns)
                 return items_mappings
         else:
             # Direct session object
-            query_result = self.db_context.query(ItemsMapping).all()
+            query = self.db_context.query(ItemsMapping)
+            
+            # Filter out temporary mappings unless explicitly requested
+            if not include_temporary:
+                query = query.filter(
+                    ~ItemsMapping.mpi_code.like("UIDI%"),
+                    ItemsMapping.mpi_code != "No Match",
+                    ItemsMapping.mpi_code != "No Match / UIDI",
+                    ItemsMapping.mpi_code.isnot(None),
+                    ItemsMapping.mpi_code != ""
+                )
+            
+            query_result = query.all()
+            
+            # Additional validation to catch any temporary mappings that slipped through
+            filtered_results = []
+            for item in query_result:
+                if include_temporary or not is_temporary_mapping(item.mpi_code, item.description):
+                    filtered_results.append(item)
+                else:
+                    logger.warning(f"Filtered out temporary mapping: {item.mpi_code}")
+            
             data = [(item.google_sheet_name, item.mpi_code, item.description, 
                      item.supplier_item_ids, item.supplier_id) 
-                    for item in query_result]
+                    for item in filtered_results]
             columns = ['google_sheet_name', 'mpi_code', 'description',
                        'supplier_item_ids', 'supplier_id']
             items_mappings = pd.DataFrame(data, columns=columns)
@@ -190,10 +255,25 @@ class ItemsMappingController:
         query_result = (
             db.query(ItemsMapping)
             .filter_by(supplier_id=supplier_id)
+            .filter(
+                ~ItemsMapping.mpi_code.like("UIDI%"),
+                ItemsMapping.mpi_code != "No Match",
+                ItemsMapping.mpi_code != "No Match / UIDI",
+                ItemsMapping.mpi_code.isnot(None),
+                ItemsMapping.mpi_code != ""
+            )
             .limit(limit)
             .offset(offset)
             .all()  # Fetch as a list instead of yielding
         )
+
+        # Additional validation to filter out any temporary mappings
+        filtered_results = []
+        for item in query_result:
+            if not is_temporary_mapping(item.mpi_code, item.description):
+                filtered_results.append(item)
+            else:
+                logger.warning(f"Filtered out temporary mapping for supplier {supplier_id}: {item.mpi_code}")
 
         return [
             {
@@ -203,26 +283,37 @@ class ItemsMappingController:
                 "supplier_item_ids": item.supplier_item_ids,
                 "supplier_id": item.supplier_id
             }
-            for item in query_result
+            for item in filtered_results
         ]
 
     def get_items_mappings_by_mpi_type(self):
         db = self._get_db_session()
-        query_result = db.query(ItemsMapping).all()
+        query_result = db.query(ItemsMapping).filter(
+            ~ItemsMapping.mpi_code.like("UIDI%"),
+            ItemsMapping.mpi_code != "No Match",
+            ItemsMapping.mpi_code != "No Match / UIDI",
+            ItemsMapping.mpi_code.isnot(None),
+            ItemsMapping.mpi_code != ""
+        ).all()
 
-        data = {
-            item.mpi_code: {
-                "type": item.google_sheet_name, 
-                "mpi_description": item.description
-            }
-            for item in query_result
-        }
+        # Additional validation to filter out any temporary mappings
+        data = {}
+        for item in query_result:
+            if not is_temporary_mapping(item.mpi_code, item.description):
+                data[item.mpi_code] = {
+                    "type": item.google_sheet_name, 
+                    "mpi_description": item.description
+                }
+            else:
+                logger.warning(f"Filtered out temporary mapping from MPI type data: {item.mpi_code}")
+        
         return data
 
     def update_mapping(self, supplier_id: str, mapping_data: dict):
         """
         Update or create a mapping entry and propagate changes to related 
-        InvoiceItems.
+        InvoiceItems. Now includes validation to prevent temporary mappings 
+        from being saved permanently.
         
         Args:
             supplier_id (str): The supplier ID for the mapping
@@ -230,50 +321,124 @@ class ItemsMappingController:
         """
         db = self._get_db_session()
         
-        # Keep track of whether this is an update or a new entry
-        is_update = False
-        old_mpi_code = None
-        old_description = None
-        
-        # Check if mapping already exists
-        existing_mapping = db.query(ItemsMapping).filter_by(
-            supplier_id=supplier_id,
-            supplier_item_ids=mapping_data["supplier_item_ids"]
-        ).first()
-        
-        if existing_mapping:
-            is_update = True
-            old_mpi_code = existing_mapping.mpi_code
-            old_description = existing_mapping.description
+        try:
+            # Clean and validate the mapping data
+            cleaned_data = clean_mapping_data(mapping_data)
+            is_valid, validation_errors = validate_mapping_for_permanent_storage(cleaned_data)
             
-            # Update existing mapping
-            for key, value in mapping_data.items():
-                setattr(existing_mapping, key, value)
-        else:
-            # Create new mapping
-            db_mapping = ItemsMapping(**mapping_data, supplier_id=supplier_id)
-            db.add(db_mapping)
-        
-        # Commit the changes to the mapping
-        db.commit()
-        
-        # If this was an update and the mpi_code or description changed,
-        # propagate the changes to related InvoiceItems
-        if is_update and (
-            old_mpi_code != mapping_data.get("mpi_code") or 
-            old_description != mapping_data.get("description")
-        ):
-            try:
-                self._propagate_mapping_changes(
-                    db, 
-                    supplier_id,
-                    mapping_data["supplier_item_ids"],
-                    mapping_data.get("mpi_code", ""),
-                    mapping_data.get("description", ""),
-                    mapping_data.get("google_sheet_name", "")
+            # If this is a temporary mapping, redirect to temporary storage
+            if not is_valid:
+                logger.warning(f"Blocking temporary mapping from permanent storage: {cleaned_data.get('mpi_code')} - {validation_errors}")
+                
+                # Save to temporary storage instead
+                try:
+                    self._save_to_temporary_storage(
+                        db, 
+                        cleaned_data.get("supplier_item_ids", ""),
+                        cleaned_data.get("mpi_code", ""),
+                        int(supplier_id)
+                    )
+                    db.commit()
+                    return {
+                        "status": "redirected_to_temporary",
+                        "message": f"Temporary mapping saved to temporary storage instead of permanent mappings",
+                        "validation_errors": validation_errors,
+                        "temporary_mapping_created": True
+                    }
+                except Exception as temp_error:
+                    logger.error(f"Failed to save to temporary storage: {temp_error}")
+                    raise Exception(f"Cannot save temporary mapping: {validation_errors[0] if validation_errors else 'Invalid mapping data'}")
+            
+            # Proceed with permanent mapping (validation passed)
+            is_update = False
+            old_mpi_code = None
+            old_description = None
+            
+            # Check if mapping already exists
+            existing_mapping = db.query(ItemsMapping).filter_by(
+                supplier_id=supplier_id,
+                supplier_item_ids=cleaned_data["supplier_item_ids"]
+            ).first()
+            
+            if existing_mapping:
+                is_update = True
+                old_mpi_code = existing_mapping.mpi_code
+                old_description = existing_mapping.description
+                
+                # Update existing mapping
+                for key, value in cleaned_data.items():
+                    setattr(existing_mapping, key, value)
+                    
+                logger.info(f"Updated permanent mapping: {cleaned_data['supplier_item_ids']} -> {cleaned_data['mpi_code']}")
+            else:
+                # Create new mapping
+                db_mapping = ItemsMapping(**cleaned_data, supplier_id=supplier_id)
+                db.add(db_mapping)
+                logger.info(f"Created new permanent mapping: {cleaned_data['supplier_item_ids']} -> {cleaned_data['mpi_code']}")
+            
+            # Commit the changes to the mapping
+            db.commit()
+            
+            # If this was an update and the mpi_code or description changed,
+            # propagate the changes to related InvoiceItems
+            if is_update and (
+                old_mpi_code != cleaned_data.get("mpi_code") or 
+                old_description != cleaned_data.get("description")
+            ):
+                try:
+                    self._propagate_mapping_changes(
+                        db, 
+                        supplier_id,
+                        cleaned_data["supplier_item_ids"],
+                        cleaned_data.get("mpi_code", ""),
+                        cleaned_data.get("description", ""),
+                        cleaned_data.get("google_sheet_name", "")
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to propagate mapping changes: {str(e)}")
+            
+            return {
+                "status": "success",
+                "message": "Permanent mapping created/updated successfully",
+                "mapping_type": "permanent",
+                "is_update": is_update
+            }
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to update mapping: {str(e)}")
+            raise
+        finally:
+            db.close()
+
+    def _save_to_temporary_storage(self, db: Session, original_item_number: str, 
+                                  temporary_item_number: str, supplier_id: int):
+        """
+        Save mapping to temporary_item_mappings table instead of permanent table.
+        """
+        try:
+            # Check if temporary mapping already exists
+            existing_temp = db.query(TempItemMapping).filter_by(
+                original_item_number=original_item_number
+            ).first()
+            
+            if existing_temp:
+                # Update existing temporary mapping
+                existing_temp.temporary_item_number = temporary_item_number
+                logger.info(f"Updated temporary mapping: {original_item_number} -> {temporary_item_number}")
+            else:
+                # Create new temporary mapping
+                new_temp_mapping = TempItemMapping(
+                    original_item_number=original_item_number,
+                    temporary_item_number=temporary_item_number,
+                    description=""  # We don't have description in this context
                 )
-            except Exception as e:
-                logger.error(f"Failed to propagate mapping changes: {str(e)}")
+                db.add(new_temp_mapping)
+                logger.info(f"Created temporary mapping: {original_item_number} -> {temporary_item_number}")
+                
+        except Exception as e:
+            logger.error(f"Error saving to temporary storage: {str(e)}")
+            raise
 
     def update_no_match_uidi_mappings(self) -> Dict[str, Any]:
         """
@@ -302,12 +467,13 @@ class ItemsMappingController:
             
         db = self._get_db_session()
         try:
-            # Get items with No Match / UIDI mappings
+            # Get items with No Match / UIDI mappings - FIXED: use mpi_item instead of mpi_code
             no_match_items = db.query(InvoiceItem).filter(
                 or_(
-                    InvoiceItem.mpi_code.is_(None),
-                    InvoiceItem.mpi_code == "",
-                    InvoiceItem.mpi_code == "No Match / UIDI"
+                    InvoiceItem.mpi_item.is_(None),
+                    InvoiceItem.mpi_item == "",
+                    InvoiceItem.mpi_item == "No Match",
+                    InvoiceItem.mpi_item.like("UIDI%")
                 )
             ).all()
             
@@ -317,33 +483,81 @@ class ItemsMappingController:
                     "message": "No items with No Match / UIDI found"
                 }
                 
-            # Get all mappings
-            mappings = self.get_items_mappings()
-            if mappings.empty:
+            # Get ONLY valid permanent mappings for UIDI update
+            # We want real mappings, not temporary placeholders
+            valid_mappings = db.query(ItemsMapping).filter(
+                ~ItemsMapping.mpi_code.like("UIDI%"),
+                ItemsMapping.mpi_code != "No Match",
+                ItemsMapping.mpi_code != "No Match / UIDI",
+                ItemsMapping.mpi_code.isnot(None),
+                ItemsMapping.mpi_code != ""
+            ).all()
+            
+            if not valid_mappings:
                 return {
                     "status": "error",
-                    "message": "No mappings available"
+                    "message": "No valid permanent mappings available"
                 }
                 
-            # Update No Match / UIDI items if mappings are found
+            # Update No Match / UIDI items if valid mappings are found
             updated_count = 0
+            
             for item in no_match_items:
-                # Find matching mapping
+                # Find matching mapping using supplier-specific suffix cleaning
                 matched = False
-                for _, mapping in mappings.iterrows():
-                    supplier_item_ids = mapping['supplier_item_ids']
+                
+                for mapping in valid_mappings:
+                    # Validate this is truly a permanent mapping
+                    if is_temporary_mapping(mapping.mpi_code, mapping.description):
+                        logger.warning(f"Skipping temporary mapping in permanent table: {mapping.mpi_code}")
+                        continue
+                    
+                    supplier_item_ids = mapping.supplier_item_ids
                     if not supplier_item_ids:
                         continue
-                        
-                    if str(item.supplier_item_id) in supplier_item_ids.split(','):
-                        item.mpi_code = mapping['mpi_code']
+                    
+                    # Extract supplier_id from the invoice item's supplier/vendor
+                    supplier_id, _ = self._extract_supplier_id(item.vendor)
+                    
+                    # Check for exact match first
+                    if str(item.item) in supplier_item_ids.split(','):
+                        old_status = item.mpi_item or "Empty"
+                        item.mpi_item = mapping.mpi_code
+                        item.mpi_description = mapping.description
+                        item.sheet_name = mapping.google_sheet_name or ""
                         updated_count += 1
                         matched = True
+                        if old_status.startswith("UIDI"):
+                            logger.info(f"UIDI override: {item.item} | {old_status} -> {mapping.mpi_code}")
+                        elif old_status == "No Match":
+                            logger.info(f"No Match override: {item.item} | No Match -> {mapping.mpi_code}")
+                        else:
+                            logger.info(f"Item update: {item.item} | {old_status} -> {mapping.mpi_code}")
                         break
+                    
+                    # If no exact match, try with suffix cleaning
+                    if supplier_id:
+                        from mpi_backend.utils.item_utils import clean_supplier_suffix
+                        cleaned_supplier_item_ids = clean_supplier_suffix(supplier_item_ids, supplier_id)
+                        if str(item.item) in cleaned_supplier_item_ids.split(','):
+                            old_status = item.mpi_item or "Empty"
+                            item.mpi_item = mapping.mpi_code
+                            item.mpi_description = mapping.description
+                            item.sheet_name = mapping.google_sheet_name or ""
+                            updated_count += 1
+                            matched = True
+                            if old_status.startswith("UIDI"):
+                                logger.info(f"UIDI override (cleaned): {item.item} | {old_status} -> {mapping.mpi_code}")
+                            elif old_status == "No Match":
+                                logger.info(f"No Match override (cleaned): {item.item} | No Match -> {mapping.mpi_code}")
+                            else:
+                                logger.info(f"Item update (cleaned): {item.item} | {old_status} -> {mapping.mpi_code}")
+                            break
                         
-                # If no match found, set to "No Match / UIDI"
+                # If no match found, set to "No Match"
                 if not matched:
-                    item.mpi_code = "No Match / UIDI"
+                    item.mpi_item = "No Match"
+                    item.mpi_description = "No Match"
                     
             db.commit()
             
@@ -360,6 +574,28 @@ class ItemsMappingController:
                 "status": "error",
                 "message": f"Failed to update No Match / UIDI mappings: {str(e)}"
             }
+
+    def _extract_supplier_id(self, vendor_name):
+        """Helper method to extract supplier ID from vendor name"""
+        company_codes = {
+            "BMW Plumbing Supplies": 1,
+            "World Wide Plumbing": 2,
+            "Y & S Plumbing Supply": 3,
+            "Supreme Plumbing Supply": 4,
+            "Pyramid Plumbing": 5,
+            "ABC Opus Services": 6,
+            "Park Plumbing Supply": 7,
+            "Gotham Plumbing Supply": 8,
+            "FW Webb Plumbing Supply": 9,
+            "Flow Mark Plumbing Supply": 10,
+            "Plumbing Exchange": 11,
+            "AF Supply": 12,
+            "Lion Hvac Supplies": 13
+        }
+        for company, code in company_codes.items():
+            if company in vendor_name:
+                return code, company
+        return 1, "BMW Plumbing Supplies"  # Default
 
     def update_all_mappings(self) -> Dict[str, Any]:
         """
@@ -389,21 +625,42 @@ class ItemsMappingController:
         try:
             db = self._get_db_session()
             
-            # Fetch all mappings
-            mappings = db.query(ItemsMapping).all()
+            # Fetch ALL mappings from supplier table - this should apply everything in the mapping table
+            # Note: We include ALL mappings because "Update All" means apply whatever is in the mapping table
+            all_mappings = db.query(ItemsMapping).all()
             
-            if not mappings:
-                logger.info("No mappings found to apply")
+            if not all_mappings:
+                logger.info("No mappings found in supplier table to apply")
                 return {
                     "status": "success",
-                    "message": "No mappings found to apply"
+                    "message": "No mappings found in supplier table to apply"
+                }
+            
+            # Separate valid mappings from invalid ones
+            valid_mappings = []
+            
+            for mapping in all_mappings:
+                # Skip only truly invalid mappings (None, empty, etc.) but allow others
+                if not mapping.mpi_code or mapping.mpi_code.strip() == "":
+                    logger.warning(f"Skipping mapping with empty MPI code: {mapping.supplier_item_ids}")
+                    continue
+                
+                # For "Update All", we want to apply what's in the table, even if it's UIDI
+                # The business logic is: if it's in the supplier mapping table, apply it
+                valid_mappings.append(mapping)
+            
+            if not valid_mappings:
+                logger.info("No valid mappings found to apply after filtering")
+                return {
+                    "status": "success", 
+                    "message": "No valid mappings found to apply after filtering"
                 }
             
             # Process each mapping to update related invoice items
             total_updated_count = 0
             total_mappings_processed = 0
             
-            for mapping in mappings:
+            for mapping in valid_mappings:
                 total_mappings_processed += 1
                 try:
                     # Get vendor name from supplier_id
@@ -442,9 +699,10 @@ class ItemsMappingController:
                     # Update all matching items
                     item_updated_count = 0
                     for item in matching_items:
+                        # Apply the mapping from supplier table
                         item.mpi_item = mapping.mpi_code
                         item.mpi_description = mapping.description
-                        item.sheet_name = mapping.google_sheet_name
+                        item.sheet_name = mapping.google_sheet_name or ""
                         item_updated_count += 1
                     
                     total_updated_count += item_updated_count
@@ -486,10 +744,12 @@ class ItemsMappingController:
                                   new_mpi_code, new_description, sheet_name):
         """
         Propagate mapping changes to all matching InvoiceItems with suffix cleaning.
+        Now includes validation to ensure we don't propagate temporary mappings.
         
         Updates all InvoiceItem records that:
         1. Have the same item number (item field) - with suffix cleaning comparison
         2. Belong to the same supplier (determined from vendor field)
+        3. Only if the new mapping is NOT a temporary placeholder
         
         Args:
             db: Database session
@@ -500,6 +760,11 @@ class ItemsMappingController:
             sheet_name (str): Sheet name to set
         """
         try:
+            # Validate that we're not propagating temporary mappings
+            if is_temporary_mapping(new_mpi_code, new_description):
+                logger.warning(f"Skipping propagation of temporary mapping: {new_mpi_code}")
+                return
+            
             # Get vendor name from supplier_id
             from mpi_backend.database.models import Supplier
             supplier = db.query(Supplier).filter_by(id=supplier_id).first()
@@ -526,20 +791,33 @@ class ItemsMappingController:
                     matching_items.append(invoice_item)
             
             if not matching_items:
-                logger.info(f"No matching invoice items found for {item_number} (cleaned: {cleaned_item_number})")
+                logger.info(f"No matching invoice items found for {item_number} (cleaned: {cleaned_mapping_item})")
                 return
                 
-            # Update all matching items
+            # Update all matching items, prioritizing UIDI items for override
             updated_count = 0
+            uidi_override_count = 0
+            
             for item in matching_items:
+                # Track if we're overriding a UIDI item with a valid mapping
+                was_uidi = item.mpi_item and item.mpi_item.startswith("UIDI")
+                
                 item.mpi_item = new_mpi_code
                 item.mpi_description = new_description
                 item.sheet_name = sheet_name
                 updated_count += 1
                 
+                if was_uidi:
+                    uidi_override_count += 1
+                    logger.info(f"Overrode UIDI item {item.item} with permanent mapping {new_mpi_code}")
+                
             # Commit the changes
             db.commit()
-            logger.info(f"Updated {updated_count} invoice items with new mapping data for {item_number}")
+            
+            log_message = f"Updated {updated_count} invoice items with new mapping data for {item_number}"
+            if uidi_override_count > 0:
+                log_message += f" (including {uidi_override_count} UIDI overrides)"
+            logger.info(log_message)
             
         except Exception as e:
             logger.error(f"Error propagating mapping changes: {str(e)}")

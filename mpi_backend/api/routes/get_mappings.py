@@ -11,10 +11,36 @@ router = APIRouter(prefix="/mapping", tags=['Item Mappings'])
 
 @router.post("")
 def update_item_mappings(request: UpdateMappingRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+    """
+    Update item mappings with validation to prevent temporary mappings from being saved permanently.
+    """
     try:
+        results = []
+        permanent_count = 0
+        temporary_redirected = 0
+        
         for mapping in request.mapping:
-            ItemsMappingController(db).update_mapping(request.supplier_id, mapping)
-        return {"success": True, "message": "Mapping updated/created successfully"}
+            result = ItemsMappingController(db).update_mapping(request.supplier_id, mapping)
+            results.append(result)
+            
+            if result.get("status") == "success":
+                permanent_count += 1
+            elif result.get("status") == "redirected_to_temporary":
+                temporary_redirected += 1
+        
+        message = f"Processing completed: {permanent_count} permanent mappings"
+        if temporary_redirected > 0:
+            message += f", {temporary_redirected} redirected to temporary storage"
+            
+        return {
+            "success": True, 
+            "message": message,
+            "details": {
+                "permanent_mappings": permanent_count,
+                "temporary_redirected": temporary_redirected,
+                "results": results
+            }
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update item mapping : {e}")
 

@@ -22,6 +22,7 @@ from mpi_backend.api.routes import filters
 from mpi_backend.api.routes import sync_mappings
 from mpi_backend.api.routes import price_comparison
 from mpi_backend.api.routes import statements
+
 from mpi_backend.database.controllers import GoogleSheetSyncController, ItemsMappingController
 from mpi_backend.config import LOG_LEVEL
 from mpi_backend.utils.invoice_downaloder import email_download_background_task
@@ -129,6 +130,7 @@ def register_routes(app):
     app.include_router(sync_mappings.router)
     app.include_router(price_comparison.router)
     app.include_router(statements.router)
+
 
 
 register_routes(app)
