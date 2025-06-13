@@ -22,17 +22,29 @@ import os
 from typing import Dict, Set, Tuple, Any
 from collections import defaultdict
 
-# Add parent directory to path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add parent directory to path for imports and change working directory
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(script_dir)
+sys.path.append(parent_dir)
 
-from sqlalchemy import text, create_engine
-from sqlalchemy.orm import sessionmaker
-from mpi_backend.database import db_context
-from mpi_backend.database.controllers import GoogleSheetSyncController
-from mpi_backend.config.spreadsheet_config import (
-    DEFAULT_SHEET_ID, DEFAULT_OUTPUT_FILE, GOOGLE_API_KEY, 
-    SKIP_SHEETS, MAPPING_CONFIG
-)
+# Change to parent directory so .env file is found
+original_cwd = os.getcwd()
+os.chdir(parent_dir)
+
+try:
+    from sqlalchemy import text, create_engine
+    from sqlalchemy.orm import sessionmaker
+    from mpi_backend.database import db_context
+    from mpi_backend.database.controllers import GoogleSheetSyncController
+    from mpi_backend.config.spreadsheet_config import (
+        DEFAULT_SHEET_ID, DEFAULT_OUTPUT_FILE, GOOGLE_API_KEY, 
+        SKIP_SHEETS, MAPPING_CONFIG
+    )
+    from mpi_backend.config import SQLALCHEMY_DATABASE_URI
+except ImportError as e:
+    print(f"❌ Import error: {e}")
+    print("Make sure you're running from the correct directory and all dependencies are installed.")
+    sys.exit(1)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -42,6 +54,9 @@ class UltraFastMappingUpdater:
     """Ultra-fast mapping updater optimized for large datasets."""
     
     def __init__(self):
+        # Check database connection on initialization
+        self._check_database_connection()
+        
         # Supplier suffix patterns for cleaning
         self.suffix_patterns = {
             1: "-B", 2: "-W", 3: "-Y", 4: "-S", 5: "-P",
@@ -59,6 +74,17 @@ class UltraFastMappingUpdater:
             "Plumbing Exchange": 11, "AF Supply": 12,
             "Lion Hvac Supplies": 13, "Bruce Ferguson": 14
         }
+    
+    def _check_database_connection(self):
+        """Check if database connection is working."""
+        try:
+            with db_context() as db:
+                db.execute(text("SELECT 1"))
+            logger.info("✅ Database connection verified")
+        except Exception as e:
+            logger.error(f"❌ Database connection failed: {str(e)}")
+            logger.error("Please check your database configuration and ensure the database is running")
+            raise ConnectionError(f"Database connection failed: {str(e)}")
     
     def run_update(self, force_full_sync: bool = True) -> Dict[str, Any]:
         """Run the complete update process: sync mappings first, then ultra-fast UIDI update."""
@@ -196,7 +222,7 @@ class UltraFastMappingUpdater:
         query = text("""
             SELECT supplier_item_ids, mpi_code, description, 
                    COALESCE(google_sheet_name, '') as sheet_name, supplier_id
-            FROM items_mapping 
+            FROM supplier_item_mappings 
             WHERE mpi_code NOT LIKE 'UIDI%' 
             AND mpi_code NOT IN ('No Match', 'No Match / UIDI', '')
             AND mpi_code IS NOT NULL 
@@ -317,18 +343,32 @@ def main():
     logger.info("🚀 COMPLETE MAPPING UPDATE PROCESS")
     logger.info("=" * 60)
     
-    # Parse command line arguments
-    skip_sync = "--no-sync" in sys.argv
-    
-    if skip_sync:
-        logger.info("⏭️  Skipping Google Sheets sync (NOT RECOMMENDED)")
-        logger.warning("⚠️  This will only update UIDI items with existing mappings!")
-    else:
-        logger.info("📥 Will update ALL mappings from Google Sheets first")
-    
-    # Create updater and run
-    updater = UltraFastMappingUpdater()
-    result = updater.run_update(force_full_sync=not skip_sync)
+    try:
+        # Parse command line arguments
+        skip_sync = "--no-sync" in sys.argv
+        
+        if skip_sync:
+            logger.info("⏭️  Skipping Google Sheets sync (NOT RECOMMENDED)")
+            logger.warning("⚠️  This will only update UIDI items with existing mappings!")
+        else:
+            logger.info("📥 Will update ALL mappings from Google Sheets first")
+        
+        # Check database URI
+        logger.info(f"🔍 Database URI check: {SQLALCHEMY_DATABASE_URI[:50]}...")
+        
+        # Create updater and run
+        logger.info("🔧 Initializing updater...")
+        updater = UltraFastMappingUpdater()
+        
+        logger.info("🚀 Starting update process...")
+        result = updater.run_update(force_full_sync=not skip_sync)
+        
+    except ConnectionError as e:
+        logger.error("❌ Database connection error - cannot proceed")
+        result = {"success": False, "error": str(e), "total_time": 0}
+    except Exception as e:
+        logger.error(f"❌ Initialization failed: {str(e)}")
+        result = {"success": False, "error": str(e), "total_time": 0}
     
     # Print results
     logger.info("=" * 60)
