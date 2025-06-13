@@ -176,7 +176,7 @@ class UltraFastMappingUpdater:
             # Step 1: Build super-fast lookup using raw SQL
             mappings_lookup = self._build_ultra_fast_lookup(db)
             lookup_time = time.time() - lookup_start
-            logger.info(f"🏗️  Built {len(mappings_lookup)} lookups in {lookup_time:.3f}s")
+            logger.info(f"🏗️  Built {len(mappings_lookup):,} lookups in {lookup_time:.3f}s")
             
             # Step 2: Get all UIDI items with raw SQL
             logger.info("🔍 Fetching UIDI items...")
@@ -184,7 +184,7 @@ class UltraFastMappingUpdater:
             
             uidi_items = self._fetch_uidi_items_raw(db)
             fetch_time = time.time() - fetch_start
-            logger.info(f"🔍 Fetched {len(uidi_items)} UIDI items in {fetch_time:.3f}s")
+            logger.info(f"🔍 Fetched {len(uidi_items):,} UIDI items in {fetch_time:.3f}s")
             
             if not uidi_items:
                 return {
@@ -195,21 +195,44 @@ class UltraFastMappingUpdater:
                     "message": "No UIDI items found"
                 }
             
-            # Step 3: Ultra-fast bulk update
-            logger.info("⚡ Executing bulk update...")
+            # Step 3: Ultra-fast bulk matching and update
+            logger.info("⚡ Processing matches and executing bulk update...")
             update_start = time.time()
             
-            updates = self._prepare_bulk_updates(uidi_items, mappings_lookup)
+            # Process all items at once for maximum speed
+            updates = []
+            exact_hits = 0
+            suffix_hits = 0
+            
+            for item_id, item_code, vendor in uidi_items:
+                # Try exact match first (fastest - O(1) lookup)
+                if item_code in mappings_lookup:
+                    mpi_code, description, sheet_name = mappings_lookup[item_code]
+                    updates.append((item_id, mpi_code, description, sheet_name))
+                    exact_hits += 1
+                else:
+                    # Try suffix-cleaned match
+                    supplier_id = self._fast_supplier_lookup(vendor)
+                    suffix_key = f"{item_code}|{supplier_id}"
+                    if suffix_key in mappings_lookup:
+                        mpi_code, description, sheet_name = mappings_lookup[suffix_key]
+                        updates.append((item_id, mpi_code, description, sheet_name))
+                        suffix_hits += 1
+            
+            # Execute single bulk update for all matches
             updated_count = self._execute_bulk_updates(db, updates)
             
             update_time = time.time() - update_start
             total_time = lookup_time + fetch_time + update_time
             
-            logger.info(f"⚡ Updated {updated_count} items in {update_time:.3f}s")
+            logger.info(f"⚡ Processed {len(uidi_items):,} items, updated {updated_count:,} in {update_time:.3f}s")
+            logger.info(f"📊 Exact matches: {exact_hits:,} | Suffix matches: {suffix_hits:,}")
             
             return {
                 "updated_count": updated_count,
                 "total_items": len(uidi_items),
+                "exact_matches": exact_hits,
+                "suffix_matches": suffix_hits,
                 "lookup_time": round(lookup_time, 3),
                 "fetch_time": round(fetch_time, 3),
                 "update_time": round(update_time, 3),
@@ -272,28 +295,7 @@ class UltraFastMappingUpdater:
         result = db.execute(query)
         return [(row.id, row.item.strip(), row.vendor) for row in result if row.item]
     
-    def _prepare_bulk_updates(self, items: list, lookup: Dict[str, Tuple[str, str, str]]) -> list:
-        """Prepare bulk updates using ultra-fast lookups."""
-        updates = []
-        
-        for item_id, item_code, vendor in items:
-            mapping = None
-            
-            # Try exact match first (fastest)
-            if item_code in lookup:
-                mapping = lookup[item_code]
-            else:
-                # Try suffix-cleaned match
-                supplier_id = self._fast_supplier_lookup(vendor)
-                suffix_key = f"{item_code}|{supplier_id}"
-                if suffix_key in lookup:
-                    mapping = lookup[suffix_key]
-            
-            if mapping:
-                mpi_code, description, sheet_name = mapping
-                updates.append((item_id, mpi_code, description, sheet_name))
-        
-        return updates
+
     
     def _fast_supplier_lookup(self, vendor: str) -> int:
         """Fast supplier ID lookup."""
@@ -307,34 +309,74 @@ class UltraFastMappingUpdater:
         return 1
     
     def _execute_bulk_updates(self, db, updates: list) -> int:
-        """Execute bulk updates using raw SQL for maximum performance."""
+        """Execute ultra-fast bulk updates using optimized SQL."""
         if not updates:
             return 0
         
-        # Prepare bulk update query
-        update_query = text("""
-            UPDATE invoice_items 
-            SET mpi_item = :mpi_code,
-                mpi_description = :description,
-                sheet_name = :sheet_name
-            WHERE id = :item_id
-        """)
+        # Use optimized bulk updates
+        if len(updates) < 1000:
+            # For smaller batches, use VALUES with JOIN
+            values_list = []
+            for item_id, mpi_code, description, sheet_name in updates:
+                # Escape single quotes and handle NULL values
+                mpi_code = mpi_code.replace("'", "''") if mpi_code else ''
+                description = description.replace("'", "''") if description else ''
+                sheet_name = sheet_name.replace("'", "''") if sheet_name else ''
+                values_list.append(f"({item_id}, '{mpi_code}', '{description}', '{sheet_name}')")
+            
+            values_str = ",".join(values_list)
+            
+            bulk_query = text(f"""
+                UPDATE invoice_items 
+                SET mpi_item = v.mpi_code,
+                    mpi_description = v.description,
+                    sheet_name = v.sheet_name
+                FROM (VALUES {values_str}) AS v(id, mpi_code, description, sheet_name)
+                WHERE invoice_items.id = v.id
+            """)
+            
+            db.execute(bulk_query)
+        else:
+            # For larger batches, use temporary table approach
+            # Create temporary table
+            db.execute(text("""
+                CREATE TEMPORARY TABLE temp_updates (
+                    id INTEGER,
+                    mpi_code VARCHAR,
+                    description VARCHAR,
+                    sheet_name VARCHAR
+                )
+            """))
+            
+            # Insert data into temp table in chunks
+            chunk_size = 1000
+            for i in range(0, len(updates), chunk_size):
+                chunk = updates[i:i + chunk_size]
+                values_list = []
+                for item_id, mpi_code, description, sheet_name in chunk:
+                    # Escape single quotes
+                    mpi_code = mpi_code.replace("'", "''")
+                    description = description.replace("'", "''")
+                    sheet_name = sheet_name.replace("'", "''")
+                    values_list.append(f"({item_id}, '{mpi_code}', '{description}', '{sheet_name}')")
+                
+                values_str = ",".join(values_list)
+                db.execute(text(f"INSERT INTO temp_updates VALUES {values_str}"))
+            
+            # Perform bulk update using temp table
+            db.execute(text("""
+                UPDATE invoice_items 
+                SET mpi_item = temp_updates.mpi_code,
+                    mpi_description = temp_updates.description,
+                    sheet_name = temp_updates.sheet_name
+                FROM temp_updates
+                WHERE invoice_items.id = temp_updates.id
+            """))
+            
+            # Drop temp table
+            db.execute(text("DROP TABLE temp_updates"))
         
-        # Prepare data for bulk execution
-        update_data = [
-            {
-                "item_id": item_id,
-                "mpi_code": mpi_code,
-                "description": description,
-                "sheet_name": sheet_name
-            }
-            for item_id, mpi_code, description, sheet_name in updates
-        ]
-        
-        # Execute bulk update
-        db.execute(update_query, update_data)
         db.commit()
-        
         return len(updates)
 
 def main():
