@@ -49,7 +49,7 @@ def get_statement_invoice_data(
     ),
     supplier_names: Optional[List[str]] = Query(
         None,
-        description="List of supplier names, supplier IDs, or ['All'] to filter by"
+        description="List of supplier names, supplier IDs, or ['All'] to filter by. Use '0' for all suppliers."
     ),
     status: Optional[str] = Query(
         None,
@@ -81,7 +81,7 @@ def get_statement_invoice_data(
     - **to_date**: End date filter in DD/MM/YYYY format 
       (filters by statement_date)
     - **supplier_names**: Filter by list of supplier names (partial match supported), 
-      supplier IDs (numeric), or ["All"] for all suppliers
+      supplier IDs (numeric), ["All"] for all suppliers, or ["0"] for all suppliers
     - **status**: Filter by reconciliation status 
       ('Processed', 'Failed', 'all')
     - **page**: Page number for pagination (starts from 1)
@@ -112,6 +112,9 @@ def get_statement_invoice_data(
     
     # Get all suppliers' data
     GET /statements/invoice-data?supplier_names=All&page=1&page_size=20
+    
+    # Get all suppliers' data using supplier_id = 0
+    GET /statements/invoice-data?supplier_names=0&page=1&page_size=20
     
     # Filter by single supplier ID
     GET /statements/invoice-data?supplier_names=3&page=1&page_size=20

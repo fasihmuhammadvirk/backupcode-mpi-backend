@@ -367,6 +367,7 @@ class StatementController:
                 query = query.filter(PlumbingStatement.statement_date <= to_date)
             
             # Apply supplier filter - support ["All"], multiple supplier IDs, or supplier names
+            # Handle supplier_id = 0 as "all suppliers"
             if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
                 # Build OR conditions for multiple suppliers
                 supplier_conditions = []
@@ -374,15 +375,22 @@ class StatementController:
                 for supplier_name in supplier_names:
                     # Check if supplier_name is a numeric ID
                     if supplier_name.isdigit():
-                        # Filter by supplier ID
-                        supplier_conditions.append(PlumbingSupplier.id == int(supplier_name))
+                        supplier_id = int(supplier_name)
+                        # Handle supplier_id = 0 as "all suppliers" - skip filtering
+                        if supplier_id == 0:
+                            # If any supplier_name is "0", treat as "all suppliers"
+                            supplier_conditions = []
+                            break
+                        else:
+                            # Filter by specific supplier ID
+                            supplier_conditions.append(PlumbingSupplier.id == supplier_id)
                     else:
                         # Filter by supplier name (partial match)
                         supplier_conditions.append(
                             PlumbingSupplier.name.ilike(f"%{supplier_name}%")
                         )
                 
-                # Apply OR condition if any suppliers specified
+                # Apply OR condition if any suppliers specified (and not "all suppliers")
                 if supplier_conditions:
                     query = query.filter(or_(*supplier_conditions))
             
@@ -465,6 +473,7 @@ class StatementController:
                     'supplier_names': supplier_names,
                     'supplier_filter_type': (
                         'all' if supplier_names and len(supplier_names) == 1 and supplier_names[0].lower() == 'all'
+                        else 'all' if supplier_names and len(supplier_names) == 1 and supplier_names[0] == '0'
                         else 'multiple' if supplier_names and len(supplier_names) > 1
                         else 'id' if supplier_names and len(supplier_names) == 1 and supplier_names[0].isdigit()
                         else 'name' if supplier_names and len(supplier_names) == 1
@@ -801,8 +810,12 @@ class StatementController:
             # Apply supplier filter if provided
             if supplier_name:
                 if supplier_name.isdigit():
-                    # Filter by supplier ID
-                    query = query.filter(PlumbingStatement.supplier_id == int(supplier_name))
+                    supplier_id = int(supplier_name)
+                    # Handle supplier_id = 0 as "all suppliers" - skip filtering
+                    if supplier_id != 0:
+                        # Filter by specific supplier ID
+                        query = query.filter(PlumbingStatement.supplier_id == supplier_id)
+                    # If supplier_id == 0, don't apply any filter (all suppliers)
                 else:
                     # Filter by supplier name (partial match) - need to join for this
                     query = query.join(PlumbingSupplier).filter(
