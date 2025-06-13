@@ -286,6 +286,7 @@ def download_statement_pdf(
                 },
                 ExpiresIn=180
             )
+        except Exception as e:
             logger.error(
                 f"Error generating presigned URL for {s3_key}: {str(e)}"
             )
