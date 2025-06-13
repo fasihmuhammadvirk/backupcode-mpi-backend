@@ -340,20 +340,56 @@ class GoogleSheetDataExtractor:
             Dictionary mapping supplier names to column indices
         """
         supplier_columns = {}
+        unnamed_columns = []
         
-        # Iterate through each column
+        # First pass: Check for columns with explicit supplier names or numbered variations
         for col_idx, col_name in enumerate(df_head.columns):
-            # Skip if column is unnamed or empty
-            if not col_name or str(col_name).startswith('Unnamed:'):
+            # Skip if column is empty
+            if pd.isna(col_name):
+                continue
+                
+            # Check if this is an unnamed column - collect these for later inspection
+            if str(col_name).startswith('Unnamed:'):
+                # Check if column contains any data
+                col_data = df_full.iloc[:, col_idx]
+                if not col_data.dropna().empty:
+                    unnamed_columns.append(col_idx)
                 continue
                 
             # Skip columns that likely contain description/code data
             col_name_str = str(col_name).lower()
             if any(x in col_name_str for x in 
-                  ["size", "description", "item", "code"]):
+                  ["size", "description", "item code", "code", "mpi"]):
                 continue
                 
-            # Match column to supplier
+            # Check for supplier name with number pattern (e.g., "BMW 1", "BMW 2", "BMW3", "WWPS 1")
+            # This regex handles both space-separated numbers (BMW 1) and attached numbers (BMW3)
+            supplier_number_match = re.match(r'^([A-Za-z&\s]+)[\s]*(\d+)?$', str(col_name))
+            
+            if supplier_number_match:
+                # Extract the base supplier name without the number
+                base_supplier_name = supplier_number_match.group(1).strip()
+                # Match the base supplier name
+                supplier, supplier_id, confidence = self.match_supplier(base_supplier_name)
+                
+                # If good match, add to supplier columns
+                if supplier_id > 0 and confidence >= self.fuzzy_threshold:
+                    # Check if column contains any data
+                    col_data = df_full.iloc[:, col_idx]
+                    if not col_data.dropna().empty:
+                        # Add to supplier columns
+                        if supplier not in supplier_columns:
+                            supplier_columns[supplier] = []
+                        supplier_columns[supplier].append(col_idx)
+                        
+                        logger.info(
+                            f"Detected supplier column: {col_name} -> "
+                            f"{supplier} (ID: {supplier_id}, "
+                            f"Confidence: {confidence:.1f}%)"
+                        )
+                    continue
+            
+            # Standard supplier name matching for columns without numbers
             supplier, supplier_id, confidence = self.match_supplier(str(col_name))
             
             # Only keep columns that have a supplier match and contain data
@@ -371,6 +407,199 @@ class GoogleSheetDataExtractor:
                         f"{supplier} (ID: {supplier_id}, "
                         f"Confidence: {confidence:.1f}%)"
                     )
+        
+        # Now check unnamed columns for supplier item patterns
+        # Common patterns: item codes with supplier suffixes like -B, -W, -Y, -S
+        suffix_pattern = r'-[BWYSGFPA]$'
+        
+        for col_idx in unnamed_columns:
+            # Sample some non-empty values from this column
+            col_data = df_full.iloc[:, col_idx].dropna()
+            if len(col_data) == 0:
+                continue
+                
+            # Check if values match supplier item patterns
+            supplier_matches = {
+                "BMW Plumbing Supplies": 0,
+                "World Wide Plumbing": 0,
+                "Y & S Plumbing Supply": 0,
+                "Supreme Plumbing Supply": 0,
+                "Pyramid Plumbing": 0,
+                "Gotham Plumbing Supply": 0,
+                "FW Webb Plumbing Supply": 0,
+                "ABC Opus Services": 0,
+                "Flow Mark Plumbing Supply": 0,
+                "AF Supply": 0
+            }
+            
+            # Count suffix matches
+            for value in col_data[:30]:  # Check first 30 non-empty values (increased from 20)
+                if not isinstance(value, str):
+                    continue
+                    
+                value = str(value).strip()
+                if value.endswith("-B"):
+                    supplier_matches["BMW Plumbing Supplies"] += 1
+                elif value.endswith("-W"):
+                    supplier_matches["World Wide Plumbing"] += 1
+                elif value.endswith("-Y"):
+                    supplier_matches["Y & S Plumbing Supply"] += 1
+                elif value.endswith("-S"):
+                    supplier_matches["Supreme Plumbing Supply"] += 1
+                elif value.endswith("-P"):
+                    supplier_matches["Pyramid Plumbing"] += 1
+                elif value.endswith("-G"):
+                    supplier_matches["Gotham Plumbing Supply"] += 1
+                elif value.endswith("-F"):
+                    supplier_matches["FW Webb Plumbing Supply"] += 1
+                elif value.endswith("-A"):
+                    supplier_matches["ABC Opus Services"] += 1
+                # Check for numeric patterns that might indicate supplier items
+                elif re.match(r'^\d{8,}(-[A-Z])?$', value):  # Long numeric codes often used by BMW
+                    supplier_matches["BMW Plumbing Supplies"] += 1
+                elif re.match(r'^IN[A-Z0-9]{2,}(-[A-Z])?$', value):  # Patterns like INHL20-A for AF Supply
+                    supplier_matches["AF Supply"] += 1
+            
+            # If we have a significant number of matches for a supplier, add this column
+            for supplier, count in supplier_matches.items():
+                if count >= 2:  # At least 2 matches to consider it a supplier column (reduced from 3)
+                    if supplier not in supplier_columns:
+                        supplier_columns[supplier] = []
+                    supplier_columns[supplier].append(col_idx)
+                    
+                    logger.info(
+                        f"Detected unnamed supplier column: {df_head.columns[col_idx]} -> "
+                        f"{supplier} (ID: {self.supplier_ids[supplier]}, "
+                        f"Based on {count} suffix/pattern matches)"
+                    )
+                    break  # Assign to the supplier with most matches
+        
+        # Check for columns we might have missed (especially those with supplier names in header row)
+        if len(df_full) > 0:
+            # Check the first few rows for supplier names
+            for row_idx in range(min(8, len(df_full))):  # Increased from 5 to 8 rows
+                for col_idx, col_name in enumerate(df_head.columns):
+                    # Skip columns we've already identified
+                    if any(col_idx in indices for indices in supplier_columns.values()):
+                        continue
+                        
+                    # Skip empty columns
+                    if col_idx >= len(df_full.iloc[row_idx]):
+                        continue
+                        
+                    cell_value = df_full.iloc[row_idx, col_idx]
+                    if pd.isna(cell_value) or not isinstance(cell_value, str):
+                        continue
+                        
+                    # Check if this cell contains a supplier name or abbreviation
+                    cell_str = str(cell_value).strip()
+                    
+                    # Check for common supplier column headers with more variations
+                    for supplier_pattern, supplier_name in [
+                        ("BMW", "BMW Plumbing Supplies"),
+                        ("WWPS", "World Wide Plumbing"),
+                        ("Y&S", "Y & S Plumbing Supply"),
+                        ("Y & S", "Y & S Plumbing Supply"),
+                        ("SUPREME", "Supreme Plumbing Supply"),
+                        ("PYRAMID", "Pyramid Plumbing"),
+                        ("GOTHAM", "Gotham Plumbing Supply"),
+                        ("FW WEBB", "FW Webb Plumbing Supply"),
+                        ("FLOW", "Flow Mark Plumbing Supply"),
+                        ("OPUS", "ABC Opus Services"),
+                        ("AF SUPPLY", "AF Supply"),
+                        ("AF", "AF Supply"),
+                        ("LION", "Lion Hvac Supplies"),
+                        ("BRUCE", "Bruce Ferguson")
+                    ]:
+                        # Match supplier name with optional number (e.g., "BMW 1", "BMW 2")
+                        if re.match(f"^{supplier_pattern}\\s*\\d*$", cell_str, re.IGNORECASE):
+                            supplier_id = self.supplier_ids.get(supplier_name, 0)
+                            if supplier_id > 0:
+                                # Check if column contains any data
+                                col_data = df_full.iloc[:, col_idx]
+                                if not col_data.dropna().empty:
+                                    # Add to supplier columns
+                                    if supplier_name not in supplier_columns:
+                                        supplier_columns[supplier_name] = []
+                                    if col_idx not in supplier_columns[supplier_name]:
+                                        supplier_columns[supplier_name].append(col_idx)
+                                        
+                                        logger.info(
+                                            f"Detected supplier from header row: {cell_str} -> "
+                                            f"{supplier_name} (ID: {supplier_id}, "
+                                            f"Column: {col_name})"
+                                        )
+            
+            # Additional check for columns that might contain supplier data but weren't detected
+            # Look for columns that have item codes but weren't identified as supplier columns
+            for col_idx, col_name in enumerate(df_head.columns):
+                # Skip columns we've already identified
+                if any(col_idx in indices for indices in supplier_columns.values()):
+                    continue
+                
+                # Skip columns that likely contain description/code data
+                col_name_str = str(col_name).lower()
+                if any(x in col_name_str for x in 
+                      ["size", "description", "item code", "code", "mpi"]):
+                    continue
+                
+                # Check if column contains data that looks like item codes
+                col_data = df_full.iloc[:, col_idx].dropna()
+                if len(col_data) >= 5:  # At least 5 non-empty values
+                    # Sample values to check for patterns
+                    sample_values = col_data[:20].tolist()
+                    string_values = [str(v).strip() for v in sample_values if isinstance(v, (str, int, float))]
+                    
+                    # Count values that look like item codes
+                    code_patterns = [
+                        r'^\d{5,}(-[A-Z])?$',  # Long numeric codes
+                        r'^[A-Z]{2,}\d+(-[A-Z])?$',  # Alphanumeric codes
+                        r'^[A-Z]{2,}[0-9]+[A-Z0-9]*(-[A-Z])?$'  # Complex alphanumeric codes
+                    ]
+                    
+                    pattern_matches = 0
+                    for value in string_values:
+                        if any(re.match(pattern, value) for pattern in code_patterns):
+                            pattern_matches += 1
+                    
+                    # If more than 30% of values look like item codes, consider it a supplier column
+                    if pattern_matches > 0 and pattern_matches / len(string_values) >= 0.3:
+                        # Try to determine which supplier based on patterns
+                        # Default to BMW if we can't determine
+                        supplier_name = "BMW Plumbing Supplies"
+                        
+                        # Check for specific patterns
+                        for value in string_values:
+                            if value.endswith("-W"):
+                                supplier_name = "World Wide Plumbing"
+                                break
+                            elif value.endswith("-Y"):
+                                supplier_name = "Y & S Plumbing Supply"
+                                break
+                            elif value.endswith("-S"):
+                                supplier_name = "Supreme Plumbing Supply"
+                                break
+                            elif value.endswith("-B"):
+                                supplier_name = "BMW Plumbing Supplies"
+                                break
+                            elif value.endswith("-A"):
+                                supplier_name = "ABC Opus Services"
+                                break
+                            elif "IN" in value and len(value) > 5:
+                                supplier_name = "AF Supply"
+                                break
+                        
+                        # Add to supplier columns
+                        if supplier_name not in supplier_columns:
+                            supplier_columns[supplier_name] = []
+                        if col_idx not in supplier_columns[supplier_name]:
+                            supplier_columns[supplier_name].append(col_idx)
+                            
+                            logger.info(
+                                f"Detected supplier column by pattern analysis: {col_name} -> "
+                                f"{supplier_name} (ID: {self.supplier_ids[supplier_name]}, "
+                                f"Based on {pattern_matches}/{len(string_values)} pattern matches)"
+                            )
         
         return supplier_columns
 
@@ -549,7 +778,7 @@ class GoogleSheetDataExtractor:
                     supplier_value = str(cell_value).strip()
                     # Remove common prefix patterns like -B, -W, -Y, -S
                     cleaned_value = re.sub(
-                        r'\s*-\s*[BWYS](\s|$)', 
+                        r'\s*-\s*[BWYSGFPA](\s|$)', 
                         '', 
                         supplier_value
                     )
@@ -560,6 +789,9 @@ class GoogleSheetDataExtractor:
                     if any(term in cleaned_value.lower() for term in ["supplier", "item", "id", "code"]):
                         continue
                     
+                    # Get the original column name
+                    supplier_column_name = str(df.columns[col_idx])
+                    
                     # Create item mapping with enhanced data
                     item_mapping = {
                         "mpi_code": mpi_code,
@@ -569,7 +801,8 @@ class GoogleSheetDataExtractor:
                         "supplier_id": self.supplier_ids[supplier],
                         "supplier_item_ids": cleaned_value,
                         "google_sheet_name": sheet_title,
-                        "row_index": actual_row
+                        "row_index": actual_row,
+                        "supplier_column_name": supplier_column_name
                     }
                     
                     extracted_items.append(item_mapping)
