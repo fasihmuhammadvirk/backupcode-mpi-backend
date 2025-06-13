@@ -3,6 +3,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 from datetime import datetime
 import logging
+import boto3
 
 from mpi_backend.database import get_db
 from mpi_backend.database.controllers.statement_controller import (
@@ -11,7 +12,13 @@ from mpi_backend.database.controllers.statement_controller import (
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.s3_utils import get_presigned_url
 from mpi_backend.utils.statement_extractor.extractor import StatementExtractor
-from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
+from mpi_backend.config import (
+    INVOICE_DOWNLOAD_FOLDER, 
+    AWS_SERVER_PUBLIC_KEY, 
+    AWS_SERVER_SECRET_KEY, 
+    REGION, 
+    BUCKET_NAME
+)
 
 logger = logging.getLogger(__name__)
 
@@ -258,18 +265,27 @@ def download_statement_pdf(
         
         # Generate presigned URL for statement PDF
         # Statements are stored with key pattern: statements/{filename}
-        # Remove .pdf extension since get_presigned_url will add it back when is_invoice=True
         s3_key = f"statements/{pdf_filename}"
-        if s3_key.endswith('.pdf'):
-            s3_key = s3_key[:-4]  # Remove .pdf extension
         
         try:
-            presigned_url = get_presigned_url(
-                file_key=s3_key,
-                expiration_time=180,  # 3 minutes
-                is_invoice=True
+            # Force inline viewing in the URL response, regardless of how file was uploaded
+            s3_client = boto3.client(
+                's3',
+                aws_access_key_id=AWS_SERVER_PUBLIC_KEY,
+                aws_secret_access_key=AWS_SERVER_SECRET_KEY,
+                region_name=REGION
             )
-        except Exception as e:
+            
+            presigned_url = s3_client.generate_presigned_url(
+                'get_object',
+                Params={
+                    'Bucket': BUCKET_NAME,
+                    'Key': s3_key,
+                    'ResponseContentDisposition': 'inline',
+                    'ResponseContentType': 'application/pdf'
+                },
+                ExpiresIn=180
+            )
             logger.error(
                 f"Error generating presigned URL for {s3_key}: {str(e)}"
             )
