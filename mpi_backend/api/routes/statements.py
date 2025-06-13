@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import Optional
+from typing import Optional, List
 from sqlalchemy.orm import Session
 from datetime import datetime
 import logging
@@ -47,9 +47,9 @@ def get_statement_invoice_data(
         description="End date in DD/MM/YYYY format (e.g., '01/06/2025')",
         regex=r"^\d{1,2}/\d{1,2}/\d{4}$"
     ),
-    supplier_name: Optional[str] = Query(
+    supplier_names: Optional[List[str]] = Query(
         None,
-        description="Supplier name, supplier ID, or 'All' to filter by"
+        description="List of supplier names, supplier IDs, or ['All'] to filter by"
     ),
     status: Optional[str] = Query(
         None,
@@ -80,8 +80,8 @@ def get_statement_invoice_data(
       (filters by statement_date)
     - **to_date**: End date filter in DD/MM/YYYY format 
       (filters by statement_date)
-    - **supplier_name**: Filter by supplier name (partial match supported), 
-      supplier ID (numeric), or "All" for all suppliers
+    - **supplier_names**: Filter by list of supplier names (partial match supported), 
+      supplier IDs (numeric), or ["All"] for all suppliers
     - **status**: Filter by reconciliation status 
       ('Processed', 'Failed', 'all')
     - **page**: Page number for pagination (starts from 1)
@@ -111,10 +111,16 @@ def get_statement_invoice_data(
     status=Processed&page=1&page_size=20
     
     # Get all suppliers' data
-    GET /statements/invoice-data?supplier_name=All&page=1&page_size=20
+    GET /statements/invoice-data?supplier_names=All&page=1&page_size=20
     
-    # Filter by supplier ID
-    GET /statements/invoice-data?supplier_name=3&page=1&page_size=20
+    # Filter by single supplier ID
+    GET /statements/invoice-data?supplier_names=3&page=1&page_size=20
+    
+    # Filter by multiple suppliers
+    GET /statements/invoice-data?supplier_names=BMW Plumbing Supplies&supplier_names=Y & S Plumbing Supply&page=1&page_size=20
+    
+    # Filter by multiple supplier IDs
+    GET /statements/invoice-data?supplier_names=1&supplier_names=2&supplier_names=3&page=1&page_size=20
     ```
     """
     try:
@@ -157,7 +163,7 @@ def get_statement_invoice_data(
         
         logger.info(
             f"Getting invoice data - Dates: {from_date} to {to_date}, "
-            f"Supplier: {supplier_name}, Status: {status}, "
+            f"Suppliers: {supplier_names}, Status: {status}, "
             f"Page: {page}, Size: {page_size}"
         )
         
@@ -166,7 +172,7 @@ def get_statement_invoice_data(
         result = controller.get_statement_invoice_data(
             from_date=from_date_obj,
             to_date=to_date_obj,
-            supplier_name=supplier_name,
+            supplier_names=supplier_names,
             status=status,
             page=page,
             page_size=page_size

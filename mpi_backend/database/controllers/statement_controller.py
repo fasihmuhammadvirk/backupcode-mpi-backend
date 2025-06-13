@@ -333,7 +333,7 @@ class StatementController:
         self,
         from_date: Optional[date] = None,
         to_date: Optional[date] = None, 
-        supplier_name: Optional[str] = None,
+        supplier_names: Optional[List[str]] = None,
         status: Optional[str] = None,
         page: int = 1,
         page_size: int = 20
@@ -344,7 +344,7 @@ class StatementController:
         Args:
             from_date: Start date filter (DD/MM/YYYY converted to date)
             to_date: End date filter (DD/MM/YYYY converted to date)
-            supplier_name: Supplier name/ID filter or "All" for all suppliers
+            supplier_names: List of supplier names/IDs or ["All"] for all suppliers
             status: Invoice status filter (Processed/Failed)
             page: Page number (1-based)
             page_size: Number of items per page
@@ -366,17 +366,25 @@ class StatementController:
             if to_date:
                 query = query.filter(PlumbingStatement.statement_date <= to_date)
             
-            # Apply supplier filter - support "All", supplier ID, or supplier name
-            if supplier_name and supplier_name.lower() != "all":
-                # Check if supplier_name is a numeric ID
-                if supplier_name.isdigit():
-                    # Filter by supplier ID
-                    query = query.filter(PlumbingSupplier.id == int(supplier_name))
-                else:
-                    # Filter by supplier name (partial match)
-                    query = query.filter(
-                        PlumbingSupplier.name.ilike(f"%{supplier_name}%")
-                    )
+            # Apply supplier filter - support ["All"], multiple supplier IDs, or supplier names
+            if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
+                # Build OR conditions for multiple suppliers
+                supplier_conditions = []
+                
+                for supplier_name in supplier_names:
+                    # Check if supplier_name is a numeric ID
+                    if supplier_name.isdigit():
+                        # Filter by supplier ID
+                        supplier_conditions.append(PlumbingSupplier.id == int(supplier_name))
+                    else:
+                        # Filter by supplier name (partial match)
+                        supplier_conditions.append(
+                            PlumbingSupplier.name.ilike(f"%{supplier_name}%")
+                        )
+                
+                # Apply OR condition if any suppliers specified
+                if supplier_conditions:
+                    query = query.filter(or_(*supplier_conditions))
             
             # Get total count before pagination
             total_count = query.count()
@@ -454,11 +462,12 @@ class StatementController:
                 'filters_applied': {
                     'from_date': from_date.isoformat() if from_date else None,
                     'to_date': to_date.isoformat() if to_date else None,
-                    'supplier_name': supplier_name,
+                    'supplier_names': supplier_names,
                     'supplier_filter_type': (
-                        'all' if supplier_name and supplier_name.lower() == 'all'
-                        else 'id' if supplier_name and supplier_name.isdigit()
-                        else 'name' if supplier_name
+                        'all' if supplier_names and len(supplier_names) == 1 and supplier_names[0].lower() == 'all'
+                        else 'multiple' if supplier_names and len(supplier_names) > 1
+                        else 'id' if supplier_names and len(supplier_names) == 1 and supplier_names[0].isdigit()
+                        else 'name' if supplier_names and len(supplier_names) == 1
                         else None
                     ),
                     'status': status

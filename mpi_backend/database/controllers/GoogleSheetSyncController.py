@@ -34,6 +34,7 @@ class GoogleSheetSyncController:
     
     # Track which operation is running and last run times
     _current_operation = None  # Can be 'sync', 'update_no_match_uidi', 'update_all'
+    _current_sub_operation = None  # Track specific job within operation
     _last_update_no_match_uidi_time = None
     _last_update_all_time = None
     _last_update_invalid_time = None  # For backward compatibility
@@ -90,6 +91,7 @@ class GoogleSheetSyncController:
         return {
             "is_running": cls._sync_task_running,
             "current_operation": cls._current_operation,
+            "current_sub_operation": cls._current_sub_operation,
             "last_sync_time": (
                 cls._last_sync_time.isoformat() 
                 if cls._last_sync_time else None
@@ -130,7 +132,8 @@ class GoogleSheetSyncController:
 
             # Handle different operations
             if operation == 'update_no_match_uidi':
-                # First sync from Google Sheets to get latest mappings
+                # Step 1: Sync from Google Sheets to get latest mappings
+                self.__class__._current_sub_operation = "syncing_google_sheets"
                 sync_result = self.sync_sheet_mappings(
                     sheet_id=DEFAULT_SHEET_ID,
                     output_file=DEFAULT_OUTPUT_FILE,
@@ -144,14 +147,16 @@ class GoogleSheetSyncController:
                 if not sync_result.get("success"):
                     return sync_result
                 
-                # Then update No Match / UIDI mappings using the newly synced data
+                # Step 2: Update No Match / UIDI mappings using the newly synced data
+                self.__class__._current_sub_operation = "updating_uidi_items"
                 result = self.mapping_controller.update_no_match_uidi_mappings()
                 
                 # Combine results
                 result["sync_info"] = f"Synced {sync_result.get('new_mappings_count', 0)} new mappings from Google Sheets first"
                 
             elif operation == 'update_all':
-                # First sync from Google Sheets to get latest mappings
+                # Step 1: Sync from Google Sheets to get latest mappings
+                self.__class__._current_sub_operation = "syncing_google_sheets"
                 sync_result = self.sync_sheet_mappings(
                     sheet_id=DEFAULT_SHEET_ID,
                     output_file=DEFAULT_OUTPUT_FILE,
@@ -165,7 +170,8 @@ class GoogleSheetSyncController:
                 if not sync_result.get("success"):
                     return sync_result
                 
-                # Then update all mappings using the newly synced data
+                # Step 2: Update all mappings using the newly synced data
+                self.__class__._current_sub_operation = "updating_all_items"
                 result = self.mapping_controller.update_all_mappings()
                 
                 # Combine results
@@ -173,6 +179,7 @@ class GoogleSheetSyncController:
                 
             else:
                 # Default to syncing from Google Sheets only
+                self.__class__._current_sub_operation = "syncing_google_sheets"
                 result = self.sync_sheet_mappings(
                     sheet_id=DEFAULT_SHEET_ID,
                     output_file=DEFAULT_OUTPUT_FILE,
@@ -210,6 +217,7 @@ class GoogleSheetSyncController:
         finally:
             self.__class__._sync_task_running = False
             self.__class__._current_operation = None
+            self.__class__._current_sub_operation = None
 
     def sync_sheet_mappings(
         self,

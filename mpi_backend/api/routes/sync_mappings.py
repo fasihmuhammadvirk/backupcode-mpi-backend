@@ -38,16 +38,33 @@ def sync_mapping(
     status = sync_controller.get_sync_status()
     
     if status["is_running"]:
-        # Operation display names mapping
-        operation_display = {
-            "sync": "Synchronization",
-            "update_no_match_uidi": "No Match / UIDI Update",
-            "update_all": "Full Update"
-        }.get(status['current_operation'], status['current_operation'])
+        # Get detailed job information
+        operation = status["current_operation"]
+        sub_operation = status["current_sub_operation"]
+        
+        # Determine what's currently running
+        if operation == "update_no_match_uidi":
+            if sub_operation == "syncing_google_sheets":
+                blocking_job = "UIDI Update (Step 1/2: Syncing Google Sheets)"
+            elif sub_operation == "updating_uidi_items":
+                blocking_job = "UIDI Update (Step 2/2: Updating UIDI items)"
+            else:
+                blocking_job = "UIDI Update"
+        elif operation == "update_all":
+            if sub_operation == "syncing_google_sheets":
+                blocking_job = "Full Update (Step 1/2: Syncing Google Sheets)"
+            elif sub_operation == "updating_all_items":
+                blocking_job = "Full Update (Step 2/2: Updating all items)"
+            else:
+                blocking_job = "Full Update"
+        elif operation == "sync":
+            blocking_job = "Google Sheets Sync"
+        else:
+            blocking_job = operation or "Unknown operation"
         
         return SyncMappingsResponse(
             success=False,
-            message=f"Cannot start operation: {operation_display} is already in progress",
+            message=f"Cannot start sync: {blocking_job} is currently running",
             timestamp=datetime.now()
         )
     
@@ -75,17 +92,39 @@ def sync_status(
     sync_controller = GoogleSheetSyncController(db)
     status = sync_controller.get_sync_status()
     
-    # Format the response with clear status information
-    operation_display = {
-        None: "No operation in progress",
-        "sync": "Synchronizing data",
-        "update_no_match_uidi": "Updating No Match / UIDI Mappings",
-        "update_all": "Updating All Mappings"
-    }
+    # Determine detailed current operation description
+    current_operation = "No operation in progress"
+    
+    if status["is_running"]:
+        operation = status["current_operation"]
+        sub_operation = status["current_sub_operation"]
+        
+        # Create detailed operation descriptions based on operation and sub-operation
+        if operation == "sync":
+            current_operation = "Synchronizing Google Sheets"
+                
+        elif operation == "update_no_match_uidi":
+            if sub_operation == "syncing_google_sheets":
+                current_operation = "Updating No Match / UIDI Mappings (Step 1/2: Syncing Google Sheets)"
+            elif sub_operation == "updating_uidi_items":
+                current_operation = "Updating No Match / UIDI Mappings (Step 2/2: Updating UIDI Items)"
+            else:
+                current_operation = "Updating No Match / UIDI Mappings"
+                
+        elif operation == "update_all":
+            if sub_operation == "syncing_google_sheets":
+                current_operation = "Updating All Mappings (Step 1/2: Syncing Google Sheets)"
+            elif sub_operation == "updating_all_items":
+                current_operation = "Updating All Mappings (Step 2/2: Updating All Items)"
+            else:
+                current_operation = "Updating All Mappings"
+        else:
+            # Fallback for unknown operations
+            current_operation = operation or "Unknown operation"
     
     return {
         "status": "running" if status["is_running"] else "idle",
-        "current_operation": operation_display.get(status["current_operation"], status["current_operation"]),
+        "current_operation": current_operation,
         "last_sync_time": status["last_sync_time"],
         "last_no_match_uidi_update": status["last_update_no_match_uidi_time"],
         "last_full_update": status["last_update_all_time"]
@@ -118,16 +157,33 @@ def update_no_match_uidi_mappings(
     status = sync_controller.get_sync_status()
 
     if status["is_running"]:
-        # Convert operation name to user-friendly format
-        operation_display = {
-            "sync": "Synchronization",
-            "update_no_match_uidi": "No Match / UIDI Update",
-            "update_all": "Full Update"
-        }.get(status['current_operation'], status['current_operation'])
+        # Get detailed job information
+        operation = status["current_operation"]
+        sub_operation = status["current_sub_operation"]
+        
+        # Determine what's currently running
+        if operation == "update_no_match_uidi":
+            if sub_operation == "syncing_google_sheets":
+                blocking_job = "UIDI Update (Step 1/2: Syncing Google Sheets)"
+            elif sub_operation == "updating_uidi_items":
+                blocking_job = "UIDI Update (Step 2/2: Updating UIDI items)"
+            else:
+                blocking_job = "UIDI Update"
+        elif operation == "update_all":
+            if sub_operation == "syncing_google_sheets":
+                blocking_job = "Full Update (Step 1/2: Syncing Google Sheets)"
+            elif sub_operation == "updating_all_items":
+                blocking_job = "Full Update (Step 2/2: Updating all items)"
+            else:
+                blocking_job = "Full Update"
+        elif operation == "sync":
+            blocking_job = "Google Sheets Sync"
+        else:
+            blocking_job = operation or "Unknown operation"
         
         return {
             "status": "error",
-            "message": f"Cannot start operation: {operation_display} is already in progress",
+            "message": f"Cannot start UIDI update: {blocking_job} is currently running",
             "timestamp": datetime.now().isoformat()
         }
 
@@ -176,16 +232,33 @@ def update_all_mappings(
     status = sync_controller.get_sync_status()
 
     if status["is_running"]:
-        # Convert operation name to user-friendly format
-        operation_display = {
-            "sync": "Synchronization",
-            "update_no_match_uidi": "No Match / UIDI Update",
-            "update_all": "Full Update"
-        }.get(status['current_operation'], status['current_operation'])
+        # Get detailed job information
+        operation = status["current_operation"]
+        sub_operation = status["current_sub_operation"]
         
+        # Determine what's currently running
+        if operation == "update_no_match_uidi":
+            if sub_operation == "syncing_google_sheets":
+                blocking_job = "UIDI Update (Step 1/2: Syncing Google Sheets)"
+            elif sub_operation == "updating_uidi_items":
+                blocking_job = "UIDI Update (Step 2/2: Updating UIDI items)"
+            else:
+                blocking_job = "UIDI Update"
+        elif operation == "update_all":
+            if sub_operation == "syncing_google_sheets":
+                blocking_job = "Full Update (Step 1/2: Syncing Google Sheets)"
+            elif sub_operation == "updating_all_items":
+                blocking_job = "Full Update (Step 2/2: Updating all items)"
+            else:
+                blocking_job = "Full Update"
+        elif operation == "sync":
+            blocking_job = "Google Sheets Sync"
+        else:
+            blocking_job = operation or "Unknown operation"
+
         return {
             "status": "error",
-            "message": f"Cannot start operation: {operation_display} is already in progress",
+            "message": f"Cannot start full update: {blocking_job} is currently running",
             "timestamp": datetime.now().isoformat()
         }
 
