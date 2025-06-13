@@ -584,7 +584,7 @@ def process_statement_files(base_folder_path: Path):
                             # Upload PDF to S3 for storage
                             file_key = f"statements/{pdf_file.name}"
                             upload_file(str(pdf_file), file_key, 
-                                       is_invoice=False)
+                                       is_invoice=True)
                             
                             processed_count += 1
                         else:

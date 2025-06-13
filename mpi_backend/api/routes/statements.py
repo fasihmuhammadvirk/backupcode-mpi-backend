@@ -258,13 +258,16 @@ def download_statement_pdf(
         
         # Generate presigned URL for statement PDF
         # Statements are stored with key pattern: statements/{filename}
+        # Remove .pdf extension since get_presigned_url will add it back when is_invoice=True
         s3_key = f"statements/{pdf_filename}"
+        if s3_key.endswith('.pdf'):
+            s3_key = s3_key[:-4]  # Remove .pdf extension
         
         try:
             presigned_url = get_presigned_url(
                 file_key=s3_key,
                 expiration_time=180,  # 3 minutes
-                is_invoice=False
+                is_invoice=True
             )
         except Exception as e:
             logger.error(
