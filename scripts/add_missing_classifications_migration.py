@@ -8,8 +8,8 @@ import json
 import sys
 import os
 
-# Add project to path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Add project to path - go up one directory from scripts/
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mpi_backend.database import SessionLocal
 from mpi_backend.database.models.ItemClassification import ItemClassification
