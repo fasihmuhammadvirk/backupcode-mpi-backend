@@ -16,6 +16,43 @@ from mpi_backend.utils.item_utils import clean_supplier_suffix
 db = contextmanager(get_db)
 
 
+def validate_invoice_data(data):
+    """
+    Validates if the invoice has all the required critical fields.
+    Returns: True if all critical fields are present, False otherwise
+    """
+    validation_errors = []
+    
+    # Check for reference number
+    if 'Ref NO' not in data.columns:
+        validation_errors.append("Missing 'Ref NO' column")
+    elif data.empty or len(data) == 0:
+        validation_errors.append("Invoice data is empty")
+    elif pd.isna(data['Ref NO'][0]) or str(data['Ref NO'][0]).strip() == '':
+        validation_errors.append("Missing reference number value")
+    
+    # Check for total amount (using the sum of all line item amounts)
+    if 'Amount' not in data.columns:
+        validation_errors.append("Missing 'Amount' column")
+    elif data['Amount'].isnull().all():
+        validation_errors.append("All amount values are null")
+    elif len(data['Amount']) == 0:
+        validation_errors.append("No amount values found")
+    
+    # Check for date
+    if 'Date' not in data.columns:
+        validation_errors.append("Missing 'Date' column")
+    elif pd.isna(data['Date'][0]) or str(data['Date'][0]).strip() == '':
+        validation_errors.append("Missing date value")
+    
+    if validation_errors:
+        for error in validation_errors:
+            logger.error(f'Invoice validation failed: {error}')
+        return False
+    
+    return True
+
+
 def process_extracted_data(converted_files, failed_files):
 
     temp_items = TempItemsMappingController(db).get_temp_items_mappings()
@@ -27,6 +64,7 @@ def process_extracted_data(converted_files, failed_files):
             extracted_data = pd.read_excel(file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
         except FileNotFoundError:
             logger.error(f'Invoice ->{file} does not exists')
+            failed_files.append(file)  # Add to failed files if Excel not found
             continue
 
         supplier_id = SupplierController(db).get_supplier_name(extracted_data['Vendor'][0])
@@ -49,18 +87,35 @@ def process_extracted_data(converted_files, failed_files):
                                                 'PO #': '', 'Customer Job': '', 'Buyer': '',
                                                 'Date': datetime.today().strftime('%m/%d/%Y')})
 
+        # Create invoice record initially with PROCESSING status
         invoice_record = InvoiceController(db).insert_invoice(extracted_data['Date'][0], file.rsplit('/')[-1],
                                                               supplier_id, 'PROCESSING',
                                                               file)  # one record for every file in invoices table
 
-        InvoiceController(db).set_status_to_processed(invoice_record.id) # invoice has processed, change its status accordingly
+        # Validate the invoice has all critical fields
+        if validate_invoice_data(extracted_data):
+            # Invoice valid - mark as processed
+            InvoiceController(db).set_status_to_processed(invoice_record.id)
+            logger.info(f'Invoice {file.rsplit("/")[-1]} marked as processed successfully')
+        else:
+            # Invoice invalid - mark as failed
+            invoice_record.status = 'FAILED'
+            with db() as session:
+                invoice = session.query(InvoiceController(session).db_context.query).filter_by(id=invoice_record.id).first()
+                if invoice:
+                    invoice.status = 'FAILED'
+                    session.commit()
+            logger.warning(f'Invoice {file.rsplit("/")[-1]} marked as failed due to missing critical data')
+        
+        # Upload to S3 regardless of status
         upload_file(file_name=file, file_key=f'{extracted_data["Vendor"][0]}/{invoice_record.id}')
 
+        # Store invoice items regardless of status
         for index, row in extracted_data.iterrows():  # every item has its own record
             InvoiceItemController(db).insert_invoice_items(row, file.rsplit('/')[-1], invoice_record.id)
 
     for file in failed_files:
-        supplier_id, supplier_name = extract_supplier_id (file_path=file)
+        supplier_id, supplier_name = extract_supplier_id(file_path=file)
         if InvoiceController(db).is_invoice_present(file.split("/")[-1]):
             continue
         invoice_record = InvoiceController(db).insert_invoice(datetime.now().strftime('%m/%d/%Y'), file.rsplit('/')[-1], supplier_id, 'FAILED', file)
