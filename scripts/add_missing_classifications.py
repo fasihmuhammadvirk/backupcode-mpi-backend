@@ -1,12 +1,27 @@
 #!/usr/bin/env python3
 """
 Script to add missing item classifications from item-mapping.json
-This script ONLY ADDS missing classifications - it does NOT overwrite existing ones.
+This script:
+1. Updates item-classifications.json (preserves existing ones)
+2. Updates the database directly
+3. Generates SQL script as backup
 """
 
 import json
 import os
+import sys
 from datetime import datetime
+
+# Add the parent directory to Python path to import from mpi_backend
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Import database connection from your project
+try:
+    from mpi_backend.database.connection import get_database_connection
+    DATABASE_CONNECTION_AVAILABLE = True
+except ImportError:
+    DATABASE_CONNECTION_AVAILABLE = False
+    print("⚠️  Warning: Could not import database connection from mpi_backend")
 
 def load_json_file(filepath):
     """Load JSON file safely"""
@@ -80,8 +95,48 @@ def determine_category(sheet_name):
     # Default to materials
     return 'M'
 
+def update_database(new_classifications):
+    """Update the database with new classifications"""
+    
+    if not DATABASE_CONNECTION_AVAILABLE:
+        print("❌ Database connection not available. Skipping database update.")
+        print("   You'll need to run the generated SQL script manually.")
+        return False
+    
+    try:
+        print("\n🔗 Connecting to database...")
+        db = get_database_connection()
+        cursor = db.cursor()
+        
+        print(f"📝 Inserting {len(new_classifications)} new classifications into database...")
+        
+        inserted_count = 0
+        for classification in new_classifications:
+            try:
+                query = "INSERT INTO item_classification (item, category) VALUES (%s, %s)"
+                cursor.execute(query, (classification['item'], classification['category']))
+                inserted_count += 1
+                print(f"   ✅ Added: '{classification['item']}' → {classification['category']}")
+            except Exception as e:
+                print(f"   ⚠️  Warning: Could not insert '{classification['item']}': {e}")
+        
+        # Commit the changes
+        db.commit()
+        cursor.close()
+        db.close()
+        
+        print(f"\n✅ Database updated successfully!")
+        print(f"   - Inserted: {inserted_count}/{len(new_classifications)} classifications")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Database error: {e}")
+        print("   Falling back to SQL script generation only.")
+        return False
+
 def add_missing_classifications(missing_sheet_names, existing_data):
-    """Add missing classifications to the existing data"""
+    """Add missing classifications to JSON file and database"""
     
     if not missing_sheet_names:
         print("\n✅ No missing classifications found! Your system is up to date.")
@@ -92,8 +147,9 @@ def add_missing_classifications(missing_sheet_names, existing_data):
         print(f"   {i:2d}. '{sheet_name}'")
     
     # Ask for confirmation
-    print(f"\n⚠️  This will add {len(missing_sheet_names)} new classifications to your existing ones.")
-    print(f"⚠️  Existing classifications will NOT be modified.")
+    print(f"\n⚠️  This will add {len(missing_sheet_names)} new classifications:")
+    print(f"   - To item-classifications.json (preserving existing ones)")
+    print(f"   - To the database (item_classification table)")
     response = input(f"\nProceed with adding {len(missing_sheet_names)} missing classifications? (y/N): ")
     
     if response.lower() != 'y':
@@ -116,6 +172,37 @@ def add_missing_classifications(missing_sheet_names, existing_data):
         
         category_name = "Equipment" if category == 'E' else "Materials"
         print(f"   + '{sheet_name}' → Category: {category} ({category_name})")
+    
+    # Update JSON file
+    success_json = update_json_file(existing_data, new_classifications)
+    
+    # Update database
+    success_db = update_database(new_classifications)
+    
+    # Generate SQL script as backup
+    generate_sql_script(new_classifications)
+    
+    if success_json:
+        print(f"\n🎉 SUCCESS!")
+        print(f"   - ✅ JSON file updated: {len(new_classifications)} classifications added")
+        if success_db:
+            print(f"   - ✅ Database updated: Classifications inserted")
+        else:
+            print(f"   - ⚠️  Database update failed: Use generated SQL script")
+        print(f"   - ✅ SQL script generated as backup")
+        
+        # Check if the specific problematic classification was added
+        if any(c['item'] == '(NO-HUB FITTINGS)' for c in new_classifications):
+            print(f"\n🎯 QUICKBOOKS ISSUE FIXED:")
+            print(f"   - Added '(NO-HUB FITTINGS)' classification")
+            print(f"   - Your QuickBooks import should now work!")
+        
+        return True
+    
+    return False
+
+def update_json_file(existing_data, new_classifications):
+    """Update the JSON file with new classifications"""
     
     # Combine existing and new data (preserving existing ones)
     updated_data = existing_data + new_classifications
@@ -144,32 +231,21 @@ def add_missing_classifications(missing_sheet_names, existing_data):
     try:
         with open('mpi_backend/storage/fixtures/item-classifications.json', 'w', encoding='utf-8') as f:
             json.dump(updated_data, f, indent=2, ensure_ascii=False)
-        print(f"✅ File updated successfully")
-        
-        # Generate SQL script
-        generate_sql_script(new_classifications)
-        
-        print(f"\n🎉 SUCCESS! Added {len(new_classifications)} new classifications")
+        print(f"✅ JSON file updated successfully")
         print(f"   - Total classifications now: {len(updated_data)}")
         print(f"   - Existing classifications: PRESERVED")
         print(f"   - New classifications: {len(new_classifications)} ADDED")
         
-        # Check if the specific problematic classification was added
-        if any(c['item'] == '(NO-HUB FITTINGS)' for c in new_classifications):
-            print(f"\n🎯 QUICKBOOKS ISSUE FIXED:")
-            print(f"   - Added '(NO-HUB FITTINGS)' classification")
-            print(f"   - Your QuickBooks import should now work!")
-        
         return True
         
     except Exception as e:
-        print(f"❌ Error writing file: {e}")
+        print(f"❌ Error writing JSON file: {e}")
         return False
 
 def generate_sql_script(new_classifications):
-    """Generate SQL script for database updates"""
+    """Generate SQL script for database updates (as backup)"""
     
-    sql_filename = f"add_missing_classifications_{datetime.now().strftime('%Y%m%d_%H%M%S')}.sql"
+    sql_filename = f"scripts/add_missing_classifications_{datetime.now().strftime('%Y%m%d_%H%M%S')}.sql"
     
     print(f"\n📝 Generating SQL script: {sql_filename}")
     
@@ -177,6 +253,7 @@ def generate_sql_script(new_classifications):
         with open(sql_filename, 'w') as f:
             f.write("-- SQL script to add missing item classifications\n")
             f.write("-- This script adds ONLY the missing classifications\n")
+            f.write(f"-- Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"-- Total new classifications: {len(new_classifications)}\n\n")
             
             for classification in new_classifications:
@@ -187,20 +264,21 @@ def generate_sql_script(new_classifications):
             f.write(f"\n-- End of script ({len(new_classifications)} classifications added)\n")
         
         print(f"✅ SQL script generated: {sql_filename}")
-        print(f"   Run this script in your database to complete the fix")
+        print(f"   Use this script as backup or for manual database updates")
         
     except Exception as e:
         print(f"❌ Error generating SQL script: {e}")
 
 def main():
     """Main function"""
-    print("=" * 60)
-    print("🔧 ADD MISSING ITEM CLASSIFICATIONS")
-    print("=" * 60)
+    print("=" * 70)
+    print("🔧 ADD MISSING ITEM CLASSIFICATIONS (JSON + DATABASE)")
+    print("=" * 70)
     print("This script will:")
-    print("1. Find sheet names in item-mapping.json that don't exist in item-classifications.json")
-    print("2. ADD missing classifications (existing ones are preserved)")
-    print("3. Generate SQL script for database updates")
+    print("1. Find missing sheet names from item-mapping.json")
+    print("2. ADD them to item-classifications.json (preserving existing)")
+    print("3. INSERT them into the database (item_classification table)")
+    print("4. Generate SQL script as backup")
     print()
     
     # Check required files
@@ -214,6 +292,14 @@ def main():
             print(f"❌ Error: Required file not found: {filepath}")
             return
     
+    # Show database connection status
+    if DATABASE_CONNECTION_AVAILABLE:
+        print("✅ Database connection available - will update both JSON and database")
+    else:
+        print("⚠️  Database connection not available - will update JSON and generate SQL script")
+    
+    print()
+    
     # Find and add missing classifications
     missing_sheet_names, existing_data = find_missing_classifications()
     
@@ -222,9 +308,14 @@ def main():
     
     if add_missing_classifications(missing_sheet_names, existing_data):
         print(f"\n🚀 NEXT STEPS:")
-        print(f"   1. ✅ JSON file updated with new classifications")
-        print(f"   2. 🔄 Run the generated SQL script in your database")
-        print(f"   3. 🎯 Test your QuickBooks import - it should work now!")
+        if DATABASE_CONNECTION_AVAILABLE:
+            print(f"   1. ✅ JSON file updated with new classifications")
+            print(f"   2. ✅ Database updated with new classifications")
+            print(f"   3. 🎯 Test your QuickBooks import - it should work now!")
+        else:
+            print(f"   1. ✅ JSON file updated with new classifications")
+            print(f"   2. 🔄 Run the generated SQL script in your database")
+            print(f"   3. 🎯 Test your QuickBooks import - it should work now!")
 
 if __name__ == "__main__":
     main() 
