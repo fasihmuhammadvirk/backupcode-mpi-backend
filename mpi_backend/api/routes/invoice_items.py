@@ -199,7 +199,7 @@ def export_invoices(
             print(f"Using standard export for {record_count} records")
             controller = InvoiceItemController(db)
             items = controller.get_invoice_items_by_ids(ids, order_by=order_by)
-            items_df = convert_items_to_dataframe(items)
+    items_df = convert_items_to_dataframe(items)
             method_used = "standard"
         
         if items_df.empty:
@@ -217,28 +217,28 @@ def export_invoices(
             items_df = items_df[available_columns]
         
         # Prepare file paths
-        upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/Exports/'
-        filename = f'{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.xlsx'
-        file_path = f'{upload_folder}{filename}'
+    upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/Exports/'
+    filename = f'{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.xlsx'
+    file_path = f'{upload_folder}{filename}'
         
         if not os.path.exists(upload_folder):
             os.makedirs(upload_folder)
-        
+
         # Choose Excel export method based on optimization level
         if method_used in ["optimized", "batch_optimized"]:
             from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data_fast
             save_final_data_fast(items_df, file_path)
-        else:
+    else:
             save_final_data(final_df=items_df, supplier='', output_path=file_path)
-        
+
         processing_time = time.time() - start_time
         print(f"Export completed using {method_used} method in {processing_time:.2f} seconds for {len(items_df)} items")
-        
+
         # Upload to S3 and get download URL
         upload_file(file_path, file_key=f'Exports/{filename}', is_invoice=False)
-        download_url = get_presigned_url(file_key=f'Exports/{filename}', is_invoice=False)
-        
-        return download_url
+    download_url = get_presigned_url(file_key=f'Exports/{filename}', is_invoice=False)
+
+    return download_url
         
     except Exception as e:
         print(f"Export error: {str(e)}")

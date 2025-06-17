@@ -37,6 +37,8 @@ def migrate_invoice_to_QB(
     all_batch_entries = []
 
     for invoice_id in invoice_ids:
+        # Get raw SQLAlchemy objects for DataFrame (fixes vars() issue)
+        line_items_raw = InvoiceItemController(db).get_invoice_items_raw(invoice_id)
         line_items = InvoiceItemController(db).get_invoice_items(invoice_id)
         line_item_copy = line_items
 
@@ -45,24 +47,55 @@ def migrate_invoice_to_QB(
             if item.sheet_name == '(TAX)':
                 tax = float(item.amount.replace(',', ''))
 
-        line_items = [item for item in line_items if item.sheet_name != '(TAX)']
+        # Filter using raw items for DataFrame creation
+        line_items_for_df = [item for item in line_items_raw if item.sheet_name != '(TAX)']
 
         # Create DataFrame and handle possible missing fields
         try:
             # First get reference numbers before creating DataFrame
-            ref_numbers = [getattr(item, 'ref_no', 'unknown') for item in line_items]
+            ref_numbers = [getattr(item, 'ref_no', 'unknown') for item in line_items_for_df]
             
-            line_item_df = pd.DataFrame([vars(item) for item in line_items])
+            # Convert raw SQLAlchemy objects to DataFrame (this fixes the vars() issue)
+            line_items_data = []
+            for item in line_items_for_df:
+                item_dict = item.__dict__.copy()
+                item_dict.pop('_sa_instance_state', None)  # Remove SQLAlchemy internal field
+                line_items_data.append(item_dict)
             
-            # Get sheet_name from DataFrame - this will fail with KeyError if missing
-            line_item_df['sheet_name']
+            line_item_df = pd.DataFrame(line_items_data)
             
-        except KeyError:
-            # Just use the reference numbers we collected before the error
-            raise HTTPException(
-                status_code=400,
-                detail=f"Missing sheet_name data. Reference numbers: {ref_numbers}"
-            )
+            # Check if we have any data at all
+            if line_item_df.empty:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No invoice items found for processing. Reference numbers: {ref_numbers}"
+                )
+            
+            # Ensure sheet_name column exists, fill missing values with empty string
+            # UIDI items are designed to have empty sheet names and that's OK
+            if 'sheet_name' not in line_item_df.columns:
+                line_item_df['sheet_name'] = ''
+                print(f"Created missing sheet_name column for {len(line_item_df)} items")
+            else:
+                # Fill null sheet_name values with empty string (UIDI items have null sheet names by design)
+                null_count = line_item_df['sheet_name'].isnull().sum()
+                line_item_df['sheet_name'] = line_item_df['sheet_name'].fillna('')
+                if null_count > 0:
+                    print(f"Filled {null_count} null sheet_name values with empty string")
+            
+            # Debug: Check for UIDI items
+            uidi_items = line_item_df[line_item_df['mpi_item'].str.startswith('UIDI', na=False)]
+            if not uidi_items.empty:
+                print(f"Found {len(uidi_items)} UIDI items with empty sheet names (this is expected)")
+                print(f"UIDI items: {uidi_items['mpi_item'].unique().tolist()}")
+            
+            print(f"DataFrame created successfully with {len(line_item_df)} items")
+            print(f"Columns: {list(line_item_df.columns)}")
+            print(f"Sample sheet_name values: {line_item_df['sheet_name'].value_counts().head()}")
+            
+        except HTTPException:
+            # Re-raise HTTPExceptions as-is
+            raise
         except Exception as e:
             # For any other exception, also return reference numbers
             raise HTTPException(
@@ -188,3 +221,66 @@ def migrate_invoice_to_QB(
     )
 
     return download_url
+
+@router.get("/debug-invoice/{invoice_id}")
+def debug_invoice_items(invoice_id: UUID, db: Session = Depends(get_db)):
+    """
+    Debug endpoint to test invoice item retrieval and conversion.
+    This helps isolate the issue with missing sheet_name.
+    """
+    try:
+        print(f"\n=== DEBUG INVOICE {invoice_id} ===")
+        
+        # Test both methods
+        controller = InvoiceItemController(db)
+        
+        # Test raw method
+        print("1. Testing get_invoice_items_raw...")
+        raw_items = controller.get_invoice_items_raw(invoice_id)
+        print(f"Raw items count: {len(raw_items)}")
+        
+        # Test regular method  
+        print("2. Testing get_invoice_items...")
+        regular_items = controller.get_invoice_items(invoice_id)
+        print(f"Regular items count: {len(regular_items)}")
+        
+        if raw_items:
+            sample_raw = raw_items[0]
+            print(f"Raw item sample:")
+            print(f"  - Type: {type(sample_raw)}")
+            print(f"  - Has sheet_name: {hasattr(sample_raw, 'sheet_name')}")
+            print(f"  - sheet_name value: {getattr(sample_raw, 'sheet_name', 'MISSING')}")
+            print(f"  - __dict__ keys: {list(sample_raw.__dict__.keys())}")
+            
+            # Test conversion
+            print("3. Testing conversion to dict...")
+            item_dict = sample_raw.__dict__.copy()
+            item_dict.pop('_sa_instance_state', None)
+            print(f"  - Dict keys: {list(item_dict.keys())}")
+            print(f"  - sheet_name in dict: {'sheet_name' in item_dict}")
+            print(f"  - sheet_name value: {item_dict.get('sheet_name', 'MISSING FROM DICT')}")
+            
+            # Test DataFrame creation
+            print("4. Testing DataFrame creation...")
+            import pandas as pd
+            df = pd.DataFrame([item_dict])
+            print(f"  - DataFrame columns: {list(df.columns)}")
+            print(f"  - sheet_name in DataFrame: {'sheet_name' in df.columns}")
+            
+        return {
+            "status": "debug_complete",
+            "raw_items_count": len(raw_items),
+            "regular_items_count": len(regular_items),
+            "sample_raw_sheet_name": getattr(raw_items[0], 'sheet_name', None) if raw_items else None,
+            "sample_raw_ref_no": getattr(raw_items[0], 'ref_no', None) if raw_items else None
+        }
+        
+    except Exception as e:
+        import traceback
+        print(f"Debug error: {str(e)}")
+        traceback.print_exc()
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
