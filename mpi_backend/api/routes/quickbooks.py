@@ -59,8 +59,6 @@ def migrate_invoice_to_QB(
             if line_items_raw:
                 sample_item = line_items_raw[0]
                 print(f"Sample item type: {type(sample_item)}")
-                print(f"Sample item attributes: {dir(sample_item)}")
-                print(f"Sample item __dict__ keys: {list(sample_item.__dict__.keys()) if hasattr(sample_item, '__dict__') else 'No __dict__'}")
                 print(f"Sample sheet_name value: {getattr(sample_item, 'sheet_name', 'NO SHEET_NAME ATTR')}")
                 print(f"Sample ref_no value: {getattr(sample_item, 'ref_no', 'NO REF_NO ATTR')}")
             
@@ -69,24 +67,15 @@ def migrate_invoice_to_QB(
             for i, item in enumerate(line_items_raw):
                 try:
                     item_dict = item.__dict__.copy()
-                    print(f"Item {i} __dict__ keys: {list(item_dict.keys())}")
                     
                     # Remove SQLAlchemy internal fields
                     item_dict.pop('_sa_instance_state', None)
-                    
-                    # Debug: Check specific fields
-                    print(f"Item {i} sheet_name in dict: {'sheet_name' in item_dict}")
-                    print(f"Item {i} sheet_name value: {item_dict.get('sheet_name', 'MISSING')}")
                     
                     # Apply suffix transformation for display
                     if hasattr(item, 'item_code_with_suffix'):
                         item_dict['item'] = item.item_code_with_suffix
                         
                     line_items_data.append(item_dict)
-                    
-                    # Only debug first few items to avoid spam
-                    if i >= 2:
-                        break
                         
                 except Exception as item_error:
                     print(f"Error processing item {i}: {str(item_error)}")
@@ -96,13 +85,13 @@ def migrate_invoice_to_QB(
             print(f"Number of processed item dictionaries: {len(line_items_data)}")
             if line_items_data:
                 print(f"Sample processed dict keys: {list(line_items_data[0].keys())}")
+                print(f"Sample sheet_name from dict: {line_items_data[0].get('sheet_name', 'MISSING FROM DICT')}")
             
             line_item_df = pd.DataFrame(line_items_data)
             
             # Debug: DataFrame info
             print(f"DataFrame shape: {line_item_df.shape}")
             print(f"DataFrame columns: {list(line_item_df.columns)}")
-            print(f"DataFrame dtypes: {line_item_df.dtypes.to_dict()}")
             
             # Verify that sheet_name column exists
             if 'sheet_name' not in line_item_df.columns:
