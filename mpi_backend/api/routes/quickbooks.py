@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import List
@@ -18,10 +18,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/quickbooks",tags=["QuickBooks"])
 
 @router.post("/migrate-all")
-def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest, db: Session = Depends(get_db), background_tasks: BackgroundTasks = None):
+def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest, db: Session = Depends(get_db)):
     """
     Migrate all invoices to QuickBooks based on filters.
     Uses batch processing to handle large datasets more efficiently.
+    Returns the download URL for the exported Excel file.
     """
     # Get filtered invoice IDs
     logger.info("Starting migrate-all process with filters")
@@ -38,19 +39,17 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest, db: Session = Depe
     
     logger.info(f"Found {len(invoice_ids)} invoices to process")
     
-    # If too many invoices, process in background
-    if len(invoice_ids) > 20 and background_tasks:
-        logger.info(f"Processing {len(invoice_ids)} invoices in background task")
-        background_tasks.add_task(migrate_invoice_to_QB, invoice_ids, db)
-        return {"status": "processing", "message": f"Processing {len(invoice_ids)} invoices in background. This may take some time."}
-    
-    # Otherwise process normally
+    # Process all invoices synchronously and return only download URL
     return migrate_invoice_to_QB(invoice_ids, db=db)
 
 
 @router.post("/migrate")
 def migrate_invoice_to_QB(
         invoice_ids: List[UUID], db: Session = Depends(get_db)):
+    """
+    Migrate specific invoices to QuickBooks by invoice IDs.
+    Returns the download URL for the exported Excel file.
+    """
 
     all_batch_entries = []
     processed_invoices = []
@@ -304,14 +303,11 @@ def migrate_invoice_to_QB(
         is_invoice=False
     )
 
-    response = {
-        "download_url": download_url,
-        "processed": len(processed_invoices)
-    }
-
+    # Log processing summary
     if skipped_invoices:
-        response["skipped_invoice_ids"] = skipped_invoices
         logger.info(f"Processing complete. Processed: {len(processed_invoices)}, Skipped: {len(skipped_invoices)}")
+    else:
+        logger.info(f"Processing complete. Processed: {len(processed_invoices)} invoices")
     
     return download_url
  
