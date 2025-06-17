@@ -12,8 +12,6 @@ class InvoiceItems(BaseModel):
     mpi_description: Optional[str]
     item: Optional[str]
     description: Optional[str]
-    item: Optional[str]
-    description: Optional[str]
     qty: Optional[int]
     cost: Optional[float]
     amount: Optional[str]
@@ -28,7 +26,8 @@ class InvoiceItems(BaseModel):
     buyer: Optional[str]
     date_added: Optional[str]
     invoice_id: Optional[UUID]
-    is_active:Optional[bool]
+    is_active: Optional[bool]
+    
     class Config:
         from_attributes = True
 

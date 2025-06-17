@@ -19,6 +19,35 @@ class InvoiceItemController:
     def __init__(self, db):
         self.db_context = db
 
+    def _remove_suffix_from_item_code(self, item_code_with_suffix):
+        """
+        Remove supplier suffix from item code to get original database value.
+        This is used when filtering by suffixed values selected from dropdowns.
+        
+        Args:
+            item_code_with_suffix: Item code that may have a suffix (e.g., "ABC123-B")
+            
+        Returns:
+            str: Original item code without suffix (e.g., "ABC123")
+        """
+        if not item_code_with_suffix:
+            return item_code_with_suffix
+        
+        # Get all possible suffixes from the model
+        from mpi_backend.database.models.InvoiceItems import InvoiceItem
+        all_suffixes = set(InvoiceItem.SUPPLIER_SUFFIX_MAP.values())
+        all_suffixes.discard("")  # Remove empty suffix
+        
+        # Check if the item code ends with any known suffix
+        for suffix in all_suffixes:
+            if item_code_with_suffix.endswith(suffix):
+                # Remove the suffix to get original item code
+                original_code = item_code_with_suffix[:-len(suffix)]
+                return original_code
+        
+        # If no suffix found, return as-is (might be an item without suffix)
+        return item_code_with_suffix
+
     def insert_invoice_items(self, row, filename, invoice_id):
         new_item = InvoiceItem(
             filename=filename,
@@ -59,7 +88,12 @@ class InvoiceItemController:
         query = query.order_by(InvoiceItem.id.desc())
         items = query.all()
 
-        invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in items]
+        invoices_items = []
+        for item in items:
+            item_dict = item.__dict__.copy()
+            # Replace the item field with the suffixed version for display
+            item_dict['item'] = item.item_code_with_suffix
+            invoices_items.append(InvoiceItemsResponse(**item_dict))
 
         return invoices_items
 
@@ -89,7 +123,12 @@ class InvoiceItemController:
             query = query.limit(page_size).offset((page - 1) * page_size)
             items = query.all()
 
-        invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in items]
+        invoices_items = []
+        for item in items:
+            item_dict = item.__dict__.copy()
+            # Replace the item field with the suffixed version for display
+            item_dict['item'] = item.item_code_with_suffix
+            invoices_items.append(InvoiceItemsResponse(**item_dict))
 
         return {
             "items": invoices_items,
@@ -132,7 +171,12 @@ class InvoiceItemController:
 
         items = query.all()
 
-        invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in items]
+        invoices_items = []
+        for item in items:
+            item_dict = item.__dict__.copy()
+            # Replace the item field with the suffixed version for display
+            item_dict['item'] = item.item_code_with_suffix
+            invoices_items.append(InvoiceItemsResponse(**item_dict))
         return invoices_items
 
     def set_export_status_to_sent(self, ids):
@@ -200,7 +244,12 @@ class InvoiceItemController:
                 .filter(InvoiceItem.is_active.is_(False)) \
                 .all()
             hidden_items = [item for item in items if not item.is_active]
-            invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in hidden_items]
+            invoices_items = []
+            for item in hidden_items:
+                item_dict = item.__dict__.copy()
+                # Replace the item field with the suffixed version for display
+                item_dict['item'] = item.item_code_with_suffix
+                invoices_items.append(InvoiceItemsResponse(**item_dict))
             return invoices_items
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -333,7 +382,12 @@ class InvoiceItemController:
             raise HTTPException(status_code=400, detail="Invalid sort order")
 
         invoice_items = self.db_context.query(InvoiceItem).order_by(order).all()
-        invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in invoice_items]
+        invoices_items = []
+        for item in invoice_items:
+            item_dict = item.__dict__.copy()
+            # Replace the item field with the suffixed version for display
+            item_dict['item'] = item.item_code_with_suffix
+            invoices_items.append(InvoiceItemsResponse(**item_dict))
         return invoices_items
 
     def get_customer_jobs(self, db):
@@ -348,6 +402,64 @@ class InvoiceItemController:
         filter_context: the previous selected columns / previous applied filters
         """
 
+        # Special handling for 'item' column to return suffixed values
+        if column_name == "item":
+            query = self.db_context.query(InvoiceItem)
+            
+            # applying comparison (>,<= etc) filters
+            for comp_filter in comparison_filters:
+                if not hasattr(InvoiceItem, comp_filter['column']):
+                    raise HTTPException(status_code=400, detail=f"Invalid column name: {comp_filter['column']}")
+
+                column = getattr(InvoiceItem, comp_filter['column'])
+
+                # Special handling for 'amount' column (string to float conversion)
+                if comp_filter['column'] == "amount":
+                    column = cast(column, Float)
+
+                # Handle type casting for comparison filters
+                try:
+                    if comp_filter['column'] == "amount":
+                        try:
+                            value = float(comp_filter['value'])
+                        except ValueError:
+                            continue  # Skip invalid float conversion
+                    elif column.type.python_type == int:
+                        value = int(comp_filter['value'])
+                    elif column.type.python_type == float:
+                        value = float(comp_filter['value'])
+                    elif column.type.python_type == date:
+                        value = date.fromisoformat(comp_filter['value'])
+                    else:
+                        value = comp_filter['value']
+                except (ValueError, TypeError):
+                    raise HTTPException(status_code=400, detail=f"Invalid value type for column: {comp_filter['column']}")
+
+                if comp_filter['operator'] == "gt":
+                    query = query.filter(column > value)
+                elif comp_filter['operator'] == "lt":
+                    query = query.filter(column < value)
+                elif comp_filter['operator'] == "gte":
+                    query = query.filter(column >= value)
+                elif comp_filter['operator'] == "lte":
+                    query = query.filter(column <= value)
+                elif comp_filter['operator'] == "eq":
+                    query = query.filter(column == value)
+                else:
+                    raise HTTPException(status_code=400, detail=f"Invalid operator: {comp_filter['operator']}")
+
+            if filter_context:  # if there are previous filter selections -> add them in query
+                for filter_col_name in filter_context.keys():
+                    filter_column = getattr(InvoiceItem, filter_col_name)
+                    query = query.filter(filter_column.in_(filter_context[filter_col_name]))
+
+            # Get all matching items and extract suffixed item codes
+            items = query.all()
+            suffixed_items = [item.item_code_with_suffix for item in items if item.item_code_with_suffix is not None]
+            # Return unique sorted values
+            return sorted(list(set(suffixed_items)))
+        
+        # Original logic for other columns
         my_column_name = getattr(InvoiceItem, column_name)
         query = self.db_context.query(distinct(my_column_name))
 
@@ -410,7 +522,17 @@ class InvoiceItemController:
                 raise HTTPException(status_code=400, detail=f"Invalid column name: {column_name}")
 
             column = getattr(InvoiceItem, column_name)
-            query = query.filter(column.in_(values))
+            
+            # Special handling for 'item' column - convert suffixed values back to original values
+            if column_name == "item":
+                original_values = []
+                for value in values:
+                    # Remove suffix to get original item code for database filtering
+                    original_value = self._remove_suffix_from_item_code(value)
+                    original_values.append(original_value)
+                query = query.filter(column.in_(original_values))
+            else:
+                query = query.filter(column.in_(values))
 
         # applying comparison (>,<= etc) filters
         for comp_filter in request.comparison_filters:
@@ -515,7 +637,12 @@ class InvoiceItemController:
             query = query.limit(size).offset((page - 1) * size)
             results = query.all()
 
-        invoices_items = [InvoiceItemsResponse(**item.__dict__) for item in results]
+        invoices_items = []
+        for item in results:
+            item_dict = item.__dict__.copy()
+            # Replace the item field with the suffixed version for display
+            item_dict['item'] = item.item_code_with_suffix
+            invoices_items.append(InvoiceItemsResponse(**item_dict))
 
         return {
             "items": invoices_items,
