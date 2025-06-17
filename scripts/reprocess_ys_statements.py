@@ -38,18 +38,11 @@ from mpi_backend.config import BUCKET_NAME
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(f'scripts\logs\reprocess_ys_statements_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
-    ]
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-def ensure_log_directory():
-    """Ensure the logs directory exists"""
-    log_dir = Path("scripts/logs")
-    log_dir.mkdir(exist_ok=True)
+
 
 def get_ys_statements(db_session, limit=None):
     """Get all Y&S statements from the database"""
@@ -198,9 +191,6 @@ def main():
                        help="Skip confirmation prompts")
     
     args = parser.parse_args()
-    
-    # Ensure log directory exists
-    ensure_log_directory()
     
     logger.info("🚀 Starting Y&S statement reprocessing...")
     logger.info(f"🔧 Mode: {'DRY RUN' if args.dry_run else 'LIVE PROCESSING'}")
