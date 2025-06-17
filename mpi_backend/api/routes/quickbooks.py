@@ -54,25 +54,65 @@ def migrate_invoice_to_QB(
             # First get reference numbers before creating DataFrame
             ref_numbers = [getattr(item, 'ref_no', 'unknown') for item in line_items_raw]
             
+            # Debug: Check what we actually got from the database
+            print(f"Number of raw items retrieved: {len(line_items_raw)}")
+            if line_items_raw:
+                sample_item = line_items_raw[0]
+                print(f"Sample item type: {type(sample_item)}")
+                print(f"Sample item attributes: {dir(sample_item)}")
+                print(f"Sample item __dict__ keys: {list(sample_item.__dict__.keys()) if hasattr(sample_item, '__dict__') else 'No __dict__'}")
+                print(f"Sample sheet_name value: {getattr(sample_item, 'sheet_name', 'NO SHEET_NAME ATTR')}")
+                print(f"Sample ref_no value: {getattr(sample_item, 'ref_no', 'NO REF_NO ATTR')}")
+            
             # Convert SQLAlchemy objects to dictionaries (this works reliably)
             line_items_data = []
-            for item in line_items_raw:
-                item_dict = item.__dict__.copy()
-                # Remove SQLAlchemy internal fields
-                item_dict.pop('_sa_instance_state', None)
-                # Apply suffix transformation for display
-                if hasattr(item, 'item_code_with_suffix'):
-                    item_dict['item'] = item.item_code_with_suffix
-                line_items_data.append(item_dict)
+            for i, item in enumerate(line_items_raw):
+                try:
+                    item_dict = item.__dict__.copy()
+                    print(f"Item {i} __dict__ keys: {list(item_dict.keys())}")
+                    
+                    # Remove SQLAlchemy internal fields
+                    item_dict.pop('_sa_instance_state', None)
+                    
+                    # Debug: Check specific fields
+                    print(f"Item {i} sheet_name in dict: {'sheet_name' in item_dict}")
+                    print(f"Item {i} sheet_name value: {item_dict.get('sheet_name', 'MISSING')}")
+                    
+                    # Apply suffix transformation for display
+                    if hasattr(item, 'item_code_with_suffix'):
+                        item_dict['item'] = item.item_code_with_suffix
+                        
+                    line_items_data.append(item_dict)
+                    
+                    # Only debug first few items to avoid spam
+                    if i >= 2:
+                        break
+                        
+                except Exception as item_error:
+                    print(f"Error processing item {i}: {str(item_error)}")
+                    print(f"Item type: {type(item)}")
+                    raise
+            
+            print(f"Number of processed item dictionaries: {len(line_items_data)}")
+            if line_items_data:
+                print(f"Sample processed dict keys: {list(line_items_data[0].keys())}")
             
             line_item_df = pd.DataFrame(line_items_data)
             
+            # Debug: DataFrame info
+            print(f"DataFrame shape: {line_item_df.shape}")
+            print(f"DataFrame columns: {list(line_item_df.columns)}")
+            print(f"DataFrame dtypes: {line_item_df.dtypes.to_dict()}")
+            
             # Verify that sheet_name column exists
             if 'sheet_name' not in line_item_df.columns:
+                print("CRITICAL: sheet_name column missing!")
+                print(f"Available columns: {list(line_item_df.columns)}")
+                print(f"Raw data sample: {line_items_data[0] if line_items_data else 'No data'}")
                 raise KeyError("sheet_name column missing from DataFrame")
             
             # Debug: Log the available columns for troubleshooting
-            print(f"Available columns in DataFrame: {list(line_item_df.columns)}")
+            print(f"SUCCESS: Available columns in DataFrame: {list(line_item_df.columns)}")
             print(f"Number of items processed: {len(line_item_df)}")
             
             # Check for items with null/empty sheet_name
@@ -101,6 +141,9 @@ def migrate_invoice_to_QB(
             )
         except Exception as e:
             # For any other exception, also return reference numbers
+            print(f"Unexpected error in QB export: {str(e)}")
+            import traceback
+            traceback.print_exc()
             raise HTTPException(
                 status_code=400,
                 detail=f"Error processing data: {str(e)}. Reference numbers: {ref_numbers}"
@@ -224,3 +267,66 @@ def migrate_invoice_to_QB(
     )
 
     return download_url
+
+@router.get("/debug-invoice/{invoice_id}")
+def debug_invoice_items(invoice_id: UUID, db: Session = Depends(get_db)):
+    """
+    Debug endpoint to test invoice item retrieval and conversion.
+    This helps isolate the issue with missing sheet_name.
+    """
+    try:
+        print(f"\n=== DEBUG INVOICE {invoice_id} ===")
+        
+        # Test both methods
+        controller = InvoiceItemController(db)
+        
+        # Test raw method
+        print("1. Testing get_invoice_items_raw...")
+        raw_items = controller.get_invoice_items_raw(invoice_id)
+        print(f"Raw items count: {len(raw_items)}")
+        
+        # Test regular method  
+        print("2. Testing get_invoice_items...")
+        regular_items = controller.get_invoice_items(invoice_id)
+        print(f"Regular items count: {len(regular_items)}")
+        
+        if raw_items:
+            sample_raw = raw_items[0]
+            print(f"Raw item sample:")
+            print(f"  - Type: {type(sample_raw)}")
+            print(f"  - Has sheet_name: {hasattr(sample_raw, 'sheet_name')}")
+            print(f"  - sheet_name value: {getattr(sample_raw, 'sheet_name', 'MISSING')}")
+            print(f"  - __dict__ keys: {list(sample_raw.__dict__.keys())}")
+            
+            # Test conversion
+            print("3. Testing conversion to dict...")
+            item_dict = sample_raw.__dict__.copy()
+            item_dict.pop('_sa_instance_state', None)
+            print(f"  - Dict keys: {list(item_dict.keys())}")
+            print(f"  - sheet_name in dict: {'sheet_name' in item_dict}")
+            print(f"  - sheet_name value: {item_dict.get('sheet_name', 'MISSING FROM DICT')}")
+            
+            # Test DataFrame creation
+            print("4. Testing DataFrame creation...")
+            import pandas as pd
+            df = pd.DataFrame([item_dict])
+            print(f"  - DataFrame columns: {list(df.columns)}")
+            print(f"  - sheet_name in DataFrame: {'sheet_name' in df.columns}")
+            
+        return {
+            "status": "debug_complete",
+            "raw_items_count": len(raw_items),
+            "regular_items_count": len(regular_items),
+            "sample_raw_sheet_name": getattr(raw_items[0], 'sheet_name', None) if raw_items else None,
+            "sample_raw_ref_no": getattr(raw_items[0], 'ref_no', None) if raw_items else None
+        }
+        
+    except Exception as e:
+        import traceback
+        print(f"Debug error: {str(e)}")
+        traceback.print_exc()
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }

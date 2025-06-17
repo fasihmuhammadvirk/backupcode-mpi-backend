@@ -951,9 +951,47 @@ class InvoiceItemController:
         Get invoice items as raw SQLAlchemy objects for QuickBooks export.
         This avoids Pydantic conversion issues that can cause missing fields in DataFrames.
         """
-        query = self.db_context.query(InvoiceItem)
+        print(f"get_invoice_items_raw called with invoice_id: {invoice_id}")
+        
+        # Explicitly query all columns to avoid any lazy loading issues
+        query = self.db_context.query(InvoiceItem).options()
         if invoice_id:
             query = query.filter(InvoiceItem.invoice_id == invoice_id)
         query = query.order_by(InvoiceItem.id.desc())
+        
+        print(f"Executing query: {str(query)}")
         items = query.all()
+        
+        print(f"Query returned {len(items)} items")
+        if items:
+            sample_item = items[0]
+            print(f"Sample item type: {type(sample_item)}")
+            print(f"Sample item has sheet_name attr: {hasattr(sample_item, 'sheet_name')}")
+            
+            # Force load all attributes
+            try:
+                sheet_name_val = sample_item.sheet_name
+                print(f"Sample item sheet_name value: {sheet_name_val}")
+            except Exception as e:
+                print(f"Error accessing sheet_name: {e}")
+                
+            try:
+                ref_no_val = sample_item.ref_no  
+                print(f"Sample item ref_no value: {ref_no_val}")
+            except Exception as e:
+                print(f"Error accessing ref_no: {e}")
+                
+            # Check all accessible attributes
+            accessible_attrs = []
+            for attr_name in dir(sample_item):
+                if not attr_name.startswith('_') and not callable(getattr(sample_item, attr_name)):
+                    try:
+                        val = getattr(sample_item, attr_name)
+                        accessible_attrs.append(attr_name)
+                    except Exception:
+                        pass
+            print(f"Accessible attributes: {accessible_attrs}")
+            
+            print(f"Sample item __dict__ keys: {list(sample_item.__dict__.keys()) if hasattr(sample_item, '__dict__') else 'No __dict__'}")
+        
         return items
