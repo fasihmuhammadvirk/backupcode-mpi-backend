@@ -139,45 +139,57 @@ def reprocess_statement(statement, pdf_path, db_session, dry_run=False):
             logger.info("  [DRY RUN] Would reprocess this statement")
             return {"success": True, "dry_run": True}
         
-        # Delete existing records
-        if not delete_existing_statement_data(db_session, statement.id):
-            return {"success": False, "error": "Failed to delete existing records"}
+        # Store original data for comparison
+        original_total = float(statement.total_amount or 0)
+        original_invoices = statement.total_invoices
         
-        db_session.commit()
-        
-        # Re-extract using the new Y&S extractor
-        logger.info(f"Re-extracting data using specialized Y&S extractor...")
+        # FIRST: Try to extract new data WITHOUT deleting original data
+        logger.info(f"Extracting new data using specialized Y&S extractor...")
         
         extractor = StatementExtractor(
             pdf_path=pdf_path,
-            save_to_db=True,
+            save_to_db=False,  # Don't save to DB yet - test extraction first
             db_session=db_session,
             supplier_name="Y & S Plumbing Supply"
         )
         
-        # Process the statement
+        # Process the statement (extract only, don't save)
         result = extractor.process_statement()
         
-        if result.get('success', False):
-            new_statement = extractor.statement_obj
-            logger.info(f"✅ Successfully reprocessed statement {statement.id}")
-            logger.info(f"  New total: ${new_statement.total_amount}")
-            logger.info(f"  New invoices: {new_statement.total_invoices}")
-            
-            return {
-                "success": True,
-                "original_total": float(statement.total_amount or 0),
-                "new_total": float(new_statement.total_amount or 0),
-                "original_invoices": statement.total_invoices,
-                "new_invoices": new_statement.total_invoices
-            }
-        else:
+        if not result.get('success', False):
             error_msg = result.get('error_message', 'Unknown error during extraction')
-            logger.error(f"❌ Failed to reprocess statement {statement.id}: {error_msg}")
+            logger.error(f"❌ Extraction failed for statement {statement.id}: {error_msg}")
+            logger.info("✅ Original data preserved (not deleted)")
             return {"success": False, "error": error_msg}
+        
+        # Extraction successful - now it's safe to delete old data and save new data
+        logger.info("✅ Extraction successful! Now replacing old data...")
+        
+        # Delete existing records
+        if not delete_existing_statement_data(db_session, statement.id):
+            return {"success": False, "error": "Failed to delete existing records"}
+        
+        # Save the new extracted data
+        extractor.save_to_database()
+        db_session.commit()
+        
+        new_statement = extractor.statement_obj
+        logger.info(f"✅ Successfully reprocessed statement {statement.id}")
+        logger.info(f"  New total: ${new_statement.total_amount}")
+        logger.info(f"  New invoices: {new_statement.total_invoices}")
+        
+        return {
+            "success": True,
+            "original_total": original_total,
+            "new_total": float(new_statement.total_amount or 0),
+            "original_invoices": original_invoices,
+            "new_invoices": new_statement.total_invoices
+        }
             
     except Exception as e:
         logger.error(f"❌ Error reprocessing statement {statement.id}: {str(e)}")
+        logger.info("✅ Original data preserved (not deleted)")
+        db_session.rollback()  # Rollback any partial changes
         return {"success": False, "error": str(e)}
 
 def main():
