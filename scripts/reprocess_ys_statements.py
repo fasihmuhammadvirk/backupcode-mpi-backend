@@ -41,7 +41,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(f'scripts/logs/reprocess_ys_statements_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
+        logging.FileHandler(f'scripts\logs\reprocess_ys_statements_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
     ]
 )
 logger = logging.getLogger(__name__)
