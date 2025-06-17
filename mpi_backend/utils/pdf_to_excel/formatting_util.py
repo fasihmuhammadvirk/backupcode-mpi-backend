@@ -75,6 +75,81 @@ def save_final_data(final_df, supplier, output_path):
     writer.save()
 
 
+def save_final_data_fast(final_df, output_path):
+    """
+    Fast Excel export with minimal formatting for better performance.
+    
+    Args:
+        final_df: DataFrame to export
+        output_path: Output file path
+    """
+    try:
+        # Use xlsxwriter for better performance
+        with pd.ExcelWriter(output_path, engine='xlsxwriter', options={'strings_to_numbers': True}) as writer:
+            # Write data without formatting first
+            final_df.to_excel(writer, sheet_name='Exported Data', index=False)
+            
+            # Get workbook and worksheet
+            workbook = writer.book
+            worksheet = writer.sheets['Exported Data']
+            
+            # Apply minimal formatting for better readability
+            # Header format
+            header_format = workbook.add_format({
+                'bold': True,
+                'bg_color': '#D7E4BC',
+                'border': 1,
+                'align': 'center'
+            })
+            
+            # Data format
+            data_format = workbook.add_format({
+                'border': 1,
+                'align': 'left'
+            })
+            
+            # Number format for cost columns
+            number_format = workbook.add_format({
+                'num_format': '#,##0.00',
+                'border': 1,
+                'align': 'right'
+            })
+            
+            # Date format
+            date_format = workbook.add_format({
+                'num_format': 'mm/dd/yyyy',
+                'border': 1,
+                'align': 'center'
+            })
+            
+            # Apply header formatting
+            for col_num, column in enumerate(final_df.columns):
+                worksheet.write(0, col_num, column, header_format)
+                
+                # Set column widths based on content
+                if column in ['Item', 'MPI Item Code']:
+                    worksheet.set_column(col_num, col_num, 20)
+                elif column in ['Description', 'Customer Job', 'MPI Description']:
+                    worksheet.set_column(col_num, col_num, 35) 
+                elif column in ['Cost', 'Amount']:
+                    worksheet.set_column(col_num, col_num, 12)
+                elif column == 'Date':
+                    worksheet.set_column(col_num, col_num, 12)
+                else:
+                    worksheet.set_column(col_num, col_num, 15)
+            
+            # Apply autofilter
+            worksheet.autofilter(0, 0, len(final_df), len(final_df.columns) - 1)
+            
+        return True
+        
+    except Exception as e:
+        print(f"Error in fast Excel export: {e}")
+        # Fallback to simple export
+        final_df.to_excel(output_path, index=False)
+        return False
+
+
 def save_opus_services(extracted_data, output_path):
     writer = pd.ExcelWriter(output_path, engine='xlsxwriter')
     num_cols = len(extracted_data.columns)

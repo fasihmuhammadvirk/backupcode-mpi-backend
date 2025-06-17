@@ -179,6 +179,105 @@ class InvoiceItemController:
             invoices_items.append(InvoiceItemsResponse(**item_dict))
         return invoices_items
 
+    def get_invoice_items_for_export_optimized(self, ids, columns=None, order_by=None):
+        """
+        Optimized method for exporting invoice items with minimal memory overhead.
+        Returns raw database tuples instead of full objects for better performance.
+        
+        Args:
+            ids: List of invoice item IDs
+            columns: List of column names to include (optional)
+            order_by: List of OrderByFilter objects (optional)
+            
+        Returns:
+            List of tuples with selected data
+        """
+        if not ids:
+            return []
+        
+        # Define columns mapping
+        available_columns = {
+            'item': InvoiceItem.item,
+            'description': InvoiceItem.description,
+            'qty': InvoiceItem.qty,
+            'cost': InvoiceItem.cost,
+            'amount': InvoiceItem.amount,
+            'date': InvoiceItem.date,
+            'ref_no': InvoiceItem.ref_no,
+            'po_number': InvoiceItem.po_number,
+            'customer_job': InvoiceItem.customer_job,
+            'bill': InvoiceItem.bill,
+            'vendor': InvoiceItem.vendor,
+            'class_': InvoiceItem.class_,
+            'memo': InvoiceItem.memo,
+            'buyer': InvoiceItem.buyer,
+            'filename': InvoiceItem.filename,
+            'sheet_name': InvoiceItem.sheet_name,
+            'mpi_item': InvoiceItem.mpi_item,
+            'mpi_description': InvoiceItem.mpi_description,
+            'date_added': InvoiceItem.date_added
+        }
+        
+        # Determine which columns to select
+        if columns:
+            # Map display column names back to database columns
+            column_mapping = {
+                'Item': 'item',
+                'Description': 'description',
+                'Qty': 'qty',
+                'Cost': 'cost',
+                'Amount': 'amount',
+                'Date': 'date',
+                'Ref NO': 'ref_no',
+                'PO #': 'po_number',
+                'Customer Job': 'customer_job',
+                'Bill': 'bill',
+                'Vendor': 'vendor',
+                'Class': 'class_',
+                'Memo': 'memo',
+                'Buyer': 'buyer',
+                'Filename': 'filename',
+                'Sheet Name': 'sheet_name',
+                'MPI Item Code': 'mpi_item',
+                'MPI Description': 'mpi_description',
+                'Date Added': 'date_added'
+            }
+            
+            selected_columns = []
+            column_names = []
+            for col in columns:
+                db_col = column_mapping.get(col, col.lower().replace(' ', '_'))
+                if db_col in available_columns:
+                    selected_columns.append(available_columns[db_col])
+                    column_names.append(db_col)
+        else:
+            # Default columns for export - match the original convert_items_to_dataframe output
+            default_cols = ['item', 'description', 'qty', 'cost', 'amount', 'date', 
+                          'ref_no', 'po_number', 'customer_job', 'bill', 'vendor', 'class_', 'memo',
+                          'buyer', 'filename', 'sheet_name', 'mpi_item', 'mpi_description', 'date_added']
+            selected_columns = [available_columns[col] for col in default_cols]
+            column_names = default_cols
+        
+        # Always include vendor for suffix calculation
+        if 'vendor' not in column_names:
+            selected_columns.append(InvoiceItem.vendor)
+            column_names.append('vendor')
+        
+        # Build and execute query
+        query = self.db_context.query(*selected_columns).filter(InvoiceItem.id.in_(ids))
+        
+        # Apply ordering if provided
+        if order_by:
+            for order_filter in order_by:
+                if order_filter.column in available_columns:
+                    column = available_columns[order_filter.column]
+                    if order_filter.order == "asc":
+                        query = query.order_by(column.asc())
+                    elif order_filter.order == "desc":
+                        query = query.order_by(column.desc())
+        
+        return query.all(), column_names
+
     def set_export_status_to_sent(self, ids):
         """
         Updates the export_status of the InvoiceItems with the given IDs to 'Sent'.

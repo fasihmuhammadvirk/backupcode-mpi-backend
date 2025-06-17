@@ -50,3 +50,29 @@ PROCESSABLE_SUPPLIERS = ['BMW Plumbing Supplies', 'World Wide Plumbing', 'Y & S 
                          'Supreme Plumbing Supply', 'Pyramid Plumbing', 'ABC Opus Services', 'Park Plumbing Supply',
                          'Gotham Plumbing Supply', 'FW Webb Plumbing Supply', 'Flow Mark Plumbing Supply', 'Plumbing Exchange',
                          'AF Supply', 'Lion Hvac Supplies']
+
+# Database Configuration
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://username:password@localhost/dbname")
+
+# JWT Configuration
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+# File Upload Configuration
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+INVOICE_DOWNLOAD_FOLDER = os.getenv("INVOICE_DOWNLOAD_FOLDER", str(BASE_DIR / "mpi_backend" / "storage"))
+
+# Logging Configuration
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+# Export Optimization Configuration
+EXPORT_BATCH_SIZE = int(os.getenv("EXPORT_BATCH_SIZE", "1000"))  # Records per batch for large exports
+EXPORT_USE_OPTIMIZED = os.getenv("EXPORT_USE_OPTIMIZED", "true").lower() == "true"  # Enable optimized exports by default
+EXPORT_MAX_RECORDS_BEFORE_BATCH = int(os.getenv("EXPORT_MAX_RECORDS_BEFORE_BATCH", "5000"))  # When to use batch processing
+EXPORT_ENABLE_PROGRESS_LOGGING = os.getenv("EXPORT_ENABLE_PROGRESS_LOGGING", "true").lower() == "true"  # Show progress for large exports
+
+# S3 Configuration (if applicable)
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "")
+S3_REGION = os.getenv("S3_REGION", "us-east-1")
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")

@@ -140,19 +140,6 @@ def sort_invoices( db: Session = Depends(get_db), column_name:str = Query(None),
     invoice_items = InvoiceItemController(db).sort(db,column, sort_order)
     return paginate(invoice_items)
 
-@router.post("/export-all")
-def export_all_invoices(request: ExportToExcelFilterRequest,
-        db: Session = Depends(get_db),
-        token: str = Depends(JWTBearer()),
-):
-    ids = InvoiceItemController(db).apply_filters(request, page=1, size=0, col_param='id')
-
-    if request.excluded_rows_ids:  # un selected items from frontend
-        ids = list(set(ids) - set(request.excluded_rows_ids))
-
-    # ids = list(set(ids))  # make row ids of items to be exported in list to be unique, no repetition.
-    return export_invoices(ids, request.columns, order_by=request.order_by, db=db)
-
 @router.post("/export")
 def export_invoices(
         ids: List[int],
@@ -161,28 +148,141 @@ def export_invoices(
         db: Session = Depends(get_db),
         token: str = Depends(JWTBearer()),
 ):
-    columns = [col.replace('class_', 'Class') for col in columns]  # fix to handle column mismatch
+    """
+    Export invoice items to Excel with automatic performance optimization.
+    Automatically chooses the best export method based on data size and configuration.
+    """
+    try:
+        from mpi_backend.config import (
+            EXPORT_MAX_RECORDS_BEFORE_BATCH, 
+            EXPORT_USE_OPTIMIZED,
+            EXPORT_BATCH_SIZE
+        )
+        import time
+        
+        start_time = time.time()
+        record_count = len(ids)
+        
+        # Handle column name mapping
+        if columns:
+            columns = [col.replace('class_', 'Class') for col in columns]
+        
+        # Choose export method based on record count and configuration
+        if EXPORT_USE_OPTIMIZED and record_count > 100:
+            print(f"Using optimized export for {record_count} records")
+            
+            if record_count > EXPORT_MAX_RECORDS_BEFORE_BATCH:
+                # Use batch processing for very large exports
+                from mpi_backend.utils.export_utils import convert_items_to_dataframe_batch
+                items_df = convert_items_to_dataframe_batch(
+                    db_session=db,
+                    ids=ids,
+                    columns=columns,
+                    order_by=order_by,
+                    use_suffix=True,
+                    batch_size=EXPORT_BATCH_SIZE
+                )
+                method_used = "batch_optimized"
+            else:
+                # Use standard optimized method
+                from mpi_backend.utils.export_utils import convert_items_to_dataframe_optimized
+                items_df = convert_items_to_dataframe_optimized(
+                    db_session=db,
+                    ids=ids,
+                    columns=columns,
+                    order_by=order_by,
+                    use_suffix=True
+                )
+                method_used = "optimized"
+        else:
+            # Use standard method for small exports or when optimization is disabled
+            print(f"Using standard export for {record_count} records")
+            controller = InvoiceItemController(db)
+            items = controller.get_invoice_items_by_ids(ids, order_by=order_by)
+            items_df = convert_items_to_dataframe(items)
+            method_used = "standard"
+        
+        if items_df.empty:
+            raise HTTPException(status_code=404, detail="No data found for export")
+        
+        # Handle column selection
+        if columns and not items_df.empty:
+            available_columns = [col for col in columns if col in items_df.columns]
+            if available_columns:
+                items_df = items_df[available_columns]
+        else:
+            # Default columns
+            default_columns = ["Item","Description","Qty","Cost","Amount","Date","Ref NO","PO #","Customer Job","Bill","Vendor","Class","Memo"]
+            available_columns = [col for col in default_columns if col in items_df.columns]
+            items_df = items_df[available_columns]
+        
+        # Prepare file paths
+        upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/Exports/'
+        filename = f'{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.xlsx'
+        file_path = f'{upload_folder}{filename}'
+        
+        if not os.path.exists(upload_folder):
+            os.makedirs(upload_folder)
+        
+        # Choose Excel export method based on optimization level
+        if method_used in ["optimized", "batch_optimized"]:
+            from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data_fast
+            save_final_data_fast(items_df, file_path)
+        else:
+            save_final_data(final_df=items_df, supplier='', output_path=file_path)
+        
+        processing_time = time.time() - start_time
+        print(f"Export completed using {method_used} method in {processing_time:.2f} seconds for {len(items_df)} items")
+        
+        # Upload to S3 and get download URL
+        upload_file(file_path, file_key=f'Exports/{filename}', is_invoice=False)
+        download_url = get_presigned_url(file_key=f'Exports/{filename}', is_invoice=False)
+        
+        return download_url
+        
+    except Exception as e:
+        print(f"Export error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
-    items = InvoiceItemController(db).get_invoice_items_by_ids(ids, order_by=order_by)
-    items_df = convert_items_to_dataframe(items)
 
-    upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/Exports/'
-    filename = f'{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.xlsx'
-    file_path = f'{upload_folder}{filename}'
-    if not os.path.exists(upload_folder):os.makedirs(upload_folder)
-
-    if columns: items_df = items_df[columns]  # only export certain columns
-    else:
-        columns = ["Item","Description","Qty","Cost","Amount","Date","Ref NO","PO #","Customer Job","Bill","Vendor",
-                    "Class","Memo"]
-        items_df = items_df[columns]
-
-    save_final_data(final_df=items_df,supplier='', output_path=file_path) # convert to excel
-
-    upload_file(file_path, file_key=f'Exports/{filename}', is_invoice=False) # upload to s3 to be exported
-    download_url = get_presigned_url(file_key=f'Exports/{filename}', is_invoice=False)
-
-    # Removing the status update code completely
-    # No longer marking items as sent when exporting to Excel
-
-    return download_url
+@router.post("/export-all")
+def export_all_invoices(request: ExportToExcelFilterRequest,
+        db: Session = Depends(get_db),
+        token: str = Depends(JWTBearer()),
+):
+    """
+    Export all filtered invoice items to Excel with automatic performance optimization.
+    Automatically chooses the best export method based on data size and configuration.
+    """
+    try:
+        import time
+        start_time = time.time()
+        
+        # Get filtered IDs efficiently
+        ids = InvoiceItemController(db).apply_filters(request, page=1, size=0, col_param='id')
+        
+        if request.excluded_rows_ids:
+            ids = list(set(ids) - set(request.excluded_rows_ids))
+        
+        if not ids:
+            raise HTTPException(status_code=404, detail="No items found matching the filters")
+        
+        filter_time = time.time() - start_time
+        print(f"Filter processing took {filter_time:.2f} seconds, found {len(ids)} items")
+        
+        # Use the optimized export function
+        result = export_invoices(
+            ids=ids,
+            columns=request.columns,
+            order_by=request.order_by,
+            db=db,
+            token=token
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Export-all error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
