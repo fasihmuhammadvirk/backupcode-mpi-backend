@@ -37,49 +37,55 @@ def migrate_invoice_to_QB(
     all_batch_entries = []
 
     for invoice_id in invoice_ids:
-        # Use raw SQLAlchemy objects to avoid Pydantic conversion issues
-        line_items = InvoiceItemController(db).get_invoice_items_raw(invoice_id)
-        line_item_copy = InvoiceItemController(db).get_invoice_items(invoice_id)
+        # Get raw SQLAlchemy objects for DataFrame (fixes vars() issue)
+        line_items_raw = InvoiceItemController(db).get_invoice_items_raw(invoice_id)
+        line_items = InvoiceItemController(db).get_invoice_items(invoice_id)
+        line_item_copy = line_items
 
         tax = 0
         for item in line_items:
             if item.sheet_name == '(TAX)':
                 tax = float(item.amount.replace(',', ''))
 
-        line_items = [item for item in line_items if item.sheet_name != '(TAX)']
+        # Filter using raw items for DataFrame creation
+        line_items_for_df = [item for item in line_items_raw if item.sheet_name != '(TAX)']
 
-        # Convert SQLAlchemy objects to dictionaries and create DataFrame
+        # Create DataFrame and handle possible missing fields
         try:
-            # Convert to dictionaries properly (this fixes the vars() issue)
+            # First get reference numbers before creating DataFrame
+            ref_numbers = [getattr(item, 'ref_no', 'unknown') for item in line_items_for_df]
+            
+            # Convert raw SQLAlchemy objects to DataFrame (this fixes the vars() issue)
             line_items_data = []
-            for item in line_items:
+            for item in line_items_for_df:
                 item_dict = item.__dict__.copy()
-                # Remove SQLAlchemy internal fields
-                item_dict.pop('_sa_instance_state', None)
-                # Apply suffix transformation for display (matching original behavior)
-                if hasattr(item, 'item_code_with_suffix'):
-                    item_dict['item'] = item.item_code_with_suffix
+                item_dict.pop('_sa_instance_state', None)  # Remove SQLAlchemy internal field
                 line_items_data.append(item_dict)
             
             line_item_df = pd.DataFrame(line_items_data)
             
-            # Verify sheet_name column exists
-            if 'sheet_name' not in line_item_df.columns:
-                raise KeyError("sheet_name column missing from DataFrame")
-                
+            # Get sheet_name from DataFrame - this will fail with KeyError if missing
+            line_item_df['sheet_name']
+            
+        except KeyError:
+            # Just use the reference numbers we collected before the error
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing sheet_name data. Reference numbers: {ref_numbers}"
+            )
         except Exception as e:
-            ref_numbers = [getattr(item, 'ref_no', 'unknown') for item in line_items]
+            # For any other exception, also return reference numbers
             raise HTTPException(
                 status_code=400,
                 detail=f"Error processing data: {str(e)}. Reference numbers: {ref_numbers}"
             )
-
-        # Apply classification with Class A/L logic
+            
+        # Apply classification with error handling
         def get_classification_safe(sheet_name):
             if not sheet_name:
                 return ''
             return ItemClassificationController(db).get_classification(sheet_name)
-
+        
         # Initialize the account column
         line_item_df['account'] = ''
         
@@ -104,7 +110,7 @@ def migrate_invoice_to_QB(
         if unassigned_mask.any():
             line_item_df.loc[unassigned_mask, 'account'] = line_item_df.loc[unassigned_mask, 'sheet_name'].apply(get_classification_safe)
 
-        # Map specific UIDI items to accounts (only for items still unassigned after class logic)
+        # Map specific items to accounts (only for items still unassigned after class logic)
         # This ensures class A and L invoices don't get overridden
         unassigned_mask = line_item_df['account'] == ''
         
