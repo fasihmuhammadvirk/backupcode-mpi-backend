@@ -24,22 +24,23 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest, db: Session = Depe
     
     print(f"🚀 Starting QuickBooks migration with filters: {request}")
     
-    # Get filtered invoice IDs using existing controller logic
-    invoice_ids = InvoiceController(db).get_invoice_list(
-        export_status=request.export_status,
-        from_date=request.from_date,
-        to_date=request.to_date,
-        vendor=request.vendor,
-        ref_no=request.ref_no,
-        customer_job=request.customer_job,
-        class_=request.class_
-    )
+    # Get filtered invoice IDs using the existing filter logic
+    filtered_data = InvoiceItemController(db).apply_filters(request, page=1, size=0)
+    invoice_ids = [item.invoice_id for item in filtered_data['items']]
+
+    if request.excluded_invoice_ids:  # Handle excluded items from frontend
+        invoice_ids = [
+            invoice_id for invoice_id in invoice_ids 
+            if invoice_id not in request.excluded_invoice_ids
+        ]
+
+    invoice_ids = list(set(invoice_ids))  # Make invoice IDs unique
     
     if not invoice_ids:
         raise HTTPException(status_code=400, detail="No invoices found matching the criteria.")
     
-    # Extract just the invoice IDs for processing
-    invoice_id_list = [UUID(invoice.id) for invoice in invoice_ids]
+    # Extract just the invoice IDs for processing  
+    invoice_id_list = [UUID(str(invoice_id)) for invoice_id in invoice_ids]
     
     print(f"📋 Found {len(invoice_id_list)} invoices to process")
     
