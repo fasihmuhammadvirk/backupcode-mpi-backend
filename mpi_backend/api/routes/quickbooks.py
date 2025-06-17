@@ -308,10 +308,10 @@ def migrate_invoice_to_QB(
         "download_url": download_url,
         "processed": len(processed_invoices)
     }
-    
+
     if skipped_invoices:
         response["skipped_invoice_ids"] = skipped_invoices
         logger.info(f"Processing complete. Processed: {len(processed_invoices)}, Skipped: {len(skipped_invoices)}")
     
-    return response
+    return download_url
  
