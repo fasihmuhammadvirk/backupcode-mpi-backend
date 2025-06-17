@@ -242,10 +242,10 @@ def migrate_invoice_to_QB(
     )
     download_url = get_presigned_url(
         file_key=f'Exports/{file_name}', 
-        
+
         is_invoice=False
-    ) download_url
-    
+    )
+
         
     if skipped_invoices:
         response["skipped_invoice_ids"] = skipped_invoices
@@ -255,7 +255,7 @@ def migrate_invoice_to_QB(
 
 @router.get("/debug-invoice/{invoice_id}")
 def debug_invoice_items(invoice_id: UUID, db: Session = Depends(get_db)):
-    """
+    "
     Debug endpoint to test invoice item retrieval and conversion.
     This helps isolate the issue with missing sheet_name.
     """
