@@ -35,176 +35,201 @@ def migrate_invoice_to_QB(
         invoice_ids: List[UUID], db: Session = Depends(get_db)):
 
     all_batch_entries = []
+    processed_invoices = []
+    skipped_invoices = []
 
     for invoice_id in invoice_ids:
-        # Get raw SQLAlchemy objects for DataFrame (fixes vars() issue)
-        line_items_raw = InvoiceItemController(db).get_invoice_items_raw(invoice_id)
-        line_items = InvoiceItemController(db).get_invoice_items(invoice_id)
-        line_item_copy = line_items
-
-        tax = 0
-        for item in line_items:
-            if item.sheet_name == '(TAX)':
-                tax = float(item.amount.replace(',', ''))
-
-        # Filter using raw items for DataFrame creation
-        line_items_for_df = [item for item in line_items_raw if item.sheet_name != '(TAX)']
-
-        # Create DataFrame and handle possible missing fields
         try:
-            # First get reference numbers before creating DataFrame
-            ref_numbers = [getattr(item, 'ref_no', 'unknown') for item in line_items_for_df]
+            # Get raw SQLAlchemy objects for DataFrame (fixes vars() issue)
+            line_items_raw = InvoiceItemController(db).get_invoice_items_raw(invoice_id)
+            line_items = InvoiceItemController(db).get_invoice_items(invoice_id)
+            line_item_copy = line_items
+
+            # Skip if no items found for this invoice
+            if not line_items_raw:
+                print(f"Skipping invoice {invoice_id}: No items found")
+                skipped_invoices.append(str(invoice_id))
+                continue
+
+            tax = 0
+            for item in line_items:
+                if item.sheet_name == '(TAX)':
+                    tax = float(item.amount.replace(',', ''))
+
+            # Filter using raw items for DataFrame creation
+            line_items_for_df = [item for item in line_items_raw if item.sheet_name != '(TAX)']
+
+            # Skip invoice if no non-TAX items remain
+            if not line_items_for_df:
+                print(f"Skipping invoice {invoice_id}: Only TAX items found")
+                skipped_invoices.append(str(invoice_id))
+                continue
+
+            # Create DataFrame and handle possible missing fields
+            try:
+                # First get reference numbers before creating DataFrame
+                ref_numbers = [getattr(item, 'ref_no', 'unknown') for item in line_items_for_df]
+                
+                # Convert raw SQLAlchemy objects to DataFrame (this fixes the vars() issue)
+                line_items_data = []
+                for item in line_items_for_df:
+                    item_dict = item.__dict__.copy()
+                    item_dict.pop('_sa_instance_state', None)  # Remove SQLAlchemy internal field
+                    line_items_data.append(item_dict)
+                
+                line_item_df = pd.DataFrame(line_items_data)
+                
+                # Ensure sheet_name column exists, fill missing values with empty string
+                # UIDI items are designed to have empty sheet names and that's OK
+                if 'sheet_name' not in line_item_df.columns:
+                    line_item_df['sheet_name'] = ''
+                    print(f"Created missing sheet_name column for {len(line_item_df)} items")
+                else:
+                    # Fill null sheet_name values with empty string (UIDI items have null sheet names by design)
+                    null_count = line_item_df['sheet_name'].isnull().sum()
+                    line_item_df['sheet_name'] = line_item_df['sheet_name'].fillna('')
+                    if null_count > 0:
+                        print(f"Filled {null_count} null sheet_name values with empty string")
+                
+                # Debug: Check for UIDI items
+                uidi_items = line_item_df[line_item_df['mpi_item'].str.startswith('UIDI', na=False)]
+                if not uidi_items.empty:
+                    print(f"Found {len(uidi_items)} UIDI items with empty sheet names (this is expected)")
+                    print(f"UIDI items: {uidi_items['mpi_item'].unique().tolist()}")
+                
+                print(f"Processing invoice {invoice_id} with {len(line_item_df)} items")
+                
+            except Exception as e:
+                print(f"Error processing invoice {invoice_id}: {str(e)}")
+                skipped_invoices.append(str(invoice_id))
+                continue
+                
+            # Apply classification with error handling
+            def get_classification_safe(sheet_name):
+                if not sheet_name:
+                    return ''
+                return ItemClassificationController(db).get_classification(sheet_name)
             
-            # Convert raw SQLAlchemy objects to DataFrame (this fixes the vars() issue)
-            line_items_data = []
-            for item in line_items_for_df:
-                item_dict = item.__dict__.copy()
-                item_dict.pop('_sa_instance_state', None)  # Remove SQLAlchemy internal field
-                line_items_data.append(item_dict)
+            # Initialize the account column
+            line_item_df['account'] = ''
             
-            line_item_df = pd.DataFrame(line_items_data)
+            # Identify invoices (by ref_no) that have ANY class 'A' or 'L' items
+            invoices_with_class_a = line_item_df[line_item_df['class_'] == 'A']['ref_no'].unique()
+            invoices_with_class_l = line_item_df[line_item_df['class_'] == 'L']['ref_no'].unique()
             
-            # Check if we have any data at all
-            if line_item_df.empty:
+            # For invoices with ANY class 'A' item, assign ALL items to Additional Material
+            if len(invoices_with_class_a) > 0:
+                class_a_invoice_mask = line_item_df['ref_no'].isin(invoices_with_class_a)
+                line_item_df.loc[class_a_invoice_mask, 'account'] = 'UnInvoiced JIP:Material:Additional Material'
+            
+            # For invoices with ANY class 'L' item, assign ALL items to Labor (only if not already assigned to class A)
+            if len(invoices_with_class_l) > 0:
+                class_l_invoice_mask = line_item_df['ref_no'].isin(invoices_with_class_l) & (line_item_df['account'] == '')
+                line_item_df.loc[class_l_invoice_mask, 'account'] = 'UnInvoiced JIP:Subcontractors Expense:Labor'
+            
+            # For all remaining items (invoices with no class A or L), apply normal logic
+            unassigned_mask = line_item_df['account'] == ''
+            
+            # Apply sheet_name classification to unassigned items
+            if unassigned_mask.any():
+                line_item_df.loc[unassigned_mask, 'account'] = line_item_df.loc[unassigned_mask, 'sheet_name'].apply(get_classification_safe)
+
+            # Map specific items to accounts (only for items still unassigned after class logic)
+            # This ensures class A and L invoices don't get overridden
+            unassigned_mask = line_item_df['account'] == ''
+            
+            line_item_df.loc[
+                (line_item_df['mpi_item'] == 'UIDI-Job Materials Purchased') & unassigned_mask, 'account'
+            ] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
+            
+            line_item_df.loc[
+                (line_item_df['mpi_item'] == 'UIDI-Job Equipment') & unassigned_mask, 'account'
+            ] = 'UnInvoiced JIP:Cost Of Materials:Job Equipments Purchased'
+            
+            line_item_df.loc[
+                (line_item_df['mpi_item'] == 'UIDI-Sprinkler specialty item') & unassigned_mask, 'account'
+            ] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
+            
+            line_item_df.loc[
+                (line_item_df['mpi_item'] == 'UIDI-Drainage Material') & unassigned_mask, 'account'
+            ] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
+
+            line_item_df['account'] = line_item_df['account'].replace([None, 'None'], '')
+
+            # Identify missing accounts and log invoice details
+            unmatched_items = line_item_df[line_item_df['account'] == '']
+            if not unmatched_items.empty:
+                unmatched_references = unmatched_items[['mpi_item', 'ref_no']].drop_duplicates()
+                unmatched_references_list = unmatched_references.to_dict(orient='records')
+
                 raise HTTPException(
                     status_code=400,
-                    detail=f"No invoice items found for processing. Reference numbers: {ref_numbers}"
+                    detail=f"Unmatched items or sheet names are present, 'unmatched_references': {unmatched_references_list}"
                 )
+
+            line_item_df = line_item_df.astype(str)
+            float_columns = ['qty', 'cost', 'amount']
+            line_item_df[float_columns] = line_item_df[float_columns].astype(float)
+
+            batch_entry = line_item_df.groupby(['account', 'ref_no', 'customer_job']).agg({
+                'amount': 'sum',
+                'date': 'first',
+                'vendor': 'first',
+                'memo': 'first',
+                'class_': 'first'
+            }).reset_index()
+
+            batch_entry['date'] = pd.to_datetime(batch_entry['date']).dt.strftime('%m/%d/%Y')
+            batch_entry['amount'] = batch_entry['amount'].apply(lambda x: x+tax)
+            batch_entry['terms'] = ''
+            batch_entry['bill due'] = ''
+
+            batch_entry.rename(columns = {
+                'date': 'Date', 
+                'ref_no': 'Ref', 
+                'amount': 'Amount', 
+                'customer_job': 'Customer Job', 
+                'class_': 'Class', 
+                'memo': 'Memo'
+            }, inplace=True)
             
-            # Ensure sheet_name column exists, fill missing values with empty string
-            # UIDI items are designed to have empty sheet names and that's OK
-            if 'sheet_name' not in line_item_df.columns:
-                line_item_df['sheet_name'] = ''
-                print(f"Created missing sheet_name column for {len(line_item_df)} items")
-            else:
-                # Fill null sheet_name values with empty string (UIDI items have null sheet names by design)
-                null_count = line_item_df['sheet_name'].isnull().sum()
-                line_item_df['sheet_name'] = line_item_df['sheet_name'].fillna('')
-                if null_count > 0:
-                    print(f"Filled {null_count} null sheet_name values with empty string")
+            batch_entry = batch_entry[[
+                'Date', 'Ref', 'vendor', 'terms', 'bill due', 
+                'account', 'Amount', 'Memo', 'Customer Job', 'Class'
+            ]]
+            all_batch_entries.append(batch_entry)
+
+            # track & manage invoice export status
+            invoice_item_ids = [item.id for item in line_item_copy if item.id]
+            InvoiceItemController(db).set_export_status_to_sent(invoice_item_ids)
+
+            if InvoiceItemController(db).is_exported(str(invoice_id)):
+                InvoiceController(db).set_invoice_is_exported(str(invoice_id))
+                
+            processed_invoices.append(str(invoice_id))
+            print(f"Successfully processed invoice {invoice_id}")
             
-            # Debug: Check for UIDI items
-            uidi_items = line_item_df[line_item_df['mpi_item'].str.startswith('UIDI', na=False)]
-            if not uidi_items.empty:
-                print(f"Found {len(uidi_items)} UIDI items with empty sheet names (this is expected)")
-                print(f"UIDI items: {uidi_items['mpi_item'].unique().tolist()}")
-            
-            print(f"DataFrame created successfully with {len(line_item_df)} items")
-            print(f"Columns: {list(line_item_df.columns)}")
-            print(f"Sample sheet_name values: {line_item_df['sheet_name'].value_counts().head()}")
-            
-        except HTTPException:
-            # Re-raise HTTPExceptions as-is
-            raise
+        except HTTPException as e:
+            # For QuickBooks-specific errors, reraise them
+            if len(invoice_ids) == 1:  # Single invoice processing - reraise error
+                raise e
+            else:  # Batch processing - log error and continue
+                print(f"Error processing invoice {invoice_id}: {e.detail}")
+                skipped_invoices.append(str(invoice_id))
+                continue
         except Exception as e:
-            # For any other exception, also return reference numbers
-            raise HTTPException(
-                status_code=400,
-                detail=f"Error processing data: {str(e)}. Reference numbers: {ref_numbers}"
-            )
-            
-        # Apply classification with error handling
-        def get_classification_safe(sheet_name):
-            if not sheet_name:
-                return ''
-            return ItemClassificationController(db).get_classification(sheet_name)
-        
-        # Initialize the account column
-        line_item_df['account'] = ''
-        
-        # Identify invoices (by ref_no) that have ANY class 'A' or 'L' items
-        invoices_with_class_a = line_item_df[line_item_df['class_'] == 'A']['ref_no'].unique()
-        invoices_with_class_l = line_item_df[line_item_df['class_'] == 'L']['ref_no'].unique()
-        
-        # For invoices with ANY class 'A' item, assign ALL items to Additional Material
-        if len(invoices_with_class_a) > 0:
-            class_a_invoice_mask = line_item_df['ref_no'].isin(invoices_with_class_a)
-            line_item_df.loc[class_a_invoice_mask, 'account'] = 'UnInvoiced JIP:Material:Additional Material'
-        
-        # For invoices with ANY class 'L' item, assign ALL items to Labor (only if not already assigned to class A)
-        if len(invoices_with_class_l) > 0:
-            class_l_invoice_mask = line_item_df['ref_no'].isin(invoices_with_class_l) & (line_item_df['account'] == '')
-            line_item_df.loc[class_l_invoice_mask, 'account'] = 'UnInvoiced JIP:Subcontractors Expense:Labor'
-        
-        # For all remaining items (invoices with no class A or L), apply normal logic
-        unassigned_mask = line_item_df['account'] == ''
-        
-        # Apply sheet_name classification to unassigned items
-        if unassigned_mask.any():
-            line_item_df.loc[unassigned_mask, 'account'] = line_item_df.loc[unassigned_mask, 'sheet_name'].apply(get_classification_safe)
+            print(f"Unexpected error processing invoice {invoice_id}: {str(e)}")
+            skipped_invoices.append(str(invoice_id))
+            continue
 
-        # Map specific items to accounts (only for items still unassigned after class logic)
-        # This ensures class A and L invoices don't get overridden
-        unassigned_mask = line_item_df['account'] == ''
-        
-        line_item_df.loc[
-            (line_item_df['mpi_item'] == 'UIDI-Job Materials Purchased') & unassigned_mask, 'account'
-        ] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
-        
-        line_item_df.loc[
-            (line_item_df['mpi_item'] == 'UIDI-Job Equipment') & unassigned_mask, 'account'
-        ] = 'UnInvoiced JIP:Cost Of Materials:Job Equipments Purchased'
-        
-        line_item_df.loc[
-            (line_item_df['mpi_item'] == 'UIDI-Sprinkler specialty item') & unassigned_mask, 'account'
-        ] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
-        
-        line_item_df.loc[
-            (line_item_df['mpi_item'] == 'UIDI-Drainage Material') & unassigned_mask, 'account'
-        ] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
+    # Check if we have any data to export
+    if not all_batch_entries:
+        error_message = f"No invoice items found for processing."
+        if skipped_invoices:
+            error_message += f" Skipped invoices: {skipped_invoices}"
+        raise HTTPException(status_code=400, detail=error_message)
 
-        line_item_df['account'] = line_item_df['account'].replace([None, 'None'], '')
-
-        # Identify missing accounts and log invoice details
-        unmatched_items = line_item_df[line_item_df['account'] == '']
-        if not unmatched_items.empty:
-            unmatched_references = unmatched_items[['mpi_item', 'ref_no']].drop_duplicates()
-            unmatched_references_list = unmatched_references.to_dict(orient='records')
-
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unmatched items or sheet names are present, 'unmatched_references': {unmatched_references_list}"
-            )
-
-        line_item_df = line_item_df.astype(str)
-        float_columns = ['qty', 'cost', 'amount']
-        line_item_df[float_columns] = line_item_df[float_columns].astype(float)
-
-        batch_entry = line_item_df.groupby(['account', 'ref_no', 'customer_job']).agg({
-            'amount': 'sum',
-            'date': 'first',
-            'vendor': 'first',
-            'memo': 'first',
-            'class_': 'first'
-        }).reset_index()
-
-        batch_entry['date'] = pd.to_datetime(batch_entry['date']).dt.strftime('%m/%d/%Y')
-        batch_entry['amount'] = batch_entry['amount'].apply(lambda x: x+tax)
-        batch_entry['terms'] = ''
-        batch_entry['bill due'] = ''
-
-        batch_entry.rename(columns = {
-            'date': 'Date', 
-            'ref_no': 'Ref', 
-            'amount': 'Amount', 
-            'customer_job': 'Customer Job', 
-            'class_': 'Class', 
-            'memo': 'Memo'
-        }, inplace=True)
-        
-        batch_entry = batch_entry[[
-            'Date', 'Ref', 'vendor', 'terms', 'bill due', 
-            'account', 'Amount', 'Memo', 'Customer Job', 'Class'
-        ]]
-        all_batch_entries.append(batch_entry)
-
-        # track & manage invoice export status
-        invoice_item_ids = [item.id for item in line_item_copy if item.id]
-        InvoiceItemController(db).set_export_status_to_sent(invoice_item_ids)
-
-        if InvoiceItemController(db).is_exported(str(invoice_id)):
-            InvoiceController(db).set_invoice_is_exported(str(invoice_id))
-
+    # Combine all successfully processed invoices
     final_batch_entry = pd.concat(all_batch_entries, ignore_index=True)
     exported_file_path = export_batch_entry_to_excel(final_batch_entry)
     file_name = os.path.basename(exported_file_path)
@@ -220,7 +245,21 @@ def migrate_invoice_to_QB(
         is_invoice=False
     )
 
-    return download_url
+    # Return success response with processing summary
+    response = {
+        "download_url": download_url,
+        "summary": {
+            "total_invoices": len(invoice_ids),
+            "processed_invoices": len(processed_invoices),
+            "skipped_invoices": len(skipped_invoices)
+        }
+    }
+    
+    if skipped_invoices:
+        response["skipped_invoice_ids"] = skipped_invoices
+        print(f"Processing complete. Processed: {len(processed_invoices)}, Skipped: {len(skipped_invoices)}")
+    
+    return response
 
 @router.get("/debug-invoice/{invoice_id}")
 def debug_invoice_items(invoice_id: UUID, db: Session = Depends(get_db)):
