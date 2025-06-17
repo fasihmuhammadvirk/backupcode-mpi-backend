@@ -196,9 +196,11 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest, db: Session = Depe
             
             all_batch_entries.append(batch_entry)
             
-            # Collect IDs for status update
-            item_ids = line_items_df['id'].tolist()
-            all_invoice_item_ids_to_update.extend(item_ids)
+            # BUG FIX: Collect IDs for status update - INCLUDE ALL items (including TAX)
+            # This ensures that when invoice ref 158086 is sent to QuickBooks, 
+            # ALL items (including TAX items) get their status updated to 'Sent'
+            all_item_ids = invoice_items_df['id'].tolist()  # Include both regular and TAX items
+            all_invoice_item_ids_to_update.extend(all_item_ids)
         
         batch_time_taken = time.time() - batch_time
         print(f"✅ Batch {batch_start//BATCH_SIZE + 1} completed in {batch_time_taken:.2f}s")
@@ -420,9 +422,11 @@ def migrate_invoice_to_QB(
             
             all_batch_entries.append(batch_entry)
             
-            # Collect IDs for status update
-            item_ids = line_items_df['id'].tolist()
-            all_invoice_item_ids_to_update.extend(item_ids)
+            # BUG FIX: Collect IDs for status update - INCLUDE ALL items (including TAX)
+            # This ensures that when invoice ref 158086 is sent to QuickBooks, 
+            # ALL items (including TAX items) get their status updated to 'Sent'
+            all_item_ids = invoice_items_df['id'].tolist()  # Include both regular and TAX items
+            all_invoice_item_ids_to_update.extend(all_item_ids)
         
         batch_time_taken = time.time() - batch_time
         print(f"✅ Batch {batch_start//BATCH_SIZE + 1} completed in {batch_time_taken:.2f}s")
