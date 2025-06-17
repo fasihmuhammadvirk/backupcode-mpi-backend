@@ -19,6 +19,11 @@ from mpi_backend.database.models.statement_models import (
     PlumbingSupplier, PlumbingStatement, PlumbingInvoice
 )
 
+# Import the specialized Y&S extractor
+from mpi_backend.utils.statement_extractor.ys_statement_extractor import (
+    YSStatementExtractor
+)
+
 logger = logging.getLogger(__name__)
 
 # Original area definitions for Y&S Plumbing statements
@@ -117,6 +122,23 @@ class StatementExtractor:
     def extract_invoice_data(self):
         """Extract invoice data from all pages of the PDF with improved detection"""
         try:
+            # Check if this is a Y&S statement and use specialized extractor
+            supplier_name = self.email_supplier_name or self.metadata.get('supplier_name', '')
+            if supplier_name == "Y & S Plumbing Supply":
+                logger.info("Using specialized Y&S extractor for improved date and amount parsing")
+                try:
+                    ys_extractor = YSStatementExtractor(self.pdf_path)
+                    ys_result = ys_extractor.extract_invoice_data()
+                    
+                    if not ys_result.empty:
+                        self.combined_data = ys_result
+                        logger.info(f"Y&S specialized extraction successful: {len(self.combined_data)} rows")
+                        return True
+                    else:
+                        logger.warning("Y&S specialized extractor returned no data, falling back to generic extraction")
+                except Exception as e:
+                    logger.warning(f"Y&S specialized extractor failed: {str(e)}, falling back to generic extraction")
+            
             # Try multiple extraction strategies for better accuracy
             strategies = [
                 # Strategy 1: Auto-detect tables without fixed coordinates
