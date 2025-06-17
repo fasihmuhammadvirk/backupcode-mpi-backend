@@ -8,8 +8,15 @@ from fastapi_pagination import add_pagination
 from fastapi.middleware.cors import CORSMiddleware
 import pytz
 from datetime import datetime
+import logging
 # from apitally.fastapi import ApitallyMiddleware
 
+# Setup logging first, before any other imports
+from mpi_backend.config.logging_config import setup_logging
+setup_logging()
+
+logger = logging.getLogger(__name__)
+logger.info("Starting MPI Backend application")
 
 from mpi_backend.api.routes import health
 from mpi_backend.api.routes import supplier
@@ -32,14 +39,8 @@ from mpi_backend.utils.statement_downloader import statement_download_background
 from mpi_backend.utils.invoice_convertor import convert_invoice
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.database import Base, engine
-from mpi_backend.config.logging_config import setup_logging
 
 # Base.metadata.create_all(engine)  # create db tables
-setup_logging()
-
-import logging
-
-logger = logging.getLogger(__name__)
 
 # from middleware import MwTracker
 # tracker=MwTracker() # initializing middleware monitoring tool // comment out when running in local environment
@@ -49,6 +50,7 @@ UTC_TZ = pytz.utc  # UTC Time Zone
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info("Initializing background tasks")
     scheduler = BackgroundScheduler()
     scheduler.add_job(email_download_background_task, "interval", minutes=3, max_instances=20)
 
@@ -96,7 +98,9 @@ async def lifespan(app: FastAPI):
     #)
 
     scheduler.start()
+    logger.info("Background tasks scheduler started")
     yield
+    logger.info("Shutting down application")
 
 app = FastAPI(lifespan=lifespan)
 
@@ -119,6 +123,7 @@ app.add_middleware(
 
 
 def register_routes(app):
+    logger.info("Registering API routes")
     app.include_router(health.router)
     app.include_router(supplier.router)
     app.include_router(invoices_list.router)
@@ -130,7 +135,7 @@ def register_routes(app):
     app.include_router(sync_mappings.router)
     app.include_router(price_comparison.router)
     app.include_router(statements.router)
-
+    logger.info("API routes registered successfully")
 
 
 register_routes(app)

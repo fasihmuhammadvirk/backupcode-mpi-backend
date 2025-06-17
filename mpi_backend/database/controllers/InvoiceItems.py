@@ -12,6 +12,7 @@ from mpi_backend.database.schemas import PriceHistoryResponse
 from mpi_backend.utils.export_utils import extract_supplier_id
 import math
 import logging
+import sqlalchemy.orm
 
 logger = logging.getLogger(__name__)
 
@@ -281,26 +282,48 @@ class InvoiceItemController:
     def set_export_status_to_sent(self, ids):
         """
         Updates the export_status of the InvoiceItems with the given IDs to 'Sent'.
+        Optimized for large batches by processing in chunks.
+        
         Args:
             ids (list): A list of InvoiceItem IDs to update.
+            
         Returns:
             int: The number of records updated.
         """
-        query = self.db_context.query(InvoiceItem)
-
-        if ids:
-            query = query.filter(InvoiceItem.id.in_(ids))
-        else:
-            print('Invoice Item Row Ids not provided')
+        if not ids:
+            logger.warning('Invoice Item Row IDs not provided')
             return 0
-
-        updated_count = query.update({"export_status": "Sent"}, synchronize_session='fetch')
-        self.db_context.commit()
-        return updated_count
+            
+        # Process in batches to avoid memory issues and improve performance
+        batch_size = 1000
+        total_updated = 0
+        
+        try:
+            # Process IDs in batches
+            for i in range(0, len(ids), batch_size):
+                batch_ids = ids[i:i+batch_size]
+                logger.debug(f"Processing batch {i//batch_size + 1} with {len(batch_ids)} items")
+                
+                # Use direct SQL for better performance with large batches
+                query = self.db_context.query(InvoiceItem).filter(InvoiceItem.id.in_(batch_ids))
+                updated_count = query.update({"export_status": "Sent"}, synchronize_session='fetch')
+                total_updated += updated_count
+                
+                # Commit after each batch to avoid large transactions
+                self.db_context.commit()
+                
+            logger.info(f"Updated export status for {total_updated} invoice items")
+            return total_updated
+            
+        except Exception as e:
+            self.db_context.rollback()
+            logger.error(f"Error updating export status: {str(e)}")
+            raise
 
     def is_exported(self, invoice_id):
         """
         Checks if all invoice items for the given invoice_id have export_status as 'Sent'.
+        Optimized to use a count query instead of loading all items into memory.
 
         Args:
             invoice_id (str): The ID of the invoice to check.
@@ -308,13 +331,27 @@ class InvoiceItemController:
         Returns:
             bool: True if all items are 'Sent', False if any item is 'Pending'.
         """
-        query = self.db_context.query(InvoiceItem).filter(InvoiceItem.invoice_id == invoice_id)
-        items = query.all()
-
-        for item in items:
-            if item.export_status != "Sent":
+        try:
+            # Count total items for this invoice
+            total_count = self.db_context.query(func.count(InvoiceItem.id))\
+                .filter(InvoiceItem.invoice_id == invoice_id)\
+                .scalar()
+                
+            if total_count == 0:
                 return False
-        return True
+                
+            # Count items with 'Sent' status
+            sent_count = self.db_context.query(func.count(InvoiceItem.id))\
+                .filter(InvoiceItem.invoice_id == invoice_id)\
+                .filter(InvoiceItem.export_status == "Sent")\
+                .scalar()
+                
+            # All items are exported if counts match
+            return sent_count == total_count
+            
+        except Exception as e:
+            logger.error(f"Error checking export status for invoice {invoice_id}: {str(e)}")
+            return False
 
     def delete_invoice_items(self, invoice_id, db):
         items = db.query(InvoiceItem).filter_by(invoice_id=invoice_id).all()
@@ -946,52 +983,67 @@ class InvoiceItemController:
 
         return result
 
-    def get_invoice_items_raw(self, invoice_id=None):
+    def get_invoice_items_raw(self, invoice_id=None, batch_size=1000):
         """
         Get invoice items as raw SQLAlchemy objects for QuickBooks export.
         This avoids Pydantic conversion issues that can cause missing fields in DataFrames.
+        
+        Args:
+            invoice_id: Optional invoice ID to filter by
+            batch_size: Number of records to fetch in each batch
+            
+        Returns:
+            List of SQLAlchemy objects
         """
-        print(f"get_invoice_items_raw called with invoice_id: {invoice_id}")
+        logger.debug(f"Getting raw invoice items for invoice_id: {invoice_id}")
         
         # Explicitly query all columns to avoid any lazy loading issues
-        query = self.db_context.query(InvoiceItem).options()
+        query = self.db_context.query(InvoiceItem)
+        
         if invoice_id:
             query = query.filter(InvoiceItem.invoice_id == invoice_id)
+            
+        # Use only the columns we need for better performance
+        query = query.options(
+            # Load only the columns we need for QuickBooks export
+            # This reduces memory usage and improves performance
+            sqlalchemy.orm.load_only(
+                InvoiceItem.id, 
+                InvoiceItem.invoice_id,
+                InvoiceItem.sheet_name, 
+                InvoiceItem.mpi_item,
+                InvoiceItem.item, 
+                InvoiceItem.description,
+                InvoiceItem.qty, 
+                InvoiceItem.cost, 
+                InvoiceItem.amount,
+                InvoiceItem.date,
+                InvoiceItem.ref_no,
+                InvoiceItem.customer_job,
+                InvoiceItem.vendor,
+                InvoiceItem.class_,
+                InvoiceItem.memo
+            )
+        )
+        
+        # Order by ID for consistent results
         query = query.order_by(InvoiceItem.id.desc())
         
-        print(f"Executing query: {str(query)}")
-        items = query.all()
-        
-        print(f"Query returned {len(items)} items")
-        if items:
-            sample_item = items[0]
-            print(f"Sample item type: {type(sample_item)}")
-            print(f"Sample item has sheet_name attr: {hasattr(sample_item, 'sheet_name')}")
+        # For large datasets, use batched loading to reduce memory usage
+        if batch_size and batch_size > 0:
+            items = []
+            offset = 0
+            while True:
+                batch = query.limit(batch_size).offset(offset).all()
+                if not batch:
+                    break
+                items.extend(batch)
+                offset += batch_size
+                if len(batch) < batch_size:  # Last batch
+                    break
+        else:
+            items = query.all()
             
-            # Force load all attributes
-            try:
-                sheet_name_val = sample_item.sheet_name
-                print(f"Sample item sheet_name value: {sheet_name_val}")
-            except Exception as e:
-                print(f"Error accessing sheet_name: {e}")
-                
-            try:
-                ref_no_val = sample_item.ref_no  
-                print(f"Sample item ref_no value: {ref_no_val}")
-            except Exception as e:
-                print(f"Error accessing ref_no: {e}")
-                
-            # Check all accessible attributes
-            accessible_attrs = []
-            for attr_name in dir(sample_item):
-                if not attr_name.startswith('_') and not callable(getattr(sample_item, attr_name)):
-                    try:
-                        val = getattr(sample_item, attr_name)
-                        accessible_attrs.append(attr_name)
-                    except Exception:
-                        pass
-            print(f"Accessible attributes: {accessible_attrs}")
-            
-            print(f"Sample item __dict__ keys: {list(sample_item.__dict__.keys()) if hasattr(sample_item, '__dict__') else 'No __dict__'}")
+        logger.debug(f"Retrieved {len(items)} items for invoice_id: {invoice_id}")
         
         return items
