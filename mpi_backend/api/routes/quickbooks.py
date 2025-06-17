@@ -37,31 +37,67 @@ def migrate_invoice_to_QB(
     all_batch_entries = []
 
     for invoice_id in invoice_ids:
+        # Use raw SQLAlchemy objects to avoid Pydantic conversion issues
+        line_items_raw = InvoiceItemController(db).get_invoice_items_raw(invoice_id)
         line_items = InvoiceItemController(db).get_invoice_items(invoice_id)
         line_item_copy = line_items
 
         tax = 0
-        for item in line_items:
+        for item in line_items_raw:
             if item.sheet_name == '(TAX)':
                 tax = float(item.amount.replace(',', ''))
 
-        line_items = [item for item in line_items if item.sheet_name != '(TAX)']
+        line_items_raw = [item for item in line_items_raw if item.sheet_name != '(TAX)']
 
         # Create DataFrame and handle possible missing fields
         try:
             # First get reference numbers before creating DataFrame
-            ref_numbers = [getattr(item, 'ref_no', 'unknown') for item in line_items]
+            ref_numbers = [getattr(item, 'ref_no', 'unknown') for item in line_items_raw]
             
-            line_item_df = pd.DataFrame([vars(item) for item in line_items])
+            # Convert SQLAlchemy objects to dictionaries (this works reliably)
+            line_items_data = []
+            for item in line_items_raw:
+                item_dict = item.__dict__.copy()
+                # Remove SQLAlchemy internal fields
+                item_dict.pop('_sa_instance_state', None)
+                # Apply suffix transformation for display
+                if hasattr(item, 'item_code_with_suffix'):
+                    item_dict['item'] = item.item_code_with_suffix
+                line_items_data.append(item_dict)
             
-            # Get sheet_name from DataFrame - this will fail with KeyError if missing
-            line_item_df['sheet_name']
+            line_item_df = pd.DataFrame(line_items_data)
             
-        except KeyError:
-            # Just use the reference numbers we collected before the error
+            # Verify that sheet_name column exists
+            if 'sheet_name' not in line_item_df.columns:
+                raise KeyError("sheet_name column missing from DataFrame")
+            
+            # Debug: Log the available columns for troubleshooting
+            print(f"Available columns in DataFrame: {list(line_item_df.columns)}")
+            print(f"Number of items processed: {len(line_item_df)}")
+            
+            # Check for items with null/empty sheet_name
+            items_without_sheet_name = line_item_df[
+                (line_item_df['sheet_name'].isna()) | 
+                (line_item_df['sheet_name'] == '') | 
+                (line_item_df['sheet_name'] == 'None')
+            ]
+            
+            if not items_without_sheet_name.empty:
+                problematic_refs = items_without_sheet_name['ref_no'].tolist()
+                problematic_items = items_without_sheet_name[['ref_no', 'item', 'mpi_item']].to_dict('records')
+                raise ValueError(f"Items with missing sheet_name found: {problematic_items}")
+            
+        except KeyError as e:
+            # Sheet name column is missing entirely
             raise HTTPException(
                 status_code=400,
-                detail=f"Missing sheet_name data. Reference numbers: {ref_numbers}"
+                detail=f"Missing sheet_name data in DataFrame. Reference numbers: {ref_numbers}. Error: {str(e)}"
+            )
+        except ValueError as e:
+            # Items have null/empty sheet_name values
+            raise HTTPException(
+                status_code=400,
+                detail=f"Items with null/empty sheet_name found. {str(e)}"
             )
         except Exception as e:
             # For any other exception, also return reference numbers
@@ -72,7 +108,7 @@ def migrate_invoice_to_QB(
             
         # Apply classification with error handling
         def get_classification_safe(sheet_name):
-            if not sheet_name:
+            if not sheet_name or sheet_name in ['None', '', None]:
                 return ''
             return ItemClassificationController(db).get_classification(sheet_name)
         

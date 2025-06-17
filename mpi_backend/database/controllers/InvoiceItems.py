@@ -945,3 +945,15 @@ class InvoiceItemController:
             result.append((item_number, percentage_increase))
 
         return result
+
+    def get_invoice_items_raw(self, invoice_id=None):
+        """
+        Get invoice items as raw SQLAlchemy objects for QuickBooks export.
+        This avoids Pydantic conversion issues that can cause missing fields in DataFrames.
+        """
+        query = self.db_context.query(InvoiceItem)
+        if invoice_id:
+            query = query.filter(InvoiceItem.invoice_id == invoice_id)
+        query = query.order_by(InvoiceItem.id.desc())
+        items = query.all()
+        return items
