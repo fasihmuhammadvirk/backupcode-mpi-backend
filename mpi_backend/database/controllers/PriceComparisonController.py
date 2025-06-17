@@ -53,13 +53,8 @@ class PriceComparisonController:
         try:
             db = self._get_db_session()
             
-            # Base query
-            query = db.query(
-                InvoiceItem.id,
-                InvoiceItem.mpi_item,
-                InvoiceItem.item.label('original_item'),
-                InvoiceItem.mpi_description
-            ).filter(
+            # Base query - fetch full items to access suffix calculation
+            query = db.query(InvoiceItem).filter(
                 and_(
                     InvoiceItem.date >= from_date,
                     InvoiceItem.date <= to_date,
@@ -80,12 +75,12 @@ class PriceComparisonController:
             # Calculate total pages
             pages = (total + size - 1) // size if size > 0 else 1
             
-            # Format response
+            # Format response with suffixed item codes
             items = [
                 ItemInfo(
                     id=item.id,  # Use the database item ID
                     mpi_item=item.mpi_item,
-                    original_item=item.original_item,
+                    original_item=item.item_code_with_suffix,  # Use suffixed version
                     mpi_description=item.mpi_description
                 )
                 for item in items
@@ -182,13 +177,8 @@ class PriceComparisonController:
                     pages=0
                 )
             
-            # Build base query with common filters
-            query = db.query(
-                InvoiceItem.id,
-                InvoiceItem.mpi_item,
-                InvoiceItem.item.label('original_item'),
-                InvoiceItem.mpi_description
-            ).filter(
+            # Build base query with common filters - fetch full items for suffix calculation
+            query = db.query(InvoiceItem).filter(
                 InvoiceItem.mpi_item != 'No Match',
                 InvoiceItem.mpi_item != '',
                 ~InvoiceItem.mpi_item.like('%10 Materials%'),
@@ -211,35 +201,23 @@ class PriceComparisonController:
             # Get total count for pagination
             total = query.distinct().count()
             
-            # For PostgreSQL, when using DISTINCT with ORDER BY, all ORDER BY expressions must be in the SELECT list
-            # Use a subquery approach to work around this limitation
-            subquery = query.distinct().subquery()
-            
-            # Create a new query from the subquery
-            items_query = db.query(
-                subquery.c.id,
-                subquery.c.mpi_item,
-                subquery.c.original_item,
-                subquery.c.mpi_description
-            )
-            
-            # Now we can safely apply the ORDER BY to the outer query
-            items = items_query\
+            # Apply pagination and ordering directly to the main query
+            items = query.distinct()\
                     .order_by(
-                        func.upper(subquery.c.mpi_item).like(f'{search_term}%').desc(),  # Starts with first
-                        func.upper(subquery.c.mpi_item).like(f'%{search_term}%').desc(),  # Contains the term
-                        subquery.c.mpi_item.asc()  # Then sort alphabetically
+                        func.upper(InvoiceItem.mpi_item).like(f'{search_term}%').desc(),  # Starts with first
+                        func.upper(InvoiceItem.mpi_item).like(f'%{search_term}%').desc(),  # Contains the term
+                        InvoiceItem.mpi_item.asc()  # Then sort alphabetically
                     )\
                     .offset((page - 1) * size)\
                     .limit(size)\
                     .all()
             
-            # Format response
+            # Format response with suffixed item codes
             formatted_items = [
                 ItemInfo(
                     id=item.id,  # Use the database item ID
                     mpi_item=item.mpi_item or '',
-                    original_item=item.original_item or '',
+                    original_item=item.item_code_with_suffix or '',  # Use suffixed version
                     mpi_description=item.mpi_description or ''
                 )
                 for item in items
@@ -462,13 +440,8 @@ class PriceComparisonController:
         try:
             db = self._get_db_session()
             
-            # Base query to get distinct items in the date range
-            query = db.query(
-                InvoiceItem.id,
-                InvoiceItem.mpi_item,
-                InvoiceItem.item.label('original_item'),
-                InvoiceItem.mpi_description
-            ).filter(
+            # Base query to get distinct items in the date range - fetch full items for suffix calculation
+            query = db.query(InvoiceItem).filter(
                 and_(
                     InvoiceItem.date >= from_date,
                     InvoiceItem.date <= to_date,
@@ -490,29 +463,15 @@ class PriceComparisonController:
             # Get total count for pagination
             total = query.distinct().count()
             
-            # Apply pagination
-            paginated_query = query.distinct()
+            # Apply pagination and ordering directly
+            items = query.distinct().order_by(InvoiceItem.mpi_item).offset((page - 1) * size).limit(size).all()
             
-            # For pagination, we need to use a subquery approach to avoid PostgreSQL limitations
-            subquery = paginated_query.subquery()
-            
-            # Create a new query from the subquery
-            items_query = db.query(
-                subquery.c.id,
-                subquery.c.mpi_item,
-                subquery.c.original_item,
-                subquery.c.mpi_description
-            ).order_by(subquery.c.mpi_item)
-            
-            # Apply pagination to the outer query
-            items = items_query.offset((page - 1) * size).limit(size).all()
-            
-            # Format items to ItemInfo objects
+            # Format items to ItemInfo objects with suffixed item codes
             item_infos = [
                 ItemInfo(
                     id=item.id,  # Use the database item ID
                     mpi_item=item.mpi_item or '',
-                    original_item=item.original_item or '',
+                    original_item=item.item_code_with_suffix or '',  # Use suffixed version
                     mpi_description=item.mpi_description or ''
                 )
                 for item in items

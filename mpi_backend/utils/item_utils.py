@@ -2,7 +2,7 @@
 Utility functions for item processing and cleaning.
 """
 import re
-from typing import Optional
+from typing import Optional, List, Union, Dict, Any
 
 
 # Supplier ID to suffix mapping
@@ -20,7 +20,25 @@ SUPPLIER_SUFFIX_MAP = {
     11: None, # Plumbing Exchange (no specific suffix)
     12: 'A',  # AF Supply (same as ABC Opus)
     13: None, # Lion Hvac Supplies (no specific suffix)
-    14: 'F', # Bruce Ferguson (no specific suffix)
+    14: 'F', # Bruce Ferguson
+}
+
+# Supplier name to suffix mapping for display purposes
+SUPPLIER_NAME_SUFFIX_MAP = {
+    "BMW Plumbing Supplies": "B",
+    "World Wide Plumbing": "W",
+    "Y & S Plumbing Supply": "Y",
+    "Supreme Plumbing Supply": "S",
+    "Pyramid Plumbing": "P",
+    "ABC Opus Services": "A",
+    "Park Plumbing Supply": "P",
+    "Gotham Plumbing Supply": "G",
+    "FW Webb Plumbing Supply": "F",
+    "Flow Mark Plumbing Supply": "F",
+    "Plumbing Exchange": None,  # No suffix
+    "AF Supply": "A",
+    "Lion Hvac Supplies": None,  # No suffix
+    "Bruce Ferguson": "F",
 }
 
 
@@ -94,3 +112,154 @@ def get_supplier_suffix(supplier_id: int) -> Optional[str]:
         Optional[str]: Suffix letter or None if no suffix
     """
     return SUPPLIER_SUFFIX_MAP.get(supplier_id) 
+
+
+def restore_suffix_by_supplier_id(item_code: str, supplier_id: int) -> str:
+    """
+    Restore supplier-specific suffix to item code for display purposes.
+    This function is ONLY for display, filtering, sorting, and exports.
+    
+    Args:
+        item_code (str): Item code without suffix
+        supplier_id (int): Supplier ID to determine appropriate suffix
+        
+    Returns:
+        str: Item code with suffix appended (e.g., "ABC123-B")
+    """
+    if not item_code:
+        return item_code
+    
+    # Handle None input
+    if item_code is None:
+        return None
+    
+    # Clean whitespace
+    clean_item = str(item_code).strip()
+    if not clean_item:
+        return clean_item
+    
+    # Get suffix for supplier
+    suffix = SUPPLIER_SUFFIX_MAP.get(supplier_id)
+    if not suffix:
+        return clean_item
+    
+    # Check if suffix already exists and is correct
+    expected_suffix = f"-{suffix}"
+    if clean_item.endswith(expected_suffix):
+        return clean_item
+    
+    # Remove any existing suffix first, then add correct one
+    # Clean ALL possible suffixes first to handle wrong suffix scenarios
+    cleaned_item = clean_supplier_suffix(clean_item)  # Remove all suffixes
+    return f"{cleaned_item}-{suffix}"
+
+
+def restore_suffix_by_supplier_name(item_code: str, supplier_name: str) -> str:
+    """
+    Restore supplier-specific suffix to item code using supplier name.
+    This function is ONLY for display purposes.
+    
+    Args:
+        item_code (str): Item code without suffix
+        supplier_name (str): Supplier name to determine appropriate suffix
+        
+    Returns:
+        str: Item code with suffix appended (e.g., "ABC123-B")
+    """
+    if not item_code or not supplier_name:
+        return item_code
+    
+    # Clean whitespace from supplier name
+    clean_supplier_name = supplier_name.strip()
+    
+    # Get suffix for supplier name
+    suffix = SUPPLIER_NAME_SUFFIX_MAP.get(clean_supplier_name)
+    if not suffix:
+        return item_code
+    
+    # Clean whitespace from item code
+    clean_item = str(item_code).strip()
+    
+    # Check if suffix already exists and is correct
+    expected_suffix = f"-{suffix}"
+    if clean_item.endswith(expected_suffix):
+        return clean_item
+    
+    # Remove any existing suffix first, then add correct one
+    # Find supplier ID for cleaning logic
+    supplier_id = None
+    for sid, s in SUPPLIER_SUFFIX_MAP.items():
+        if s == suffix:
+            supplier_id = sid
+            break
+    
+    cleaned_item = clean_supplier_suffix(clean_item, supplier_id)
+    return f"{cleaned_item}-{suffix}"
+
+
+def bulk_restore_suffixes(items: Union[List[str], List[Dict[str, Any]]], 
+                         supplier_id: Optional[int] = None,
+                         supplier_name: Optional[str] = None) -> Union[List[str], List[Dict[str, Any]]]:
+    """
+    Restore suffixes to a list of items for display purposes.
+    
+    Args:
+        items: List of item codes (strings) or dictionaries containing item information
+        supplier_id: Supplier ID to determine suffix
+        supplier_name: Supplier name to determine suffix (alternative to supplier_id)
+        
+    Returns:
+        List with suffixes restored to items
+    """
+    if not items:
+        return items
+    
+    # Use supplier_id if provided, otherwise try to derive from supplier_name
+    if supplier_id is None and supplier_name:
+        suffix = SUPPLIER_NAME_SUFFIX_MAP.get(supplier_name.strip())
+        if suffix:
+            # Find supplier_id for this suffix
+            for sid, s in SUPPLIER_SUFFIX_MAP.items():
+                if s == suffix:
+                    supplier_id = sid
+                    break
+    
+    if supplier_id is None:
+        return items
+    
+    result = []
+    for item in items:
+        if isinstance(item, str):
+            # Simple string list
+            result.append(restore_suffix_by_supplier_id(item, supplier_id))
+        elif isinstance(item, dict):
+            # Dictionary with item field
+            item_copy = item.copy()
+            if 'item' in item_copy:
+                item_copy['item'] = restore_suffix_by_supplier_id(item_copy['item'], supplier_id)
+            result.append(item_copy)
+        else:
+            # Unknown type, add as-is
+            result.append(item)
+    
+    return result
+
+
+def should_restore_suffix(context: str) -> bool:
+    """
+    Determine if suffix should be restored based on context.
+    
+    Args:
+        context (str): Context where item will be used (display, export, pdf, excel, ui, etc.)
+        
+    Returns:
+        bool: True if suffix should be restored for this context
+    """
+    # Display contexts where suffixes should be shown
+    display_contexts = {
+        'display', 'export', 'pdf', 'excel', 'ui', 'table', 'grid', 
+        'report', 'view', 'show', 'list', 'filter', 'sort'
+    }
+    
+    # Check case-insensitive
+    return context.lower() in display_contexts 

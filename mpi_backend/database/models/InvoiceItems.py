@@ -33,6 +33,49 @@ class InvoiceItem(Base):
     invoice = relationship("Invoice", back_populates="items")
     is_active = Column(Boolean, default=True)
 
+    # Supplier name to suffix mapping for display purposes
+    SUPPLIER_SUFFIX_MAP = {
+        "BMW Plumbing Supplies": "-B",
+        "World Wide Plumbing": "-W",
+        "Y & S Plumbing Supply": "-Y",
+        "Supreme Plumbing Supply": "-S",
+        "Pyramid Plumbing": "-P",
+        "ABC Opus Services": "-A",
+        "Park Plumbing Supply": "-P",
+        "Gotham Plumbing Supply": "-G",
+        "FW Webb Plumbing Supply": "-F",
+        "Flow Mark Plumbing Supply": "-F",
+        "Plumbing Exchange": "",  # No suffix
+        "AF Supply": "-A",
+        "Lion Hvac Supplies": "",  # No suffix
+        "Bruce Ferguson": "-F",
+    }
+
+    @property
+    def item_code_with_suffix(self):
+        """
+        Read-only property that returns the item code with supplier-specific suffix.
+        This is used ONLY for display, filtering, sorting, and exports.
+        Does NOT affect any internal system logic, mapping, or database operations.
+        
+        Returns:
+            str: Item code with appropriate suffix (e.g., "ABC123-B" for BMW)
+        """
+        if not self.item:
+            return self.item
+        
+        # Get suffix for the supplier
+        suffix = ""
+        if self.vendor:
+            # Check for exact supplier name matches and partial matches
+            for supplier_name, supplier_suffix in self.SUPPLIER_SUFFIX_MAP.items():
+                if supplier_name in self.vendor:
+                    suffix = supplier_suffix
+                    break
+        
+        # Return item code with suffix (if any)
+        return f"{self.item}{suffix}" if suffix else self.item
+
 
 @event.listens_for(Query, "before_compile", retval=True)
 def _apply_active_filter(query):
