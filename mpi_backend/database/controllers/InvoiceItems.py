@@ -1085,6 +1085,8 @@ class InvoiceItemController:
             sqlalchemy.orm.load_only(
                 InvoiceItem.id,
                 InvoiceItem.invoice_id,
+                InvoiceItem.sheet_name,  # CRITICAL: Added for QuickBooks business logic
+                InvoiceItem.mpi_item,    # CRITICAL: Added for QuickBooks business logic
                 InvoiceItem.item,
                 InvoiceItem.description,
                 InvoiceItem.qty,

@@ -203,23 +203,17 @@ def update_invoice_statuses_immediately(invoice_ids: List[UUID], db: Session, op
 def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest, 
                             background_tasks: BackgroundTasks,
                             db: Session = Depends(get_qb_db)):
-    """FAST: QuickBooks migration with immediate response like export-all"""
+    """ULTRA-FAST: QuickBooks migration optimized to match export-all speed"""
     operation_start = time.time()
     operation_id = f"qb_migrate_all_{int(operation_start)}"
     
     with safe_priority_context("migrate_all"):
         try:
-            # Initialize progress tracking
-            update_progress(operation_id, "initializing", 0, 
-                           "Starting FAST QuickBooks migration")
+            logger.info("Starting ULTRA-FAST QuickBooks migration")
             
-            # OPTIMIZED filtering with set operations
-            update_progress(operation_id, "filtering", 10, 
-                           "Applying filters to get invoice data")
-            
-            filtered_data = InvoiceItemController(db).apply_filters(
-                request, page=1, size=0)
-            invoice_ids = [item.invoice_id for item in filtered_data['items']]
+            # ULTRA-FAST filtering - get just IDs like export-all does
+            invoice_ids = InvoiceItemController(db).apply_filters(
+                request, page=1, size=0, col_param='invoice_id')
 
             if request.excluded_invoice_ids:
                 excluded_set = set(request.excluded_invoice_ids)
@@ -231,29 +225,20 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
             # Validate and clean invoice IDs
             invoice_ids = validate_invoice_ids(invoice_ids)
 
-            update_progress(operation_id, "filtering", 20, 
-                           f"Found {len(invoice_ids)} invoices to process")
-
             logger.info(f"Migrate-all processing {len(invoice_ids)} invoices")
             
-            # FAST PROCESSING: Generate Excel and return immediately
-            # Database updates moved to background tasks
+            # ULTRA-FAST PROCESSING: Generate Excel and return immediately
             result = migrate_invoice_to_QB_fast(
                 invoice_ids, db=db, operation_id=operation_id, 
                 background_tasks=background_tasks)
             
             operation_time = time.time() - operation_start
-            logger.info(f"Migrate-all completed FAST in {operation_time:.2f}s "
-                       f"(database updates running in background)")
+            logger.info(f"Migrate-all completed ULTRA-FAST in {operation_time:.2f}s")
             return result
             
         except Exception as e:
             operation_time = time.time() - operation_start
-            update_progress(operation_id, "error", 0, f"Error: {str(e)}")
-            logger.error(
-                f"QuickBooks migrate-all failed after {operation_time:.2f}s: "
-                f"{str(e)}"
-            )
+            logger.error(f"QuickBooks migrate-all failed after {operation_time:.2f}s: {str(e)}")
             raise
 
 
@@ -317,16 +302,12 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
     start_time = time.time()
     logger.info(f"FAST QB migration starting for {len(invoice_ids)} invoices")
     
-    # ULTRA-FAST data retrieval - single bulk query
-    try:
-        invoice_items = InvoiceItemController(db).get_invoice_items_by_invoice_ids(invoice_ids)
-    except Exception:
-        # Quick fallback - still bulk but different method
-        from mpi_backend.database.models import InvoiceItem
-        invoice_items = db.query(InvoiceItem).filter(
-            InvoiceItem.invoice_id.in_(invoice_ids),
-            InvoiceItem.is_active == True
-        ).all()
+    # ULTRA-FAST data retrieval - direct database query like export-all
+    from mpi_backend.database.models import InvoiceItem
+    invoice_items = db.query(InvoiceItem).filter(
+        InvoiceItem.invoice_id.in_(invoice_ids),
+        InvoiceItem.is_active == True
+    ).all()
     
     if not invoice_items:
         raise HTTPException(status_code=400, detail="No items found")
@@ -525,15 +506,28 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
     
     logger.info(f"Excel and S3 upload in {time.time() - excel_start:.3f}s")
     
-    # IMMEDIATE invoice status update
-    updated_invoices = update_invoice_statuses_immediately(invoice_ids, db, operation_id)
+    # IMMEDIATE invoice status update - no progress tracking for speed
+    try:
+        invoice_controller = InvoiceController(db)
+        updated_invoices = 0
+        for invoice_id in invoice_ids:
+            try:
+                invoice_controller.set_invoice_is_exported(str(invoice_id))
+                updated_invoices += 1
+            except Exception:
+                continue
+        logger.info(f"IMMEDIATE: Updated {updated_invoices} invoice statuses")
+    except Exception as e:
+        logger.warning(f"Invoice status update failed: {e}")
+        updated_invoices = 0
     
-    # Background item status updates
-    background_tasks.add_task(
-        perform_database_updates_background,
-        all_item_ids_for_status,
-        operation_id
-    )
+    # Background item status updates - minimal overhead
+    if all_item_ids_for_status:
+        background_tasks.add_task(
+            perform_database_updates_background,
+            all_item_ids_for_status,
+            operation_id
+        )
     
     total_time = time.time() - start_time
     logger.info(f"ULTRA-FAST QB EXPORT COMPLETED: {len(final_batch_entry)} rows in {total_time:.2f}s")
