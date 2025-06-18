@@ -179,7 +179,7 @@ class SheetNameFixer:
                 fixed_name = self.get_fixed_sheet_name(original_name)
                 
                 if fixed_name != original_name:
-                    logger.info(f"   Mapping ID {mapping.id}: '{original_name}' → '{fixed_name}'")
+                    logger.info(f"   Mapping ID {mapping.id}: '{original_name}' -> '{fixed_name}'")
                     
                     if not dry_run:
                         mapping.google_sheet_name = fixed_name
@@ -196,7 +196,7 @@ class SheetNameFixer:
                 fixed_name = self.get_fixed_sheet_name(original_name)
                 
                 if fixed_name != original_name:
-                    logger.info(f"   Unmapped ID {item.id}: '{original_name}' → '{fixed_name}'")
+                    logger.info(f"   Unmapped ID {item.id}: '{original_name}' -> '{fixed_name}'")
                     
                     if not dry_run:
                         item.google_sheet_name = fixed_name
@@ -308,7 +308,7 @@ class SheetNameFixer:
                             fixed_name = self.get_fixed_sheet_name(original_name)
                             
                             if fixed_name != original_name:
-                                logger.info(f"   {file_path}: '{original_name}' → '{fixed_name}'")
+                                logger.info(f"   {file_path}: '{original_name}' -> '{fixed_name}'")
                                 
                                 if not dry_run:
                                     item['google_sheet_name'] = fixed_name
