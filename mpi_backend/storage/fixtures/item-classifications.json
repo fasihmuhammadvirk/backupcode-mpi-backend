@@ -1,274 +1,618 @@
 [
-    {
-        "item": "(AIR FITTINGS)",
-        "category": "M"
-    },
-    {
-        "item": "(BLACK MALLEABLE) (GAS)",
-        "category": "M"
-    },
-    {
-        "item": "(BLADES & BITS)",
-        "category": "M"
-    },
-    {
-        "item": "(BOXES)",
-        "category": "M"
-    },
-    {
-        "item": "(BRASS)",
-        "category": "M"
-    },
-    {
-        "item": "(CAST IRON) (STEAM - SPRINKLER)",
-        "category": "M"
-    },
-    {
-        "item": "(CONTROLS)",
-        "category": "M"
-    },
-    {
-        "item": "(COPPER)",
-        "category": "M"
-    },
-    {
-        "item": "(CPVC)",
-        "category": "M"
-    },
-    {
-        "item": "(DIELECTRIC FITTINGS)",
-        "category": "M"
-    },
-    {
-        "item": "(DRAINAGE)",
-        "category": "M"
-    },
-    {
-        "item": "(DRINKING)",
-        "category": "M"
-    },
-    {
-        "item": "(DUCKLITE)",
-        "category": "M"
-    },
-    {
-        "item": "(FINISHINGS)",
-        "category": "M"
-    },
-    {
-        "item": "(FIXTURES & MISCELLANEOUS)",
-        "category": "M"
-    },
-    {
-        "item": "(FLANGES)",
-        "category": "M"
-    },
-    {
-        "item": "(GALV. FITTING)",
-        "category": "M"
-    },
-    {
-        "item": "(GARDEN HOSES)",
-        "category": "M"
-    },
-    {
-        "item": "(GAS)",
-        "category": "M"
-    },
-    {
-        "item": "(GASKETS)",
-        "category": "M"
-    },
-    {
-        "item": "(GAUGES)",
-        "category": "M"
-    },
-    {
-        "item": "(GROOVED FITTING)",
-        "category": "M"
-    },
-    {
-        "item": "(HANGERS AND FASTENERS)",
-        "category": "M"
-    },
-    {
-        "item": "(HEAVY EQUIPMENT)",
-        "category": "E"
-    },
-    {
-        "item": "(HOT WATER)",
-        "category": "E"
-    },
-    {
-        "item": "(INJECTOR PUMPS)",
-        "category": "E"
-    },
-    {
-        "item": "(INSULATION)",
-        "category": "M"
-    },
-    {
-        "item": "(LIGHT EQUIPMENT)",
-        "category": "E"
-    },
-    {
-        "item": "(MISCELLANEOUS)",
-        "category": "M"
-    },
-    {
-        "item": "(NDS DRIANAGE)",
-        "category": "M"
-    },
-    {
-        "item": "(NIPPLES)",
-        "category": "M"
-    },
-    {
-        "item": "(NO-HUB COUPLINGS)",
-        "category": "M"
-    },
-    {
-        "item": "(NO-HUB)",
-        "category": "M"
-    },
-    {
-        "item": "(PEX)",
-        "category": "M"
-    },
-    {
-        "item": "(PIPE JOINING MATERIAL)",
-        "category": "M"
-    },
-    {
-        "item": "(POLYPROPYLENE)",
-        "category": "M"
-    },
-    {
-        "item": "(COPPER PRESS)",
-        "category": "M"
-    },
-    {
-        "item": "(PVC)",
-        "category": "M"
-    },
-    {
-        "item": "(RADIANT HEAT)",
-        "category": "M"
-    },
-    {
-        "item": "(SHOWER BODY)",
-        "category": "M"
-    },
-    {
-        "item": "(SIGNS)",
-        "category": "M"
-    },
-    {
-        "item": "(SLEEVES)",
-        "category": "M"
-    },
-    {
-        "item": "(SPACE HEATING)",
-        "category": "M"
-    },
-    {
-        "item": "(SPECIAL VALVES)",
-        "category": "M"
-    },
-    {
-        "item": "(SPRINKLER EQUIPMENT)",
-        "category": "M"
-    },
-    {
-        "item": "(SPRINKLER HEADS)",
-        "category": "M"
-    },
-    {
-        "item": "(SPRINKLER)",
-        "category": "M"
-    },
-    {
-        "item": "(SSDS)",
-        "category": "M"
-    },
-    {
-        "item": "(STAINLESS STEEL)",
-        "category": "M"
-    },
-    {
-        "item": "(STEEL PIPE)",
-        "category": "M"
-    },
-    {
-        "item": "(SV)",
-        "category": "M"
-    },
-    {
-        "item": "(TAPE)",
-        "category": "M"
-    },
-    {
-        "item": "(TAX)",
-        "category": "M"
-    },
-    {
-        "item": "(TESTING)",
-        "category": "M"
-    },
-    {
-        "item": "(TO BE PAID BY COSTUMER)",
-        "category": "O"
-    },
-    {
-        "item": "(TOOLS)",
-        "category": "M"
-    },
-    {
-        "item": "(TUB & MISCELLANEOUS)",
-        "category": "M"
-    },
-    {
-        "item": "(VALVES)",
-        "category": "M"
-    },
-    {
-        "item": "(VENT PIPE)",
-        "category": "M"
-    },
-    {
-        "item": "(WASTE)",
-        "category": "M"
-    },
-    {
-        "item": "(WATER BOOSTER)",
-        "category": "E"
-    },
-    {
-        "item": "(WATER HEATER)",
-        "category": "E"
-    },
-    {
-        "item": "(WATER MAIN)",
-        "category": "E"
-    },
-    {
-        "item": "(WELD FITTING)",
-        "category": "M"
-    },
-    {
-        "item": "(Z, ADDITIONAL FEES)",
-        "category": null
-    },
-    {
-        "item": "(MALLEABLE FITTING)",
-        "category": "M"
-    },
-    {
-        "item": "(PRESS COPPER)",
-        "category": "M"
-    },
-    {
-        "item": "(CAST IRON FITTING)",
-        "category": "M"
-    }
+  {
+    "item": "( FOR LONG STEM BALL VALVE) (VALVES)",
+    "category": "M"
+  },
+  {
+    "item": "( for shower test ) (MISCELLANEOUS)",
+    "category": "M"
+  },
+  {
+    "item": "(0-200 psi) (GAUGES)",
+    "category": "M"
+  },
+  {
+    "item": "(009N) (GROOVED FITTING)",
+    "category": "M"
+  },
+  {
+    "item": "(1/2\" CTS-3/8\" IPS)",
+    "category": "M"
+  },
+  {
+    "item": "(1/4 THICK BLACK EPOXY)",
+    "category": "M"
+  },
+  {
+    "item": "(10/PR PK 30/CS)",
+    "category": "M"
+  },
+  {
+    "item": "(100FT ROLL) (PEX)",
+    "category": "M"
+  },
+  {
+    "item": "(100PC) (HANGERS AND FASTENERS)",
+    "category": "M"
+  },
+  {
+    "item": "(10PK) (GARDEN HOSES)",
+    "category": "M"
+  },
+  {
+    "item": "(120-200F DEG RANGE) (SPECIAL VALVES)",
+    "category": "M"
+  },
+  {
+    "item": "(150 psi)",
+    "category": "M"
+  },
+  {
+    "item": "(20f (DRAINAGE)",
+    "category": "M"
+  },
+  {
+    "item": "(21503-Z)",
+    "category": "M"
+  },
+  {
+    "item": "(21504-Z)",
+    "category": "M"
+  },
+  {
+    "item": "(24v)",
+    "category": "M"
+  },
+  {
+    "item": "(3\" pipe) (DRAINAGE)",
+    "category": "M"
+  },
+  {
+    "item": "(3-Pack) (BLADES & BITS)",
+    "category": "M"
+  },
+  {
+    "item": "(3/4\" Sweat)",
+    "category": "M"
+  },
+  {
+    "item": "(30 Box) (GASKETS)",
+    "category": "M"
+  },
+  {
+    "item": "(300FT ROLL) (PEX)",
+    "category": "M"
+  },
+  {
+    "item": "(31-60 FIXTURE UNITS CAPACITY) (BOXES)",
+    "category": "M"
+  },
+  {
+    "item": "(3FT)",
+    "category": "M"
+  },
+  {
+    "item": "(40PC PER BOX) (INSULATION)",
+    "category": "M"
+  },
+  {
+    "item": "(46pc per case) (INSULATION)",
+    "category": "M"
+  },
+  {
+    "item": "(4824-434)",
+    "category": "M"
+  },
+  {
+    "item": "(500FT ROLL) (PEX)",
+    "category": "M"
+  },
+  {
+    "item": "(60 Box) (GASKETS)",
+    "category": "M"
+  },
+  {
+    "item": "(6410FFEW)",
+    "category": "M"
+  },
+  {
+    "item": "(6480-0500) (GAS)",
+    "category": "M"
+  },
+  {
+    "item": "(66pc per case) (INSULATION)",
+    "category": "M"
+  },
+  {
+    "item": "(889-GPOM) (PVC)",
+    "category": "M"
+  },
+  {
+    "item": "(AIR FITTINGS)",
+    "category": "M"
+  },
+  {
+    "item": "(ALUM. PROBE) (HOT WATER)",
+    "category": "M"
+  },
+  {
+    "item": "(BAG OF 100) (MISCELLANEOUS)",
+    "category": "M"
+  },
+  {
+    "item": "(BLACK MALLEABLE) (GAS)",
+    "category": "M"
+  },
+  {
+    "item": "(BLADES & BITS)",
+    "category": "M"
+  },
+  {
+    "item": "(BOXES)",
+    "category": "M"
+  },
+  {
+    "item": "(BRASS PROBE) (HOT WATER)",
+    "category": "M"
+  },
+  {
+    "item": "(BRASS)",
+    "category": "M"
+  },
+  {
+    "item": "(BULK PACK 5) (WATER BOOSTER)",
+    "category": "M"
+  },
+  {
+    "item": "(Body Only) (DRAINAGE)",
+    "category": "M"
+  },
+  {
+    "item": "(C.I. Top Only) (DRAINAGE)",
+    "category": "M"
+  },
+  {
+    "item": "(CAST IRON FITTING)",
+    "category": "M"
+  },
+  {
+    "item": "(CAST IRON) (STEAM - SPRINKLER)",
+    "category": "M"
+  },
+  {
+    "item": "(CONTROLS)",
+    "category": "M"
+  },
+  {
+    "item": "(COPPER PRESS)",
+    "category": "M"
+  },
+  {
+    "item": "(COPPER)",
+    "category": "M"
+  },
+  {
+    "item": "(COPPER) William",
+    "category": "M"
+  },
+  {
+    "item": "(CPVC)",
+    "category": "M"
+  },
+  {
+    "item": "(DIELECTRIC FITTINGS)",
+    "category": "M"
+  },
+  {
+    "item": "(DRAINAGE)",
+    "category": "M"
+  },
+  {
+    "item": "(DRINKING)",
+    "category": "M"
+  },
+  {
+    "item": "(DUCKLITE)",
+    "category": "M"
+  },
+  {
+    "item": "(DUCKTILE)",
+    "category": "M"
+  },
+  {
+    "item": "(FINISHINGS)",
+    "category": "M"
+  },
+  {
+    "item": "(FIXTURES & MISCELLANEOUS)",
+    "category": "M"
+  },
+  {
+    "item": "(FLANGE W/NIPPLE) (DRAINAGE)",
+    "category": "M"
+  },
+  {
+    "item": "(FLANGES)",
+    "category": "M"
+  },
+  {
+    "item": "(FOR 1\" COPPER PIPE) (MISCELLANEOUS)",
+    "category": "M"
+  },
+  {
+    "item": "(FOR 1-1/2\" COPPER PIPE) (MISCELLANEOUS)",
+    "category": "M"
+  },
+  {
+    "item": "(FOR 1-1/4\" COPPER PIPE) (MISCELLANEOUS)",
+    "category": "M"
+  },
+  {
+    "item": "(FOR 2'' COPPER PIPE) (MISCELLANEOUS)",
+    "category": "M"
+  },
+  {
+    "item": "(FOR 3/4'' COPPER PIPE) (MISCELLANEOUS)",
+    "category": "M"
+  },
+  {
+    "item": "(FOR SPRINKLER CABINET) (TOOLS)",
+    "category": "E"
+  },
+  {
+    "item": "(GALV. FITTING)",
+    "category": "M"
+  },
+  {
+    "item": "(GARDEN HOSES)",
+    "category": "M"
+  },
+  {
+    "item": "(GAS)",
+    "category": "M"
+  },
+  {
+    "item": "(GASKETS)",
+    "category": "M"
+  },
+  {
+    "item": "(GAUGES)",
+    "category": "M"
+  },
+  {
+    "item": "(GREY)",
+    "category": "M"
+  },
+  {
+    "item": "(GROOVED FITTING)",
+    "category": "M"
+  },
+  {
+    "item": "(Gruvlock)",
+    "category": "M"
+  },
+  {
+    "item": "(HANGERS AND FASTENERS)",
+    "category": "M"
+  },
+  {
+    "item": "(HEAVY EQUIPMENT)",
+    "category": "E"
+  },
+  {
+    "item": "(HOT WATER)",
+    "category": "E"
+  },
+  {
+    "item": "(INJECTOR PUMPS)",
+    "category": "E"
+  },
+  {
+    "item": "(INSULATION)",
+    "category": "M"
+  },
+  {
+    "item": "(IRON BEND)",
+    "category": "M"
+  },
+  {
+    "item": "(Josam 3000) (DRAINAGE)",
+    "category": "M"
+  },
+  {
+    "item": "(LIGHT EQUIPMENT)",
+    "category": "E"
+  },
+  {
+    "item": "(LOWBOY)",
+    "category": "M"
+  },
+  {
+    "item": "(Lead (SPECIAL VALVES)",
+    "category": "M"
+  },
+  {
+    "item": "(Lead Free) (SPECIAL VALVES)",
+    "category": "M"
+  },
+  {
+    "item": "(MALLEABLE FITTING)",
+    "category": "M"
+  },
+  {
+    "item": "(MBST6-1-1-1-O) (GAS)",
+    "category": "M"
+  },
+  {
+    "item": "(MBST7-1 1/4-O) (GAS)",
+    "category": "M"
+  },
+  {
+    "item": "(MISCELLANEOUS)",
+    "category": "M"
+  },
+  {
+    "item": "(NDS DRIANAGE)",
+    "category": "M"
+  },
+  {
+    "item": "(NIPPLES)",
+    "category": "M"
+  },
+  {
+    "item": "(NO FLOAT) (INJECTOR PUMPS)",
+    "category": "E"
+  },
+  {
+    "item": "(NO-HUB COUPLINGS)",
+    "category": "M"
+  },
+  {
+    "item": "(NO-HUB FITTINGS)",
+    "category": "M"
+  },
+  {
+    "item": "(NO-HUB)",
+    "category": "M"
+  },
+  {
+    "item": "(NOT FOR BRAZING) (COPPER)",
+    "category": "M"
+  },
+  {
+    "item": "(OB-723) (BOXES)",
+    "category": "M"
+  },
+  {
+    "item": "(PEX)",
+    "category": "M"
+  },
+  {
+    "item": "(PEX) William",
+    "category": "M"
+  },
+  {
+    "item": "(PIPE JOINING MATERIAL)",
+    "category": "M"
+  },
+  {
+    "item": "(POLYPROPYLENE)",
+    "category": "M"
+  },
+  {
+    "item": "(PRESS COPPER)",
+    "category": "M"
+  },
+  {
+    "item": "(PVC)",
+    "category": "M"
+  },
+  {
+    "item": "(Qty 100) (HANGERS AND FASTENERS)",
+    "category": "M"
+  },
+  {
+    "item": "(Qty 20) (HANGERS AND FASTENERS)",
+    "category": "M"
+  },
+  {
+    "item": "(Qty 50) (HANGERS AND FASTENERS)",
+    "category": "M"
+  },
+  {
+    "item": "(RA1425 (SPRINKLER HEADS)",
+    "category": "M"
+  },
+  {
+    "item": "(RA3415 (SPRINKLER HEADS)",
+    "category": "M"
+  },
+  {
+    "item": "(RADIANT HEAT)",
+    "category": "M"
+  },
+  {
+    "item": "(ROLL TOP POLY)",
+    "category": "M"
+  },
+  {
+    "item": "(SCH 10) (STAINLESS STEEL)",
+    "category": "M"
+  },
+  {
+    "item": "(SHOWER BODY)",
+    "category": "M"
+  },
+  {
+    "item": "(SIGNS)",
+    "category": "M"
+  },
+  {
+    "item": "(SLEEVES)",
+    "category": "M"
+  },
+  {
+    "item": "(SPACE HEATING)",
+    "category": "M"
+  },
+  {
+    "item": "(SPECIAL CUT) (NIPPLES)",
+    "category": "M"
+  },
+  {
+    "item": "(SPECIAL VALVES)",
+    "category": "M"
+  },
+  {
+    "item": "(SPRINKLER EQUIPMENT)",
+    "category": "M"
+  },
+  {
+    "item": "(SPRINKLER HEADS)",
+    "category": "M"
+  },
+  {
+    "item": "(SPRINKLER)",
+    "category": "M"
+  },
+  {
+    "item": "(SSDS)",
+    "category": "M"
+  },
+  {
+    "item": "(STAINLESS STEEL)",
+    "category": "M"
+  },
+  {
+    "item": "(STEEL PIPE)",
+    "category": "M"
+  },
+  {
+    "item": "(SV)",
+    "category": "M"
+  },
+  {
+    "item": "(TALL)",
+    "category": "M"
+  },
+  {
+    "item": "(TALL) (HOT WATER)",
+    "category": "M"
+  },
+  {
+    "item": "(TAPE)",
+    "category": "M"
+  },
+  {
+    "item": "(TAX)",
+    "category": "M"
+  },
+  {
+    "item": "(TESTING)",
+    "category": "M"
+  },
+  {
+    "item": "(TO BE PAID BY COSTUMER)",
+    "category": "O"
+  },
+  {
+    "item": "(TOOLS)",
+    "category": "M"
+  },
+  {
+    "item": "(TUB & MISCELLANEOUS)",
+    "category": "M"
+  },
+  {
+    "item": "(UL/FM) (VALVES)",
+    "category": "M"
+  },
+  {
+    "item": "(Up To 1,000,000 BTUs) (HOT WATER)",
+    "category": "M"
+  },
+  {
+    "item": "(VALVES)",
+    "category": "M"
+  },
+  {
+    "item": "(VENT PIPE)",
+    "category": "M"
+  },
+  {
+    "item": "(WASTE)",
+    "category": "M"
+  },
+  {
+    "item": "(WATER BOOSTER)",
+    "category": "E"
+  },
+  {
+    "item": "(WATER HEATER)",
+    "category": "E"
+  },
+  {
+    "item": "(WATER MAIN)",
+    "category": "E"
+  },
+  {
+    "item": "(WELD FITTING)",
+    "category": "M"
+  },
+  {
+    "item": "(WHITE) (NO-HUB COUPLINGS)",
+    "category": "M"
+  },
+  {
+    "item": "(With Insulated Blanket) (HOT WATER)",
+    "category": "M"
+  },
+  {
+    "item": "(YC1342BA16INAT-110 V) (SPECIAL VALVES)",
+    "category": "M"
+  },
+  {
+    "item": "(Z, ADDITIONAL FEES)",
+    "category": "M"
+  },
+  {
+    "item": "(any color) (MISCELLANEOUS)",
+    "category": "M"
+  },
+  {
+    "item": "(conversion k 240v and 208v availa (HOT WATER)",
+    "category": "M"
+  },
+  {
+    "item": "(denzel 7772496) (BLADES & BITS)",
+    "category": "M"
+  },
+  {
+    "item": "(pvc)",
+    "category": "M"
+  },
+  {
+    "item": "(quick set)",
+    "category": "M"
+  },
+  {
+    "item": "(stops for delta r10000) (TUB & MISCELLANEOUS)",
+    "category": "M"
+  },
+  {
+    "item": "(w/ 4 (INJECTOR PUMPS)",
+    "category": "E"
+  },
+  {
+    "item": "(walworth 1796)",
+    "category": "M"
+  },
+  {
+    "item": "(walworth 1797F)",
+    "category": "M"
+  },
+  {
+    "item": "Copy of Copy of (PVC)",
+    "category": "M"
+  }
 ]
