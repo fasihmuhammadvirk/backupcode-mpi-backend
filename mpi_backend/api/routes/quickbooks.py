@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import List
@@ -125,10 +125,65 @@ def validate_invoice_ids(invoice_ids: List[UUID]) -> List[UUID]:
     return clean_ids
 
 
+def perform_database_updates_background(all_item_ids_for_status: List, 
+                                      invoice_ids: List[UUID], 
+                                      operation_id: str):
+    """
+    Background task to handle database status updates after Excel generation.
+    This ensures the user gets the download URL immediately while updates happen async.
+    """
+    try:
+        # Create a new database session for background processing
+        from mpi_backend.database import get_qb_db
+        db_gen = get_qb_db()
+        db = next(db_gen)
+        
+        update_progress(operation_id, "background_updating", 95, 
+                       "Updating database status in background")
+        
+        status_start = time.time()
+        
+        # Batch status updates
+        if all_item_ids_for_status:
+            InvoiceItemController(db).set_export_status_to_sent(
+                all_item_ids_for_status)
+            
+            invoice_controller = InvoiceController(db)
+            updated_invoices = 0
+            
+            for invoice_id in invoice_ids:
+                try:
+                    if InvoiceItemController(db).is_exported(str(invoice_id)):
+                        invoice_controller.set_invoice_is_exported(str(invoice_id))
+                        updated_invoices += 1
+                except Exception as e:
+                    logger.warning(f"Failed to update invoice {invoice_id}: {e}")
+                    continue
+        
+        status_time = time.time() - status_start
+        logger.info(f"Background status updates completed in {status_time:.3f}s "
+                   f"for {len(all_item_ids_for_status)} items and "
+                   f"{updated_invoices} invoices")
+        
+        update_progress(operation_id, "background_completed", 100, 
+                       f"Background updates completed - {updated_invoices} invoices updated")
+        
+    except Exception as e:
+        logger.error(f"Background database update failed: {e}")
+        update_progress(operation_id, "background_error", 100, 
+                       f"Background update error: {str(e)}")
+    finally:
+        try:
+            db.close()
+        except:
+            pass
+
+
 @router.post("/migrate-all")
 def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest, 
+                            background_tasks: BackgroundTasks,
                             db: Session = Depends(get_qb_db)):
-    """PRIORITY: QuickBooks migration with background job control"""
+    """FAST: QuickBooks migration with immediate response like export-all"""
     operation_start = time.time()
     operation_id = f"qb_migrate_all_{int(operation_start)}"
     
@@ -136,7 +191,7 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
         try:
             # Initialize progress tracking
             update_progress(operation_id, "initializing", 0, 
-                           "Starting PRIORITY QuickBooks migration")
+                           "Starting FAST QuickBooks migration")
             
             # OPTIMIZED filtering with set operations
             update_progress(operation_id, "filtering", 10, 
@@ -161,23 +216,15 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
 
             logger.info(f"Migrate-all processing {len(invoice_ids)} invoices")
             
-            # Check if dataset needs chunking
-            if len(invoice_ids) > 1000:
-                logger.warning(f"Large dataset detected: {len(invoice_ids)} "
-                              f"invoices")
-                update_progress(operation_id, "chunking", 25, 
-                               f"Large dataset - processing in chunks")
-                result = _process_large_dataset_in_chunks(
-                    invoice_ids, db, operation_start, operation_id)
-            else:
-                result = migrate_invoice_to_QB_internal(
-                    invoice_ids, db=db, operation_id=operation_id)
+            # FAST PROCESSING: Generate Excel and return immediately
+            # Database updates moved to background tasks
+            result = migrate_invoice_to_QB_fast(
+                invoice_ids, db=db, operation_id=operation_id, 
+                background_tasks=background_tasks)
             
             operation_time = time.time() - operation_start
-            update_progress(operation_id, "completed", 100, 
-                           f"Export completed in {operation_time:.2f}s")
-            logger.info(f"Migrate-all completed successfully in "
-                       f"{operation_time:.2f}s")
+            logger.info(f"Migrate-all completed FAST in {operation_time:.2f}s "
+                       f"(database updates running in background)")
             return result
             
         except Exception as e:
@@ -192,8 +239,9 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
 
 @router.post("/migrate")
 def migrate_invoice_to_QB(invoice_ids: List[UUID], 
+                        background_tasks: BackgroundTasks,
                         db: Session = Depends(get_qb_db)):
-    """QuickBooks migration with priority control"""
+    """QuickBooks migration with priority control - small datasets stay synchronous"""
     start_time = time.time()
     operation_id = f"qb_migrate_{int(start_time)}"
     
@@ -204,8 +252,15 @@ def migrate_invoice_to_QB(invoice_ids: List[UUID],
             
             logger.info(f"Processing {len(invoice_ids)} invoices")
             
-            result = migrate_invoice_to_QB_internal(
-                invoice_ids, db=db, operation_id=operation_id)
+            # For smaller datasets, keep synchronous processing
+            # For larger datasets, use fast async processing
+            if len(invoice_ids) > 50:
+                result = migrate_invoice_to_QB_fast(
+                    invoice_ids, db=db, operation_id=operation_id,
+                    background_tasks=background_tasks)
+            else:
+                result = migrate_invoice_to_QB_internal(
+                    invoice_ids, db=db, operation_id=operation_id)
                 
             total_time = time.time() - start_time
             logger.info(f"QuickBooks migration completed successfully in "
@@ -231,9 +286,272 @@ def safe_getattr_with_fallback(obj, attr, default=''):
         return default
 
 
+def migrate_invoice_to_QB_fast(invoice_ids: List[UUID], 
+                              db: Session, operation_id: str,
+                              background_tasks: BackgroundTasks) -> str:
+    """
+    FAST QuickBooks migration - generates Excel immediately, 
+    database updates in background like export-all endpoint
+    """
+    
+    # Fast data retrieval with progress tracking
+    retrieval_start = time.time()
+    update_progress(operation_id, "retrieving_data", 30, 
+                   f"Retrieving data for {len(invoice_ids)} invoices")
+    
+    # Get all required data efficiently
+    invoice_items = []
+    if hasattr(InvoiceItemController(db), 'get_invoice_items_by_invoice_ids'):
+        try:
+            invoice_items = InvoiceItemController(db).get_invoice_items_by_invoice_ids(invoice_ids)
+        except Exception as bulk_error:
+            logger.warning(f"Bulk retrieval failed: {bulk_error}, falling back")
+    
+    # Fallback to individual calls if bulk fails
+    if not invoice_items:
+        for invoice_id in invoice_ids:
+            try:
+                items = InvoiceItemController(db).get_invoice_items(invoice_id)
+                if items:
+                    invoice_items.extend(items)
+            except Exception:
+                continue
+    
+    retrieval_time = time.time() - retrieval_start
+    logger.info(f"Data retrieval completed in {retrieval_time:.3f}s for "
+               f"{len(invoice_items)} items")
+    
+    update_progress(operation_id, "processing_data", 50, 
+                   f"Processing {len(invoice_items)} items")
+    
+    # Single-pass data extraction (PRESERVE EXACT ORIGINAL LOGIC)
+    extract_start = time.time()
+    
+    all_items_data = []
+    tax_by_invoice = {}
+    all_item_ids_for_status = []  # This will be used in background task
+    
+    # Get classification controller
+    classification_controller = ItemClassificationController(db)
+    
+    # Pre-build classification cache
+    unique_sheet_names = set()
+    for item in invoice_items:
+        sheet_name = getattr(item, 'sheet_name', '')
+        if sheet_name and sheet_name.strip():
+            unique_sheet_names.add(sheet_name)
+    
+    # Build classification cache
+    classification_cache = {'': '', None: ''}
+    for sheet_name in unique_sheet_names:
+        try:
+            classification_cache[sheet_name] = classification_controller.get_classification(sheet_name)
+        except Exception:
+            classification_cache[sheet_name] = ''
+
+    # Single pass through ALL items (EXACT ORIGINAL LOGIC)
+    for item in invoice_items:
+        item_sheet_name = getattr(item, 'sheet_name', '')
+        item_invoice_id = getattr(item, 'invoice_id')
+        
+        # Tax calculation (EXACT ORIGINAL LOGIC)
+        if item_sheet_name == '(TAX)':
+            if item_invoice_id not in tax_by_invoice:
+                tax_by_invoice[item_invoice_id] = 0
+            amount_str = str(getattr(item, 'amount', '0')).replace(',', '')
+            try:
+                tax_by_invoice[item_invoice_id] += float(amount_str)
+            except (ValueError, TypeError):
+                pass
+        else:
+            # Extract all item data (EXACT ORIGINAL LOGIC)
+            item_data = {
+                'id': getattr(item, 'id', None),
+                'invoice_id': item_invoice_id,
+                'sheet_name': item_sheet_name,
+                'mpi_item': getattr(item, 'mpi_item', 'No Match'),
+                'item': getattr(item, 'item', ''),
+                'description': getattr(item, 'description', ''),
+                'qty': getattr(item, 'qty', 0),
+                'cost': getattr(item, 'cost', 0.0),
+                'amount': getattr(item, 'amount', '0'),
+                'date': getattr(item, 'date', None),
+                'ref_no': getattr(item, 'ref_no', ''),
+                'customer_job': getattr(item, 'customer_job', ''),
+                'vendor': getattr(item, 'vendor', ''),
+                'class_': getattr(item, 'class_', ''),
+                'memo': getattr(item, 'memo', ''),
+            }
+            all_items_data.append(item_data)
+            
+            # Collect IDs for background status updates
+            if item_data['id']:
+                all_item_ids_for_status.append(item_data['id'])
+    
+    extract_time = time.time() - extract_start
+    logger.info(f"Data extraction completed in {extract_time:.3f}s")
+    
+    if not all_items_data:
+        raise HTTPException(status_code=400, detail="No non-tax items found")
+
+    update_progress(operation_id, "processing_data", 60, 
+                   "Performing vectorized data operations")
+
+    # Vectorized operations with DataFrame (PRESERVE EXACT ORIGINAL LOGIC)
+    vectorized_start = time.time()
+    
+    df = pd.DataFrame(all_items_data)
+    df['account'] = ''
+    
+    # VECTORIZED Class A and L logic (EXACT ORIGINAL BUSINESS LOGIC)
+    class_a_refs = df[df['class_'] == 'A']['ref_no'].unique()
+    class_l_refs = df[df['class_'] == 'L']['ref_no'].unique()
+    
+    if len(class_a_refs) > 0:
+        df.loc[df['ref_no'].isin(class_a_refs), 'account'] = 'UnInvoiced JIP:Material:Additional Material'
+    
+    if len(class_l_refs) > 0:
+        mask = df['ref_no'].isin(class_l_refs) & (df['account'] == '')
+        df.loc[mask, 'account'] = 'UnInvoiced JIP:Subcontractors Expense:Labor'
+    
+    # VECTORIZED classification mapping (EXACT ORIGINAL LOGIC)
+    unassigned_mask = df['account'] == ''
+    if unassigned_mask.any():
+        df.loc[unassigned_mask, 'account'] = df.loc[unassigned_mask, 'sheet_name'].map(
+            lambda x: classification_cache.get(x, '') if x else ''
+        )
+    
+    # VECTORIZED MPI mappings (EXACT ORIGINAL LOGIC)
+    mpi_mappings = {
+        'UIDI-Job Materials Purchased': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased',
+        'UIDI-Job Equipment': 'UnInvoiced JIP:Cost Of Materials:Job Equipments Purchased',
+        'UIDI-Sprinkler specialty item': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased',
+        'UIDI-Drainage Material': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
+    }
+    
+    for mpi_item, account in mpi_mappings.items():
+        mask = (df['mpi_item'] == mpi_item) & (df['account'] == '')
+        df.loc[mask, 'account'] = account
+    
+    # CRITICAL BUSINESS LOGIC FIX: Default account for unmatched items
+    df.loc[df['account'] == '', 'account'] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
+    
+    # VECTORIZED data type conversions
+    df['qty'] = pd.to_numeric(df['qty'], errors='coerce').fillna(0)
+    df['cost'] = pd.to_numeric(df['cost'], errors='coerce').fillna(0)
+    df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0)
+    
+    # Add tax amounts vectorized
+    df['tax_amount'] = df['invoice_id'].map(lambda x: tax_by_invoice.get(x, 0))
+    
+    vectorized_time = time.time() - vectorized_start
+    logger.info(f"Vectorized processing completed in {vectorized_time:.3f}s")
+    
+    update_progress(operation_id, "aggregating", 70, 
+                   "Aggregating data for QuickBooks export")
+
+    # Single aggregation operation
+    aggregation_start = time.time()
+    
+    batch_entry = df.groupby(['account', 'ref_no', 'customer_job']).agg({
+        'amount': 'sum',
+        'tax_amount': 'first',
+        'date': 'first',
+        'vendor': 'first',
+        'memo': 'first',
+        'class_': 'first'
+    }).reset_index()
+    
+    # Add tax to amount
+    batch_entry['amount'] = batch_entry['amount'] + batch_entry['tax_amount']
+    
+    # Final formatting
+    batch_entry['date'] = pd.to_datetime(batch_entry['date'], 
+                                        errors='coerce').dt.strftime('%m/%d/%Y')
+    batch_entry['terms'] = ''
+    batch_entry['bill due'] = ''
+    
+    # Column renaming and selection
+    batch_entry = batch_entry.rename(columns={
+        'date': 'Date', 
+        'ref_no': 'Ref', 
+        'amount': 'Amount', 
+        'customer_job': 'Customer Job', 
+        'class_': 'Class', 
+        'memo': 'Memo'
+    })
+    
+    final_batch_entry = batch_entry[[
+        'Date', 'Ref', 'vendor', 'terms', 'bill due', 
+        'account', 'Amount', 'Memo', 'Customer Job', 'Class'
+    ]]
+    
+    aggregation_time = time.time() - aggregation_start
+    logger.info(f"Aggregation completed in {aggregation_time:.3f}s for "
+               f"{len(final_batch_entry)} rows")
+    
+    update_progress(operation_id, "generating_excel", 80, 
+                   f"Generating Excel file with {len(final_batch_entry)} rows")
+
+    # Excel generation
+    excel_start = time.time()
+    exported_file_path = export_batch_entry_to_excel(final_batch_entry)
+    file_name = os.path.basename(exported_file_path)
+    excel_time = time.time() - excel_start
+    logger.info(f"Excel generation completed in {excel_time:.3f}s")
+    
+    update_progress(operation_id, "uploading", 90, "Uploading to S3")
+
+    # S3 upload
+    upload_start = time.time()
+    try:
+        upload_file(
+            exported_file_path, 
+            file_key=f'Exports/{file_name}', 
+            is_invoice=False
+        )
+        download_url = get_presigned_url(
+            file_key=f'Exports/{file_name}', 
+            is_invoice=False
+        )
+        upload_time = time.time() - upload_start
+        logger.info(f"S3 upload completed in {upload_time:.3f}s")
+        
+        # Clean up local file
+        try:
+            os.remove(exported_file_path)
+        except OSError:
+            pass
+            
+    except Exception as upload_error:
+        logger.error(f"S3 upload failed: {str(upload_error)}")
+        raise HTTPException(status_code=500, detail="Failed to upload to S3")
+    
+    # FAST RESPONSE: Schedule database updates as background task
+    # This is the key optimization - user gets download URL immediately
+    background_tasks.add_task(
+        perform_database_updates_background,
+        all_item_ids_for_status,
+        invoice_ids,
+        operation_id
+    )
+    
+    # Final completion of main process
+    total_time = time.time() - retrieval_start
+    update_progress(operation_id, "completed", 90, 
+                   f"Excel ready in {total_time:.2f}s (DB updates in background)")
+    
+    logger.info(f"FAST EXPORT COMPLETED: {len(final_batch_entry)} rows "
+               f"in {total_time:.2f}s - database updates running in background")
+    
+    return download_url
+
+
 def migrate_invoice_to_QB_internal(invoice_ids: List[UUID], 
                                  db: Session, operation_id: str) -> str:
-    """Enhanced internal migration function with optimized processing"""
+    """
+    Original synchronous migration function for smaller datasets
+    """
     
     # Fast data retrieval with progress tracking
     retrieval_start = time.time()
@@ -443,7 +761,7 @@ def migrate_invoice_to_QB_internal(invoice_ids: List[UUID],
     update_progress(operation_id, "updating_status", 90, 
                    "Updating database status")
 
-    # Batch status updates
+    # Synchronous status updates for smaller datasets
     status_start = time.time()
     if all_item_ids_for_status:
         InvoiceItemController(db).set_export_status_to_sent(
@@ -492,49 +810,10 @@ def migrate_invoice_to_QB_internal(invoice_ids: List[UUID],
     update_progress(operation_id, "completed", 100, 
                    f"Export completed in {total_time:.2f}s")
     
-    logger.info(f"PRIORITY EXPORT COMPLETED: {len(final_batch_entry)} rows "
+    logger.info(f"SYNCHRONOUS EXPORT COMPLETED: {len(final_batch_entry)} rows "
                f"in {total_time:.2f}s")
     
     return download_url
-
-
-def _process_large_dataset_in_chunks(invoice_ids: List[UUID], db: Session, 
-                                   operation_start: float, operation_id: str):
-    """Process large datasets in chunks to prevent memory issues"""
-    
-    try:
-        CHUNK_SIZE = 500
-        chunks = [invoice_ids[i:i + CHUNK_SIZE] 
-                 for i in range(0, len(invoice_ids), CHUNK_SIZE)]
-        
-        all_batch_entries = []
-        all_item_ids = []
-        
-        for i, chunk in enumerate(chunks):
-            chunk_progress = 25 + (i + 1) * 60 // len(chunks)
-            update_progress(operation_id, "processing_chunks", 
-                           chunk_progress, 
-                           f"Processing chunk {i+1}/{len(chunks)} "
-                           f"({len(chunk)} invoices)")
-            
-            chunk_result = migrate_invoice_to_QB_internal(
-                chunk, db=db, 
-                operation_id=f"{operation_id}_chunk_{i}")
-            
-            # For chunks, we need to collect the results differently
-            # This is a simplified approach - you may need to adjust
-            # based on your specific requirements
-            
-        update_progress(operation_id, "completed", 100, 
-                       f"All {len(chunks)} chunks processed successfully")
-        
-        # Return the last chunk result as a placeholder
-        # You may want to combine all chunks differently
-        return chunk_result
-        
-    except Exception as e:
-        logger.error(f"Error processing large dataset: {e}")
-        raise
 
 
 @router.get("/priority-status")
