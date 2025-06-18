@@ -137,8 +137,8 @@ async def migrate_all_invoice_to_QB(
             
             update_progress(operation_id, "completed", 100, 
                            f"All {len(chunks)} chunks processed successfully")
-            return {"message": "Large dataset processed in chunks", 
-                   "chunks": len(chunks), "results": all_results}
+            # Return only the S3 URL from the last chunk
+            return all_results[-1] if all_results else ""
         else:
             # Process normally for smaller datasets
             return await migrate_invoice_to_QB_internal(
@@ -426,9 +426,9 @@ async def migrate_invoice_to_QB(
         # Pause background jobs for priority processing
         pause_background_jobs()
         
-        result = await migrate_invoice_to_QB_internal(
+        s3_url = await migrate_invoice_to_QB_internal(
             invoice_ids, db=db, operation_id=operation_id)
-        return result
+        return s3_url
         
     except Exception as e:
         logger.error(f"QuickBooks migration failed: {str(e)}")
