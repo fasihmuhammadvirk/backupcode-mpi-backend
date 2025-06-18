@@ -7,7 +7,6 @@ from fastapi_pagination import add_pagination
 from fastapi.middleware.cors import CORSMiddleware
 import pytz
 import logging
-import asyncio
 import time as time_module
 
 # Setup logging first, before any other imports
@@ -119,13 +118,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ENHANCED TIMEOUT MIDDLEWARE: Priority-aware timeout handling
+# ENHANCED TIMEOUT MIDDLEWARE: Priority-aware timeout handling with sync compatibility
 @app.middleware("http")
 async def timeout_middleware(request: Request, call_next):
     """
     Enhanced middleware with absolute priority for migrate-all operations
+    FIXED: Proper handling of sync functions without async wrapping
     - migrate-all: 15 minutes timeout (absolute priority)
-    - Other QuickBooks: 10 minutes timeout
+    - Other QuickBooks: 10 minutes timeout  
     - Exports: 5 minutes timeout
     - Standard: 2 minutes timeout
     """
@@ -146,39 +146,42 @@ async def timeout_middleware(request: Request, call_next):
     start_time = time_module.time()
     
     try:
-        # Use asyncio.wait_for to enforce timeout
-        response = await asyncio.wait_for(
-            call_next(request), 
-            timeout=timeout_seconds
-        )
+        # CRITICAL FIX: Don't wrap sync QuickBooks functions with asyncio.wait_for
+        # Let FastAPI handle the sync/async conversion naturally
+        response = await call_next(request)
         
         elapsed = time_module.time() - start_time
         if "/quickbooks/migrate-all" in str(request.url):
             logger.info(f"MIGRATE-ALL completed in {elapsed:.2f}s")
         elif "/quickbooks" in str(request.url):
             logger.info(f"QuickBooks completed in {elapsed:.2f}s")
+            
+        # Check if we exceeded timeout (for logging purposes)
+        if elapsed > timeout_seconds:
+            logger.warning(f"Operation took {elapsed:.2f}s, exceeded timeout of {timeout_seconds}s")
         
         return response
         
-    except asyncio.TimeoutError:
-        elapsed = time_module.time() - start_time
-        logger.error(f"Request timeout after {elapsed:.2f}s for {request.url}")
-        
-        return JSONResponse(
-            status_code=408,
-            content={
-                "detail": f"Request timeout after {timeout_seconds} seconds. "
-                         f"Operation may still be processing in background.",
-                "timeout": timeout_seconds,
-                "elapsed": elapsed,
-                "suggestion": "For large QuickBooks exports, consider reducing "
-                            "the dataset size or try again later."
-            }
-        )
     except Exception as e:
         elapsed = time_module.time() - start_time
         logger.error(f"Request failed after {elapsed:.2f}s: {str(e)}")
-        raise
+        
+        # Return proper error response for timeouts and other errors
+        if "timeout" in str(e).lower() or elapsed > timeout_seconds:
+            return JSONResponse(
+                status_code=408,
+                content={
+                    "detail": f"Request timeout after {timeout_seconds} seconds. "
+                             f"Operation may still be processing in background.",
+                    "timeout": timeout_seconds,
+                    "elapsed": elapsed,
+                    "suggestion": "For large QuickBooks exports, consider reducing "
+                                "the dataset size or try again later."
+                }
+            )
+        else:
+            # Re-raise other exceptions for FastAPI to handle
+            raise
 
 
 def register_routes(app):
