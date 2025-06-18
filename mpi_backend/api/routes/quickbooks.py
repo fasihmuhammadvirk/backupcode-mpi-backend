@@ -44,7 +44,7 @@ def update_progress(operation_id: str, stage: str, progress: int,
         "message": message,
         "timestamp": time.time()
     }
-    logger.info(f"🔄 QB Progress [{operation_id}]: {stage} - {progress}% - "
+    logger.info(f"QB Progress [{operation_id}]: {stage} - {progress}% - "
                 f"{message}")
 
 
@@ -78,7 +78,7 @@ async def migrate_all_invoice_to_QB(
         
         # STEP 2: ABSOLUTE PRIORITY - Pause ALL background jobs
         pause_all_background_jobs_for_migrate_all()
-        logger.info("🚫 ABSOLUTE PRIORITY: ALL background jobs paused for "
+        logger.info("ABSOLUTE PRIORITY: ALL background jobs paused for "
                    "migrate-all operation")
         
         # STEP 3: Optimized filtering with progress tracking
@@ -110,7 +110,7 @@ async def migrate_all_invoice_to_QB(
 
         # STEP 4: Check if dataset is too large and needs chunking
         if len(invoice_ids) > 1000:
-            logger.warning(f"⚠️ Large dataset detected: {len(invoice_ids)} "
+            logger.warning(f"Large dataset detected: {len(invoice_ids)} "
                           f"invoices")
             update_progress(operation_id, "chunking", 25, 
                            f"Large dataset - processing in chunks")
@@ -145,7 +145,7 @@ async def migrate_all_invoice_to_QB(
                 invoice_ids, db=db, operation_id=operation_id)
             
     except Exception as e:
-        logger.error(f"❌ QuickBooks migration failed: {str(e)}")
+        logger.error(f"QuickBooks migration failed: {str(e)}")
         update_progress(operation_id, "error", 0, f"Error: {str(e)}")
         raise HTTPException(status_code=500, 
                           detail=f"QuickBooks migration failed: {str(e)}")
@@ -171,8 +171,6 @@ async def migrate_invoice_to_QB_internal(
     # Get all required data in single optimized query
     invoice_items = InvoiceItemController(db).get_invoice_items_by_invoice_ids(
         invoice_ids)
-    invoice_item_ids = [item.id for item in invoice_items]
-    all_item_ids_for_status = invoice_item_ids.copy()
     
     retrieval_time = time.time() - retrieval_start
     logger.info(f"Data retrieval completed in {retrieval_time:.3f}s for "
@@ -181,56 +179,129 @@ async def migrate_invoice_to_QB_internal(
     update_progress(operation_id, "processing_data", 50, 
                    f"Processing {len(invoice_items)} items")
     
-    # ULTRA-OPTIMIZATION 2: Convert to DataFrame for vectorized operations
+    # ULTRA-OPTIMIZATION 2: Single-pass data extraction (PRESERVE EXACT ORIGINAL LOGIC)
+    extract_start = time.time()
+    
+    # Pre-allocate lists for maximum performance
+    all_items_data = []
+    tax_by_invoice = {}
+    all_item_ids_for_status = []
+    
+    # Get classification controller once
+    classification_controller = ItemClassificationController(db)
+    
+    # Pre-build classification cache for ALL unique sheet names in single pass
+    unique_sheet_names = set()
+    for item in invoice_items:
+        sheet_name = getattr(item, 'sheet_name', '')
+        if sheet_name and sheet_name.strip():
+            unique_sheet_names.add(sheet_name)
+    
+    # Build classification cache (try bulk if available, fallback to individual)
+    classification_cache = {'': '', None: ''}
+    if hasattr(classification_controller, 'get_all_classifications'):
+        try:
+            # Try to get all classifications at once
+            all_classifications = classification_controller.get_all_classifications()
+            for sheet_name in unique_sheet_names:
+                classification_cache[sheet_name] = all_classifications.get(sheet_name, '')
+        except:
+            # Fallback to individual lookups
+            for sheet_name in unique_sheet_names:
+                classification_cache[sheet_name] = classification_controller.get_classification(sheet_name)
+    else:
+        # Individual lookups (still cached)
+        for sheet_name in unique_sheet_names:
+            classification_cache[sheet_name] = classification_controller.get_classification(sheet_name)
+
+    # Single pass through ALL items for extraction and tax calculation (EXACT ORIGINAL LOGIC)
+    for item in invoice_items:
+        item_sheet_name = getattr(item, 'sheet_name', '')
+        item_invoice_id = getattr(item, 'invoice_id')
+        
+        # Tax calculation (EXACT ORIGINAL LOGIC)
+        if item_sheet_name == '(TAX)':
+            if item_invoice_id not in tax_by_invoice:
+                tax_by_invoice[item_invoice_id] = 0
+            amount_str = str(getattr(item, 'amount', '0')).replace(',', '')
+            try:
+                tax_by_invoice[item_invoice_id] += float(amount_str)
+            except (ValueError, TypeError):
+                pass
+        else:
+            # Extract all item data at once (EXACT ORIGINAL LOGIC)
+            item_data = {
+                'id': getattr(item, 'id', None),
+                'invoice_id': item_invoice_id,
+                'sheet_name': item_sheet_name,
+                'mpi_item': getattr(item, 'mpi_item', 'No Match'),
+                'item': getattr(item, 'item', ''),
+                'description': getattr(item, 'description', ''),
+                'qty': getattr(item, 'qty', 0),
+                'cost': getattr(item, 'cost', 0.0),
+                'amount': getattr(item, 'amount', '0'),
+                'date': getattr(item, 'date', None),
+                'ref_no': getattr(item, 'ref_no', ''),
+                'customer_job': getattr(item, 'customer_job', ''),
+                'vendor': getattr(item, 'vendor', ''),
+                'class_': getattr(item, 'class_', ''),
+                'memo': getattr(item, 'memo', ''),
+            }
+            all_items_data.append(item_data)
+            
+            # Collect IDs for status updates
+            if item_data['id']:
+                all_item_ids_for_status.append(item_data['id'])
+    
+    extract_time = time.time() - extract_start
+    logger.info(f"Data extraction completed in {extract_time:.3f}s")
+    
+    if not all_items_data:
+        raise HTTPException(status_code=400, detail="No non-tax items found")
+
+    update_progress(operation_id, "processing_data", 60, "Performing vectorized data operations")
+
+    # ULTRA-OPTIMIZATION 3: Single DataFrame with vectorized operations (PRESERVE EXACT ORIGINAL LOGIC)
     vectorized_start = time.time()
     
-    # Convert to list of dicts for pandas (faster than individual field access)
-    data_dicts = []
-    for item in invoice_items:
-        data_dicts.append({
-            'invoice_id': item.invoice_id,
-            'date': item.invoice.date if item.invoice else None,
-            'ref_no': item.invoice.invoice_number if item.invoice else '',
-            'vendor': item.invoice.supplier.name if item.invoice and item.invoice.supplier else '',
-            'mpi_item': item.mpi_item or '',
-            'mpi_description': item.mpi_description or '',
-            'customer_job': item.customer_job or '',
-            'cost': item.cost or 0,
-            'qty': item.qty or 0,
-            'amount': item.amount or 0,
-            'class_': item.class_ or '',
-            'account': '',  # Will be filled later
-            'memo': item.memo or ''
-        })
+    # Create single large DataFrame (much faster than multiple small ones)
+    df = pd.DataFrame(all_items_data)
     
-    df = pd.DataFrame(data_dicts)
+    # Initialize account column
+    df['account'] = ''
     
-    # ULTRA-OPTIMIZATION 3: Vectorized tax processing
-    # Get tax amounts for all invoices at once
-    tax_query = db.query(
-        InvoiceItemController.model.invoice_id,
-        InvoiceItemController.model.amount
-    ).filter(
-        InvoiceItemController.model.invoice_id.in_(invoice_ids),
-        InvoiceItemController.model.mpi_item.like('%Tax%')
-    ).all()
+    # VECTORIZED Class A and L logic (PRESERVE EXACT ORIGINAL BUSINESS LOGIC)
+    class_a_refs = df[df['class_'] == 'A']['ref_no'].unique()
+    class_l_refs = df[df['class_'] == 'L']['ref_no'].unique()
     
-    # Create tax lookup dictionary
-    tax_by_invoice = {}
-    for invoice_id, tax_amount in tax_query:
-        tax_by_invoice[invoice_id] = tax_by_invoice.get(invoice_id, 0) + (tax_amount or 0)
+    # Apply class logic vectorized (EXACT ORIGINAL LOGIC)
+    if len(class_a_refs) > 0:
+        df.loc[df['ref_no'].isin(class_a_refs), 'account'] = 'UnInvoiced JIP:Material:Additional Material'
     
-    # Get MPI mappings for account assignment
-    classifications = ItemClassificationController(db).get_all_classifications()
-    mpi_mappings = {item.mpi_item: item.account for item in classifications 
-                   if item.mpi_item and item.account}
+    if len(class_l_refs) > 0:
+        mask = df['ref_no'].isin(class_l_refs) & (df['account'] == '')
+        df.loc[mask, 'account'] = 'UnInvoiced JIP:Subcontractors Expense:Labor'
     
-    # Apply account mappings vectorized
+    # VECTORIZED classification mapping (EXACT ORIGINAL LOGIC)
+    unassigned_mask = df['account'] == ''
+    if unassigned_mask.any():
+        df.loc[unassigned_mask, 'account'] = df.loc[unassigned_mask, 'sheet_name'].map(
+            lambda x: classification_cache.get(x, '') if x else ''
+        )
+    
+    # VECTORIZED MPI mappings (EXACT ORIGINAL LOGIC)
+    mpi_mappings = {
+        'UIDI-Job Materials Purchased': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased',
+        'UIDI-Job Equipment': 'UnInvoiced JIP:Cost Of Materials:Job Equipments Purchased',
+        'UIDI-Sprinkler specialty item': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased',
+        'UIDI-Drainage Material': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
+    }
+    
     for mpi_item, account in mpi_mappings.items():
         mask = (df['mpi_item'] == mpi_item) & (df['account'] == '')
         df.loc[mask, 'account'] = account
     
-    # Default account for any remaining unmatched
+    # Default account for any remaining unmatched (EXACT ORIGINAL LOGIC)
     df.loc[df['account'] == '', 'account'] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
     
     # VECTORIZED data type conversions
@@ -336,7 +407,7 @@ async def migrate_invoice_to_QB_internal(
     update_progress(operation_id, "completed", 100, 
                    f"Export completed in {total_time:.2f}s")
     
-    logger.info(f"🎯 PRIORITY EXPORT COMPLETED: {len(final_batch_entry)} rows "
+    logger.info(f"PRIORITY EXPORT COMPLETED: {len(final_batch_entry)} rows "
                f"in {total_time:.2f}s")
     
     return s3_url

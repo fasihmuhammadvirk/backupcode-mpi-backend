@@ -52,11 +52,11 @@ def setup_environment():
     os.environ.setdefault("QB_MAX_CONCURRENT_EXPORTS", "3")
     os.environ.setdefault("QB_PAUSE_BACKGROUND_JOBS", "true")
     
-    logger.info("🔧 Environment configured for QuickBooks operations")
-    logger.info(f"   ⏱️  QB Operation Timeout: {os.environ['QB_OPERATION_TIMEOUT']}s")
-    logger.info(f"   📦 QB Chunk Size: {os.environ['QB_CHUNK_SIZE']} invoices")
-    logger.info(f"   🔄 QB Chunk Delay: {os.environ['QB_CHUNK_DELAY']}s")
-    logger.info(f"   💾 DB Connection Pool: {os.environ['QB_DEDICATED_POOL_SIZE']}")
+    logger.info("Environment configured for QuickBooks operations")
+    logger.info(f"   QB Operation Timeout: {os.environ['QB_OPERATION_TIMEOUT']}s")
+    logger.info(f"   QB Chunk Size: {os.environ['QB_CHUNK_SIZE']} invoices")
+    logger.info(f"   QB Chunk Delay: {os.environ['QB_CHUNK_DELAY']}s")
+    logger.info(f"   DB Connection Pool: {os.environ['QB_DEDICATED_POOL_SIZE']}")
 
 def get_uvicorn_config():
     """Get optimized uvicorn configuration for QuickBooks operations"""
@@ -82,18 +82,18 @@ def get_uvicorn_config():
         "h11_max_incomplete_event_size": 16 * 1024 * 1024,  # 16MB for large requests
     }
     
-    logger.info("🚀 Uvicorn configured for QuickBooks operations:")
-    logger.info(f"   🌐 Host: {host}:{port}")
-    logger.info(f"   ⏰ Keep-alive timeout: {config['timeout_keep_alive']}s")
-    logger.info(f"   🔄 Graceful shutdown: {config['timeout_graceful_shutdown']}s")
-    logger.info(f"   📊 Max concurrency: {config['limit_concurrency']}")
+    logger.info("Uvicorn configured for QuickBooks operations:")
+    logger.info(f"   Host: {host}:{port}")
+    logger.info(f"   Keep-alive timeout: {config['timeout_keep_alive']}s")
+    logger.info(f"   Graceful shutdown: {config['timeout_graceful_shutdown']}s")
+    logger.info(f"   Max concurrency: {config['limit_concurrency']}")
     
     return config
 
 def main():
     """Main startup function with timeout protection"""
     
-    logger.info("🏁 Starting MPI Backend with QuickBooks timeout protection...")
+    logger.info(" Starting MPI Backend with QuickBooks timeout protection...")
     
     try:
         # Setup environment for optimal performance
@@ -103,21 +103,21 @@ def main():
         config = get_uvicorn_config()
         
         # Add additional safety measures
-        logger.info("🛡️  Safety measures activated:")
-        logger.info("   ✅ Background job pausing during QB exports")
-        logger.info("   ✅ Dedicated database connection pool")
-        logger.info("   ✅ Progressive timeout handling")
-        logger.info("   ✅ Chunked processing for large datasets")
-        logger.info("   ✅ Real-time progress tracking")
+        logger.info("  Safety measures activated:")
+        logger.info("    Background job pausing during QB exports")
+        logger.info("    Dedicated database connection pool")
+        logger.info("    Progressive timeout handling")
+        logger.info("    Chunked processing for large datasets")
+        logger.info("    Real-time progress tracking")
         
         # Start the server
-        logger.info("🚀 Starting server with enhanced timeout protection...")
+        logger.info(" Starting server with enhanced timeout protection...")
         uvicorn.run(**config)
         
     except KeyboardInterrupt:
-        logger.info("🛑 Server shutdown requested by user")
+        logger.info(" Server shutdown requested by user")
     except Exception as e:
-        logger.error(f"❌ Server startup failed: {str(e)}")
+        logger.error(f" Server startup failed: {str(e)}")
         sys.exit(1)
 
 if __name__ == "__main__":

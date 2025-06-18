@@ -41,7 +41,7 @@ def set_scheduler_instance(scheduler: BackgroundScheduler):
     """Set the global scheduler instance for dynamic job control"""
     global _scheduler_instance
     _scheduler_instance = scheduler
-    logger.info("🔧 Scheduler instance registered for dynamic job control")
+    logger.info("Scheduler instance registered for dynamic job control")
 
 
 def pause_background_jobs():

@@ -132,14 +132,14 @@ async def timeout_middleware(request: Request, call_next):
     # Determine timeout and priority based on route
     if "/quickbooks/migrate-all" in str(request.url):
         timeout_seconds = 900  # 15 minutes for migrate-all (ABSOLUTE PRIORITY)
-        logger.info(f"🎯 MIGRATE-ALL operation started - ABSOLUTE PRIORITY - "
+        logger.info(f"MIGRATE-ALL operation started - ABSOLUTE PRIORITY - "
                    f"timeout: {timeout_seconds}s")
     elif "/quickbooks" in str(request.url):
         timeout_seconds = 600  # 10 minutes for other QuickBooks operations
-        logger.info(f"🔄 QB operation started - timeout: {timeout_seconds}s")
+        logger.info(f"QB operation started - timeout: {timeout_seconds}s")
     elif "/export" in str(request.url):
         timeout_seconds = 300  # 5 minutes for export operations
-        logger.info(f"📊 Export operation started - timeout: {timeout_seconds}s")
+        logger.info(f"Export operation started - timeout: {timeout_seconds}s")
     else:
         timeout_seconds = 120  # 2 minutes for standard operations
     
