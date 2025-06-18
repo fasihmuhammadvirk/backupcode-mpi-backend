@@ -52,16 +52,10 @@ UTC_TZ = pytz.utc  # UTC Time Zone
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Initializing ENTERPRISE background task system")
-    try:
-        logger.info("🏆 QuickBooks Priority Mode: ENABLED")
-        logger.info("🔧 Dedicated QB database pool: 15 connections")
-        logger.info("⏸️  Background job pausing: ENABLED")
-    except UnicodeEncodeError:
-        # Fallback for Windows console encoding issues
-        logger.info("QuickBooks Priority Mode: ENABLED")
-        logger.info("Dedicated QB database pool: 15 connections")
-        logger.info("Background job pausing: ENABLED")
-    
+    logger.info("QuickBooks Priority Mode: ENABLED")
+    logger.info("Dedicated QB database pool: 15 connections")
+    logger.info("Background job pausing: ENABLED")
+
     scheduler = BackgroundScheduler()
     
     # OPTIMIZED: Email download with QuickBooks priority awareness

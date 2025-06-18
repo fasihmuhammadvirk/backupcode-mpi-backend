@@ -73,7 +73,7 @@ class ItemClassificationController:
                     best_algorithm = algorithm_name
         
         if best_match:
-            print(f"🔍 Fuzzy match found: '{target_item}' -> '{best_match.item}' (similarity: {best_score}% using {best_algorithm})")
+            print(f"Fuzzy match found: '{target_item}' -> '{best_match.item}' (similarity: {best_score}% using {best_algorithm})")
         
         return best_match
 
