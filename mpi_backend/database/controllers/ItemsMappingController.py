@@ -6,6 +6,7 @@ from typing import Dict, Any, List, Optional
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from mpi_backend.api.routes.quickbooks import is_qb_export_active
 from mpi_backend.utils.export_utils import extract_supplier_id
 from mpi_backend.database import SessionLocal
 from mpi_backend.utils.item_utils import clean_supplier_suffix
@@ -37,16 +38,15 @@ class ItemsMappingController:
         """
         # Check if QuickBooks export is active and should pause
         try:
-            from mpi_backend.api.routes.quickbooks import is_qb_export_active
-                    if is_qb_export_active():
-            try:
-                logger.info("⏸️  Mapping updates paused - QuickBooks priority export in progress")
-            except UnicodeEncodeError:
-                logger.info("Mapping updates paused - QuickBooks priority export in progress")
-            return {
-                "status": "paused",
-                "message": "Mapping updates paused for QuickBooks priority export"
-            }
+            if is_qb_export_active():
+                try:
+                    logger.info("⏸️  Mapping updates paused - QuickBooks priority export in progress")
+                except UnicodeEncodeError:
+                    logger.info("Mapping updates paused - QuickBooks priority export in progress")
+                return {
+                    "status": "paused",
+                    "message": "Mapping updates paused for QuickBooks priority export"
+                }
         except ImportError:
             # If function not available, continue normally
             pass
