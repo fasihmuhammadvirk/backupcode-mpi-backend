@@ -5,7 +5,7 @@ from typing import List, Dict
 from datetime import date, datetime, timedelta
 from math import ceil
 from mpi_backend.database.models import InvoiceItem
-from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
+# Import moved inside methods to avoid circular imports
 from mpi_backend.database.controllers.CustomerJobMappingContorller import CustomerJobMappingController
 from mpi_backend.database.schemas import InvoiceItems as InvoiceItemsResponse
 from mpi_backend.database.schemas import PriceHistoryResponse
@@ -501,6 +501,8 @@ class InvoiceItemController:
             
             # Only update the mapping if we have a supplier_id and supplier_item_ids
             if supplier_id and mapping_data["supplier_item_ids"]:
+                # Lazy import to avoid circular imports
+                from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
                 ItemsMappingController(self.db_context).update_mapping(supplier_id, mapping_data)
             else:
                 logger.error(f"Missing required data for mapping update: supplier_id={supplier_id}, item={mapping_data['supplier_item_ids']}")

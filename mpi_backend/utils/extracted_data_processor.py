@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 from mpi_backend.database import get_db
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
-from mpi_backend.database.controllers import InvoiceController,InvoiceItemController,SupplierController,ItemsMappingController,TempItemsMappingController,CustomerJobMappingController,UnmappedItemsController
+# Import controllers lazily to avoid circular imports
 from contextlib import contextmanager
 from mpi_backend.utils.s3_utils import upload_file,get_presigned_url
 from mpi_backend.utils.item_utils import clean_supplier_suffix
@@ -54,6 +54,13 @@ def validate_invoice_data(data):
 
 
 def process_extracted_data(converted_files, failed_files):
+    # Lazy imports to avoid circular imports
+    from mpi_backend.database.controllers.TemporaryItemMappingController import TempItemsMappingController
+    from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
+    from mpi_backend.database.controllers.CustomerJobMappingContorller import CustomerJobMappingController
+    from mpi_backend.database.controllers.Suppliers import SupplierController
+    from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
+    from mpi_backend.database.controllers.invoice import InvoiceController
 
     temp_items = TempItemsMappingController(db).get_temp_items_mappings()
     item_mappings = ItemsMappingController(db).get_items_mappings()
@@ -181,6 +188,7 @@ def search_replace(row, temp_items, item_mappings):
         return row
 
     # THIRD: If no mapping found at all, add to unmapped items
+    from mpi_backend.database.controllers.UnmappedItems import UnmappedItemsController
     if not UnmappedItemsController(db).is_item_code_present(row['Item'], supplier_id):
         UnmappedItemsController(db).insert_unmapped_item(row['Item'],row['Description'],supplier_id)
 
