@@ -47,7 +47,7 @@ def migrate_all_invoice_to_QB(
     invoice_ids = list(set(invoice_ids))
     
     filter_time = time.time() - start_time
-    logger.info(f"⚡ Filter processing completed in {filter_time:.3f}s for {len(invoice_ids)} invoices")
+    logger.info(f"Filter processing completed in {filter_time:.3f}s for {len(invoice_ids)} invoices")
 
     return migrate_invoice_to_QB(invoice_ids, db=db)
 
@@ -57,7 +57,7 @@ def migrate_invoice_to_QB(
         invoice_ids: List[UUID], db: Session = Depends(get_db)):
     
     start_time = time.time()
-    logger.info(f"🚀 Starting ULTRA-OPTIMIZED QuickBooks migration for {len(invoice_ids)} invoices")
+    logger.info(f"Starting ULTRA-OPTIMIZED QuickBooks migration for {len(invoice_ids)} invoices")
     
     if not invoice_ids:
         raise HTTPException(status_code=400, detail="No invoice IDs provided")
@@ -66,7 +66,7 @@ def migrate_invoice_to_QB(
     batch_start = time.time()
     all_invoice_items = InvoiceItemController(db).get_invoice_items_by_invoice_ids(invoice_ids)
     fetch_time = time.time() - batch_start
-    logger.info(f"⚡ Fetched {len(all_invoice_items)} items in {fetch_time:.3f}s")
+    logger.info(f"Fetched {len(all_invoice_items)} items in {fetch_time:.3f}s")
     
     if not all_invoice_items:
         raise HTTPException(status_code=400, detail="No invoice items found for provided invoice IDs")
@@ -146,7 +146,7 @@ def migrate_invoice_to_QB(
                 all_item_ids_for_status.append(item_data['id'])
     
     extract_time = time.time() - extract_start
-    logger.info(f"⚡ Data extraction completed in {extract_time:.3f}s")
+    logger.info(f"Data extraction completed in {extract_time:.3f}s")
     
     if not all_items_data:
         raise HTTPException(status_code=400, detail="No non-tax items found")
@@ -203,7 +203,7 @@ def migrate_invoice_to_QB(
     df['tax_amount'] = df['invoice_id'].map(lambda x: tax_by_invoice.get(x, 0))
     
     vectorized_time = time.time() - vectorized_start
-    logger.info(f"⚡ Vectorized processing completed in {vectorized_time:.3f}s")
+    logger.info(f"Vectorized processing completed in {vectorized_time:.3f}s")
     
     # ULTRA-OPTIMIZATION 4: Single aggregation operation
     aggregation_start = time.time()
@@ -242,14 +242,14 @@ def migrate_invoice_to_QB(
     ]]
     
     aggregation_time = time.time() - aggregation_start
-    logger.info(f"⚡ Aggregation completed in {aggregation_time:.3f}s for {len(final_batch_entry)} rows")
+    logger.info(f"Aggregation completed in {aggregation_time:.3f}s for {len(final_batch_entry)} rows")
     
     # ULTRA-OPTIMIZATION 5: Fast Excel generation
     excel_start = time.time()
     exported_file_path = export_batch_entry_to_excel(final_batch_entry)
     file_name = os.path.basename(exported_file_path)
     excel_time = time.time() - excel_start
-    logger.info(f"⚡ Excel generation completed in {excel_time:.3f}s")
+    logger.info(f"Excel generation completed in {excel_time:.3f}s")
     
     # ULTRA-OPTIMIZATION 6: Batch status updates
     status_start = time.time()
@@ -263,7 +263,7 @@ def migrate_invoice_to_QB(
                 invoice_controller.set_invoice_is_exported(str(invoice_id))
     
     status_time = time.time() - status_start
-    logger.info(f"⚡ Status updates completed in {status_time:.3f}s")
+    logger.info(f"Status updates completed in {status_time:.3f}s")
     
     # ULTRA-OPTIMIZATION 7: Fast S3 upload
     upload_start = time.time()
@@ -277,20 +277,20 @@ def migrate_invoice_to_QB(
         is_invoice=False
     )
     upload_time = time.time() - upload_start
-    logger.info(f"⚡ S3 upload completed in {upload_time:.3f}s")
+    logger.info(f"S3 upload completed in {upload_time:.3f}s")
     
     # Performance summary
     total_time = time.time() - start_time
     items_per_second = len(all_item_ids_for_status) / total_time if total_time > 0 else 0
     
-    logger.info(f"🎉 ULTRA-OPTIMIZED QuickBooks migration completed!")
-    logger.info(f"📊 Performance Summary:")
-    logger.info(f"   Total time: {total_time:.3f}s")
-    logger.info(f"   Items processed: {len(all_item_ids_for_status)}")
-    logger.info(f"   Invoices processed: {len(invoice_ids)}")
-    logger.info(f"   Items/second: {items_per_second:.1f}")
-    logger.info(f"   Excel rows generated: {len(final_batch_entry)}")
-    logger.info(f"   Speed improvement: ULTRA-FAST")
+    logger.info(f"ULTRA-OPTIMIZED QuickBooks migration completed!")
+    logger.info(f"Performance Summary:")
+    logger.info(f"Total time: {total_time:.3f}s")
+    logger.info(f"Items processed: {len(all_item_ids_for_status)}")
+    logger.info(f"Invoices processed: {len(invoice_ids)}")
+    logger.info(f"Items/second: {items_per_second:.1f}")
+    logger.info(f"Excel rows generated: {len(final_batch_entry)}")
+    logger.info(f"Speed improvement: ULTRA-FAST")
     
     return download_url
  
