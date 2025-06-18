@@ -27,3 +27,4 @@ middleware-apm
 apitally[fastapi]
 camelot-py
 fuzzywuzzy==0.18.0
+python-Levenshtein==0.21.1

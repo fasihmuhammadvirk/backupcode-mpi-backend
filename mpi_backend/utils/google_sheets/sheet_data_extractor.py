@@ -217,6 +217,141 @@ class GoogleSheetDataExtractor:
         elif supplier == "Bruce Ferguson":
             info["key_terms"].extend(["BF"])
 
+    def _extract_clean_sheet_name(self, sheet_title: str) -> str:
+        """
+        Extract clean sheet name for classification from Google Sheets tab name.
+        
+        Sheet titles can be in formats like:
+        - "(GAS)" -> should return "(GAS)"
+        - "(MBST7-1 1/4-O) (GAS)" -> should return "(GAS)"
+        - "(PVC) Williams" -> should return "(PVC)"
+        - "(COPPER)" -> should return "(COPPER)"
+        
+        Args:
+            sheet_title: Original Google Sheets tab name
+            
+        Returns:
+            Clean sheet name for classification purposes
+        """
+        if not sheet_title or not isinstance(sheet_title, str):
+            return ""
+        
+        # Common sheet name patterns that should be extracted
+        # These match the patterns in your item-classifications.json
+        classification_patterns = [
+            # Basic categories
+            r'\(AIR FITTINGS\)',
+            r'\(BLADES & BITS\)',
+            r'\(BOXES\)',
+            r'\(BRASS\)',
+            r'\(CAST IRON FITTING\)',
+            r'\(CONTROLS\)',
+            r'\(COPPER PRESS\)',
+            r'\(COPPER\)',
+            r'\(CPVC\)',
+            r'\(DIELECTRIC FITTINGS\)',
+            r'\(DRAINAGE\)',
+            r'\(DRINKING\)',
+            r'\(FINISHINGS\)',
+            r'\(FIXTURES & MISCELLANEOUS\)',
+            r'\(FLANGES\)',
+            r'\(GALV\. FITTING\)',
+            r'\(GARDEN HOSES\)',
+            r'\(GAS\)',
+            r'\(GASKETS\)',
+            r'\(GAUGES\)',
+            r'\(GROOVED FITTING\)',
+            r'\(HANGERS AND FASTENERS\)',
+            r'\(HEAVY EQUIPMENT\)',
+            r'\(HOT WATER\)',
+            r'\(INJECTOR PUMPS\)',
+            r'\(INSULATION\)',
+            r'\(LIGHT EQUIPMENT\)',
+            r'\(MALLEABLE FITTING\)',
+            r'\(MISCELLANEOUS\)',
+            r'\(NIPPLES\)',
+            r'\(NO-HUB COUPLINGS\)',
+            r'\(NO-HUB FITTINGS\)',
+            r'\(NO-HUB\)',
+            r'\(PEX\)',
+            r'\(PIPE JOINING MATERIAL\)',
+            r'\(POLYPROPYLENE\)',
+            r'\(PRESS COPPER\)',
+            r'\(PVC\)',
+            r'\(RADIANT HEAT\)',
+            r'\(SHOWER BODY\)',
+            r'\(SIGNS\)',
+            r'\(SLEEVES\)',
+            r'\(SPACE HEATING\)',
+            r'\(SPECIAL VALVES\)',
+            r'\(SPRINKLER EQUIPMENT\)',
+            r'\(SPRINKLER HEADS\)',
+            r'\(SPRINKLER\)',
+            r'\(STAINLESS STEEL\)',
+            r'\(STEEL PIPE\)',
+            r'\(TAPE\)',
+            r'\(TESTING\)',
+            r'\(TOOLS\)',
+            r'\(TUB & MISCELLANEOUS\)',
+            r'\(VALVES\)',
+            r'\(VENT PIPE\)',
+            r'\(WASTE\)',
+            r'\(WATER BOOSTER\)',
+            r'\(WATER HEATER\)',
+            r'\(WATER MAIN\)',
+            r'\(WELD FITTING\)',
+            
+            # Special cases with additional context
+            r'\(BLACK MALLEABLE\) \(GAS\)',
+            r'\(CAST IRON\) \(STEAM - SPRINKLER\)',
+            
+            # Fallback: any parentheses content at the end
+            r'\([A-Z][A-Z\s&\-\.]+\)$'
+        ]
+        
+        # First check for known compound patterns (exact matches)
+        compound_patterns = [
+            r'^\(BLACK MALLEABLE\) \(GAS\)$',
+            r'^\(CAST IRON\) \(STEAM - SPRINKLER\)$'
+        ]
+        
+        for compound_pattern in compound_patterns:
+            if re.match(compound_pattern, sheet_title, re.IGNORECASE):
+                clean_name = sheet_title.upper()
+                logger.debug(f"Extracted compound sheet name: '{sheet_title}' -> '{clean_name}'")
+                return clean_name
+        
+        # Try to find classification patterns in the sheet title
+        for pattern in classification_patterns:
+            matches = re.findall(pattern, sheet_title, re.IGNORECASE)
+            if matches:
+                # Return the last match (rightmost), which is usually the main category
+                clean_name = matches[-1].upper()
+                logger.debug(f"Extracted clean sheet name: '{sheet_title}' -> '{clean_name}'")
+                return clean_name
+        
+        # If no standard pattern found, try to extract the last parentheses group
+        # This handles cases like "(MBST7-1 1/4-O) (GAS)" -> "(GAS)"
+        parentheses_groups = re.findall(r'\([^)]+\)', sheet_title)
+        if parentheses_groups:
+            # Take the last group, as it's usually the category
+            last_group = parentheses_groups[-1].upper()
+            
+            # Validate it looks like a category (not an item code)
+            # Categories typically contain common words, not item codes
+            category_words = ['GAS', 'PVC', 'COPPER', 'DRAINAGE', 'VALVES', 'FITTINGS', 
+                             'HANGERS', 'FASTENERS', 'EQUIPMENT', 'TOOLS', 'PIPE', 
+                             'WATER', 'STEEL', 'BRASS', 'IRON', 'MISCELLANEOUS']
+            
+            # Check if the last group contains any category words
+            if any(word in last_group for word in category_words):
+                logger.debug(f"Extracted clean sheet name (fallback): '{sheet_title}' -> '{last_group}'")
+                return last_group
+        
+        # If still no match, return the original title but log a warning
+        logger.warning(f"Could not extract clean sheet name from: '{sheet_title}', using original")
+        return sheet_title
+
     def get_sheet_list(self) -> List[Dict[str, Any]]:
         """
         Get a list of all sheet names in the Google Sheet.
@@ -792,6 +927,9 @@ class GoogleSheetDataExtractor:
                     # Get the original column name
                     supplier_column_name = str(df.columns[col_idx])
                     
+                    # Extract clean sheet name for classification
+                    clean_sheet_name = self._extract_clean_sheet_name(sheet_title)
+                    
                     # Create item mapping with enhanced data
                     item_mapping = {
                         "mpi_code": mpi_code,
@@ -800,7 +938,7 @@ class GoogleSheetDataExtractor:
                         "supplier_name": supplier,
                         "supplier_id": self.supplier_ids[supplier],
                         "supplier_item_ids": cleaned_value,
-                        "google_sheet_name": sheet_title,
+                        "google_sheet_name": clean_sheet_name,
                         "row_index": actual_row,
                         "supplier_column_name": supplier_column_name
                     }
