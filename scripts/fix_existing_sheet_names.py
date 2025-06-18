@@ -32,6 +32,7 @@ os.chdir(project_root)
 from mpi_backend.database import SessionLocal
 from mpi_backend.database.models.ItemsMapping import ItemsMapping
 from mpi_backend.database.models.UnmappedItems import UnmappedItems
+from mpi_backend.database.models.InvoiceItems import InvoiceItem
 from mpi_backend.utils.google_sheets.sheet_data_extractor import GoogleSheetDataExtractor
 
 # Set up logging
@@ -136,13 +137,28 @@ class SheetNameFixer:
                 else:
                     clean_unmapped.append(item)
         
+        # Check invoice_items table
+        invoice_items = db.query(InvoiceItem).all()
+        problematic_invoice_items = []
+        clean_invoice_items = []
+        
+        for item in invoice_items:
+            if item.sheet_name:
+                if self.is_problematic_sheet_name(item.sheet_name):
+                    problematic_invoice_items.append(item)
+                else:
+                    clean_invoice_items.append(item)
+        
         analysis = {
             'total_mappings': len(mappings),
             'problematic_mappings': len(problematic_mappings),
             'clean_mappings': len(clean_mappings),
             'total_unmapped': len(unmapped_items),
             'problematic_unmapped': len(problematic_unmapped),
-            'clean_unmapped': len(clean_unmapped)
+            'clean_unmapped': len(clean_unmapped),
+            'total_invoice_items': len(invoice_items),
+            'problematic_invoice_items': len(problematic_invoice_items),
+            'clean_invoice_items': len(clean_invoice_items)
         }
         
         logger.info(f"Database Analysis:")
@@ -152,6 +168,9 @@ class SheetNameFixer:
         logger.info(f"   Unmapped Items: {analysis['total_unmapped']} total")
         logger.info(f"   - Problematic: {analysis['problematic_unmapped']}")
         logger.info(f"   - Clean: {analysis['clean_unmapped']}")
+        logger.info(f"   Invoice Items: {analysis['total_invoice_items']} total")
+        logger.info(f"   - Problematic: {analysis['problematic_invoice_items']}")
+        logger.info(f"   - Clean: {analysis['clean_invoice_items']}")
         
         return analysis
     
@@ -200,6 +219,23 @@ class SheetNameFixer:
                     
                     if not dry_run:
                         item.google_sheet_name = fixed_name
+                    
+                    updated_count += 1
+                    self.stats['successfully_fixed'] += 1
+        
+        # Fix invoice_items table
+        invoice_items = db.query(InvoiceItem).all()
+        
+        for item in invoice_items:
+            if item.sheet_name and self.is_problematic_sheet_name(item.sheet_name):
+                original_name = item.sheet_name
+                fixed_name = self.get_fixed_sheet_name(original_name)
+                
+                if fixed_name != original_name:
+                    logger.info(f"   Invoice Item ID {item.id}: '{original_name}' -> '{fixed_name}'")
+                    
+                    if not dry_run:
+                        item.sheet_name = fixed_name
                     
                     updated_count += 1
                     self.stats['successfully_fixed'] += 1
@@ -371,7 +407,9 @@ class SheetNameFixer:
             # Step 1: Database analysis and fixes
             with SessionLocal() as db:
                 db_analysis = self.analyze_database_issues(db)
-                self.stats['problematic_found'] += db_analysis['problematic_mappings'] + db_analysis['problematic_unmapped']
+                self.stats['problematic_found'] += (db_analysis['problematic_mappings'] + 
+                                                   db_analysis['problematic_unmapped'] + 
+                                                   db_analysis['problematic_invoice_items'])
                 
                 db_updates = self.fix_database_sheet_names(db, dry_run)
             
