@@ -50,35 +50,53 @@ UTC_TZ = pytz.utc  # UTC Time Zone
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Initializing background tasks")
+    logger.info("Initializing ENTERPRISE background task system")
+    logger.info("🏆 QuickBooks Priority Mode: ENABLED")
+    logger.info("🔧 Dedicated QB database pool: 15 connections")
+    logger.info("⏸️  Background job pausing: ENABLED")
+    
     scheduler = BackgroundScheduler()
-    scheduler.add_job(email_download_background_task, "interval", minutes=3, max_instances=20)
+    
+    # OPTIMIZED: Email download with QuickBooks priority awareness
+    scheduler.add_job(
+        email_download_background_task, 
+        "interval", 
+        minutes=3, 
+        max_instances=15,  # Reduced from 20 to leave resources for QB
+        id="email_download",
+        name="Email Download (QB-aware)"
+    )
 
-    # Add statement downloader - runs every hour
+    # OPTIMIZED: Statement download with QuickBooks priority awareness
     scheduler.add_job(
         statement_download_background_task, 
         "interval", 
         hours=10,
-        max_instances=1,  # Only one instance at a time
-        replace_existing=True
+        max_instances=1,
+        replace_existing=True,
+        id="statement_download",
+        name="Statement Download (QB-aware)"
     )
 
-    # Run the sync_mappings job on a 5-hour interval
+    # OPTIMIZED: Google Sheets sync with QuickBooks priority awareness
     scheduler.add_job(
         GoogleSheetSyncController.execute_sync_task,
         "interval",
         hours=5,
         replace_existing=True,
-        max_instances=1
+        max_instances=1,
+        id="google_sheets_sync",
+        name="Google Sheets Sync (QB-aware)"
     )
 
-    # Run the update_all_mappings job every 24 hours
+    # OPTIMIZED: Mapping updates with QuickBooks priority awareness
     scheduler.add_job(
         ItemsMappingController.execute_update_all_mappings_task,
-        CronTrigger(hour=3, minute=0, timezone=UTC_TZ),  # Run at 3 AM UTC
+        CronTrigger(hour=3, minute=0, timezone=UTC_TZ),
         id="update_all_mappings_daily",
         replace_existing=True,
-        max_instances=1
+        max_instances=1,
+        name="Daily Mapping Update (QB-aware)"
     )
 
     # checking for any missing invocies

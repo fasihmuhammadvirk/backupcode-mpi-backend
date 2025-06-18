@@ -233,6 +233,16 @@ def download_email_attachments(email_message, base_folder_path):
 
 def email_download_background_task():
     """Main task function with comprehensive error handling"""
+    # Check if QuickBooks export is active and should pause
+    try:
+        from mpi_backend.api.routes.quickbooks import is_qb_export_active
+        if is_qb_export_active():
+            logger.info("⏸️  Email download paused - QuickBooks priority export in progress")
+            return
+    except ImportError:
+        # If function not available, continue normally
+        pass
+    
     mail = None
     try:
         # Setup directory structure

@@ -612,6 +612,16 @@ def process_statement_files(base_folder_path: Path):
 def statement_download_background_task():
     """Main background task for downloading and processing monthly statements 
     using invoice downloader logic"""
+    # Check if QuickBooks export is active and should pause
+    try:
+        from mpi_backend.api.routes.quickbooks import is_qb_export_active
+        if is_qb_export_active():
+            logger.info("⏸️  Statement download paused - QuickBooks priority export in progress")
+            return
+    except ImportError:
+        # If function not available, continue normally
+        pass
+    
     mail = None
     try:
         # Ensure all suppliers exist in database

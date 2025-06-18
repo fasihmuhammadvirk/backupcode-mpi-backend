@@ -35,6 +35,19 @@ class ItemsMappingController:
         Returns:
             Dict with update operation details
         """
+        # Check if QuickBooks export is active and should pause
+        try:
+            from mpi_backend.api.routes.quickbooks import is_qb_export_active
+            if is_qb_export_active():
+                logger.info("⏸️  Mapping updates paused - QuickBooks priority export in progress")
+                return {
+                    "status": "paused",
+                    "message": "Mapping updates paused for QuickBooks priority export"
+                }
+        except ImportError:
+            # If function not available, continue normally
+            pass
+        
         # Check if a sync task is already running
         from mpi_backend.database.controllers import GoogleSheetSyncController
         status = GoogleSheetSyncController.get_sync_status()
