@@ -126,10 +126,11 @@ def validate_invoice_ids(invoice_ids: List[UUID]) -> List[UUID]:
 
 
 def perform_database_updates_background(all_item_ids_for_status: List, 
-                                      operation_id: str):
+                                      operation_id: str,
+                                      invoice_ids: List[UUID] = None):
     """
-    Background task to handle ONLY item-level status updates after Excel generation.
-    Invoice status updates are now done immediately before download URL is returned.
+    Background task to handle ALL status updates after Excel generation.
+    This ensures maximum speed by returning download URL immediately.
     """
     try:
         # Create a new database session for background processing
@@ -138,21 +139,32 @@ def perform_database_updates_background(all_item_ids_for_status: List,
         db = next(db_gen)
         
         update_progress(operation_id, "background_updating", 95, 
-                       "Updating item status in background")
+                       "Updating statuses in background")
         
         status_start = time.time()
         
-        # ONLY update item-level export status in background
+        # Update invoice statuses first (most important for UI)
+        updated_invoices = 0
+        if invoice_ids:
+            invoice_controller = InvoiceController(db)
+            for invoice_id in invoice_ids:
+                try:
+                    invoice_controller.set_invoice_is_exported(str(invoice_id))
+                    updated_invoices += 1
+                except Exception:
+                    continue
+        
+        # Update item-level export status in background
         if all_item_ids_for_status:
             InvoiceItemController(db).set_export_status_to_sent(
                 all_item_ids_for_status)
         
         status_time = time.time() - status_start
-        logger.info(f"Background item status updates completed in {status_time:.3f}s "
-                   f"for {len(all_item_ids_for_status)} items")
+        logger.info(f"Background updates completed in {status_time:.3f}s: "
+                   f"{updated_invoices} invoices, {len(all_item_ids_for_status)} items")
         
         update_progress(operation_id, "background_completed", 100, 
-                       f"Background updates completed - {len(all_item_ids_for_status)} items updated")
+                       f"Background updates completed - {updated_invoices} invoices, {len(all_item_ids_for_status)} items")
         
     except Exception as e:
         logger.error(f"Background database update failed: {e}")
@@ -506,27 +518,14 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
     
     logger.info(f"Excel and S3 upload in {time.time() - excel_start:.3f}s")
     
-    # IMMEDIATE invoice status update - no progress tracking for speed
-    try:
-        invoice_controller = InvoiceController(db)
-        updated_invoices = 0
-        for invoice_id in invoice_ids:
-            try:
-                invoice_controller.set_invoice_is_exported(str(invoice_id))
-                updated_invoices += 1
-            except Exception:
-                continue
-        logger.info(f"IMMEDIATE: Updated {updated_invoices} invoice statuses")
-    except Exception as e:
-        logger.warning(f"Invoice status update failed: {e}")
-        updated_invoices = 0
-    
-    # Background item status updates - minimal overhead
-    if all_item_ids_for_status:
+    # FAST RESPONSE: Move ALL status updates to background for maximum speed
+    # This ensures download URL is returned immediately like export-all
+    if all_item_ids_for_status or invoice_ids:
         background_tasks.add_task(
             perform_database_updates_background,
             all_item_ids_for_status,
-            operation_id
+            operation_id,
+            invoice_ids  # Pass invoice_ids to background task
         )
     
     total_time = time.time() - start_time
