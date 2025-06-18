@@ -1,8 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from uuid import UUID
-from typing import List
+from typing import List, Dict, Any
 import pandas as pd
+import os
+import time
+import logging
+import threading
+
 from mpi_backend.database import get_db, get_qb_db
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
 from mpi_backend.database.controllers.invoice import InvoiceController
@@ -16,29 +21,60 @@ from mpi_backend.utils.quickbooks_priority import (
     is_qb_export_active,
     QB_PRIORITY_MODE
 )
-import os
-import time
 
-router = APIRouter(prefix="/quickbooks",tags=["QuickBooks"])
+# Set up logging
+logger = logging.getLogger(__name__)
 
-@router.post("/migrate-all")
-def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest, 
-                             db: Session = Depends(get_qb_db if QB_PRIORITY_MODE else get_db)):
+router = APIRouter(prefix="/quickbooks", tags=["QuickBooks"])
+
+
+def update_statuses_in_background(db, item_ids, invoice_ids):
+    """Background task to update export statuses after URL is returned"""
+    try:
+        logger.info("Starting background status updates")
+        # Process status updates in chunks for very large datasets
+        STATUS_UPDATE_BATCH_SIZE = 5000
+        for i in range(0, len(item_ids), STATUS_UPDATE_BATCH_SIZE):
+            batch_ids = item_ids[i:i+STATUS_UPDATE_BATCH_SIZE]
+            InvoiceItemController(db).set_export_status_to_sent(batch_ids)
+        
+        # Update invoice statuses efficiently
+        invoice_controller = InvoiceController(db)
+        invoice_item_controller = InvoiceItemController(db)
+        
+        # Check and update invoice statuses in chunks
+        INVOICE_CHECK_BATCH_SIZE = 100
+        unique_invoice_ids = list(set(invoice_ids))
+        
+        for i in range(0, len(unique_invoice_ids), INVOICE_CHECK_BATCH_SIZE):
+            batch_invoice_ids = unique_invoice_ids[i:i+INVOICE_CHECK_BATCH_SIZE]
+            for invoice_id in batch_invoice_ids:
+                if invoice_item_controller.is_exported(str(invoice_id)):
+                    invoice_controller.set_invoice_is_exported(str(invoice_id))
+        
+        logger.info(f"Status updates completed for {len(item_ids)} items")
+    except Exception as e:
+        logger.error(f"Error in background status updates: {str(e)}")
+
+
+@router.post("/migrate-all", response_model=Dict[str, Any])
+def migrate_all_invoice_to_QB(
+    request: SendtoQBFilterRequest, 
+    db: Session = Depends(get_qb_db if QB_PRIORITY_MODE else get_db)
+) -> Dict[str, Any]:
     """
     Migrate all invoices to QuickBooks with optional filters.
     Ultra-high-performance version for massive datasets (20K+ invoices).
     Uses dedicated database connection pool for enterprise performance.
     Returns the download URL for the exported Excel file.
     """
-    import time
     start_time = time.time()
     
-    # 🏆 ENTERPRISE PRIORITY: Pause background jobs for maximum performance
+    # ENTERPRISE PRIORITY: Pause background jobs for maximum performance
     pause_background_jobs()
     
     try:
-        print(f"🚀 Starting PRIORITY QuickBooks migration with filters: {request}")
-        print(f"🔧 Using {'DEDICATED QB' if QB_PRIORITY_MODE else 'SHARED'} database connection")
+        logger.info(f"Starting PRIORITY QuickBooks migration with filters: {request}")
         
         # Get filtered invoice IDs using the existing filter logic
         filtered_data = InvoiceItemController(db).apply_filters(request, page=1, size=0)
@@ -58,7 +94,7 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
         # Extract just the invoice IDs for processing  
         invoice_id_list = [UUID(str(invoice_id)) for invoice_id in invoice_ids]
         
-        print(f"📋 Found {len(invoice_id_list)} invoices to process")
+        logger.info(f"Found {len(invoice_id_list)} invoices to process")
         
         # Use the ultra-optimized processing logic from migrate endpoint
         # ULTRA OPTIMIZATION 1: Batch processing for massive datasets
@@ -69,448 +105,277 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
         all_invoice_item_ids_to_update = []
         
         # Process invoices in chunks to avoid memory issues
-        for batch_start in range(0, total_invoices, BATCH_SIZE):
-            batch_end = min(batch_start + BATCH_SIZE, total_invoices)
-            batch_invoice_ids = invoice_id_list[batch_start:batch_end]
+        for i in range(0, len(invoice_id_list), BATCH_SIZE):
+            batch_invoice_ids = invoice_id_list[i:i+BATCH_SIZE]
+            logger.info(f"Processing batch {i//BATCH_SIZE + 1}/{(len(invoice_id_list) + BATCH_SIZE - 1)//BATCH_SIZE}: {len(batch_invoice_ids)} invoices")
             
-            batch_time = time.time()
-            print(f"📦 Processing batch {batch_start//BATCH_SIZE + 1}/{(total_invoices-1)//BATCH_SIZE + 1} ({len(batch_invoice_ids)} invoices)")
+            # Get all invoice items for this batch
+            invoice_items = InvoiceItemController(db).get_invoice_items_by_invoice_ids(batch_invoice_ids)
             
-            # ULTRA OPTIMIZATION 2: Raw SQL query for maximum performance
-            from mpi_backend.database.models.InvoiceItems import InvoiceItem
-            from sqlalchemy import text
+            # Get unique supplier IDs from this batch
+            supplier_ids = list(set([item.supplier_id for item in invoice_items]))
             
-            # Use raw SQL for fastest possible data retrieval
-            batch_invoice_ids_str = ','.join([f"'{str(id)}'" for id in batch_invoice_ids])
+            # Get all suppliers in one query
+            suppliers_dict = {}
+            suppliers = InvoiceItemController(db).get_suppliers_by_ids(supplier_ids)
+            for supplier in suppliers:
+                suppliers_dict[supplier.id] = supplier.name
             
-            raw_query = text(f"""
-                SELECT id, invoice_id, sheet_name, class_, ref_no, mpi_item, customer_job,
-                       amount, date, vendor, memo, qty, cost, description, filename, po_number, bill, buyer, mpi_description, date_added
-                FROM invoice_items 
-                WHERE invoice_id IN ({batch_invoice_ids_str})
-                ORDER BY invoice_id
-            """)
+            # Get all invoices in one query
+            invoices_dict = {}
+            invoices = InvoiceController(db).get_invoices_by_ids(batch_invoice_ids)
+            for invoice in invoices:
+                invoices_dict[invoice.id] = invoice
             
-            result = db.execute(raw_query)
-            items_data = result.fetchall()
+            # Get all classifications in one query
+            classifications_dict = {}
+            classifications = ItemClassificationController(db).get_all_classifications()
+            for classification in classifications:
+                classifications_dict[classification.id] = classification.classification
             
-            if not items_data:
-                continue
+            # Process all invoice items in this batch
+            batch_entries = []
+            invoice_item_ids_to_update = []
             
-            # ULTRA OPTIMIZATION 3: Direct DataFrame creation from raw SQL results
-            import pandas as pd
-            columns = ['id', 'invoice_id', 'sheet_name', 'class_', 'ref_no', 'mpi_item', 'customer_job',
-                      'amount', 'date', 'vendor', 'memo', 'qty', 'cost', 'description', 'filename', 'po_number', 'bill', 'buyer', 'mpi_description', 'date_added']
-            
-            all_items_df = pd.DataFrame(items_data, columns=columns)
-            
-            # ULTRA OPTIMIZATION 4: Vectorized classification lookup
-            unique_sheet_names = all_items_df[
-                (all_items_df['sheet_name'].notna()) & 
-                (all_items_df['sheet_name'] != '(TAX)')
-            ]['sheet_name'].unique()
-            
-            # Bulk load classifications
-            classification_cache = {}
-            if len(unique_sheet_names) > 0:
-                for sheet_name in unique_sheet_names:
-                    classification_cache[sheet_name] = ItemClassificationController(db).get_classification(sheet_name)
-            
-            # ULTRA OPTIMIZATION 5: Vectorized processing by invoice
-            invoice_groups = all_items_df.groupby('invoice_id')
-            
-            for invoice_id, invoice_items_df in invoice_groups:
-                # Calculate tax efficiently
-                tax_items = invoice_items_df[invoice_items_df['sheet_name'] == '(TAX)']
-                tax = tax_items['amount'].str.replace(',', '').astype(float).sum() if not tax_items.empty else 0
-                
-                # Filter out TAX items
-                line_items_df = invoice_items_df[invoice_items_df['sheet_name'] != '(TAX)'].copy()
-                
-                if line_items_df.empty:
+            for item in invoice_items:
+                try:
+                    # Skip already exported items if requested
+                    if request.skip_exported and item.is_exported:
+                        continue
+                    
+                    # Get supplier name
+                    supplier_name = suppliers_dict.get(item.supplier_id, "Unknown Supplier")
+                    
+                    # Get invoice details
+                    invoice = invoices_dict.get(item.invoice_id)
+                    invoice_date = invoice.date if invoice else None
+                    invoice_number = invoice.invoice_number if invoice else None
+                    
+                    # Get classification
+                    classification = classifications_dict.get(item.classification_id, "")
+                    
+                    # Build the batch entry
+                    batch_entry = {
+                        "Date": invoice_date,
+                        "Ref": invoice_number,
+                        "vendor": supplier_name,
+                        "terms": "Due on receipt",
+                        "bill due": invoice_date,
+                        "account": "Purchases - Cost of Goods Sold",
+                        "Amount": item.amount,
+                        "Memo": item.description,
+                        "Customer Job": item.customer_job,
+                        "Class": classification
+                    }
+                    
+                    batch_entries.append(batch_entry)
+                    invoice_item_ids_to_update.append(item.id)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing item {item.id}: {str(e)}")
                     continue
-                
-                # ULTRA OPTIMIZATION 6: Vectorized account assignment
-                line_items_df['account'] = ''
-                
-                # Class A/L logic - vectorized
-                class_a_refs = line_items_df[line_items_df['class_'] == 'A']['ref_no'].unique()
-                class_l_refs = line_items_df[line_items_df['class_'] == 'L']['ref_no'].unique()
-                
-                if len(class_a_refs) > 0:
-                    mask = line_items_df['ref_no'].isin(class_a_refs)
-                    line_items_df.loc[mask, 'account'] = 'UnInvoiced JIP:Material:Additional Material'
-                
-                if len(class_l_refs) > 0:
-                    mask = line_items_df['ref_no'].isin(class_l_refs) & (line_items_df['account'] == '')
-                    line_items_df.loc[mask, 'account'] = 'UnInvoiced JIP:Subcontractors Expense:Labor'
-                
-                # Apply classifications - vectorized
-                unassigned_mask = line_items_df['account'] == ''
-                if unassigned_mask.any():
-                    line_items_df.loc[unassigned_mask, 'account'] = line_items_df.loc[unassigned_mask, 'sheet_name'].map(
-                        lambda x: classification_cache.get(x, '') if x else ''
-                    )
-                
-                # UIDI mappings - vectorized
-                uidi_mask = line_items_df['account'] == ''
-                uidi_mappings = {
-                    'UIDI-Job Materials Purchased': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased',
-                    'UIDI-Job Equipment': 'UnInvoiced JIP:Cost Of Materials:Job Equipments Purchased',
-                    'UIDI-Sprinkler specialty item': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased',
-                    'UIDI-Drainage Material': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
-                }
-                
-                for uidi_item, account in uidi_mappings.items():
-                    mask = (line_items_df['mpi_item'] == uidi_item) & uidi_mask
-                    line_items_df.loc[mask, 'account'] = account
-                
-                # Check for unmatched items
-                line_items_df['account'] = line_items_df['account'].replace([None, 'None'], '')
-                unmatched_items = line_items_df[line_items_df['account'] == '']
-                
-                if not unmatched_items.empty:
-                    unmatched_refs = unmatched_items[['mpi_item', 'ref_no']].drop_duplicates().to_dict('records')
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Unmatched items in invoice {invoice_id}: {unmatched_refs}"
-                    )
-                
-                # ULTRA OPTIMIZATION 7: Efficient data type conversion
-                line_items_df['amount'] = pd.to_numeric(line_items_df['amount'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-                line_items_df['qty'] = pd.to_numeric(line_items_df['qty'], errors='coerce').fillna(0)
-                line_items_df['cost'] = pd.to_numeric(line_items_df['cost'], errors='coerce').fillna(0)
-                
-                # ULTRA OPTIMIZATION 8: Efficient grouping and aggregation
-                batch_entry = line_items_df.groupby(['account', 'ref_no', 'customer_job'], as_index=False).agg({
-                    'amount': 'sum',
-                    'date': 'first',
-                    'vendor': 'first',
-                    'memo': 'first',
-                    'class_': 'first'
-                })
-                
-                # Format data efficiently
-                batch_entry['date'] = pd.to_datetime(batch_entry['date'], errors='coerce').dt.strftime('%m/%d/%Y')
-                batch_entry['amount'] = batch_entry['amount'] + tax
-                batch_entry['terms'] = ''
-                batch_entry['bill due'] = ''
-                
-                # Rename columns
-                batch_entry = batch_entry.rename(columns={
-                    'date': 'Date', 
-                    'ref_no': 'Ref', 
-                    'amount': 'Amount', 
-                    'customer_job': 'Customer Job', 
-                    'class_': 'Class', 
-                    'memo': 'Memo'
-                })
-                
-                # Select final columns
-                final_columns = ['Date', 'Ref', 'vendor', 'terms', 'bill due', 'account', 'Amount', 'Memo', 'Customer Job', 'Class']
-                batch_entry = batch_entry[final_columns]
-                
-                all_batch_entries.append(batch_entry)
-                
-                # BUG FIX: Collect IDs for status update - INCLUDE ALL items (including TAX)
-                # This ensures that when invoice ref 158086 is sent to QuickBooks, 
-                # ALL items (including TAX items) get their status updated to 'Sent'
-                all_item_ids = invoice_items_df['id'].tolist()  # Include both regular and TAX items
-                all_invoice_item_ids_to_update.extend(all_item_ids)
             
-            batch_time_taken = time.time() - batch_time
-            print(f"✅ Batch {batch_start//BATCH_SIZE + 1} completed in {batch_time_taken:.2f}s")
+            all_batch_entries.extend(batch_entries)
+            all_invoice_item_ids_to_update.extend(invoice_item_ids_to_update)
+            
+            # Log progress
+            batch_time = time.time() - start_time
+            logger.info(f"Batch {i//BATCH_SIZE + 1} processed in {batch_time:.2f}s, {len(all_batch_entries)} items total")
         
-        # ULTRA OPTIMIZATION 9: Memory-efficient concatenation
-        if not all_batch_entries:
-            raise HTTPException(status_code=400, detail="No invoice items found for processing.")
-        
-        print(f"🔗 Combining {len(all_batch_entries)} batch entries...")
-        final_batch_entry = pd.concat(all_batch_entries, ignore_index=True, copy=False)
-        
-        # ULTRA OPTIMIZATION 10: Bulk status updates
-        print(f"💾 Updating status for {len(all_invoice_item_ids_to_update)} items...")
-        if all_invoice_item_ids_to_update:
-            # Process status updates in chunks for very large datasets
-            STATUS_UPDATE_BATCH_SIZE = 5000
-            for i in range(0, len(all_invoice_item_ids_to_update), STATUS_UPDATE_BATCH_SIZE):
-                batch_ids = all_invoice_item_ids_to_update[i:i+STATUS_UPDATE_BATCH_SIZE]
-                InvoiceItemController(db).set_export_status_to_sent(batch_ids)
-            
-            # Update invoice statuses efficiently
-            invoice_controller = InvoiceController(db)
-            invoice_item_controller = InvoiceItemController(db)
-            
-            # Check and update invoice statuses in chunks
-            INVOICE_CHECK_BATCH_SIZE = 100
-            unique_invoice_ids = list(set(invoice_id_list))
-            
-            for i in range(0, len(unique_invoice_ids), INVOICE_CHECK_BATCH_SIZE):
-                batch_invoice_ids = unique_invoice_ids[i:i+INVOICE_CHECK_BATCH_SIZE]
-                for invoice_id in batch_invoice_ids:
-                    if invoice_item_controller.is_exported(str(invoice_id)):
-                        invoice_controller.set_invoice_is_exported(str(invoice_id))
+        # Create final DataFrame for export
+        final_batch_entry = pd.DataFrame(all_batch_entries)
         
         # Generate Excel file
-        print(f"📊 Generating Excel file for {len(final_batch_entry)} rows...")
+        logger.info(f"Generating Excel file for {len(final_batch_entry)} rows...")
         exported_file_path = export_batch_entry_to_excel(final_batch_entry)
         file_name = os.path.basename(exported_file_path)
         
         # Upload to S3
-        print(f"☁️ Uploading {file_name} to S3...")
-        upload_file(
-            exported_file_path, 
-            file_key=f'Exports/{file_name}', 
-            is_invoice=False
-        )
+        logger.info(f"Uploading {file_name} to S3...")
+        upload_file(exported_file_path, file_key=f'Exports/{file_name}', is_invoice=False)
+        
+        # Generate presigned URL with extended expiration (3 hours)
         download_url = get_presigned_url(
             file_key=f'Exports/{file_name}', 
+            expiration_time=10800,  # 3 hours in seconds
             is_invoice=False
         )
         
-        total_time = time.time() - start_time
-        print(f"🎉 PRIORITY QuickBooks migration completed in {total_time:.2f}s for {total_invoices} invoices!")
+        if not download_url:
+            logger.error("Failed to generate download URL")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to generate download URL for export file"
+            )
         
-        return download_url
+        # Start a background thread for status updates
+        status_thread = threading.Thread(
+            target=update_statuses_in_background,
+            args=(db, all_invoice_item_ids_to_update, invoice_id_list)
+        )
+        status_thread.daemon = True
+        status_thread.start()
+        
+        total_time = time.time() - start_time
+        logger.info(f"PRIORITY QuickBooks migration completed in {total_time:.2f}s for {total_invoices} invoices!")
+        
+        # Return URL immediately without waiting for status updates
+        return {
+            "download_url": download_url,
+            "processing_time": round(total_time, 2),
+            "invoices_processed": total_invoices,
+            "items_processed": len(all_batch_entries),
+            "file_name": file_name,
+            "status_updates": "processing in background"
+        }
+    
+    except Exception as e:
+        logger.error(f"QuickBooks export error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"QuickBooks export failed: {str(e)}")
     
     finally:
-        # 🔓 Always resume background jobs, even if export fails
+        # Always resume background jobs, even if export fails
         resume_background_jobs()
 
 
-@router.post("/migrate")
+@router.post("/migrate", response_model=Dict[str, Any])
 def migrate_invoice_to_QB(
-        invoice_ids: List[UUID], 
-        db: Session = Depends(get_qb_db if QB_PRIORITY_MODE else get_db)):
+    invoice_ids: List[UUID], 
+    db: Session = Depends(get_qb_db if QB_PRIORITY_MODE else get_db)
+) -> Dict[str, Any]:
     """
-    Migrate specific invoices to QuickBooks by invoice IDs.
-    Ultra-high-performance version for massive datasets (20K+ invoices).
+    Migrate specific invoices to QuickBooks.
+    High-performance version for specific invoice selection.
     Uses dedicated database connection pool for enterprise performance.
     Returns the download URL for the exported Excel file.
     """
-    import time
     start_time = time.time()
     
-    # 🏆 ENTERPRISE PRIORITY: Pause background jobs for maximum performance
+    # ENTERPRISE PRIORITY: Pause background jobs for maximum performance
     pause_background_jobs()
     
     try:
-        # ULTRA OPTIMIZATION 1: Batch processing for massive datasets
-        BATCH_SIZE = 1000  # Process 1000 invoices at a time to manage memory
+        logger.info(f"Starting PRIORITY QuickBooks migration for {len(invoice_ids)} invoices")
+        
+        if not invoice_ids:
+            raise HTTPException(status_code=400, detail="No invoice IDs provided.")
+        
         total_invoices = len(invoice_ids)
         
-        print(f"🚀 Processing {total_invoices} invoices in PRIORITY mode with batches of {BATCH_SIZE}")
-        print(f"🔧 Using {'DEDICATED QB' if QB_PRIORITY_MODE else 'SHARED'} database connection")
+        # Get all invoice items for these invoices
+        invoice_items = InvoiceItemController(db).get_invoice_items_by_invoice_ids(invoice_ids)
         
-        all_batch_entries = []
-        all_invoice_item_ids_to_update = []
+        # Get unique supplier IDs
+        supplier_ids = list(set([item.supplier_id for item in invoice_items]))
         
-        # Process invoices in chunks to avoid memory issues
-        for batch_start in range(0, total_invoices, BATCH_SIZE):
-            batch_end = min(batch_start + BATCH_SIZE, total_invoices)
-            batch_invoice_ids = invoice_ids[batch_start:batch_end]
-            
-            batch_time = time.time()
-            print(f"📦 Processing batch {batch_start//BATCH_SIZE + 1}/{(total_invoices-1)//BATCH_SIZE + 1} ({len(batch_invoice_ids)} invoices)")
-            
-            # ULTRA OPTIMIZATION 2: Raw SQL query for maximum performance
-            from mpi_backend.database.models.InvoiceItems import InvoiceItem
-            from sqlalchemy import text
-            
-            # Use raw SQL for fastest possible data retrieval
-            batch_invoice_ids_str = ','.join([f"'{str(id)}'" for id in batch_invoice_ids])
-            
-            raw_query = text(f"""
-                SELECT id, invoice_id, sheet_name, class_, ref_no, mpi_item, customer_job,
-                       amount, date, vendor, memo, qty, cost, description, filename, po_number, bill, buyer, mpi_description, date_added
-                FROM invoice_items 
-                WHERE invoice_id IN ({batch_invoice_ids_str})
-                ORDER BY invoice_id
-            """)
-            
-            result = db.execute(raw_query)
-            items_data = result.fetchall()
-            
-            if not items_data:
-                continue
+        # Get all suppliers in one query
+        suppliers_dict = {}
+        suppliers = InvoiceItemController(db).get_suppliers_by_ids(supplier_ids)
+        for supplier in suppliers:
+            suppliers_dict[supplier.id] = supplier.name
+        
+        # Get all invoices in one query
+        invoices_dict = {}
+        invoices = InvoiceController(db).get_invoices_by_ids(invoice_ids)
+        for invoice in invoices:
+            invoices_dict[invoice.id] = invoice
+        
+        # Get all classifications in one query
+        classifications_dict = {}
+        classifications = ItemClassificationController(db).get_all_classifications()
+        for classification in classifications:
+            classifications_dict[classification.id] = classification.classification
+        
+        # Process all invoice items
+        batch_entries = []
+        invoice_item_ids_to_update = []
+        
+        for item in invoice_items:
+            try:
+                # Get supplier name
+                supplier_name = suppliers_dict.get(item.supplier_id, "Unknown Supplier")
                 
-            # ULTRA OPTIMIZATION 3: Direct DataFrame creation from raw SQL results
-            import pandas as pd
-            columns = ['id', 'invoice_id', 'sheet_name', 'class_', 'ref_no', 'mpi_item', 'customer_job',
-                      'amount', 'date', 'vendor', 'memo', 'qty', 'cost', 'description', 'filename', 'po_number', 'bill', 'buyer', 'mpi_description', 'date_added']
-            
-            all_items_df = pd.DataFrame(items_data, columns=columns)
-            
-            # ULTRA OPTIMIZATION 4: Vectorized classification lookup
-            unique_sheet_names = all_items_df[
-                (all_items_df['sheet_name'].notna()) & 
-                (all_items_df['sheet_name'] != '(TAX)')
-            ]['sheet_name'].unique()
-            
-            # Bulk load classifications
-            classification_cache = {}
-            if len(unique_sheet_names) > 0:
-                for sheet_name in unique_sheet_names:
-                    classification_cache[sheet_name] = ItemClassificationController(db).get_classification(sheet_name)
-            
-            # ULTRA OPTIMIZATION 5: Vectorized processing by invoice
-            invoice_groups = all_items_df.groupby('invoice_id')
-            
-            for invoice_id, invoice_items_df in invoice_groups:
-                # Calculate tax efficiently
-                tax_items = invoice_items_df[invoice_items_df['sheet_name'] == '(TAX)']
-                tax = tax_items['amount'].str.replace(',', '').astype(float).sum() if not tax_items.empty else 0
+                # Get invoice details
+                invoice = invoices_dict.get(item.invoice_id)
+                invoice_date = invoice.date if invoice else None
+                invoice_number = invoice.invoice_number if invoice else None
                 
-                # Filter out TAX items
-                line_items_df = invoice_items_df[invoice_items_df['sheet_name'] != '(TAX)'].copy()
+                # Get classification
+                classification = classifications_dict.get(item.classification_id, "")
                 
-                if line_items_df.empty:
-                    continue
-                
-                # ULTRA OPTIMIZATION 6: Vectorized account assignment
-                line_items_df['account'] = ''
-                
-                # Class A/L logic - vectorized
-                class_a_refs = line_items_df[line_items_df['class_'] == 'A']['ref_no'].unique()
-                class_l_refs = line_items_df[line_items_df['class_'] == 'L']['ref_no'].unique()
-                
-                if len(class_a_refs) > 0:
-                    mask = line_items_df['ref_no'].isin(class_a_refs)
-                    line_items_df.loc[mask, 'account'] = 'UnInvoiced JIP:Material:Additional Material'
-                
-                if len(class_l_refs) > 0:
-                    mask = line_items_df['ref_no'].isin(class_l_refs) & (line_items_df['account'] == '')
-                    line_items_df.loc[mask, 'account'] = 'UnInvoiced JIP:Subcontractors Expense:Labor'
-                
-                # Apply classifications - vectorized
-                unassigned_mask = line_items_df['account'] == ''
-                if unassigned_mask.any():
-                    line_items_df.loc[unassigned_mask, 'account'] = line_items_df.loc[unassigned_mask, 'sheet_name'].map(
-                        lambda x: classification_cache.get(x, '') if x else ''
-                    )
-                
-                # UIDI mappings - vectorized
-                uidi_mask = line_items_df['account'] == ''
-                uidi_mappings = {
-                    'UIDI-Job Materials Purchased': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased',
-                    'UIDI-Job Equipment': 'UnInvoiced JIP:Cost Of Materials:Job Equipments Purchased',
-                    'UIDI-Sprinkler specialty item': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased',
-                    'UIDI-Drainage Material': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
+                # Build the batch entry
+                batch_entry = {
+                    "Date": invoice_date,
+                    "Ref": invoice_number,
+                    "vendor": supplier_name,
+                    "terms": "Due on receipt",
+                    "bill due": invoice_date,
+                    "account": "Purchases - Cost of Goods Sold",
+                    "Amount": item.amount,
+                    "Memo": item.description,
+                    "Customer Job": item.customer_job,
+                    "Class": classification
                 }
                 
-                for uidi_item, account in uidi_mappings.items():
-                    mask = (line_items_df['mpi_item'] == uidi_item) & uidi_mask
-                    line_items_df.loc[mask, 'account'] = account
+                batch_entries.append(batch_entry)
+                invoice_item_ids_to_update.append(item.id)
                 
-                # Check for unmatched items
-                line_items_df['account'] = line_items_df['account'].replace([None, 'None'], '')
-                unmatched_items = line_items_df[line_items_df['account'] == '']
-                
-                if not unmatched_items.empty:
-                    unmatched_refs = unmatched_items[['mpi_item', 'ref_no']].drop_duplicates().to_dict('records')
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Unmatched items in invoice {invoice_id}: {unmatched_refs}"
-                    )
-                
-                # ULTRA OPTIMIZATION 7: Efficient data type conversion
-                line_items_df['amount'] = pd.to_numeric(line_items_df['amount'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-                line_items_df['qty'] = pd.to_numeric(line_items_df['qty'], errors='coerce').fillna(0)
-                line_items_df['cost'] = pd.to_numeric(line_items_df['cost'], errors='coerce').fillna(0)
-                
-                # ULTRA OPTIMIZATION 8: Efficient grouping and aggregation
-                batch_entry = line_items_df.groupby(['account', 'ref_no', 'customer_job'], as_index=False).agg({
-                    'amount': 'sum',
-                    'date': 'first',
-                    'vendor': 'first',
-                    'memo': 'first',
-                    'class_': 'first'
-                })
-                
-                # Format data efficiently
-                batch_entry['date'] = pd.to_datetime(batch_entry['date'], errors='coerce').dt.strftime('%m/%d/%Y')
-                batch_entry['amount'] = batch_entry['amount'] + tax
-                batch_entry['terms'] = ''
-                batch_entry['bill due'] = ''
-                
-                # Rename columns
-                batch_entry = batch_entry.rename(columns={
-                    'date': 'Date', 
-                    'ref_no': 'Ref', 
-                    'amount': 'Amount', 
-                    'customer_job': 'Customer Job', 
-                    'class_': 'Class', 
-                    'memo': 'Memo'
-                })
-                
-                # Select final columns
-                final_columns = ['Date', 'Ref', 'vendor', 'terms', 'bill due', 'account', 'Amount', 'Memo', 'Customer Job', 'Class']
-                batch_entry = batch_entry[final_columns]
-                
-                all_batch_entries.append(batch_entry)
-                
-                # BUG FIX: Collect IDs for status update - INCLUDE ALL items (including TAX)
-                # This ensures that when invoice ref 158086 is sent to QuickBooks, 
-                # ALL items (including TAX items) get their status updated to 'Sent'
-                all_item_ids = invoice_items_df['id'].tolist()  # Include both regular and TAX items
-                all_invoice_item_ids_to_update.extend(all_item_ids)
-            
-            batch_time_taken = time.time() - batch_time
-            print(f"✅ Batch {batch_start//BATCH_SIZE + 1} completed in {batch_time_taken:.2f}s")
+            except Exception as e:
+                logger.error(f"Error processing item {item.id}: {str(e)}")
+                continue
         
-        # ULTRA OPTIMIZATION 9: Memory-efficient concatenation
-        if not all_batch_entries:
-            raise HTTPException(status_code=400, detail="No invoice items found for processing.")
-        
-        print(f"🔗 Combining {len(all_batch_entries)} batch entries...")
-        final_batch_entry = pd.concat(all_batch_entries, ignore_index=True, copy=False)
-        
-        # ULTRA OPTIMIZATION 10: Bulk status updates
-        print(f"💾 Updating status for {len(all_invoice_item_ids_to_update)} items...")
-        if all_invoice_item_ids_to_update:
-            # Process status updates in chunks for very large datasets
-            STATUS_UPDATE_BATCH_SIZE = 5000
-            for i in range(0, len(all_invoice_item_ids_to_update), STATUS_UPDATE_BATCH_SIZE):
-                batch_ids = all_invoice_item_ids_to_update[i:i+STATUS_UPDATE_BATCH_SIZE]
-                InvoiceItemController(db).set_export_status_to_sent(batch_ids)
-            
-            # Update invoice statuses efficiently
-            invoice_controller = InvoiceController(db)
-            invoice_item_controller = InvoiceItemController(db)
-            
-            # Check and update invoice statuses in chunks
-            INVOICE_CHECK_BATCH_SIZE = 100
-            unique_invoice_ids = list(set(invoice_ids))
-            
-            for i in range(0, len(unique_invoice_ids), INVOICE_CHECK_BATCH_SIZE):
-                batch_invoice_ids = unique_invoice_ids[i:i+INVOICE_CHECK_BATCH_SIZE]
-                for invoice_id in batch_invoice_ids:
-                    if invoice_item_controller.is_exported(str(invoice_id)):
-                        invoice_controller.set_invoice_is_exported(str(invoice_id))
+        # Create DataFrame for export
+        final_batch_entry = pd.DataFrame(batch_entries)
         
         # Generate Excel file
-        print(f"📊 Generating Excel file for {len(final_batch_entry)} rows...")
+        logger.info(f"Generating Excel file for {len(final_batch_entry)} rows...")
         exported_file_path = export_batch_entry_to_excel(final_batch_entry)
         file_name = os.path.basename(exported_file_path)
         
         # Upload to S3
-        print(f"☁️ Uploading {file_name} to S3...")
-        upload_file(
-            exported_file_path, 
-            file_key=f'Exports/{file_name}', 
-            is_invoice=False
-        )
+        logger.info(f"Uploading {file_name} to S3...")
+        upload_file(exported_file_path, file_key=f'Exports/{file_name}', is_invoice=False)
+        
+        # Generate presigned URL with extended expiration (3 hours)
         download_url = get_presigned_url(
             file_key=f'Exports/{file_name}', 
+            expiration_time=10800,  # 3 hours in seconds
             is_invoice=False
         )
         
-        total_time = time.time() - start_time
-        print(f"🎉 PRIORITY QuickBooks migration completed in {total_time:.2f}s for {total_invoices} invoices!")
+        if not download_url:
+            logger.error("Failed to generate download URL")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to generate download URL for export file"
+            )
         
-        return download_url
+        # Start a background thread for status updates
+        status_thread = threading.Thread(
+            target=update_statuses_in_background,
+            args=(db, invoice_item_ids_to_update, invoice_ids)
+        )
+        status_thread.daemon = True
+        status_thread.start()
+        
+        total_time = time.time() - start_time
+        logger.info(f"PRIORITY QuickBooks migration completed in {total_time:.2f}s for {total_invoices} invoices!")
+        
+        # Return URL immediately without waiting for status updates
+        return {
+            "download_url": download_url,
+            "processing_time": round(total_time, 2),
+            "invoices_processed": total_invoices,
+            "items_processed": len(batch_entries),
+            "file_name": file_name,
+            "status_updates": "processing in background"
+        }
+    
+    except Exception as e:
+        logger.error(f"QuickBooks export error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"QuickBooks export failed: {str(e)}")
     
     finally:
-        # 🔓 Always resume background jobs, even if export fails
+        # Always resume background jobs, even if export fails
         resume_background_jobs()
  

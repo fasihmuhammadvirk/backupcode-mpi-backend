@@ -45,6 +45,7 @@ class GoogleSheetSyncController:
         Args:
             db: SQLAlchemy database session
         """
+        # Import here to avoid circular imports
         from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
         self.db = db
         self.mapping_controller = ItemsMappingController(db)
@@ -61,6 +62,24 @@ class GoogleSheetSyncController:
         Returns:
             Dict with sync operation details
         """
+        # Check if QuickBooks export is active and should pause
+        try:
+            from mpi_backend.utils.quickbooks_priority import is_qb_export_active
+            if is_qb_export_active():
+                try:
+                    logger.info("Google Sheets sync paused - QuickBooks priority export in progress")
+                except Exception:
+                    # Handle any encoding issues
+                    pass
+                return {
+                    "success": False,
+                    "message": "Sync paused for QuickBooks priority export",
+                    "skipped": True
+                }
+        except ImportError:
+            # If function not available, continue normally
+            pass
+            
         # If db is not provided, create a new session
         if db is None:
             db_session = SessionLocal()
@@ -116,23 +135,6 @@ class GoogleSheetSyncController:
         Returns:
             Dict with sync operation details
         """
-        # Check if QuickBooks export is active and should pause
-        try:
-            from mpi_backend.utils.quickbooks_priority import is_qb_export_active
-            if is_qb_export_active():
-                try:
-                    logger.info("⏸️  Google Sheets sync paused - QuickBooks priority export in progress")
-                except UnicodeEncodeError:
-                    logger.info("Google Sheets sync paused - QuickBooks priority export in progress")
-                return {
-                    "success": False,
-                    "message": "Sync paused for QuickBooks priority export",
-                    "skipped": True
-                }
-        except ImportError:
-            # If function not available, continue normally
-            pass
-        
         # If task is already running, skip this run
         if self.__class__._sync_task_running:
             logger.info(f"A {self.__class__._current_operation} task is already running, skipping this run")

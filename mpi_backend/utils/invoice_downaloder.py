@@ -237,10 +237,7 @@ def email_download_background_task():
     try:
         from mpi_backend.utils.quickbooks_priority import is_qb_export_active
         if is_qb_export_active():
-            try:
-                logger.info("⏸️  Email download paused - QuickBooks priority export in progress")
-            except UnicodeEncodeError:
-                logger.info("Email download paused - QuickBooks priority export in progress")
+            logger.info("⏸Email download paused - QuickBooks priority export in progress")
             return
     except ImportError:
         # If function not available, continue normally

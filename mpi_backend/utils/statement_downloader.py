@@ -443,14 +443,14 @@ def extract_supplier_from_filename(filename: str) -> Optional[str]:
         # Strategy 1: Direct supplier name matching (filename starts with exact supplier name)
         for supplier in STATEMENT_SUPPLIERS:
             if basename.startswith(supplier + '_'):
-                logger.info(f"✅ Extracted supplier from filename (direct match): {supplier}")
+                logger.info(f"Extracted supplier from filename (direct match): {supplier}")
                 return supplier
         
         # Strategy 2: Underscore replacement matching
         for supplier in STATEMENT_SUPPLIERS:
             supplier_underscore = supplier.replace(' ', '_').replace('&', '_')
             if basename.startswith(supplier_underscore + '_'):
-                logger.info(f"✅ Extracted supplier from filename (underscore match): {supplier}")
+                logger.info(f"Extracted supplier from filename (underscore match): {supplier}")
                 return supplier
         
         # Strategy 2b: Special case for Y & S with different underscore patterns
@@ -464,7 +464,7 @@ def extract_supplier_from_filename(filename: str) -> Optional[str]:
                 ]
                 for pattern in patterns:
                     if basename.startswith(pattern + '_'):
-                        logger.info(f"✅ Extracted supplier from filename (Y&S special match): {supplier}")
+                        logger.info(f"Extracted supplier from filename (Y&S special match): {supplier}")
                         return supplier
         
         # Strategy 3: Pattern matching for special cases
@@ -490,24 +490,24 @@ def extract_supplier_from_filename(filename: str) -> Optional[str]:
         elif 'flow' in basename_lower or 'mark' in basename_lower:
             return "Flow Mark Plumbing Supply"
         
-        logger.warning(f"⚠️  Could not extract supplier from filename: {filename}")
+        logger.warning(f"Could not extract supplier from filename: {filename}")
         return None
         
     except Exception as e:
-        logger.error(f"❌ Error extracting supplier from filename {filename}: {str(e)}")
+        logger.error(f"Error extracting supplier from filename {filename}: {str(e)}")
         return None
 
 
 def process_statement_files(base_folder_path: Path):
     """Process all downloaded statement files with improved supplier detection"""
     try:
-        logger.info("🚀 Starting statement file processing with improved supplier detection")
+        logger.info("Starting statement file processing with improved supplier detection")
         processed_count = 0
         
         # Find all PDF files in the download directory
         for pdf_file in base_folder_path.rglob('*.pdf'):
             try:
-                logger.info(f"📄 Processing statement file: {pdf_file}")
+                logger.info(f"Processing statement file: {pdf_file}")
                 
                 # BULLETPROOF supplier name extraction with multiple strategies
                 path_supplier = None
@@ -537,16 +537,16 @@ def process_statement_files(base_folder_path: Path):
                     final_supplier = filename_supplier
                     logger.info(f"🎯 Using filename-extracted supplier: {final_supplier}")
                 else:
-                    logger.error(f"❌ CRITICAL: Could not extract supplier name for {pdf_file}")
-                    logger.error(f"   Path parts: {pdf_file.parts}")
-                    logger.error(f"   Filename: {pdf_file.name}")
-                    logger.error("   This statement will use unreliable PDF OCR detection!")
+                    logger.error(f"CRITICAL: Could not extract supplier name for {pdf_file}")
+                    logger.error(f"Path parts: {pdf_file.parts}")
+                    logger.error(f"Filename: {pdf_file.name}")
+                    logger.error("This statement will use unreliable PDF OCR detection!")
                 
                 # Log comprehensive supplier information for verification
-                logger.info(f"📊 SUPPLIER DETECTION SUMMARY:")
-                logger.info(f"   📁 Path supplier: {path_supplier}")
-                logger.info(f"   📄 Filename supplier: {filename_supplier}")
-                logger.info(f"   🎯 Final supplier: {final_supplier}")
+                logger.info(f"SUPPLIER DETECTION SUMMARY:")
+                logger.info(f"Path supplier: {path_supplier}")
+                logger.info(f"Filename supplier: {filename_supplier}")
+                logger.info(f"Final supplier: {final_supplier}")
                 
                 if not final_supplier:
                     logger.warning(f"Could not extract supplier name for {pdf_file}, will rely on PDF detection")
@@ -588,9 +588,9 @@ def process_statement_files(base_folder_path: Path):
                             
                             processed_count += 1
                         else:
-                            logger.error(f"❌ Failed to save statement to database: {pdf_file}")
+                            logger.error(f"Failed to save statement to database: {pdf_file}")
                     else:
-                        logger.error(f"❌ Failed to extract statement data: {pdf_file}")
+                        logger.error(f"Failed to extract statement data: {pdf_file}")
                         
             except Exception as file_error:
                 logger.error(
@@ -598,7 +598,7 @@ def process_statement_files(base_folder_path: Path):
                     f"\n{traceback.format_exc()}"
                 )
         
-        logger.info(f"✅ Statement processing complete. Processed {processed_count} files")
+        logger.info(f"Statement processing complete. Processed {processed_count} files")
         return processed_count
         
     except Exception as e:
@@ -616,10 +616,7 @@ def statement_download_background_task():
     try:
         from mpi_backend.utils.quickbooks_priority import is_qb_export_active
         if is_qb_export_active():
-            try:
-                logger.info("⏸️  Statement download paused - QuickBooks priority export in progress")
-            except UnicodeEncodeError:
-                logger.info("Statement download paused - QuickBooks priority export in progress")
+            logger.info("Statement download paused - QuickBooks priority export in progress")
             return
     except ImportError:
         # If function not available, continue normally
