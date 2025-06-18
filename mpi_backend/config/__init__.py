@@ -76,6 +76,31 @@ QB_DEDICATED_POOL_SIZE = int(os.getenv("QB_DEDICATED_POOL_SIZE", "10"))  # Dedic
 QB_MAX_CONCURRENT_EXPORTS = int(os.getenv("QB_MAX_CONCURRENT_EXPORTS", "3"))  # Max concurrent QB exports
 QB_PAUSE_BACKGROUND_JOBS = os.getenv("QB_PAUSE_BACKGROUND_JOBS", "true").lower() == "true"  # Pause non-critical jobs during QB export
 
+# CRITICAL: Timeout Configuration for QuickBooks Operations
+# These settings prevent operations from getting stuck and ensure reliable processing
+QB_OPERATION_TIMEOUT = int(os.getenv("QB_OPERATION_TIMEOUT", "600"))  # 10 minutes max for QB operations
+QB_CHUNK_SIZE = int(os.getenv("QB_CHUNK_SIZE", "500"))  # Process large datasets in chunks of 500 invoices
+QB_CHUNK_DELAY = float(os.getenv("QB_CHUNK_DELAY", "1.0"))  # 1 second delay between chunks
+QB_PROGRESS_UPDATE_INTERVAL = int(os.getenv("QB_PROGRESS_UPDATE_INTERVAL", "10"))  # Update progress every 10%
+
+# HTTP Request Timeout Configuration
+REQUEST_TIMEOUT_DEFAULT = int(os.getenv("REQUEST_TIMEOUT_DEFAULT", "120"))  # 2 minutes for standard requests
+REQUEST_TIMEOUT_QUICKBOOKS = int(os.getenv("REQUEST_TIMEOUT_QUICKBOOKS", "600"))  # 10 minutes for QuickBooks
+REQUEST_TIMEOUT_EXPORT = int(os.getenv("REQUEST_TIMEOUT_EXPORT", "300"))  # 5 minutes for exports
+
+# Database Connection Timeout Configuration  
+DB_CONNECTION_TIMEOUT = int(os.getenv("DB_CONNECTION_TIMEOUT", "30"))  # 30 seconds for DB connections
+DB_QUERY_TIMEOUT = int(os.getenv("DB_QUERY_TIMEOUT", "120"))  # 2 minutes for complex queries
+DB_BULK_OPERATION_TIMEOUT = int(os.getenv("DB_BULK_OPERATION_TIMEOUT", "300"))  # 5 minutes for bulk operations
+
+# S3 Upload Timeout Configuration
+S3_UPLOAD_TIMEOUT = int(os.getenv("S3_UPLOAD_TIMEOUT", "300"))  # 5 minutes for S3 uploads
+S3_PRESIGNED_URL_EXPIRY = int(os.getenv("S3_PRESIGNED_URL_EXPIRY", "3600"))  # 1 hour for presigned URLs
+
+# Performance Monitoring Configuration
+PERFORMANCE_LOGGING_ENABLED = os.getenv("PERFORMANCE_LOGGING_ENABLED", "true").lower() == "true"
+PERFORMANCE_LOG_SLOW_QUERIES = int(os.getenv("PERFORMANCE_LOG_SLOW_QUERIES", "5"))  # Log queries slower than 5 seconds
+
 # S3 Configuration (if applicable)
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "")
 S3_REGION = os.getenv("S3_REGION", "us-east-1")

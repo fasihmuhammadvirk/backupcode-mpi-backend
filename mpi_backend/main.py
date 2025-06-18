@@ -1,4 +1,5 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -10,6 +11,8 @@ import pytz
 from datetime import datetime
 import logging
 # from apitally.fastapi import ApitallyMiddleware
+import asyncio
+import time as time_module
 
 # Setup logging first, before any other imports
 from mpi_backend.config.logging_config import setup_logging
@@ -122,7 +125,13 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("Shutting down application")
 
-app = FastAPI(lifespan=lifespan)
+# CRITICAL FIX: Extended timeout configuration for QuickBooks operations
+app = FastAPI(
+    lifespan=lifespan,
+    title="MPI Backend API",
+    description="Enterprise-grade backend with QuickBooks integration",
+    version="1.0.0"
+)
 
 origins = ["*"]
 
@@ -133,6 +142,59 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# CRITICAL TIMEOUT MIDDLEWARE: Add timeout handling middleware
+@app.middleware("http")
+async def timeout_middleware(request: Request, call_next):
+    """
+    Middleware to handle timeouts for different routes
+    QuickBooks routes get extended timeout (10 minutes)
+    Other routes get standard timeout (2 minutes)
+    """
+    # Determine timeout based on route
+    if "/quickbooks" in str(request.url):
+        timeout_seconds = 600  # 10 minutes for QuickBooks operations
+        logger.info(f"🔄 QB operation started - timeout: {timeout_seconds}s")
+    elif "/export" in str(request.url):
+        timeout_seconds = 300  # 5 minutes for export operations
+        logger.info(f"📊 Export operation started - timeout: {timeout_seconds}s")
+    else:
+        timeout_seconds = 120  # 2 minutes for standard operations
+    
+    start_time = time_module.time()
+    
+    try:
+        # Use asyncio.wait_for to enforce timeout
+        response = await asyncio.wait_for(
+            call_next(request), 
+            timeout=timeout_seconds
+        )
+        
+        elapsed = time_module.time() - start_time
+        if "/quickbooks" in str(request.url):
+            logger.info(f"✅ QuickBooks completed in {elapsed:.2f}s")
+        
+        return response
+        
+    except asyncio.TimeoutError:
+        elapsed = time_module.time() - start_time
+        logger.error(f"⏰ Request timeout after {elapsed:.2f}s for {request.url}")
+        
+        return JSONResponse(
+            status_code=408,
+            content={
+                "detail": f"Request timeout after {timeout_seconds} seconds. "
+                         f"Operation may still be processing in background.",
+                "timeout": timeout_seconds,
+                "elapsed": elapsed,
+                "suggestion": "For large QuickBooks exports, consider reducing "
+                            "the dataset size or try again later."
+            }
+        )
+    except Exception as e:
+        elapsed = time_module.time() - start_time
+        logger.error(f"❌ Request failed after {elapsed:.2f}s: {str(e)}")
+        raise
 
 
 # app.add_middleware(
@@ -160,3 +222,12 @@ def register_routes(app):
 
 register_routes(app)
 add_pagination(app)
+
+# CRITICAL: Add startup event to log timeout configuration
+@app.on_event("startup")
+async def startup_event():
+    logger.info("🚀 MPI Backend started with timeout protections:")
+    logger.info("   ⏱️  QuickBooks operations: 10 minutes timeout")
+    logger.info("   📊 Export operations: 5 minutes timeout") 
+    logger.info("   🔄 Standard operations: 2 minutes timeout")
+    logger.info("   🎯 Timeout middleware: ACTIVE")
