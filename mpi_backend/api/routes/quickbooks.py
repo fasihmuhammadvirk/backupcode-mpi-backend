@@ -25,7 +25,10 @@ def pause_background_jobs():
     if QB_PAUSE_BACKGROUND_JOBS:
         with _qb_export_lock:
             _qb_export_active = True
-        print("🔒 Background jobs paused for QuickBooks priority export")
+        try:
+            print("🔒 Background jobs paused for QuickBooks priority export")
+        except UnicodeEncodeError:
+            print("Background jobs paused for QuickBooks priority export")
 
 def resume_background_jobs():
     """Signal to resume background jobs"""
@@ -33,7 +36,10 @@ def resume_background_jobs():
     if QB_PAUSE_BACKGROUND_JOBS:
         with _qb_export_lock:
             _qb_export_active = False
-        print("🔓 Background jobs resumed after QuickBooks export")
+        try:
+            print("🔓 Background jobs resumed after QuickBooks export")
+        except UnicodeEncodeError:
+            print("Background jobs resumed after QuickBooks export")
 
 def is_qb_export_active():
     """Check if QuickBooks export is currently active"""
