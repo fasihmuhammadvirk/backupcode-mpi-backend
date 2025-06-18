@@ -372,6 +372,12 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
                 tax_by_invoice[item_invoice_id] += float(amount_str)
             except (ValueError, TypeError):
                 pass
+            
+            # CRITICAL BUG FIX: Add TAX item IDs to status update list
+            # TAX items also need their export_status changed from Pending to Sent
+            tax_item_id = getattr(item, 'id', None)
+            if tax_item_id:
+                all_item_ids_for_status.append(tax_item_id)
         else:
             # Fast data extraction - direct attribute access
             item_data = {
@@ -609,6 +615,12 @@ def migrate_invoice_to_QB_internal(invoice_ids: List[UUID],
                 tax_by_invoice[item_invoice_id] += float(amount_str)
             except (ValueError, TypeError):
                 pass
+            
+            # CRITICAL BUG FIX: Add TAX item IDs to status update list
+            # TAX items also need their export_status changed from Pending to Sent
+            tax_item_id = getattr(item, 'id', None)
+            if tax_item_id:
+                all_item_ids_for_status.append(tax_item_id)
         else:
             # Extract all item data (EXACT ORIGINAL LOGIC)
             item_data = {
