@@ -613,8 +613,8 @@ def statement_download_background_task():
     """Main background task for downloading and processing monthly statements 
     using invoice downloader logic"""
     # Check if QuickBooks export is active and should pause
-        try:
-            from mpi_backend.utils.quickbooks_priority import is_qb_export_active
+    try:
+        from mpi_backend.utils.quickbooks_priority import is_qb_export_active
         if is_qb_export_active():
             try:
                 logger.info("⏸️  Statement download paused - QuickBooks priority export in progress")

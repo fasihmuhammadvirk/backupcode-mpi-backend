@@ -2,7 +2,7 @@ from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
-from mpi_backend.database.controllers import CustomerJobMappingController
+from mpi_backend.database.controllers.CustomerJobMappingContorller import CustomerJobMappingController
 
 router = APIRouter(prefix="/customer-job", tags=["Customer Job Mapping"])
 

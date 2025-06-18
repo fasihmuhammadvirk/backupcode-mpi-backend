@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from mpi_backend.database import get_db
-from mpi_backend.database.controllers import SupplierController
+from mpi_backend.database.controllers.Suppliers import SupplierController
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 
 router = APIRouter(prefix="/supplier", tags=["Supplier"])

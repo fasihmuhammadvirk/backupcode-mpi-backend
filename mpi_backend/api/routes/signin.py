@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from mpi_backend.database import get_db
-from mpi_backend.database.controllers import UserController
+from mpi_backend.database.controllers.UserController import UserController
 from mpi_backend.utils.auth.auth_handler import signJWT
 
 router = APIRouter(prefix="/signin",tags=["SignIn"])

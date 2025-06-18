@@ -8,7 +8,9 @@ from datetime import date
 import os
 import requests
 from math import ceil
-from mpi_backend.database.controllers import SupplierController, InvoiceController, InvoiceItemController
+from mpi_backend.database.controllers.Suppliers import SupplierController
+from mpi_backend.database.controllers.invoice import InvoiceController
+from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.utils.invoice_convertor import convert_invoice

@@ -2,7 +2,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
-from mpi_backend.database.controllers import ItemsMappingController
+from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
 from mpi_backend.database.schemas import ItemMappingsResponse,ItemMappingsByMpiTypeResponse,UpdateMappingRequest
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 

@@ -30,7 +30,8 @@ from mpi_backend.api.routes import sync_mappings
 from mpi_backend.api.routes import price_comparison
 from mpi_backend.api.routes import statements
 
-from mpi_backend.database.controllers import GoogleSheetSyncController, ItemsMappingController
+from mpi_backend.database.controllers.GoogleSheetSyncController import GoogleSheetSyncController
+from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
 from mpi_backend.config import LOG_LEVEL
 from mpi_backend.utils.invoice_downaloder import email_download_background_task
 from mpi_backend.utils.missing_invoice_downaloder import missing_email_download_background_task

@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException,Query, Body
 from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
-from mpi_backend.database.controllers import SupplierController, InvoiceItemController
+from mpi_backend.database.controllers.Suppliers import SupplierController
+from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
 from mpi_backend.database.schemas import FilterRequest, PaginatedInvoiceItemsResponse, PriceHistoryRequest, PriceHistoryResponse
 from mpi_backend.database.schemas import InvoiceItems
 from mpi_backend.utils.auth.auth_bearer import JWTBearer

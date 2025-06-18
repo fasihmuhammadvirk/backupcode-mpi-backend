@@ -10,7 +10,6 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from mpi_backend.database.controllers import ItemsMappingController
 from mpi_backend.utils.google_sheets import GoogleSheetDataExtractor
 from mpi_backend.config.spreadsheet_config import (
     DEFAULT_SHEET_ID,
@@ -46,6 +45,7 @@ class GoogleSheetSyncController:
         Args:
             db: SQLAlchemy database session
         """
+        from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
         self.db = db
         self.mapping_controller = ItemsMappingController(db)
         
