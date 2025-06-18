@@ -232,12 +232,22 @@ def download_email_attachments(email_message, base_folder_path):
 
 
 def email_download_background_task():
-    """Main task function with comprehensive error handling"""
-    # Check if QuickBooks export is active and should pause
+    """ENHANCED: Email download with migrate-all priority awareness"""
+    # ABSOLUTE PRIORITY: Check if migrate-all operation is active
+    try:
+        from mpi_backend.utils.quickbooks_priority import is_migrate_all_active
+        if is_migrate_all_active():
+            logger.info("Email download paused - MIGRATE-ALL has absolute priority")
+            return
+    except ImportError:
+        # If function not available, continue normally
+        pass
+    
+    # FALLBACK: Check if any QuickBooks export is active
     try:
         from mpi_backend.utils.quickbooks_priority import is_qb_export_active
         if is_qb_export_active():
-            logger.info("⏸Email download paused - QuickBooks priority export in progress")
+            logger.info("Email download paused - QuickBooks priority export in progress")
             return
     except ImportError:
         # If function not available, continue normally

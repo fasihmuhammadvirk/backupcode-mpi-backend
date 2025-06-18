@@ -53,7 +53,7 @@ class GoogleSheetSyncController:
     @classmethod
     def execute_sync_task(cls, db: Session = None, operation: str = 'sync'):
         """
-        Execute the sync task with proper session management.
+        ENHANCED: Execute sync task with migrate-all absolute priority awareness
         
         Args:
             db: Database session. If None, a new session is created.
@@ -62,22 +62,30 @@ class GoogleSheetSyncController:
         Returns:
             Dict with sync operation details
         """
-        # Check if QuickBooks export is active and should pause
+        # ABSOLUTE PRIORITY: Check if migrate-all operation is active
+        try:
+            from mpi_backend.utils.quickbooks_priority import is_migrate_all_active
+            if is_migrate_all_active():
+                logger.info("Google Sheets sync paused - MIGRATE-ALL has absolute priority")
+                return {
+                    "success": False,
+                    "message": "Sync paused for MIGRATE-ALL priority operation",
+                    "skipped": True
+                }
+        except ImportError:
+            pass
+            
+        # FALLBACK: Check if any QuickBooks export is active
         try:
             from mpi_backend.utils.quickbooks_priority import is_qb_export_active
             if is_qb_export_active():
-                try:
-                    logger.info("Google Sheets sync paused - QuickBooks priority export in progress")
-                except Exception:
-                    # Handle any encoding issues
-                    pass
+                logger.info("Google Sheets sync paused - QuickBooks priority export in progress")
                 return {
                     "success": False,
                     "message": "Sync paused for QuickBooks priority export",
                     "skipped": True
                 }
         except ImportError:
-            # If function not available, continue normally
             pass
             
         # If db is not provided, create a new session

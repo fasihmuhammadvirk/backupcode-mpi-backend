@@ -1,16 +1,12 @@
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.date import DateTrigger
-from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from fastapi_pagination import add_pagination
 from fastapi.middleware.cors import CORSMiddleware
 import pytz
-from datetime import datetime
 import logging
-# from apitally.fastapi import ApitallyMiddleware
 import asyncio
 import time as time_module
 
@@ -37,17 +33,10 @@ from mpi_backend.database.controllers.GoogleSheetSyncController import GoogleShe
 from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
 from mpi_backend.config import LOG_LEVEL
 from mpi_backend.utils.invoice_downaloder import email_download_background_task
-from mpi_backend.utils.missing_invoice_downaloder import missing_email_download_background_task
 from mpi_backend.utils.statement_downloader import statement_download_background_task
 
-from mpi_backend.utils.invoice_convertor import convert_invoice
-from mpi_backend.utils.extracted_data_processor import process_extracted_data
-from mpi_backend.database import Base, engine
-
-# Base.metadata.create_all(engine)  # create db tables
-
-# from middleware import MwTracker
-# tracker=MwTracker() # initializing middleware monitoring tool // comment out when running in local environment
+# ENHANCED: Import priority control utilities
+from mpi_backend.utils.quickbooks_priority import set_scheduler_instance
 
 UTC_TZ = pytz.utc  # UTC Time Zone
 
@@ -55,23 +44,27 @@ UTC_TZ = pytz.utc  # UTC Time Zone
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Initializing ENTERPRISE background task system")
-    logger.info("QuickBooks Priority Mode: ENABLED")
+    logger.info("QuickBooks ABSOLUTE Priority Mode: ENABLED")
     logger.info("Dedicated QB database pool: 15 connections")
     logger.info("Background job pausing: ENABLED")
+    logger.info("Dynamic scheduler control: ENABLED")
 
     scheduler = BackgroundScheduler()
     
-    # OPTIMIZED: Email download with QuickBooks priority awareness
+    # ENHANCED: Register scheduler for dynamic job control
+    set_scheduler_instance(scheduler)
+    
+    # OPTIMIZED: Email download with migrate-all priority awareness
     scheduler.add_job(
         email_download_background_task, 
         "interval", 
         minutes=3, 
-        max_instances=15,  # Reduced from 20 to leave resources for QB
+        max_instances=10,  # Reduced further to prioritize migrate-all
         id="email_download",
-        name="Email Download (QB-aware)"
+        name="Email Download (migrate-all aware)"
     )
 
-    # OPTIMIZED: Statement download with QuickBooks priority awareness
+    # OPTIMIZED: Statement download with migrate-all priority awareness
     scheduler.add_job(
         statement_download_background_task, 
         "interval", 
@@ -79,10 +72,10 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         replace_existing=True,
         id="statement_download",
-        name="Statement Download (QB-aware)"
+        name="Statement Download (migrate-all aware)"
     )
 
-    # OPTIMIZED: Google Sheets sync with QuickBooks priority awareness
+    # OPTIMIZED: Google Sheets sync with migrate-all priority awareness
     scheduler.add_job(
         GoogleSheetSyncController.execute_sync_task,
         "interval",
@@ -90,38 +83,21 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
         max_instances=1,
         id="google_sheets_sync",
-        name="Google Sheets Sync (QB-aware)"
+        name="Google Sheets Sync (migrate-all aware)"
     )
 
-    # OPTIMIZED: Mapping updates with QuickBooks priority awareness
+    # OPTIMIZED: Mapping updates with migrate-all priority awareness
     scheduler.add_job(
         ItemsMappingController.execute_update_all_mappings_task,
         CronTrigger(hour=3, minute=0, timezone=UTC_TZ),
         id="update_all_mappings_daily",
         replace_existing=True,
         max_instances=1,
-        name="Daily Mapping Update (QB-aware)"
+        name="Daily Mapping Update (migrate-all aware)"
     )
 
-    # checking for any missing invocies
-    #scheduler.add_job(missing_email_download_background_task,
-    #                 CronTrigger(hour=5, minute=0, timezone=UTC_TZ),
-    #                  # Eastern Time: 9:00 PM Previous Day
-    #                  # European Time: 3:00 AM Same Day
-    #                  max_instances=1,
-    #                  replace_existing=True  # Avoids duplicate jobs if restarted
-    #                  )
-    #
-
-    # Run the job only once when the application starts (non-blocking)
-    #scheduler.add_job(
-    #    missing_email_download_background_task,
-    #    DateTrigger(run_date=datetime.now()),  # Runs once at startup
-    #    replace_existing=True
-    #)
-
     scheduler.start()
-    logger.info("Background tasks scheduler started")
+    logger.info("Background tasks scheduler started with priority control")
     yield
     logger.info("Shutting down application")
 
@@ -143,17 +119,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# CRITICAL TIMEOUT MIDDLEWARE: Add timeout handling middleware
+# ENHANCED TIMEOUT MIDDLEWARE: Priority-aware timeout handling
 @app.middleware("http")
 async def timeout_middleware(request: Request, call_next):
     """
-    Middleware to handle timeouts for different routes
-    QuickBooks routes get extended timeout (10 minutes)
-    Other routes get standard timeout (2 minutes)
+    Enhanced middleware with absolute priority for migrate-all operations
+    - migrate-all: 15 minutes timeout (absolute priority)
+    - Other QuickBooks: 10 minutes timeout
+    - Exports: 5 minutes timeout
+    - Standard: 2 minutes timeout
     """
-    # Determine timeout based on route
-    if "/quickbooks" in str(request.url):
-        timeout_seconds = 600  # 10 minutes for QuickBooks operations
+    # Determine timeout and priority based on route
+    if "/quickbooks/migrate-all" in str(request.url):
+        timeout_seconds = 900  # 15 minutes for migrate-all (ABSOLUTE PRIORITY)
+        logger.info(f"🎯 MIGRATE-ALL operation started - ABSOLUTE PRIORITY - "
+                   f"timeout: {timeout_seconds}s")
+    elif "/quickbooks" in str(request.url):
+        timeout_seconds = 600  # 10 minutes for other QuickBooks operations
         logger.info(f"🔄 QB operation started - timeout: {timeout_seconds}s")
     elif "/export" in str(request.url):
         timeout_seconds = 300  # 5 minutes for export operations
@@ -171,14 +153,16 @@ async def timeout_middleware(request: Request, call_next):
         )
         
         elapsed = time_module.time() - start_time
-        if "/quickbooks" in str(request.url):
-            logger.info(f"✅ QuickBooks completed in {elapsed:.2f}s")
+        if "/quickbooks/migrate-all" in str(request.url):
+            logger.info(f"MIGRATE-ALL completed in {elapsed:.2f}s")
+        elif "/quickbooks" in str(request.url):
+            logger.info(f"QuickBooks completed in {elapsed:.2f}s")
         
         return response
         
     except asyncio.TimeoutError:
         elapsed = time_module.time() - start_time
-        logger.error(f"⏰ Request timeout after {elapsed:.2f}s for {request.url}")
+        logger.error(f"Request timeout after {elapsed:.2f}s for {request.url}")
         
         return JSONResponse(
             status_code=408,
@@ -193,15 +177,8 @@ async def timeout_middleware(request: Request, call_next):
         )
     except Exception as e:
         elapsed = time_module.time() - start_time
-        logger.error(f"❌ Request failed after {elapsed:.2f}s: {str(e)}")
+        logger.error(f"Request failed after {elapsed:.2f}s: {str(e)}")
         raise
-
-
-# app.add_middleware(
-#     ApitallyMiddleware,
-#     client_id="d2f20325-2b6d-4fe0-8a73-a757ae4227b8",
-#     env="prod",  # or "dev"
-# )
 
 
 def register_routes(app):
@@ -223,11 +200,13 @@ def register_routes(app):
 register_routes(app)
 add_pagination(app)
 
-# CRITICAL: Add startup event to log timeout configuration
+# ENHANCED: Add startup event to log timeout configuration
 @app.on_event("startup")
 async def startup_event():
-    logger.info("🚀 MPI Backend started with timeout protections:")
-    logger.info("   ⏱️  QuickBooks operations: 10 minutes timeout")
-    logger.info("   📊 Export operations: 5 minutes timeout") 
-    logger.info("   🔄 Standard operations: 2 minutes timeout")
-    logger.info("   🎯 Timeout middleware: ACTIVE")
+    logger.info("MPI Backend started with ENHANCED timeout protections:")
+    logger.info("MIGRATE-ALL operations: 15 minutes timeout (ABSOLUTE PRIORITY)")
+    logger.info(" Other QuickBooks operations: 10 minutes timeout")
+    logger.info("Export operations: 5 minutes timeout")
+    logger.info("Standard operations: 2 minutes timeout")
+    logger.info("Dynamic job pausing: ACTIVE")
+    logger.info("Priority control middleware: ACTIVE")

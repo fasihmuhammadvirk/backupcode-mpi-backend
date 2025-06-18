@@ -610,16 +610,23 @@ def process_statement_files(base_folder_path: Path):
 
 
 def statement_download_background_task():
-    """Main background task for downloading and processing monthly statements 
-    using invoice downloader logic"""
-    # Check if QuickBooks export is active and should pause
+    """ENHANCED: Statement download with migrate-all priority awareness"""
+    # ABSOLUTE PRIORITY: Check if migrate-all operation is active
+    try:
+        from mpi_backend.utils.quickbooks_priority import is_migrate_all_active
+        if is_migrate_all_active():
+            logger.info("Statement download paused - MIGRATE-ALL has absolute priority")
+            return
+    except ImportError:
+        pass
+    
+    # FALLBACK: Check if any QuickBooks export is active
     try:
         from mpi_backend.utils.quickbooks_priority import is_qb_export_active
         if is_qb_export_active():
             logger.info("Statement download paused - QuickBooks priority export in progress")
             return
     except ImportError:
-        # If function not available, continue normally
         pass
     
     mail = None

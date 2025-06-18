@@ -70,11 +70,16 @@ EXPORT_BATCH_SIZE = int(os.getenv("EXPORT_BATCH_SIZE", "1000"))  # Records per b
 EXPORT_USE_OPTIMIZED = os.getenv("EXPORT_USE_OPTIMIZED", "true").lower() == "true"  # Enable optimized exports by default
 EXPORT_MAX_RECORDS_BEFORE_BATCH = int(os.getenv("EXPORT_MAX_RECORDS_BEFORE_BATCH", "5000"))
 
-# QuickBooks Priority Configuration (Enterprise-level performance)
+# ENHANCED QuickBooks Priority Configuration with MIGRATE-ALL absolute priority
 QB_PRIORITY_MODE = os.getenv("QB_PRIORITY_MODE", "true").lower() == "true"  # Priority mode for QB exports
-QB_DEDICATED_POOL_SIZE = int(os.getenv("QB_DEDICATED_POOL_SIZE", "10"))  # Dedicated DB connections for QB
+QB_DEDICATED_POOL_SIZE = int(os.getenv("QB_DEDICATED_POOL_SIZE", "15"))  # Dedicated DB connections for QB
 QB_MAX_CONCURRENT_EXPORTS = int(os.getenv("QB_MAX_CONCURRENT_EXPORTS", "3"))  # Max concurrent QB exports
 QB_PAUSE_BACKGROUND_JOBS = os.getenv("QB_PAUSE_BACKGROUND_JOBS", "true").lower() == "true"  # Pause non-critical jobs during QB export
+
+# NEW: MIGRATE-ALL absolute priority settings
+MIGRATE_ALL_ABSOLUTE_PRIORITY = os.getenv("MIGRATE_ALL_ABSOLUTE_PRIORITY", "true").lower() == "true"  # MIGRATE-ALL gets absolute priority
+MIGRATE_ALL_TIMEOUT = int(os.getenv("MIGRATE_ALL_TIMEOUT", "900"))  # 15 minutes for migrate-all operations
+MIGRATE_ALL_PAUSE_ALL_JOBS = os.getenv("MIGRATE_ALL_PAUSE_ALL_JOBS", "true").lower() == "true"  # Pause ALL jobs during migrate-all
 
 # CRITICAL: Timeout Configuration for QuickBooks Operations
 # These settings prevent operations from getting stuck and ensure reliable processing
@@ -83,8 +88,9 @@ QB_CHUNK_SIZE = int(os.getenv("QB_CHUNK_SIZE", "500"))  # Process large datasets
 QB_CHUNK_DELAY = float(os.getenv("QB_CHUNK_DELAY", "1.0"))  # 1 second delay between chunks
 QB_PROGRESS_UPDATE_INTERVAL = int(os.getenv("QB_PROGRESS_UPDATE_INTERVAL", "10"))  # Update progress every 10%
 
-# HTTP Request Timeout Configuration
+# HTTP Request Timeout Configuration with MIGRATE-ALL priority
 REQUEST_TIMEOUT_DEFAULT = int(os.getenv("REQUEST_TIMEOUT_DEFAULT", "120"))  # 2 minutes for standard requests
+REQUEST_TIMEOUT_MIGRATE_ALL = int(os.getenv("REQUEST_TIMEOUT_MIGRATE_ALL", "900"))  # 15 minutes for MIGRATE-ALL (ABSOLUTE PRIORITY)
 REQUEST_TIMEOUT_QUICKBOOKS = int(os.getenv("REQUEST_TIMEOUT_QUICKBOOKS", "600"))  # 10 minutes for QuickBooks
 REQUEST_TIMEOUT_EXPORT = int(os.getenv("REQUEST_TIMEOUT_EXPORT", "300"))  # 5 minutes for exports
 
