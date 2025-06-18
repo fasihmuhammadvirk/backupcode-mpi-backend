@@ -1049,3 +1049,96 @@ class InvoiceItemController:
         logger.debug(f"Retrieved {len(items)} items for invoice_id: {invoice_id}")
         
         return items
+
+    def get_invoice_items_by_invoice_ids(self, invoice_ids, batch_size=1000):
+        """
+        Get invoice items by a list of invoice IDs for QuickBooks export.
+        This method gets all invoice items that belong to the specified invoices.
+        
+        Args:
+            invoice_ids: List of invoice IDs (can be UUID objects or strings)
+            batch_size: Number of records to fetch in each batch for large datasets
+            
+        Returns:
+            List of InvoiceItem objects with necessary attributes loaded
+        """
+        logger.debug(f"Getting invoice items for {len(invoice_ids) if invoice_ids else 0} invoices")
+        
+        if not invoice_ids:
+            return []
+        
+        # Convert UUID objects to strings if needed for database query
+        processed_invoice_ids = []
+        for invoice_id in invoice_ids:
+            if hasattr(invoice_id, '__str__'):
+                processed_invoice_ids.append(str(invoice_id))
+            else:
+                processed_invoice_ids.append(invoice_id)
+        
+        # Build query to get all invoice items for the specified invoices
+        query = self.db_context.query(InvoiceItem).filter(
+            InvoiceItem.invoice_id.in_(processed_invoice_ids)
+        )
+        
+        # Use optimized loading for QuickBooks export - only load necessary columns
+        query = query.options(
+            sqlalchemy.orm.load_only(
+                InvoiceItem.id,
+                InvoiceItem.invoice_id,
+                InvoiceItem.item,
+                InvoiceItem.description,
+                InvoiceItem.qty,
+                InvoiceItem.cost,
+                InvoiceItem.amount,
+                InvoiceItem.date,
+                InvoiceItem.ref_no,
+                InvoiceItem.customer_job,
+                InvoiceItem.vendor,
+                InvoiceItem.class_,
+                InvoiceItem.memo,
+                InvoiceItem.export_status
+            )
+        )
+        
+        # Order by invoice_id and then by id for consistent results
+        query = query.order_by(InvoiceItem.invoice_id, InvoiceItem.id)
+        
+        # For large datasets, use batched loading to reduce memory usage
+        if batch_size and batch_size > 0 and len(processed_invoice_ids) > 10:
+            items = []
+            offset = 0
+            while True:
+                batch = query.limit(batch_size).offset(offset).all()
+                if not batch:
+                    break
+                items.extend(batch)
+                offset += batch_size
+                if len(batch) < batch_size:  # Last batch
+                    break
+        else:
+            items = query.all()
+        
+        logger.debug(f"Retrieved {len(items)} invoice items for {len(processed_invoice_ids)} invoices")
+        return items
+
+    def get_suppliers_by_ids(self, supplier_ids):
+        """
+        Get suppliers by a list of supplier IDs for QuickBooks export.
+        
+        Args:
+            supplier_ids: List of supplier IDs
+            
+        Returns:
+            List of Supplier objects
+        """
+        if not supplier_ids:
+            return []
+        
+        from mpi_backend.database.models.Suppliers import Supplier
+        
+        suppliers = self.db_context.query(Supplier).filter(
+            Supplier.id.in_(supplier_ids)
+        ).all()
+        
+        logger.debug(f"Retrieved {len(suppliers)} suppliers for {len(supplier_ids)} supplier IDs")
+        return suppliers

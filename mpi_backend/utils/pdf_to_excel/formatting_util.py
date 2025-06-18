@@ -355,6 +355,11 @@ def export_batch_entry_to_excel(df, output_dir="mpi_backend/storage/Exports"):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     file_path = os.path.join(output_dir, f"exported_data_{timestamp}.xlsx")
 
+    # Handle empty DataFrame case
+    if df.empty or len(df.columns) == 0:
+        # Create a minimal DataFrame with a message
+        df = pd.DataFrame({"Message": ["No data to export"]})
+
     # Use pd.ExcelWriter with xlsxwriter as the engine
     with pd.ExcelWriter(file_path, engine="xlsxwriter") as writer:
         # Write the DataFrame to Excel
@@ -388,13 +393,16 @@ def export_batch_entry_to_excel(df, output_dir="mpi_backend/storage/Exports"):
             "Memo": 25,
             "Customer Job": 40,
             "Class": 10,
+            "Message": 30,  # For empty DataFrame case
         }
 
         for col_num, column in enumerate(df.columns):
             width = column_widths.get(column, 15)  # Default width is 15 if not specified
             worksheet.set_column(col_num, col_num, width)
 
-        worksheet.autofilter(0, 0, 0, len(df.columns) - 1)
+        # Only apply autofilter if we have data
+        if len(df.columns) > 0:
+            worksheet.autofilter(0, 0, 0, len(df.columns) - 1)
 
     return file_path
 

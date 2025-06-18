@@ -76,3 +76,13 @@ class ItemClassificationController:
             print(f"🔍 Fuzzy match found: '{target_item}' -> '{best_match.item}' (similarity: {best_score}% using {best_algorithm})")
         
         return best_match
+
+    def get_all_classifications(self):
+        """
+        Get all item classifications for QuickBooks export.
+        
+        Returns:
+            List of ItemClassification objects
+        """
+        classifications = self.db_context.query(ItemClassification).all()
+        return classifications

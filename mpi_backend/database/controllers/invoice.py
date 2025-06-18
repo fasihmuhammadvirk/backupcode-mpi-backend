@@ -4,6 +4,7 @@ from sqlalchemy.orm import joinedload, aliased
 from datetime import date
 from math import ceil
 import os
+import logging
 
 from fastapi import HTTPException
 from sqlalchemy import or_, asc, desc
@@ -11,6 +12,7 @@ from mpi_backend.database.models import Invoice, InvoiceItem
 from mpi_backend.database.schemas import Invoice as InvoiceResponse
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 
+logger = logging.getLogger(__name__)
 
 class InvoiceController:
     def __init__(self, db):
@@ -178,6 +180,34 @@ class InvoiceController:
 
     def get_invoice_by_invoiceID(self, invoice_id,db):
         return db.query(Invoice).filter(Invoice.id == invoice_id).first()
+
+    def get_invoices_by_ids(self, invoice_ids):
+        """
+        Get invoices by a list of invoice IDs for QuickBooks export.
+        
+        Args:
+            invoice_ids: List of invoice IDs (can be UUID objects or strings)
+            
+        Returns:
+            List of Invoice objects
+        """
+        if not invoice_ids:
+            return []
+        
+        # Convert UUID objects to strings if needed for database query
+        processed_invoice_ids = []
+        for invoice_id in invoice_ids:
+            if hasattr(invoice_id, '__str__'):
+                processed_invoice_ids.append(str(invoice_id))
+            else:
+                processed_invoice_ids.append(invoice_id)
+        
+        invoices = self.db_context.query(Invoice).filter(
+            Invoice.id.in_(processed_invoice_ids)
+        ).all()
+        
+        logger.debug(f"Retrieved {len(invoices)} invoices for {len(processed_invoice_ids)} invoice IDs")
+        return invoices
 
     def is_invoice_present(self,filename):
         try:

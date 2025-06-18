@@ -23,6 +23,7 @@ class SendtoQBFilterRequest(BaseModel):
     comparison_filters: List[ComparisonFilter] = []
     order_by: Optional[List[OrderByFilter]] = None
     excluded_invoice_ids: List[UUID] = None
+    skip_exported: bool = False
 
 class ExportToExcelFilterRequest(BaseModel):
     filters: Dict[str, List[Any]] = {}

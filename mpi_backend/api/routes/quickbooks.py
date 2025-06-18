@@ -112,14 +112,8 @@ def migrate_all_invoice_to_QB(
             # Get all invoice items for this batch
             invoice_items = InvoiceItemController(db).get_invoice_items_by_invoice_ids(batch_invoice_ids)
             
-            # Get unique supplier IDs from this batch
-            supplier_ids = list(set([item.supplier_id for item in invoice_items]))
-            
-            # Get all suppliers in one query
-            suppliers_dict = {}
-            suppliers = InvoiceItemController(db).get_suppliers_by_ids(supplier_ids)
-            for supplier in suppliers:
-                suppliers_dict[supplier.id] = supplier.name
+            # Get unique supplier names from this batch (since InvoiceItem stores vendor name directly)
+            vendor_names = list(set([item.vendor for item in invoice_items if item.vendor]))
             
             # Get all invoices in one query
             invoices_dict = {}
@@ -127,11 +121,8 @@ def migrate_all_invoice_to_QB(
             for invoice in invoices:
                 invoices_dict[invoice.id] = invoice
             
-            # Get all classifications in one query
-            classifications_dict = {}
-            classifications = ItemClassificationController(db).get_all_classifications()
-            for classification in classifications:
-                classifications_dict[classification.id] = classification.classification
+            # Get classifications for items using ItemClassificationController
+            classifications_controller = ItemClassificationController(db)
             
             # Process all invoice items in this batch
             batch_entries = []
@@ -139,20 +130,20 @@ def migrate_all_invoice_to_QB(
             
             for item in invoice_items:
                 try:
-                    # Skip already exported items if requested
-                    if request.skip_exported and item.is_exported:
+                    # Skip already exported items if requested (check export_status)
+                    if request.skip_exported and item.export_status == "Sent":
                         continue
                     
-                    # Get supplier name
-                    supplier_name = suppliers_dict.get(item.supplier_id, "Unknown Supplier")
+                    # Get supplier name (directly from vendor field)
+                    supplier_name = item.vendor or "Unknown Supplier"
                     
                     # Get invoice details
                     invoice = invoices_dict.get(item.invoice_id)
-                    invoice_date = invoice.date if invoice else None
-                    invoice_number = invoice.invoice_number if invoice else None
+                    invoice_date = invoice.date if invoice else item.date
+                    invoice_number = item.ref_no  # Use ref_no from item as invoice number
                     
-                    # Get classification
-                    classification = classifications_dict.get(item.classification_id, "")
+                    # Get classification using the item description
+                    classification = classifications_controller.get_classification(item.description or item.item or "")
                     
                     # Build the batch entry
                     batch_entry = {
@@ -161,11 +152,11 @@ def migrate_all_invoice_to_QB(
                         "vendor": supplier_name,
                         "terms": "Due on receipt",
                         "bill due": invoice_date,
-                        "account": "Purchases - Cost of Goods Sold",
+                        "account": classification or "Purchases - Cost of Goods Sold",
                         "Amount": item.amount,
-                        "Memo": item.description,
-                        "Customer Job": item.customer_job,
-                        "Class": classification
+                        "Memo": item.description or item.item or "",
+                        "Customer Job": item.customer_job or "",
+                        "Class": item.class_ or ""
                     }
                     
                     batch_entries.append(batch_entry)
@@ -265,14 +256,8 @@ def migrate_invoice_to_QB(
         # Get all invoice items for these invoices
         invoice_items = InvoiceItemController(db).get_invoice_items_by_invoice_ids(invoice_ids)
         
-        # Get unique supplier IDs
-        supplier_ids = list(set([item.supplier_id for item in invoice_items]))
-        
-        # Get all suppliers in one query
-        suppliers_dict = {}
-        suppliers = InvoiceItemController(db).get_suppliers_by_ids(supplier_ids)
-        for supplier in suppliers:
-            suppliers_dict[supplier.id] = supplier.name
+        # Get unique supplier names from these invoices (since InvoiceItem stores vendor name directly)
+        vendor_names = list(set([item.vendor for item in invoice_items if item.vendor]))
         
         # Get all invoices in one query
         invoices_dict = {}
@@ -280,11 +265,8 @@ def migrate_invoice_to_QB(
         for invoice in invoices:
             invoices_dict[invoice.id] = invoice
         
-        # Get all classifications in one query
-        classifications_dict = {}
-        classifications = ItemClassificationController(db).get_all_classifications()
-        for classification in classifications:
-            classifications_dict[classification.id] = classification.classification
+        # Get classifications for items using ItemClassificationController
+        classifications_controller = ItemClassificationController(db)
         
         # Process all invoice items
         batch_entries = []
@@ -292,16 +274,19 @@ def migrate_invoice_to_QB(
         
         for item in invoice_items:
             try:
-                # Get supplier name
-                supplier_name = suppliers_dict.get(item.supplier_id, "Unknown Supplier")
+                # The /migrate endpoint doesn't have skip_exported option, process all items
+                # (skip_exported is only available in /migrate-all endpoint)
+                
+                # Get supplier name (directly from vendor field)
+                supplier_name = item.vendor or "Unknown Supplier"
                 
                 # Get invoice details
                 invoice = invoices_dict.get(item.invoice_id)
-                invoice_date = invoice.date if invoice else None
-                invoice_number = invoice.invoice_number if invoice else None
+                invoice_date = invoice.date if invoice else item.date
+                invoice_number = item.ref_no  # Use ref_no from item as invoice number
                 
-                # Get classification
-                classification = classifications_dict.get(item.classification_id, "")
+                # Get classification using the item description
+                classification = classifications_controller.get_classification(item.description or item.item or "")
                 
                 # Build the batch entry
                 batch_entry = {
@@ -310,11 +295,11 @@ def migrate_invoice_to_QB(
                     "vendor": supplier_name,
                     "terms": "Due on receipt",
                     "bill due": invoice_date,
-                    "account": "Purchases - Cost of Goods Sold",
+                    "account": classification or "Purchases - Cost of Goods Sold",
                     "Amount": item.amount,
-                    "Memo": item.description,
-                    "Customer Job": item.customer_job,
-                    "Class": classification
+                    "Memo": item.description or item.item or "",
+                    "Customer Job": item.customer_job or "",
+                    "Class": item.class_ or ""
                 }
                 
                 batch_entries.append(batch_entry)
