@@ -118,7 +118,7 @@ class GoogleSheetSyncController:
         """
         # Check if QuickBooks export is active and should pause
         try:
-            from mpi_backend.api.routes.quickbooks import is_qb_export_active
+            from mpi_backend.utils.quickbooks_priority import is_qb_export_active
             if is_qb_export_active():
                 try:
                     logger.info("⏸️  Google Sheets sync paused - QuickBooks priority export in progress")

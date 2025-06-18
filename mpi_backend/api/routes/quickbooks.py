@@ -8,43 +8,16 @@ from mpi_backend.database.controllers import InvoiceItemController,InvoiceContro
 from mpi_backend.database.schemas import SendtoQBFilterRequest
 from mpi_backend.utils.pdf_to_excel.formatting_util import export_batch_entry_to_excel
 from mpi_backend.utils.s3_utils import upload_file, get_presigned_url
-from mpi_backend.config import QB_PRIORITY_MODE, QB_PAUSE_BACKGROUND_JOBS
+from mpi_backend.utils.quickbooks_priority import (
+    pause_background_jobs,
+    resume_background_jobs, 
+    is_qb_export_active,
+    QB_PRIORITY_MODE
+)
 import os
-import threading
 import time
 
 router = APIRouter(prefix="/quickbooks",tags=["QuickBooks"])
-
-# Global flag to pause background jobs during QB export
-_qb_export_active = False
-_qb_export_lock = threading.Lock()
-
-def pause_background_jobs():
-    """Signal to pause non-critical background jobs"""
-    global _qb_export_active
-    if QB_PAUSE_BACKGROUND_JOBS:
-        with _qb_export_lock:
-            _qb_export_active = True
-        try:
-            print("🔒 Background jobs paused for QuickBooks priority export")
-        except UnicodeEncodeError:
-            print("Background jobs paused for QuickBooks priority export")
-
-def resume_background_jobs():
-    """Signal to resume background jobs"""
-    global _qb_export_active
-    if QB_PAUSE_BACKGROUND_JOBS:
-        with _qb_export_lock:
-            _qb_export_active = False
-        try:
-            print("🔓 Background jobs resumed after QuickBooks export")
-        except UnicodeEncodeError:
-            print("Background jobs resumed after QuickBooks export")
-
-def is_qb_export_active():
-    """Check if QuickBooks export is currently active"""
-    with _qb_export_lock:
-        return _qb_export_active
 
 @router.post("/migrate-all")
 def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest, 
