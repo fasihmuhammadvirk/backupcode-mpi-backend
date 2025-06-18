@@ -110,7 +110,7 @@ class SheetNameFixer:
         Returns:
             Dictionary with analysis results
         """
-        logger.info("🔍 Analyzing database for problematic sheet names...")
+        logger.info("Analyzing database for problematic sheet names...")
         
         # Check supplier_item_mappings table
         mappings = db.query(ItemsMapping).all()
@@ -145,7 +145,7 @@ class SheetNameFixer:
             'clean_unmapped': len(clean_unmapped)
         }
         
-        logger.info(f"📊 Database Analysis:")
+        logger.info(f"Database Analysis:")
         logger.info(f"   Supplier Item Mappings: {analysis['total_mappings']} total")
         logger.info(f"   - Problematic: {analysis['problematic_mappings']}")
         logger.info(f"   - Clean: {analysis['clean_mappings']}")
@@ -166,7 +166,7 @@ class SheetNameFixer:
         Returns:
             Number of records updated
         """
-        logger.info(f"🔧 {'[DRY RUN] ' if dry_run else ''}Fixing database sheet names...")
+        logger.info(f"{'[DRY RUN] ' if dry_run else ''}Fixing database sheet names...")
         
         updated_count = 0
         
@@ -207,15 +207,15 @@ class SheetNameFixer:
         if not dry_run and updated_count > 0:
             try:
                 db.commit()
-                logger.info(f"✅ Successfully updated {updated_count} database records")
+                logger.info(f"Successfully updated {updated_count} database records")
                 self.stats['database_updates'] = updated_count
             except Exception as e:
                 db.rollback()
-                logger.error(f"❌ Error committing database changes: {e}")
+                logger.error(f"Error committing database changes: {e}")
                 self.stats['errors'] += 1
                 raise
         elif dry_run:
-            logger.info(f"📋 Would update {updated_count} database records")
+            logger.info(f"Would update {updated_count} database records")
         
         return updated_count
     
@@ -226,7 +226,7 @@ class SheetNameFixer:
         Returns:
             Dictionary with file analysis results
         """
-        logger.info("🔍 Analyzing JSON files for problematic sheet names...")
+        logger.info("Analyzing JSON files for problematic sheet names...")
         
         json_files = [
             'mpi_backend/storage/fixtures/item-mapping.json',
@@ -237,7 +237,7 @@ class SheetNameFixer:
         
         for file_path in json_files:
             if not os.path.exists(file_path):
-                logger.warning(f"⚠️  File not found: {file_path}")
+                logger.warning(f"File not found: {file_path}")
                 continue
             
             try:
@@ -260,13 +260,13 @@ class SheetNameFixer:
                     'clean_count': clean_count
                 }
                 
-                logger.info(f"📊 {file_path}:")
+                logger.info(f"{file_path}:")
                 logger.info(f"   Total items: {len(data)}")
                 logger.info(f"   Problematic: {problematic_count}")
                 logger.info(f"   Clean: {clean_count}")
                 
             except Exception as e:
-                logger.error(f"❌ Error analyzing {file_path}: {e}")
+                logger.error(f"Error analyzing {file_path}: {e}")
                 self.stats['errors'] += 1
         
         return results
@@ -281,7 +281,7 @@ class SheetNameFixer:
         Returns:
             Number of files updated
         """
-        logger.info(f"🔧 {'[DRY RUN] ' if dry_run else ''}Fixing JSON files...")
+        logger.info(f"{'[DRY RUN] ' if dry_run else ''}Fixing JSON files...")
         
         json_files = [
             'mpi_backend/storage/fixtures/item-mapping.json',
@@ -321,20 +321,20 @@ class SheetNameFixer:
                         backup_path = f"{file_path}.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
                         with open(backup_path, 'w') as f:
                             json.dump(data, f, indent=2)
-                        logger.info(f"📁 Created backup: {backup_path}")
+                        logger.info(f"Created backup: {backup_path}")
                         
                         # Save updated file
                         with open(file_path, 'w') as f:
                             json.dump(data, f, indent=2)
                         
-                        logger.info(f"✅ Updated {updated_items} items in {file_path}")
+                        logger.info(f"Updated {updated_items} items in {file_path}")
                         files_updated += 1
                         self.stats['json_updates'] += updated_items
                     else:
-                        logger.info(f"📋 Would update {updated_items} items in {file_path}")
+                        logger.info(f"Would update {updated_items} items in {file_path}")
                 
             except Exception as e:
-                logger.error(f"❌ Error processing {file_path}: {e}")
+                logger.error(f"Error processing {file_path}: {e}")
                 self.stats['errors'] += 1
         
         return files_updated
@@ -349,19 +349,19 @@ class SheetNameFixer:
         Returns:
             Dictionary with operation results
         """
-        logger.info("🚀 Starting Complete Sheet Name Fix Process")
+        logger.info("Starting Complete Sheet Name Fix Process")
         logger.info("="*60)
         
         try:
             # Test database connection first
-            logger.info("🔍 Testing database connection...")
+            logger.info("Testing database connection...")
             try:
                 from sqlalchemy import text
                 with SessionLocal() as test_db:
                     test_db.execute(text("SELECT 1"))
-                logger.info("✅ Database connection successful")
+                logger.info("Database connection successful")
             except Exception as e:
-                logger.error(f"❌ Database connection failed: {e}")
+                logger.error(f"Database connection failed: {e}")
                 return {
                     'success': False,
                     'error': f"Database connection failed: {e}",
@@ -383,7 +383,7 @@ class SheetNameFixer:
             total_fixed = self.stats['successfully_fixed']
             
             logger.info("\n" + "="*60)
-            logger.info("📊 OPERATION SUMMARY")
+            logger.info("OPERATION SUMMARY")
             logger.info("="*60)
             logger.info(f"Mode: {'DRY RUN' if dry_run else 'LIVE RUN'}")
             logger.info(f"Problematic sheet names found: {self.stats['problematic_found']}")
@@ -393,10 +393,10 @@ class SheetNameFixer:
             logger.info(f"Errors encountered: {self.stats['errors']}")
             
             if dry_run:
-                logger.info("\n🔍 This was a DRY RUN. No changes were made.")
+                logger.info("\nThis was a DRY RUN. No changes were made.")
                 logger.info("To apply the fixes, run with --live flag")
             else:
-                logger.info(f"\n✅ Sheet name fix completed successfully!")
+                logger.info(f"\nSheet name fix completed successfully!")
                 logger.info(f"Your QuickBooks export should now work properly.")
             
             return {
@@ -408,7 +408,7 @@ class SheetNameFixer:
             }
             
         except Exception as e:
-            logger.error(f"❌ Critical error during fix process: {e}")
+            logger.error(f"Critical error during fix process: {e}")
             return {
                 'success': False,
                 'error': str(e),
@@ -436,17 +436,17 @@ def main():
     
     dry_run = not args.live
     
-    print("🛠️  Sheet Name Fix Script")
+    print("Sheet Name Fix Script")
     print("="*60)
     print(f"Mode: {'DRY RUN (no changes)' if dry_run else 'LIVE RUN (will make changes)'}")
     
     if not dry_run and not args.force:
-        print("\n⚠️  WARNING: This will modify your database and JSON files!")
+        print("\nWARNING: This will modify your database and JSON files!")
         print("Make sure you have backups before proceeding.")
         
         confirm = input("\nDo you want to continue? (yes/no): ").lower().strip()
         if confirm != 'yes':
-            print("❌ Operation cancelled.")
+            print("Operation cancelled.")
             return
     
     # Run the fix
@@ -454,11 +454,11 @@ def main():
     result = fixer.run_complete_fix(dry_run)
     
     if result['success']:
-        print(f"\n🎉 Operation completed successfully!")
+        print(f"\nOperation completed successfully!")
         if dry_run:
             print("Run with --live to apply the fixes.")
     else:
-        print(f"\n❌ Operation failed: {result.get('error', 'Unknown error')}")
+        print(f"\nOperation failed: {result.get('error', 'Unknown error')}")
         sys.exit(1)
 
 
