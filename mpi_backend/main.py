@@ -58,16 +58,16 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(
         statement_download_background_task, 
         "interval", 
-        hours=1, 
+        hours=10,
         max_instances=1,  # Only one instance at a time
         replace_existing=True
     )
 
-    # Run the sync_mappings job on a 30-minute interval
+    # Run the sync_mappings job on a 5-hour interval
     scheduler.add_job(
         GoogleSheetSyncController.execute_sync_task,
         "interval",
-        minutes=30,
+        hours=5,
         replace_existing=True,
         max_instances=1
     )
@@ -90,6 +90,7 @@ async def lifespan(app: FastAPI):
     #                  replace_existing=True  # Avoids duplicate jobs if restarted
     #                  )
     #
+
     # Run the job only once when the application starts (non-blocking)
     #scheduler.add_job(
     #    missing_email_download_background_task,
