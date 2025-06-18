@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Optional
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from mpi_backend.api.routes.quickbooks import is_qb_export_active
+from mpi_backend.utils.quickbooks_priority import is_qb_export_active
 from mpi_backend.utils.export_utils import extract_supplier_id
 from mpi_backend.database import SessionLocal
 from mpi_backend.utils.item_utils import clean_supplier_suffix
