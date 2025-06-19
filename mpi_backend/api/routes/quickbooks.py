@@ -558,13 +558,31 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
             mask_l = batch_entry['ref_no'].isin(ref_nos_with_l_only)
             batch_entry.loc[mask_l, 'class_'] = 'L'
     
+    # CRITICAL FIX: Include TAX item classes for custom classes like "finishing"
+    # Build mapping of ref_no to tax item classes for non-A/L classes
+    tax_class_mapping = {}
+    for invoice_id, classes in tax_item_classes.items():
+        matching_rows = df[df['invoice_id'] == invoice_id]
+        if not matching_rows.empty:
+            ref_no = matching_rows.iloc[0]['ref_no']
+            # For non-A/L classes, use the first tax class found
+            non_al_classes = [c for c in classes if c not in ['A', 'L']]
+            if non_al_classes and ref_no not in final_class_a_refs and ref_no not in final_class_l_refs:
+                tax_class_mapping[ref_no] = non_al_classes[0]
+    
     # For other classes: use groupby to get first non-empty class per ref_no (fast!)
     # This preserves classes like "finishing" that you manually assign
     ref_nos_to_update = ~batch_entry['ref_no'].isin(list(final_class_a_refs) + list(final_class_l_refs))
     if ref_nos_to_update.any():
         # Get first non-empty class for each ref_no (preserves your custom classes!)
         non_empty_classes = df[df['class_'] != ''].groupby('ref_no')['class_'].first()
+        # Apply regular item classes first
         batch_entry.loc[ref_nos_to_update, 'class_'] = batch_entry.loc[ref_nos_to_update, 'ref_no'].map(non_empty_classes).fillna('')
+        # Then override with tax item classes where they exist
+        for ref_no, tax_class in tax_class_mapping.items():
+            mask = (batch_entry['ref_no'] == ref_no) & ref_nos_to_update
+            if mask.any():
+                batch_entry.loc[mask, 'class_'] = tax_class
     
     # FAST formatting
     batch_entry['date'] = pd.to_datetime(batch_entry['date'], errors='coerce').dt.strftime('%m/%d/%Y')
@@ -902,13 +920,31 @@ def migrate_invoice_to_QB_internal(invoice_ids: List[UUID],
             mask_l = batch_entry['ref_no'].isin(ref_nos_with_l_only)
             batch_entry.loc[mask_l, 'class_'] = 'L'
     
+    # CRITICAL FIX: Include TAX item classes for custom classes like "finishing"
+    # Build mapping of ref_no to tax item classes for non-A/L classes
+    tax_class_mapping = {}
+    for invoice_id, classes in tax_item_classes.items():
+        matching_rows = df[df['invoice_id'] == invoice_id]
+        if not matching_rows.empty:
+            ref_no = matching_rows.iloc[0]['ref_no']
+            # For non-A/L classes, use the first tax class found
+            non_al_classes = [c for c in classes if c not in ['A', 'L']]
+            if non_al_classes and ref_no not in ref_nos_with_a and ref_no not in ref_nos_with_l:
+                tax_class_mapping[ref_no] = non_al_classes[0]
+    
     # For other classes: use groupby to get first non-empty class per ref_no (fast!)
     # This preserves classes like "finishing" that you manually assign
     ref_nos_to_update = ~batch_entry['ref_no'].isin(list(ref_nos_with_a) + list(ref_nos_with_l))
     if ref_nos_to_update.any():
         # Get first non-empty class for each ref_no (preserves your custom classes!)
         non_empty_classes = df[df['class_'] != ''].groupby('ref_no')['class_'].first()
+        # Apply regular item classes first
         batch_entry.loc[ref_nos_to_update, 'class_'] = batch_entry.loc[ref_nos_to_update, 'ref_no'].map(non_empty_classes).fillna('')
+        # Then override with tax item classes where they exist
+        for ref_no, tax_class in tax_class_mapping.items():
+            mask = (batch_entry['ref_no'] == ref_no) & ref_nos_to_update
+            if mask.any():
+                batch_entry.loc[mask, 'class_'] = tax_class
     
     # Final formatting
     batch_entry['date'] = pd.to_datetime(batch_entry['date'], 
