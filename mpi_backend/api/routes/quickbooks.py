@@ -380,6 +380,9 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
     tax_by_invoice = {}
     all_item_ids_for_status = []
     
+    # Store class values from tax items for invoice-level class determination
+    tax_item_classes = {}
+    
     # Single pass through ALL items - optimized for speed
     for item in invoice_items:
         item_sheet_name = getattr(item, 'sheet_name', '') or ''
@@ -394,6 +397,14 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
                 tax_by_invoice[item_invoice_id] += float(amount_str)
             except (ValueError, TypeError):
                 pass
+            
+            # CRITICAL BUG FIX: Preserve class values from TAX items
+            # Tax items with class A or L should affect entire invoice classification
+            item_class = getattr(item, 'class_', '') or ''
+            if item_class and item_invoice_id:
+                if item_invoice_id not in tax_item_classes:
+                    tax_item_classes[item_invoice_id] = []
+                tax_item_classes[item_invoice_id].append(item_class)
             
             # CRITICAL BUG FIX: Add TAX item IDs to status update list
             # TAX items also need their export_status changed from Pending to Sent
@@ -435,9 +446,21 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
     df = pd.DataFrame(all_items_data)
     df['account'] = ''
     
-    # CRITICAL BUG FIX: Class A and L logic (EXACT MATCH TO WORKING INTERNAL FUNCTION)
+    # CRITICAL BUG FIX: Class A and L logic INCLUDING TAX ITEMS
+    # Get class A and L ref_nos from regular items
     class_a_refs = df[df['class_'] == 'A']['ref_no'].unique()
     class_l_refs = df[df['class_'] == 'L']['ref_no'].unique()
+    
+    # CRITICAL BUG FIX: Add ref_nos from tax items with class A or L
+    for invoice_id, classes in tax_item_classes.items():
+        # Find corresponding ref_no for this invoice_id
+        matching_rows = df[df['invoice_id'] == invoice_id]
+        if not matching_rows.empty:
+            ref_no = matching_rows.iloc[0]['ref_no']
+            if 'A' in classes and ref_no not in class_a_refs:
+                class_a_refs = list(class_a_refs) + [ref_no]
+            elif 'L' in classes and ref_no not in class_l_refs:
+                class_l_refs = list(class_l_refs) + [ref_no]
     
     if len(class_a_refs) > 0:
         df.loc[df['ref_no'].isin(class_a_refs), 'account'] = 'UnInvoiced JIP:Material:Additional Material'
@@ -513,6 +536,13 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
         'class_': 'first'  # This will be overridden below with proper invoice-level class logic
     })
     
+    # CRITICAL BUSINESS LOGIC FIX: Apply tax like original working code
+    # Tax should be added per invoice, not per row - this matches the working logic
+    def add_tax_per_invoice(row):
+        return row['amount'] + row['tax_amount']
+    
+    batch_entry['amount'] = batch_entry.apply(add_tax_per_invoice, axis=1)
+    
     # ULTRA-FAST VECTORIZED CLASS LOGIC: Determine class at INVOICE level  
     # This replaces the slow loop with vectorized pandas operations for maximum speed
     
@@ -523,6 +553,17 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
     # Step 2: Get unique ref_nos with A or L classes (vectorized)
     ref_nos_with_a = df[has_class_a]['ref_no'].unique() if has_class_a.any() else []
     ref_nos_with_l = df[has_class_l]['ref_no'].unique() if has_class_l.any() else []
+    
+    # Step 2.5: CRITICAL BUG FIX - Add ref_nos from tax items with class A or L
+    for invoice_id, classes in tax_item_classes.items():
+        # Find corresponding ref_no for this invoice_id
+        matching_rows = df[df['invoice_id'] == invoice_id]
+        if not matching_rows.empty:
+            ref_no = matching_rows.iloc[0]['ref_no']
+            if 'A' in classes and ref_no not in ref_nos_with_a:
+                ref_nos_with_a = list(ref_nos_with_a) + [ref_no]
+            elif 'L' in classes and ref_no not in ref_nos_with_l:
+                ref_nos_with_l = list(ref_nos_with_l) + [ref_no]
     
     # Step 3: Apply class priority logic (vectorized operations)
     # For invoices with class A, set ALL to A
@@ -544,9 +585,6 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
         # Get first non-empty class for each ref_no (preserves your custom classes!)
         non_empty_classes = df[df['class_'] != ''].groupby('ref_no')['class_'].first()
         batch_entry.loc[ref_nos_to_update, 'class_'] = batch_entry.loc[ref_nos_to_update, 'ref_no'].map(non_empty_classes).fillna('')
-    
-    # Add tax to amount
-    batch_entry['amount'] = batch_entry['amount'] + batch_entry['tax_amount']
     
     # FAST formatting
     batch_entry['date'] = pd.to_datetime(batch_entry['date'], errors='coerce').dt.strftime('%m/%d/%Y')
@@ -659,6 +697,9 @@ def migrate_invoice_to_QB_internal(invoice_ids: List[UUID],
     tax_by_invoice = {}
     all_item_ids_for_status = []
     
+    # Store class values from tax items for invoice-level class determination
+    tax_item_classes = {}
+    
     # Get classification controller
     classification_controller = ItemClassificationController(db)
     
@@ -691,6 +732,14 @@ def migrate_invoice_to_QB_internal(invoice_ids: List[UUID],
                 tax_by_invoice[item_invoice_id] += float(amount_str)
             except (ValueError, TypeError):
                 pass
+            
+            # CRITICAL BUG FIX: Preserve class values from TAX items
+            # Tax items with class A or L should affect entire invoice classification
+            item_class = getattr(item, 'class_', '') or ''
+            if item_class and item_invoice_id:
+                if item_invoice_id not in tax_item_classes:
+                    tax_item_classes[item_invoice_id] = []
+                tax_item_classes[item_invoice_id].append(item_class)
             
             # CRITICAL BUG FIX: Add TAX item IDs to status update list
             # TAX items also need their export_status changed from Pending to Sent
@@ -736,9 +785,21 @@ def migrate_invoice_to_QB_internal(invoice_ids: List[UUID],
     df = pd.DataFrame(all_items_data)
     df['account'] = ''
     
-    # VECTORIZED Class A and L logic (EXACT ORIGINAL BUSINESS LOGIC)
+    # VECTORIZED Class A and L logic INCLUDING TAX ITEMS
+    # Get class A and L ref_nos from regular items
     class_a_refs = df[df['class_'] == 'A']['ref_no'].unique()
     class_l_refs = df[df['class_'] == 'L']['ref_no'].unique()
+    
+    # CRITICAL BUG FIX: Add ref_nos from tax items with class A or L
+    for invoice_id, classes in tax_item_classes.items():
+        # Find corresponding ref_no for this invoice_id
+        matching_rows = df[df['invoice_id'] == invoice_id]
+        if not matching_rows.empty:
+            ref_no = matching_rows.iloc[0]['ref_no']
+            if 'A' in classes and ref_no not in class_a_refs:
+                class_a_refs = list(class_a_refs) + [ref_no]
+            elif 'L' in classes and ref_no not in class_l_refs:
+                class_l_refs = list(class_l_refs) + [ref_no]
     
     if len(class_a_refs) > 0:
         df.loc[df['ref_no'].isin(class_a_refs), 'account'] = 'UnInvoiced JIP:Material:Additional Material'
@@ -819,6 +880,13 @@ def migrate_invoice_to_QB_internal(invoice_ids: List[UUID],
         'class_': 'first'  # This will be overridden below with proper invoice-level class logic
     }).reset_index()
     
+    # CRITICAL BUSINESS LOGIC FIX: Apply tax like original working code
+    # Tax should be added per invoice, not per row - this matches the working logic
+    def add_tax_per_invoice(row):
+        return row['amount'] + row['tax_amount']
+    
+    batch_entry['amount'] = batch_entry.apply(add_tax_per_invoice, axis=1)
+    
     # ULTRA-FAST VECTORIZED CLASS LOGIC: Determine class at INVOICE level  
     # This replaces the slow loop with vectorized pandas operations for maximum speed
     
@@ -829,6 +897,17 @@ def migrate_invoice_to_QB_internal(invoice_ids: List[UUID],
     # Step 2: Get unique ref_nos with A or L classes (vectorized)
     ref_nos_with_a = df[has_class_a]['ref_no'].unique() if has_class_a.any() else []
     ref_nos_with_l = df[has_class_l]['ref_no'].unique() if has_class_l.any() else []
+    
+    # Step 2.5: CRITICAL BUG FIX - Add ref_nos from tax items with class A or L
+    for invoice_id, classes in tax_item_classes.items():
+        # Find corresponding ref_no for this invoice_id
+        matching_rows = df[df['invoice_id'] == invoice_id]
+        if not matching_rows.empty:
+            ref_no = matching_rows.iloc[0]['ref_no']
+            if 'A' in classes and ref_no not in ref_nos_with_a:
+                ref_nos_with_a = list(ref_nos_with_a) + [ref_no]
+            elif 'L' in classes and ref_no not in ref_nos_with_l:
+                ref_nos_with_l = list(ref_nos_with_l) + [ref_no]
     
     # Step 3: Apply class priority logic (vectorized operations)
     # For invoices with class A, set ALL to A
@@ -850,9 +929,6 @@ def migrate_invoice_to_QB_internal(invoice_ids: List[UUID],
         # Get first non-empty class for each ref_no (preserves your custom classes!)
         non_empty_classes = df[df['class_'] != ''].groupby('ref_no')['class_'].first()
         batch_entry.loc[ref_nos_to_update, 'class_'] = batch_entry.loc[ref_nos_to_update, 'ref_no'].map(non_empty_classes).fillna('')
-    
-    # Add tax to amount
-    batch_entry['amount'] = batch_entry['amount'] + batch_entry['tax_amount']
     
     # Final formatting
     batch_entry['date'] = pd.to_datetime(batch_entry['date'], 
