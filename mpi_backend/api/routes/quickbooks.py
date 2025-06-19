@@ -53,7 +53,7 @@ def migrate_invoice_to_QB(
             ref_numbers = [getattr(item, 'ref_no', 'unknown') for item in line_items]
 
             line_item_df = pd.DataFrame([vars(item) for item in line_items])
-            if 'UIDI' not in line_item_df['mpi_item']
+            if 'UIDI' not in line_item_df['mpi_item']:
                 # Get sheet_name from DataFrame - this will fail with KeyError if missing
                 line_item_df['sheet_name']
 
