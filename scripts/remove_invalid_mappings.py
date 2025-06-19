@@ -304,10 +304,13 @@ class IntelligentMappingCleaner:
                 # Check if this item has any valid mapping
                 has_valid_mapping = False
                 
-                # Check if any mapping exists for this MPI code with valid supplier mapping
+                # Check if any mapping exists for this supplier_item_ids
+                # This should check supplier_item_ids, not mpi_code!
                 for mapping_key in current_valid_mappings:
                     mpi_code, supplier_id, supplier_item_id = mapping_key
-                    if mpi_code == item.mpi_code:
+                    # Check if the unmapped item's supplier_item_ids matches any valid mapping
+                    if (supplier_item_id == item.supplier_item_ids and 
+                        supplier_id == item.supplier_id):
                         has_valid_mapping = True
                         break
                 
@@ -315,7 +318,8 @@ class IntelligentMappingCleaner:
                 if not has_valid_mapping and item.supplier_item_ids != 'No Match':
                     logger.info(
                         f"{'[DRY RUN] ' if self.dry_run else ''}Marking as No Match: "
-                        f"MPI: {item.mpi_code} (was: {item.supplier_item_ids})"
+                        f"Supplier Item: {item.supplier_item_ids} (Supplier ID: {item.supplier_id}) "
+                        f"MPI: {item.mpi_code}"
                     )
                     
                     if not self.dry_run:
