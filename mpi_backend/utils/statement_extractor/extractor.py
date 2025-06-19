@@ -561,11 +561,13 @@ class StatementExtractor:
                 ] = calculated_balance
     
     def detect_supplier(self) -> Optional[str]:
-        """Detect supplier from email information first, then PDF as fallback"""
+        """Detect supplier using multiple strategies with priority order"""
         try:
             # Priority 1: Use email-detected supplier name if available
             if self.email_supplier_name:
-                logger.info(f"Using email-detected supplier: {self.email_supplier_name}")
+                logger.info(
+                    f"Using email-detected supplier: {self.email_supplier_name}"
+                )
                 return self.email_supplier_name
             
             # Priority 2: Use supplier from metadata if available
@@ -573,8 +575,26 @@ class StatementExtractor:
                     self.metadata.get('supplier_name')):
                 return self.metadata['supplier_name']
             
-            # Priority 3: Fallback to PDF OCR detection (less reliable)
-            logger.warning("No email supplier provided, falling back to PDF OCR detection")
+            # Priority 3: Try to detect from filename
+            try:
+                from mpi_backend.utils.statement_downloader import (
+                    extract_supplier_from_filename
+                )
+                filename_supplier = extract_supplier_from_filename(
+                    self.pdf_filename
+                )
+                if filename_supplier:
+                    logger.info(
+                        f"Filename detected supplier: {filename_supplier}"
+                    )
+                    return filename_supplier
+            except Exception as e:
+                logger.debug(f"Filename supplier detection failed: {str(e)}")
+            
+            # Priority 4: Fallback to PDF OCR detection (less reliable)
+            logger.warning(
+                "No email supplier provided, falling back to PDF OCR detection"
+            )
             full_text, _ = extract_text_from_pdf(self.pdf_path)
             supplier = identify_supplier(full_text)
             if supplier:
