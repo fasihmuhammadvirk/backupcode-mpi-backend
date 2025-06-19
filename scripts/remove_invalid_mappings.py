@@ -156,7 +156,7 @@ def remove_invalid_mappings_from_db(db, invalid_mappings: List[Dict],
     if not dry_run:
         try:
             db.commit()
-            logger.info(f"✅ Successfully removed {removed_count} mappings")
+            logger.info(f"Successfully removed {removed_count} mappings")
         except Exception as e:
             db.rollback()
             logger.error(f"Error committing database changes: {e}")
@@ -226,7 +226,7 @@ def cleanup_json_file(json_file: str, invalid_items: Set[str],
         if not dry_run and removed_count > 0:
             with open(json_file, 'w') as f:
                 json.dump(cleaned_data, f, indent=2)
-            logger.info(f"✅ Updated {json_file}: "
+            logger.info(f"Updated {json_file}: "
                        f"removed {removed_count}/{original_count} items")
         elif dry_run:
             logger.info(f"[DRY RUN] Would remove "
@@ -269,7 +269,7 @@ def generate_report(invalid_mappings: List[Dict], db_removed: int,
                     json_removed: int):
     """Generate cleanup report"""
     logger.info("\n" + "="*80)
-    logger.info("📊 CLEANUP REPORT")
+    logger.info("CLEANUP REPORT")
     logger.info("="*80)
 
     # Count by reason
@@ -316,7 +316,7 @@ def main():
     args = parser.parse_args()
 
     dry_run_text = '(DRY RUN)' if args.dry_run else ''
-    logger.info(f"🧹 Starting invalid mapping cleanup {dry_run_text}")
+    logger.info(f"Starting invalid mapping cleanup {dry_run_text}")
 
     db = SessionLocal()
     try:
@@ -324,7 +324,7 @@ def main():
         invalid_mappings = identify_invalid_mappings(db)
 
         if not invalid_mappings:
-            logger.info("✅ No invalid mappings found!")
+            logger.info("No invalid mappings found!")
             return
 
         # Step 2: Remove from database
@@ -338,10 +338,10 @@ def main():
         generate_report(invalid_mappings, db_removed, json_removed)
 
         completion_text = '(DRY RUN)' if args.dry_run else 'successfully'
-        logger.info(f"🎉 Cleanup completed {completion_text}!")
+        logger.info(f"Cleanup completed {completion_text}!")
 
     except Exception as e:
-        logger.error(f"❌ Cleanup failed: {e}")
+        logger.error(f"Cleanup failed: {e}")
         raise
     finally:
         db.close()
