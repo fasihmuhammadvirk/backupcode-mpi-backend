@@ -107,7 +107,7 @@ def get_supplier_name(db, supplier_id: int) -> str:
 
 def identify_invalid_mappings(db) -> List[Dict]:
     """Identify all invalid mappings in the database"""
-    logger.info("🔍 Identifying invalid mappings...")
+    logger.info("Identifying invalid mappings...")
 
     invalid_mappings = []
     all_mappings = db.query(ItemsMapping).all()
