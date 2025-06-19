@@ -35,7 +35,7 @@ import logging
 import traceback
 from pathlib import Path
 from datetime import datetime, date, timedelta
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import time
 
 # Add the parent directory to the path so we can import mpi_backend
@@ -184,7 +184,7 @@ class StatementUpdater:
             logger.error(f"Error getting statements: {str(e)}")
             return []
     
-    def should_skip_statement(self, statement: PlumbingStatement) -> tuple[bool, str]:
+    def should_skip_statement(self, statement: PlumbingStatement) -> Tuple[bool, str]:
         """Determine if a statement should be skipped"""
         if not self.force:
             # Skip if processed recently (within last 24 hours) unless force mode
