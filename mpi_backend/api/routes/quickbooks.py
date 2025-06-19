@@ -446,7 +446,9 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
     df = pd.DataFrame(all_items_data)
     df['account'] = ''
     
-    # CRITICAL BUG FIX: Class A and L logic INCLUDING TAX ITEMS
+    # CRITICAL BUG FIX: UNIFIED Class A and L logic INCLUDING TAX ITEMS
+    # This logic will be used for BOTH account assignment AND final class values
+    
     # Get class A and L ref_nos from regular items
     class_a_refs = df[df['class_'] == 'A']['ref_no'].unique()
     class_l_refs = df[df['class_'] == 'L']['ref_no'].unique()
@@ -461,6 +463,10 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
                 class_a_refs = list(class_a_refs) + [ref_no]
             elif 'L' in classes and ref_no not in class_l_refs:
                 class_l_refs = list(class_l_refs) + [ref_no]
+    
+    # Store these for later use in final class assignment
+    final_class_a_refs = list(class_a_refs)
+    final_class_l_refs = list(class_l_refs)
     
     if len(class_a_refs) > 0:
         df.loc[df['ref_no'].isin(class_a_refs), 'account'] = 'UnInvoiced JIP:Material:Additional Material'
@@ -565,22 +571,23 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
             elif 'L' in classes and ref_no not in ref_nos_with_l:
                 ref_nos_with_l = list(ref_nos_with_l) + [ref_no]
     
-    # Step 3: Apply class priority logic (vectorized operations)
+    # CRITICAL BUG FIX: Use the SAME unified class logic for final output
+    # Apply class priority logic using the unified class determination
     # For invoices with class A, set ALL to A
-    if len(ref_nos_with_a) > 0:
-        mask_a = batch_entry['ref_no'].isin(ref_nos_with_a)
+    if len(final_class_a_refs) > 0:
+        mask_a = batch_entry['ref_no'].isin(final_class_a_refs)
         batch_entry.loc[mask_a, 'class_'] = 'A'
     
     # For invoices with class L (but not A), set ALL to L
-    if len(ref_nos_with_l) > 0:
-        ref_nos_with_l_only = [r for r in ref_nos_with_l if r not in ref_nos_with_a]
+    if len(final_class_l_refs) > 0:
+        ref_nos_with_l_only = [r for r in final_class_l_refs if r not in final_class_a_refs]
         if ref_nos_with_l_only:
             mask_l = batch_entry['ref_no'].isin(ref_nos_with_l_only)
             batch_entry.loc[mask_l, 'class_'] = 'L'
     
     # For other classes: use groupby to get first non-empty class per ref_no (fast!)
     # This preserves classes like "finishing" that you manually assign
-    ref_nos_to_update = ~batch_entry['ref_no'].isin(list(ref_nos_with_a) + list(ref_nos_with_l))
+    ref_nos_to_update = ~batch_entry['ref_no'].isin(list(final_class_a_refs) + list(final_class_l_refs))
     if ref_nos_to_update.any():
         # Get first non-empty class for each ref_no (preserves your custom classes!)
         non_empty_classes = df[df['class_'] != ''].groupby('ref_no')['class_'].first()
