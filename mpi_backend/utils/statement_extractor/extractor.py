@@ -122,22 +122,33 @@ class StatementExtractor:
     def extract_invoice_data(self):
         """Extract invoice data from all pages of the PDF with improved detection"""
         try:
-            # Check if this is a Y&S statement and use specialized extractor
-            supplier_name = self.email_supplier_name or self.metadata.get('supplier_name', '')
-            if supplier_name == "Y & S Plumbing Supply":
-                logger.info("Using specialized Y&S extractor for improved date and amount parsing")
+            # Check if this is a Y&S or WWPS statement 
+            # Both Y&S and WWPS have the same statement format structure
+            supplier_name = (self.email_supplier_name or 
+                             self.metadata.get('supplier_name', ''))
+            if supplier_name in ["Y & S Plumbing Supply", "World Wide Plumbing"]:
+                logger.info("Using specialized Y&S extractor for %s - "
+                           "improved date and amount parsing", supplier_name)
                 try:
-                    ys_extractor = YSStatementExtractor(self.pdf_path)
+                    ys_extractor = YSStatementExtractor(self.pdf_path, supplier_name)
                     ys_result = ys_extractor.extract_invoice_data()
                     
                     if not ys_result.empty:
                         self.combined_data = ys_result
-                        logger.info(f"Y&S specialized extraction successful: {len(self.combined_data)} rows")
+                        # Update supplier name in the extracted data for WWPS
+                        if supplier_name == "World Wide Plumbing":
+                            self.combined_data['Supplier'] = 'World Wide Plumbing'
+                        logger.info("%s specialized extraction successful: %d rows",
+                                   supplier_name, len(self.combined_data))
                         return True
                     else:
-                        logger.warning("Y&S specialized extractor returned no data, falling back to generic extraction")
+                        logger.warning("%s specialized extractor returned no data, "
+                                      "falling back to generic extraction",
+                                      supplier_name)
                 except Exception as e:
-                    logger.warning(f"Y&S specialized extractor failed: {str(e)}, falling back to generic extraction")
+                    logger.warning("%s specialized extractor failed: %s, "
+                                  "falling back to generic extraction",
+                                  supplier_name, str(e))
             
             # Try multiple extraction strategies for better accuracy
             strategies = [

@@ -11,12 +11,14 @@ logger = logging.getLogger(__name__)
 
 class YSStatementExtractor:
     """
-    Specialized extractor for Y&S Plumbing Supply statements
+    Specialized extractor for Y&S Plumbing Supply and WWPS statements
     Addresses specific formatting issues with dates and amounts
+    Both suppliers use the same statement format
     """
     
-    def __init__(self, pdf_path: str):
+    def __init__(self, pdf_path: str, supplier_name: str = "Y & S Plumbing Supply"):
         self.pdf_path = pdf_path
+        self.supplier_name = supplier_name
         self.extracted_data = pd.DataFrame()
         self.metadata = {}
         
@@ -30,7 +32,7 @@ class YSStatementExtractor:
             metadata = {
                 "statement_date": "",
                 "account_number": "",
-                "supplier_name": "Y & S Plumbing Supply",
+                "supplier_name": self.supplier_name,
                 "customer_name": "",
                 "terms": ""
             }
@@ -83,7 +85,7 @@ class YSStatementExtractor:
             return {
                 "statement_date": "",
                 "account_number": "", 
-                "supplier_name": "Y & S Plumbing Supply",
+                "supplier_name": self.supplier_name,
                 "customer_name": "",
                 "terms": ""
             }
@@ -257,7 +259,7 @@ class YSStatementExtractor:
         # Add metadata
         df['Statement Date'] = self.metadata.get('statement_date', '')
         df['Account Number'] = self.metadata.get('account_number', '')
-        df['Supplier'] = 'Y & S Plumbing Supply'
+        df['Supplier'] = self.supplier_name
         
         return df
     
@@ -448,26 +450,28 @@ class YSStatementExtractor:
         }
 
 
-def extract_ys_statement(pdf_path: str) -> Dict[str, Any]:
+def extract_ys_statement(pdf_path: str, supplier_name: str = "Y & S Plumbing Supply") -> Dict[str, Any]:
     """
-    Main function to extract Y&S statement data
+    Main function to extract Y&S and WWPS statement data
+    Both suppliers use the same statement format
     
     Args:
-        pdf_path: Path to the Y&S statement PDF
+        pdf_path: Path to the statement PDF
+        supplier_name: Name of the supplier (Y&S or WWPS)
         
     Returns:
         Dictionary containing metadata and invoice data
     """
     try:
-        extractor = YSStatementExtractor(pdf_path)
+        extractor = YSStatementExtractor(pdf_path, supplier_name)
         result = extractor.extract_full_statement()
         
-        logger.info(f"Y&S extraction complete: {result['total_invoices']} invoices, total: ${result['total_amount']}")
+        logger.info(f"{supplier_name} extraction complete: {result['total_invoices']} invoices, total: ${result['total_amount']}")
         
         return result
         
     except Exception as e:
-        logger.error(f"Y&S statement extraction failed: {str(e)}")
+        logger.error(f"{supplier_name} statement extraction failed: {str(e)}")
         return {
             'metadata': {},
             'invoice_data': pd.DataFrame(),
