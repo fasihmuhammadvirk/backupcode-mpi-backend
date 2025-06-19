@@ -486,8 +486,33 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
         'date': 'first',
         'vendor': 'first',
         'memo': 'first',
-        'class_': 'first'
+        'class_': 'first'  # This will be overridden below with proper invoice-level class logic
     })
+    
+    # CRITICAL FIX: Determine class at INVOICE level (like the old working code)
+    # For each ref_no, determine if ANY item in that invoice had class A or L
+    invoice_classes = {}
+    
+    # Check each invoice (ref_no) for class A or L items
+    for ref_no in df['ref_no'].unique():
+        invoice_items = df[df['ref_no'] == ref_no]
+        
+        # If ANY item in this invoice has class A, entire invoice gets class A
+        if (invoice_items['class_'] == 'A').any():
+            invoice_classes[ref_no] = 'A'
+        # If ANY item in this invoice has class L (and no A), entire invoice gets class L  
+        elif (invoice_items['class_'] == 'L').any():
+            invoice_classes[ref_no] = 'L'
+        # Otherwise, use the first non-empty class found, or empty string
+        else:
+            non_empty_classes = invoice_items[invoice_items['class_'] != '']['class_']
+            if not non_empty_classes.empty:
+                invoice_classes[ref_no] = non_empty_classes.iloc[0]
+            else:
+                invoice_classes[ref_no] = ''
+    
+    # Apply the invoice-level class to all rows for that ref_no
+    batch_entry['class_'] = batch_entry['ref_no'].map(invoice_classes).fillna('')
     
     # Add tax to amount
     batch_entry['amount'] = batch_entry['amount'] + batch_entry['tax_amount']
@@ -736,8 +761,33 @@ def migrate_invoice_to_QB_internal(invoice_ids: List[UUID],
         'date': 'first',
         'vendor': 'first',
         'memo': 'first',
-        'class_': 'first'
+        'class_': 'first'  # This will be overridden below with proper invoice-level class logic
     }).reset_index()
+    
+    # CRITICAL FIX: Determine class at INVOICE level (like the old working code)
+    # For each ref_no, determine if ANY item in that invoice had class A or L
+    invoice_classes = {}
+    
+    # Check each invoice (ref_no) for class A or L items
+    for ref_no in df['ref_no'].unique():
+        invoice_items = df[df['ref_no'] == ref_no]
+        
+        # If ANY item in this invoice has class A, entire invoice gets class A
+        if (invoice_items['class_'] == 'A').any():
+            invoice_classes[ref_no] = 'A'
+        # If ANY item in this invoice has class L (and no A), entire invoice gets class L  
+        elif (invoice_items['class_'] == 'L').any():
+            invoice_classes[ref_no] = 'L'
+        # Otherwise, use the first non-empty class found, or empty string
+        else:
+            non_empty_classes = invoice_items[invoice_items['class_'] != '']['class_']
+            if not non_empty_classes.empty:
+                invoice_classes[ref_no] = non_empty_classes.iloc[0]
+            else:
+                invoice_classes[ref_no] = ''
+    
+    # Apply the invoice-level class to all rows for that ref_no
+    batch_entry['class_'] = batch_entry['ref_no'].map(invoice_classes).fillna('')
     
     # Add tax to amount
     batch_entry['amount'] = batch_entry['amount'] + batch_entry['tax_amount']

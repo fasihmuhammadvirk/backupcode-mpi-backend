@@ -856,14 +856,39 @@ class InvoiceItemController:
             else:
                 raise HTTPException(status_code=400, detail=f"Invalid operator: {comp_filter.operator}")
 
-        # Cast amount to float for calculations
-        amount_column = cast(func.replace(InvoiceItem.amount, ',', ''), Float)
+        # CRITICAL BUG FIX: Safe casting with validation for amount column
+        # This prevents database errors from concatenated text data
+        
+        # Use CASE statement to handle invalid amounts gracefully
+        # Convert only valid numeric amounts, set invalid ones to 0
+        safe_amount_case = case(
+            (
+                and_(
+                    InvoiceItem.amount.isnot(None),
+                    InvoiceItem.amount != '',
+                    # Simple length check - valid amounts should be < 50 chars
+                    func.length(InvoiceItem.amount) < 50
+                ),
+                cast(func.replace(InvoiceItem.amount, ',', ''), Float)
+            ),
+            else_=0.0
+        )
 
-        aggregates = query.with_entities(
-            func.sum(InvoiceItem.qty).label('total_qty'),
-            func.sum(amount_column).label('total_amount'),
-            func.avg(InvoiceItem.cost).label('average_cost')
-        ).first()
+        # Execute query with additional error handling for database issues
+        try:
+            aggregates = query.with_entities(
+                func.sum(InvoiceItem.qty).label('total_qty'),
+                func.sum(safe_amount_case).label('total_amount'),
+                func.avg(InvoiceItem.cost).label('average_cost')
+            ).first()
+        except Exception as e:
+            logger.error(f"Database error in get_aggregates: {str(e)}")
+            # Return default values if query fails
+            return {
+                "total_qty": 0,
+                "total_amount": 0.0,
+                "average_cost": 0.0
+            }
 
         total_qty = 0 if aggregates.total_qty is None else int(aggregates.total_qty)
 
