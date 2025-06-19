@@ -348,29 +348,23 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
     
     logger.info(f"Retrieved {len(invoice_items)} items in {time.time() - start_time:.3f}s")
     
-    # FAST classification cache - only build for unique sheet names
+    # Get classification controller
     classification_controller = ItemClassificationController(db)
-    unique_sheet_names = {getattr(item, 'sheet_name', '') for item in invoice_items if getattr(item, 'sheet_name', '')}
     
-    # Bulk classification lookup
+    # Pre-build classification cache exactly like the internal function
+    unique_sheet_names = set()
+    for item in invoice_items:
+        sheet_name = getattr(item, 'sheet_name', '')
+        if sheet_name and sheet_name.strip():
+            unique_sheet_names.add(sheet_name)
+    
+    # Build classification cache using the same logic as internal function
     classification_cache = {'': '', None: ''}
-    if unique_sheet_names:
+    for sheet_name in unique_sheet_names:
         try:
-            from mpi_backend.database.models import ItemClassification
-            classifications = db.query(ItemClassification).filter(
-                ItemClassification.item.in_(unique_sheet_names)
-            ).all()
-            
-            for classification in classifications:
-                account = ''
-                if classification.category == 'M':
-                    account = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
-                elif classification.category == 'E':
-                    account = 'UnInvoiced JIP:Cost Of Materials:Job Equipments Purchased'
-                classification_cache[classification.item] = account
-                
-        except Exception as e:
-            logger.warning(f"Bulk classification failed: {e}, using fallback")
+            classification_cache[sheet_name] = classification_controller.get_classification(sheet_name)
+        except Exception:
+            classification_cache[sheet_name] = ''
     
     # ULTRA-FAST single-pass data processing
     process_start = time.time()
@@ -464,7 +458,7 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
             elif 'L' in classes and ref_no not in class_l_refs:
                 class_l_refs = list(class_l_refs) + [ref_no]
     
-    # Store these for later use in final class assignment
+    # Store these AFTER adding tax item classes for final class assignment
     final_class_a_refs = list(class_a_refs)
     final_class_l_refs = list(class_l_refs)
     
@@ -549,30 +543,9 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
     
     batch_entry['amount'] = batch_entry.apply(add_tax_per_invoice, axis=1)
     
-    # ULTRA-FAST VECTORIZED CLASS LOGIC: Determine class at INVOICE level  
-    # This replaces the slow loop with vectorized pandas operations for maximum speed
-    
-    # Step 1: Create masks for class A and L items (vectorized - no loops!)
-    has_class_a = df['class_'] == 'A'
-    has_class_l = df['class_'] == 'L'
-    
-    # Step 2: Get unique ref_nos with A or L classes (vectorized)
-    ref_nos_with_a = df[has_class_a]['ref_no'].unique() if has_class_a.any() else []
-    ref_nos_with_l = df[has_class_l]['ref_no'].unique() if has_class_l.any() else []
-    
-    # Step 2.5: CRITICAL BUG FIX - Add ref_nos from tax items with class A or L
-    for invoice_id, classes in tax_item_classes.items():
-        # Find corresponding ref_no for this invoice_id
-        matching_rows = df[df['invoice_id'] == invoice_id]
-        if not matching_rows.empty:
-            ref_no = matching_rows.iloc[0]['ref_no']
-            if 'A' in classes and ref_no not in ref_nos_with_a:
-                ref_nos_with_a = list(ref_nos_with_a) + [ref_no]
-            elif 'L' in classes and ref_no not in ref_nos_with_l:
-                ref_nos_with_l = list(ref_nos_with_l) + [ref_no]
-    
-    # CRITICAL BUG FIX: Use the SAME unified class logic for final output
-    # Apply class priority logic using the unified class determination
+    # ULTRA-FAST VECTORIZED CLASS LOGIC: Use the UNIFIED class determination 
+    # that already includes tax item classes (calculated above)
+    # This ensures consistency between account assignment and final class values
     # For invoices with class A, set ALL to A
     if len(final_class_a_refs) > 0:
         mask_a = batch_entry['ref_no'].isin(final_class_a_refs)
@@ -878,14 +851,14 @@ def migrate_invoice_to_QB_internal(invoice_ids: List[UUID],
     # Single aggregation operation
     aggregation_start = time.time()
     
-    batch_entry = df.groupby(['account', 'ref_no', 'customer_job']).agg({
+    batch_entry = df.groupby(['account', 'ref_no', 'customer_job'], as_index=False).agg({
         'amount': 'sum',
         'tax_amount': 'first',
         'date': 'first',
         'vendor': 'first',
         'memo': 'first',
         'class_': 'first'  # This will be overridden below with proper invoice-level class logic
-    }).reset_index()
+    })
     
     # CRITICAL BUSINESS LOGIC FIX: Apply tax like original working code
     # Tax should be added per invoice, not per row - this matches the working logic
