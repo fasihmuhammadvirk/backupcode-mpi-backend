@@ -47,19 +47,6 @@ def update_progress(operation_id: str, stage: str, progress: int,
     logger.info(f"QB Progress [{operation_id}]: {stage} - {progress}% - "
                 f"{message}")
 
-
-@router.get("/progress/{operation_id}")
-def get_operation_progress(operation_id: str):
-    """Get real-time progress for QuickBooks operations"""
-    if operation_id in qb_operation_progress:
-        return qb_operation_progress[operation_id]
-    else:
-        raise HTTPException(
-            status_code=404, 
-            detail=f"Operation {operation_id} not found"
-        )
-
-
 @contextmanager
 def safe_priority_context(operation_type="regular"):
     """Context manager to ensure background jobs are always resumed"""
@@ -244,20 +231,18 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
     with safe_priority_context("migrate_all"):
         try:
             logger.info("Starting ULTRA-FAST QuickBooks migration")
-            
-            # ULTRA-FAST filtering - get just IDs like export-all does
-            invoice_ids = InvoiceItemController(db).apply_filters(
-                request, page=1, size=0, col_param='invoice_id')
 
-            if request.excluded_invoice_ids:
-                excluded_set = set(request.excluded_invoice_ids)
+            filtered_data = InvoiceItemController(db).apply_filters(request, page=1, size=0)
+                    # ULTRA-FAST filtering - get just IDs like export-all does
+            invoice_ids = [item.invoice_id for item in filtered_data['items']]
+
+            if request.excluded_invoice_ids:  # un selected items from frontend
                 invoice_ids = [
                     invoice_id for invoice_id in invoice_ids 
-                    if invoice_id not in excluded_set
+                    if invoice_id not in request.excluded_invoice_ids
                 ]
 
-            # Validate and clean invoice IDs
-            invoice_ids = validate_invoice_ids(invoice_ids)
+            invoice_ids = list(set(invoice_ids))  # make invoice-ids in list to be unique
 
             logger.info(f"Migrate-all processing {len(invoice_ids)} invoices")
             
@@ -292,14 +277,18 @@ def migrate_invoice_to_QB(invoice_ids: List[UUID],
             logger.info(f"Processing {len(invoice_ids)} invoices")
             
             # For smaller datasets, keep synchronous processing
-            # For larger datasets, use fast async processing
-            if len(invoice_ids) > 50:
-                result = migrate_invoice_to_QB_fast(
-                    invoice_ids, db=db, operation_id=operation_id,
-                    background_tasks=background_tasks)
-            else:
-                result = migrate_invoice_to_QB_internal(
+            
+            result = migrate_invoice_to_QB_internal(
                     invoice_ids, db=db, operation_id=operation_id)
+            
+            
+            # if len(invoice_ids) > 50:
+            #     result = migrate_invoice_to_QB_fast(
+            #         invoice_ids, db=db, operation_id=operation_id,
+            #         background_tasks=background_tasks)
+            # else:
+            #     result = migrate_invoice_to_QB_internal(
+            #         invoice_ids, db=db, operation_id=operation_id)
                 
             total_time = time.time() - start_time
             logger.info(f"QuickBooks migration completed successfully in "
@@ -1054,15 +1043,3 @@ def migrate_invoice_to_QB_internal(invoice_ids: List[UUID],
                f"in {total_time:.2f}s")
     
     return download_url
-
-
-@router.get("/priority-status")
-def get_priority_status():
-    """Get current QuickBooks priority system status"""
-    try:
-        from mpi_backend.utils.quickbooks_priority import get_qb_priority_status
-        return get_qb_priority_status()
-    except Exception as e:
-        logger.error(f"Failed to get priority status: {e}")
-        return {"status": "error", "message": str(e)}
- 
