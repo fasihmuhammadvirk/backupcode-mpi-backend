@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import asc, desc, distinct, case, cast, Float, func
+from sqlalchemy import asc, desc, distinct, case, cast, Float, func, and_
 from fastapi import HTTPException, BackgroundTasks
 from typing import List, Dict
 from datetime import date, datetime, timedelta

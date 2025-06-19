@@ -489,30 +489,37 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
         'class_': 'first'  # This will be overridden below with proper invoice-level class logic
     })
     
-    # CRITICAL FIX: Determine class at INVOICE level (like the old working code)
-    # For each ref_no, determine if ANY item in that invoice had class A or L
-    invoice_classes = {}
+    # ULTRA-FAST VECTORIZED CLASS LOGIC: Determine class at INVOICE level  
+    # This replaces the slow loop with vectorized pandas operations for maximum speed
     
-    # Check each invoice (ref_no) for class A or L items
-    for ref_no in df['ref_no'].unique():
-        invoice_items = df[df['ref_no'] == ref_no]
-        
-        # If ANY item in this invoice has class A, entire invoice gets class A
-        if (invoice_items['class_'] == 'A').any():
-            invoice_classes[ref_no] = 'A'
-        # If ANY item in this invoice has class L (and no A), entire invoice gets class L  
-        elif (invoice_items['class_'] == 'L').any():
-            invoice_classes[ref_no] = 'L'
-        # Otherwise, use the first non-empty class found, or empty string
-        else:
-            non_empty_classes = invoice_items[invoice_items['class_'] != '']['class_']
-            if not non_empty_classes.empty:
-                invoice_classes[ref_no] = non_empty_classes.iloc[0]
-            else:
-                invoice_classes[ref_no] = ''
+    # Step 1: Create masks for class A and L items (vectorized - no loops!)
+    has_class_a = df['class_'] == 'A'
+    has_class_l = df['class_'] == 'L'
     
-    # Apply the invoice-level class to all rows for that ref_no
-    batch_entry['class_'] = batch_entry['ref_no'].map(invoice_classes).fillna('')
+    # Step 2: Get unique ref_nos with A or L classes (vectorized)
+    ref_nos_with_a = df[has_class_a]['ref_no'].unique() if has_class_a.any() else []
+    ref_nos_with_l = df[has_class_l]['ref_no'].unique() if has_class_l.any() else []
+    
+    # Step 3: Apply class priority logic (vectorized operations)
+    # For invoices with class A, set ALL to A
+    if len(ref_nos_with_a) > 0:
+        mask_a = batch_entry['ref_no'].isin(ref_nos_with_a)
+        batch_entry.loc[mask_a, 'class_'] = 'A'
+    
+    # For invoices with class L (but not A), set ALL to L
+    if len(ref_nos_with_l) > 0:
+        ref_nos_with_l_only = [r for r in ref_nos_with_l if r not in ref_nos_with_a]
+        if ref_nos_with_l_only:
+            mask_l = batch_entry['ref_no'].isin(ref_nos_with_l_only)
+            batch_entry.loc[mask_l, 'class_'] = 'L'
+    
+    # For other classes: use groupby to get first non-empty class per ref_no (fast!)
+    # This preserves classes like "finishing" that you manually assign
+    ref_nos_to_update = ~batch_entry['ref_no'].isin(list(ref_nos_with_a) + list(ref_nos_with_l))
+    if ref_nos_to_update.any():
+        # Get first non-empty class for each ref_no (preserves your custom classes!)
+        non_empty_classes = df[df['class_'] != ''].groupby('ref_no')['class_'].first()
+        batch_entry.loc[ref_nos_to_update, 'class_'] = batch_entry.loc[ref_nos_to_update, 'ref_no'].map(non_empty_classes).fillna('')
     
     # Add tax to amount
     batch_entry['amount'] = batch_entry['amount'] + batch_entry['tax_amount']
@@ -764,30 +771,37 @@ def migrate_invoice_to_QB_internal(invoice_ids: List[UUID],
         'class_': 'first'  # This will be overridden below with proper invoice-level class logic
     }).reset_index()
     
-    # CRITICAL FIX: Determine class at INVOICE level (like the old working code)
-    # For each ref_no, determine if ANY item in that invoice had class A or L
-    invoice_classes = {}
+    # ULTRA-FAST VECTORIZED CLASS LOGIC: Determine class at INVOICE level  
+    # This replaces the slow loop with vectorized pandas operations for maximum speed
     
-    # Check each invoice (ref_no) for class A or L items
-    for ref_no in df['ref_no'].unique():
-        invoice_items = df[df['ref_no'] == ref_no]
-        
-        # If ANY item in this invoice has class A, entire invoice gets class A
-        if (invoice_items['class_'] == 'A').any():
-            invoice_classes[ref_no] = 'A'
-        # If ANY item in this invoice has class L (and no A), entire invoice gets class L  
-        elif (invoice_items['class_'] == 'L').any():
-            invoice_classes[ref_no] = 'L'
-        # Otherwise, use the first non-empty class found, or empty string
-        else:
-            non_empty_classes = invoice_items[invoice_items['class_'] != '']['class_']
-            if not non_empty_classes.empty:
-                invoice_classes[ref_no] = non_empty_classes.iloc[0]
-            else:
-                invoice_classes[ref_no] = ''
+    # Step 1: Create masks for class A and L items (vectorized - no loops!)
+    has_class_a = df['class_'] == 'A'
+    has_class_l = df['class_'] == 'L'
     
-    # Apply the invoice-level class to all rows for that ref_no
-    batch_entry['class_'] = batch_entry['ref_no'].map(invoice_classes).fillna('')
+    # Step 2: Get unique ref_nos with A or L classes (vectorized)
+    ref_nos_with_a = df[has_class_a]['ref_no'].unique() if has_class_a.any() else []
+    ref_nos_with_l = df[has_class_l]['ref_no'].unique() if has_class_l.any() else []
+    
+    # Step 3: Apply class priority logic (vectorized operations)
+    # For invoices with class A, set ALL to A
+    if len(ref_nos_with_a) > 0:
+        mask_a = batch_entry['ref_no'].isin(ref_nos_with_a)
+        batch_entry.loc[mask_a, 'class_'] = 'A'
+    
+    # For invoices with class L (but not A), set ALL to L
+    if len(ref_nos_with_l) > 0:
+        ref_nos_with_l_only = [r for r in ref_nos_with_l if r not in ref_nos_with_a]
+        if ref_nos_with_l_only:
+            mask_l = batch_entry['ref_no'].isin(ref_nos_with_l_only)
+            batch_entry.loc[mask_l, 'class_'] = 'L'
+    
+    # For other classes: use groupby to get first non-empty class per ref_no (fast!)
+    # This preserves classes like "finishing" that you manually assign
+    ref_nos_to_update = ~batch_entry['ref_no'].isin(list(ref_nos_with_a) + list(ref_nos_with_l))
+    if ref_nos_to_update.any():
+        # Get first non-empty class for each ref_no (preserves your custom classes!)
+        non_empty_classes = df[df['class_'] != ''].groupby('ref_no')['class_'].first()
+        batch_entry.loc[ref_nos_to_update, 'class_'] = batch_entry.loc[ref_nos_to_update, 'ref_no'].map(non_empty_classes).fillna('')
     
     # Add tax to amount
     batch_entry['amount'] = batch_entry['amount'] + batch_entry['tax_amount']
