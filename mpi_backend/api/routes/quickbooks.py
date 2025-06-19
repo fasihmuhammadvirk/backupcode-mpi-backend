@@ -466,7 +466,31 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
         if mask.any():
             df.loc[mask, 'account'] = account
     
-    # Default account for unmatched
+    # CRITICAL VALIDATION: Check for "No Match" items and unmatched accounts
+    no_match_items = df[df['mpi_item'] == 'No Match']
+    if not no_match_items.empty:
+        # Get sample reference numbers from "No Match" items for error details
+        no_match_refs = no_match_items[['mpi_item', 'ref_no', 'item', 'description']].drop_duplicates()
+        no_match_list = no_match_refs.to_dict(orient='records')
+        
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot export to QuickBooks: Found {len(no_match_items)} 'No Match' items. "
+                   f"Please map these items first. Sample unmapped items: {no_match_list[:5]}"
+        )
+    
+    # Check for items with empty accounts (unmatched sheet names)
+    unmatched_accounts = df[df['account'] == '']
+    if not unmatched_accounts.empty:
+        unmatched_references = unmatched_accounts[['mpi_item', 'ref_no', 'sheet_name']].drop_duplicates()
+        unmatched_references_list = unmatched_references.to_dict(orient='records')
+        
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unmatched sheet names are present. Please add classifications for these sheet names: {unmatched_references_list[:5]}"
+        )
+    
+    # Default account for any remaining unmatched (should not happen after validation)
     df.loc[df['account'] == '', 'account'] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
     
     # FAST data type conversions
@@ -742,7 +766,31 @@ def migrate_invoice_to_QB_internal(invoice_ids: List[UUID],
         mask = (df['mpi_item'] == mpi_item) & (df['account'] == '')
         df.loc[mask, 'account'] = account
     
-    # CRITICAL BUSINESS LOGIC FIX: Default account for unmatched items
+    # CRITICAL VALIDATION: Check for "No Match" items and unmatched accounts
+    no_match_items = df[df['mpi_item'] == 'No Match']
+    if not no_match_items.empty:
+        # Get sample reference numbers from "No Match" items for error details
+        no_match_refs = no_match_items[['mpi_item', 'ref_no', 'item', 'description']].drop_duplicates()
+        no_match_list = no_match_refs.to_dict(orient='records')
+        
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot export to QuickBooks: Found {len(no_match_items)} 'No Match' items. "
+                   f"Please map these items first. Sample unmapped items: {no_match_list[:5]}"
+        )
+    
+    # Check for items with empty accounts (unmatched sheet names)
+    unmatched_accounts = df[df['account'] == '']
+    if not unmatched_accounts.empty:
+        unmatched_references = unmatched_accounts[['mpi_item', 'ref_no', 'sheet_name']].drop_duplicates()
+        unmatched_references_list = unmatched_references.to_dict(orient='records')
+        
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unmatched sheet names are present. Please add classifications for these sheet names: {unmatched_references_list[:5]}"
+        )
+    
+    # Default account for any remaining unmatched (should not happen after validation)
     df.loc[df['account'] == '', 'account'] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
     
     # VECTORIZED data type conversions
