@@ -132,26 +132,37 @@ def perform_database_updates_background(all_item_ids_for_status: List,
     Background task to handle ALL status updates after Excel generation.
     This ensures maximum speed by returning download URL immediately.
     """
+    db = None
     try:
-        # Create a new database session for background processing
-        from mpi_backend.database import get_qb_db
-        db_gen = get_qb_db()
-        db = next(db_gen)
+        # CRITICAL FIX: Proper database session for background processing
+        from mpi_backend.database import SessionLocal
+        db = SessionLocal()
         
         update_progress(operation_id, "background_updating", 95, 
                        "Updating statuses in background")
         
         status_start = time.time()
         
-        # Update invoice statuses first (most important for UI)
+        # CRITICAL FIX: Update invoice statuses with proper validation
         updated_invoices = 0
+        skipped_invoices = 0
         if invoice_ids:
             invoice_controller = InvoiceController(db)
             for invoice_id in invoice_ids:
                 try:
-                    invoice_controller.set_invoice_is_exported(str(invoice_id))
-                    updated_invoices += 1
-                except Exception:
+                    # Check current status before updating
+                    from mpi_backend.database.models import Invoice
+                    invoice = db.query(Invoice).filter(Invoice.id == str(invoice_id)).first()
+                    if invoice:
+                        if invoice.is_exported != 'Sent':  # Only update if not already Sent
+                            success = invoice_controller.set_invoice_is_exported(str(invoice_id))
+                            if success:
+                                updated_invoices += 1
+                        else:
+                            skipped_invoices += 1
+                            logger.debug(f"Invoice {invoice_id} already marked as Sent, skipping")
+                except Exception as e:
+                    logger.warning(f"Failed to update invoice {invoice_id}: {e}")
                     continue
         
         # Update item-level export status in background
@@ -161,20 +172,23 @@ def perform_database_updates_background(all_item_ids_for_status: List,
         
         status_time = time.time() - status_start
         logger.info(f"Background updates completed in {status_time:.3f}s: "
-                   f"{updated_invoices} invoices, {len(all_item_ids_for_status)} items")
+                   f"{updated_invoices} invoices updated, {skipped_invoices} already sent, "
+                   f"{len(all_item_ids_for_status)} items")
         
         update_progress(operation_id, "background_completed", 100, 
-                       f"Background updates completed - {updated_invoices} invoices, {len(all_item_ids_for_status)} items")
+                       f"Background updates completed - {updated_invoices} invoices updated, "
+                       f"{skipped_invoices} already sent, {len(all_item_ids_for_status)} items")
         
     except Exception as e:
         logger.error(f"Background database update failed: {e}")
         update_progress(operation_id, "background_error", 100, 
                        f"Background update error: {str(e)}")
     finally:
-        try:
-            db.close()
-        except:
-            pass
+        if db:
+            try:
+                db.close()
+            except Exception as e:
+                logger.error(f"Error closing background db session: {e}")
 
 
 def update_invoice_statuses_immediately(invoice_ids: List[UUID], db: Session, operation_id: str):
@@ -189,20 +203,28 @@ def update_invoice_statuses_immediately(invoice_ids: List[UUID], db: Session, op
         status_start = time.time()
         invoice_controller = InvoiceController(db)
         updated_invoices = 0
+        skipped_invoices = 0
         
-        # Update all invoice statuses immediately
+        # CRITICAL FIX: Update all invoice statuses with validation
+        from mpi_backend.database.models import Invoice
         for invoice_id in invoice_ids:
             try:
-                # Set invoice as exported immediately (optimistic update)
-                invoice_controller.set_invoice_is_exported(str(invoice_id))
-                updated_invoices += 1
+                # Check current status before updating  
+                invoice = db.query(Invoice).filter(Invoice.id == str(invoice_id)).first()
+                if invoice:
+                    if invoice.is_exported != 'Sent':  # Only update if not already Sent
+                        success = invoice_controller.set_invoice_is_exported(str(invoice_id))
+                        if success:
+                            updated_invoices += 1
+                    else:
+                        skipped_invoices += 1
             except Exception as e:
                 logger.warning(f"Failed to update invoice {invoice_id}: {e}")
                 continue
         
         status_time = time.time() - status_start
-        logger.info(f"IMMEDIATE invoice status updates completed in {status_time:.3f}s "
-                   f"for {updated_invoices} invoices")
+        logger.info(f"IMMEDIATE invoice status updates completed in {status_time:.3f}s: "
+                   f"{updated_invoices} updated, {skipped_invoices} already sent")
         
         return updated_invoices
         
@@ -413,16 +435,14 @@ def migrate_invoice_to_QB_fast(invoice_ids: List[UUID],
     df = pd.DataFrame(all_items_data)
     df['account'] = ''
     
-    # FAST Class A and L logic
-    class_a_mask = df['class_'] == 'A'
-    class_l_mask = df['class_'] == 'L'
+    # CRITICAL BUG FIX: Class A and L logic (EXACT MATCH TO WORKING INTERNAL FUNCTION)
+    class_a_refs = df[df['class_'] == 'A']['ref_no'].unique()
+    class_l_refs = df[df['class_'] == 'L']['ref_no'].unique()
     
-    if class_a_mask.any():
-        class_a_refs = df.loc[class_a_mask, 'ref_no'].unique()
+    if len(class_a_refs) > 0:
         df.loc[df['ref_no'].isin(class_a_refs), 'account'] = 'UnInvoiced JIP:Material:Additional Material'
     
-    if class_l_mask.any():
-        class_l_refs = df.loc[class_l_mask, 'ref_no'].unique()
+    if len(class_l_refs) > 0:
         mask = df['ref_no'].isin(class_l_refs) & (df['account'] == '')
         df.loc[mask, 'account'] = 'UnInvoiced JIP:Subcontractors Expense:Labor'
     
