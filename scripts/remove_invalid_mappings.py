@@ -4,11 +4,11 @@ Intelligent Invalid Mappings Removal Script
 
 This script intelligently identifies and removes invalid mappings by:
 1. Extracting current valid mappings from Google Sheets
-2. Checking all InvoiceItems against these valid mappings (excluding UIDI items)
+2. Checking all InvoiceItems against these valid mappings (excluding UIDI and 10 Materials)
 3. Marking items without valid mappings as "No Match" and clearing sheet_name
 4. Removing invalid mappings from database and JSON files
 
-Note: UIDI items are excluded from validation as they are special identifiers, not mappings.
+Note: UIDI items and "10 Materials" are excluded from validation as they are special identifiers, not mappings.
 
 Usage:
     python scripts/remove_invalid_mappings.py [--dry-run]
@@ -138,16 +138,17 @@ class IntelligentMappingCleaner:
         """Check all invoice items and mark unmapped ones as 'No Match'"""
         
         # Get all invoice items that currently have mappings (not "No Match")
-        # Exclude UIDI items as they are special identifiers, not mappings
+        # Exclude UIDI items and "10 Materials" as they are special identifiers, not mappings
         invoice_items = db.query(InvoiceItem).filter(
             InvoiceItem.mpi_item.isnot(None),
             InvoiceItem.mpi_item != '',
             InvoiceItem.mpi_item != 'No Match',
-            ~InvoiceItem.mpi_item.like('UIDI%')  # Exclude UIDI items
+            ~InvoiceItem.mpi_item.like('UIDI%'),  # Exclude UIDI items
+            InvoiceItem.mpi_item != '10 Materials'  # Exclude 10 Materials
         ).all()
         
         self.stats['invoice_items_checked'] = len(invoice_items)
-        logger.info(f"Checking {len(invoice_items)} invoice items (excluding UIDI items)...")
+        logger.info(f"Checking {len(invoice_items)} invoice items (excluding UIDI and 10 Materials)...")
         
         marked_count = 0
         
