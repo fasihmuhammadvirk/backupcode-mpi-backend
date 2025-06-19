@@ -5,7 +5,7 @@ from typing import List
 import pyodbc
 import pandas as pd
 from mpi_backend.database import get_db
-from mpi_backend.database.controllers import InvoiceItemController, InvoiceController, ItemClassification
+from mpi_backend.database.controllers import InvoiceItemController, InvoiceController, ItemClassificationController
 from mpi_backend.database.schemas import SendtoQBFilterRequest
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.pdf_to_excel.formatting_util import export_batch_entry_to_excel
@@ -53,7 +53,7 @@ def migrate_invoice_to_QB(
             ref_numbers = [getattr(item, 'ref_no', 'unknown') for item in line_items]
 
             line_item_df = pd.DataFrame([vars(item) for item in line_items])
-            if 'UIDI' not in  line_item_df['mpi_item']:
+            if 'UIDI' not in line_item_df['mpi_item']
                 # Get sheet_name from DataFrame - this will fail with KeyError if missing
                 line_item_df['sheet_name']
 
@@ -69,7 +69,7 @@ def migrate_invoice_to_QB(
         def get_classification_safe(sheet_name):
             if not sheet_name:
                 return ''
-            return ItemClassification(db).get_classification(sheet_name)
+            return ItemClassificationController(db).get_classification(sheet_name)
 
         # Initialize the account column
         line_item_df['account'] = ''
