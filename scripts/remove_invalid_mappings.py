@@ -3,10 +3,10 @@
 Intelligent Invalid Mappings Removal Script
 
 This script intelligently identifies and removes invalid mappings by:
-1. Extracting current valid mappings from Google Sheets using the updated validation logic
-2. Comparing current sheets data with database/JSON to find invalid mappings
-3. Removing invalid mappings from database and JSON files
-4. Updating items without valid mappings to "No Match"
+1. Extracting current valid mappings from Google Sheets
+2. Checking all InvoiceItems against these valid mappings
+3. Marking items without valid mappings as "No Match" and clearing sheet_name
+4. Removing invalid mappings from database and JSON files
 
 Usage:
     python scripts/remove_invalid_mappings.py [--dry-run]
@@ -18,19 +18,20 @@ import json
 import logging
 import argparse
 from datetime import datetime
-from typing import List, Dict, Set, Tuple
+from typing import Dict, Set, Tuple
 
 # Add project root to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from mpi_backend.database import SessionLocal
-from mpi_backend.database.models import ItemsMapping, Supplier, UnmappedItems
+from mpi_backend.database.models import ItemsMapping, Supplier, InvoiceItem
 from mpi_backend.utils.mapping_validators import is_temporary_mapping
 from mpi_backend.config.logging_config import setup_logging
 from mpi_backend.utils.google_sheets import GoogleSheetDataExtractor
 from mpi_backend.config.spreadsheet_config import (
     DEFAULT_SHEET_ID, GOOGLE_API_KEY, DEFAULT_OUTPUT_FILE, SKIP_SHEETS
 )
+from mpi_backend.utils.item_utils import clean_supplier_suffix
 
 # Setup logging using existing app configuration
 setup_logging()
@@ -38,7 +39,7 @@ logger = logging.getLogger('mpi_backend.scripts.intelligent_cleanup')
 
 
 class IntelligentMappingCleaner:
-    """Intelligent cleaner that compares current Google Sheets with database/JSON"""
+    """Intelligent cleaner that checks InvoiceItems against Google Sheets"""
     
     def __init__(self, dry_run: bool = False):
         self.dry_run = dry_run
@@ -51,9 +52,10 @@ class IntelligentMappingCleaner:
         # Stats tracking
         self.stats = {
             'current_valid_mappings': 0,
+            'invoice_items_checked': 0,
+            'invoice_items_marked_no_match': 0,
             'db_invalid_removed': 0,
             'json_invalid_removed': 0,
-            'items_marked_no_match': 0,
             'total_processed': 0
         }
     
@@ -64,27 +66,29 @@ class IntelligentMappingCleaner:
         with SessionLocal() as db:
             try:
                 # Step 1: Extract current valid mappings from Google Sheets
-                logger.info("Step 1: Extracting current valid mappings from Google Sheets...")
+                logger.info("Step 1: Extracting valid mappings from Google Sheets...")
                 current_valid_mappings = self._extract_current_valid_mappings()
                 self.stats['current_valid_mappings'] = len(current_valid_mappings)
-                logger.info(f"Found {len(current_valid_mappings)} currently valid mappings in Google Sheets")
+                logger.info(f"Found {len(current_valid_mappings)} valid mappings")
                 
-                # Step 2: Identify invalid mappings in database
-                logger.info("Step 2: Identifying invalid mappings in database...")
-                invalid_db_mappings = self._identify_invalid_db_mappings(db, current_valid_mappings)
-                logger.info(f"Found {len(invalid_db_mappings)} invalid mappings in database")
+                # Step 2: Check all InvoiceItems against valid mappings
+                logger.info("Step 2: Checking invoice items...")
+                marked_count = self._check_and_mark_invoice_items(
+                    db, current_valid_mappings
+                )
+                self.stats['invoice_items_marked_no_match'] = marked_count
                 
                 # Step 3: Remove invalid mappings from database
                 logger.info("Step 3: Removing invalid mappings from database...")
-                self.stats['db_invalid_removed'] = self._remove_invalid_db_mappings(db, invalid_db_mappings)
+                db_removed = self._remove_invalid_db_mappings(
+                    db, current_valid_mappings
+                )
+                self.stats['db_invalid_removed'] = db_removed
                 
                 # Step 4: Clean JSON files
                 logger.info("Step 4: Cleaning JSON files...")
-                self.stats['json_invalid_removed'] = self._clean_json_files(current_valid_mappings)
-                
-                # Step 5: Mark unmapped items as "No Match"
-                logger.info("Step 5: Marking unmapped items as 'No Match'...")
-                self.stats['items_marked_no_match'] = self._mark_unmapped_items_no_match(db, current_valid_mappings)
+                json_removed = self._clean_json_files(current_valid_mappings)
+                self.stats['json_invalid_removed'] = json_removed
                 
                 # Generate final report
                 self._generate_final_report()
@@ -104,10 +108,9 @@ class IntelligentMappingCleaner:
                 }
     
     def _extract_current_valid_mappings(self) -> Set[Tuple[str, int, str]]:
-        """Extract current valid mappings from Google Sheets using updated validation logic"""
-        logger.info("Extracting from Google Sheets with current validation logic...")
+        """Extract current valid mappings from Google Sheets"""
+        logger.info("Extracting from Google Sheets...")
         
-        # Extract all current mappings from Google Sheets
         current_mappings = self.extractor.process_all_sheets()
         
         # Convert to set of tuples for easy comparison
@@ -124,16 +127,104 @@ class IntelligentMappingCleaner:
             if key[0] and key[1] and key[2]:
                 valid_mappings.add(key)
         
-        logger.info(f"Extracted {len(valid_mappings)} valid mapping keys from current Google Sheets")
+        logger.info(f"Extracted {len(valid_mappings)} valid mappings")
         return valid_mappings
     
-    def _identify_invalid_db_mappings(self, db, current_valid_mappings: Set[Tuple[str, int, str]]) -> List[Dict]:
-        """Identify mappings in database that are not in current valid Google Sheets mappings"""
-        invalid_mappings = []
+    def _check_and_mark_invoice_items(
+        self, db, current_valid_mappings: Set[Tuple[str, int, str]]
+    ) -> int:
+        """Check all invoice items and mark unmapped ones as 'No Match'"""
         
-        # Get all mappings from database
+        # Get all invoice items that currently have mappings (not "No Match")
+        invoice_items = db.query(InvoiceItem).filter(
+            InvoiceItem.mpi_item.isnot(None),
+            InvoiceItem.mpi_item != '',
+            InvoiceItem.mpi_item != 'No Match'
+        ).all()
+        
+        self.stats['invoice_items_checked'] = len(invoice_items)
+        logger.info(f"Checking {len(invoice_items)} invoice items...")
+        
+        marked_count = 0
+        
+        for item in invoice_items:
+            # Get supplier ID from vendor name
+            supplier_id = self._get_supplier_id_by_name(db, item.vendor)
+            
+            if not supplier_id:
+                logger.warning(f"Could not find supplier for vendor: {item.vendor}")
+                continue
+            
+            # Check if this item has a valid mapping
+            has_valid_mapping = self._item_has_valid_mapping(
+                item, supplier_id, current_valid_mappings
+            )
+            
+            if not has_valid_mapping:
+                logger.info(
+                    f"{'[DRY RUN] ' if self.dry_run else ''}Marking as No Match: "
+                    f"Item: {item.item} -> MPI: {item.mpi_item} "
+                    f"(Supplier: {item.vendor})"
+                )
+                
+                if not self.dry_run:
+                    item.mpi_item = 'No Match'
+                    item.mpi_description = 'No Match'
+                    item.sheet_name = ''
+                    marked_count += 1
+        
+        if not self.dry_run and marked_count > 0:
+            try:
+                db.commit()
+                logger.info(f"Marked {marked_count} invoice items as 'No Match'")
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Error committing invoice item changes: {e}")
+                marked_count = 0
+        
+        return marked_count
+    
+    def _item_has_valid_mapping(
+        self, 
+        item: InvoiceItem, 
+        supplier_id: int, 
+        current_valid_mappings: Set[Tuple[str, int, str]]
+    ) -> bool:
+        """Check if an invoice item has a valid mapping in Google Sheets"""
+        
+        # Clean the invoice item for comparison
+        clean_item = item.item.strip() if item.item else ''
+        
+        # Check against all valid mappings for this supplier
+        for mapping_key in current_valid_mappings:
+            mpi_code, mapping_supplier_id, supplier_item_id = mapping_key
+            
+            # Skip if different supplier
+            if mapping_supplier_id != supplier_id:
+                continue
+            
+            # Try exact match first
+            if clean_item == supplier_item_id.strip():
+                return True
+            
+            # Try with suffix cleaning
+            clean_supplier_item = clean_supplier_suffix(
+                supplier_item_id.strip(), supplier_id
+            )
+            if clean_item == clean_supplier_item:
+                return True
+        
+        return False
+    
+    def _remove_invalid_db_mappings(
+        self, db, current_valid_mappings: Set[Tuple[str, int, str]]
+    ) -> int:
+        """Remove mappings from database that are not in Google Sheets"""
+        
         all_db_mappings = db.query(ItemsMapping).all()
-        logger.info(f"Checking {len(all_db_mappings)} database mappings against current Google Sheets...")
+        logger.info(f"Checking {len(all_db_mappings)} database mappings...")
+        
+        removed_count = 0
         
         for mapping in all_db_mappings:
             # Create the same key format
@@ -143,68 +234,52 @@ class IntelligentMappingCleaner:
                 mapping.supplier_item_ids.strip() if mapping.supplier_item_ids else ''
             )
             
-            # Check if this mapping exists in current valid Google Sheets mappings
+            # Check if this mapping exists in current valid Google Sheets
             is_valid = mapping_key in current_valid_mappings
             
             # Also check for temporary mappings (these should be removed)
-            is_temporary = is_temporary_mapping(mapping.mpi_code, mapping.description)
-            
-            # Determine reasons for invalidity
-            reasons = []
-            if not is_valid:
-                reasons.append('not_in_current_sheets')
-            if is_temporary:
-                reasons.append('temporary_mapping')
-            
-            # If invalid for any reason, add to removal list
-            if reasons:
-                invalid_mappings.append({
-                    'mapping': mapping,
-                    'key': mapping_key,
-                    'reasons': reasons
-                })
-        
-        return invalid_mappings
-    
-    def _remove_invalid_db_mappings(self, db, invalid_mappings: List[Dict]) -> int:
-        """Remove invalid mappings from database"""
-        removed_count = 0
-        
-        for item in invalid_mappings:
-            mapping = item['mapping']
-            reasons = item['reasons']
-            
-            # Get supplier name for logging
-            supplier_name = self._get_supplier_name(db, mapping.supplier_id)
-            
-            logger.info(
-                f"{'[DRY RUN] ' if self.dry_run else ''}Removing DB mapping: "
-                f"'{mapping.supplier_item_ids}' -> '{mapping.mpi_code}' "
-                f"(Supplier: {supplier_name}) "
-                f"Reasons: {', '.join(reasons)}"
+            is_temporary = is_temporary_mapping(
+                mapping.mpi_code, mapping.description
             )
             
-            if not self.dry_run:
-                try:
-                    db.delete(mapping)
-                    removed_count += 1
-                except Exception as e:
-                    logger.error(f"Error removing mapping ID {mapping.id}: {e}")
+            # Remove if invalid or temporary
+            if not is_valid or is_temporary:
+                reasons = []
+                if not is_valid:
+                    reasons.append('not_in_current_sheets')
+                if is_temporary:
+                    reasons.append('temporary_mapping')
+                
+                supplier_name = self._get_supplier_name(db, mapping.supplier_id)
+                
+                logger.info(
+                    f"{'[DRY RUN] ' if self.dry_run else ''}Removing DB mapping: "
+                    f"'{mapping.supplier_item_ids}' -> '{mapping.mpi_code}' "
+                    f"(Supplier: {supplier_name}) "
+                    f"Reasons: {', '.join(reasons)}"
+                )
+                
+                if not self.dry_run:
+                    try:
+                        db.delete(mapping)
+                        removed_count += 1
+                    except Exception as e:
+                        logger.error(f"Error removing mapping ID {mapping.id}: {e}")
         
         if not self.dry_run and removed_count > 0:
             try:
                 db.commit()
-                logger.info(f"Successfully removed {removed_count} invalid mappings from database")
+                logger.info(f"Removed {removed_count} invalid mappings from database")
             except Exception as e:
                 db.rollback()
                 logger.error(f"Error committing database changes: {e}")
                 removed_count = 0
-        else:
-            logger.info(f"{'[DRY RUN] Would remove' if self.dry_run else 'No'} {len(invalid_mappings)} invalid mappings from database")
         
         return removed_count
     
-    def _clean_json_files(self, current_valid_mappings: Set[Tuple[str, int, str]]) -> int:
+    def _clean_json_files(
+        self, current_valid_mappings: Set[Tuple[str, int, str]]
+    ) -> int:
         """Clean invalid mappings from JSON files"""
         total_removed = 0
         
@@ -223,7 +298,9 @@ class IntelligentMappingCleaner:
         
         return total_removed
     
-    def _clean_single_json_file(self, json_file: str, current_valid_mappings: Set[Tuple[str, int, str]]) -> int:
+    def _clean_single_json_file(
+        self, json_file: str, current_valid_mappings: Set[Tuple[str, int, str]]
+    ) -> int:
         """Clean a single JSON file"""
         logger.info(f"Processing {json_file}...")
         
@@ -255,7 +332,9 @@ class IntelligentMappingCleaner:
                 is_valid = item_key in current_valid_mappings
                 
                 # Also check for temporary mappings
-                is_temporary = is_temporary_mapping(item.get('mpi_code', ''), item.get('description', ''))
+                is_temporary = is_temporary_mapping(
+                    item.get('mpi_code', ''), item.get('description', '')
+                )
                 
                 if is_valid and not is_temporary:
                     cleaned_data.append(item)
@@ -287,57 +366,18 @@ class IntelligentMappingCleaner:
             logger.error(f"Error processing {json_file}: {e}")
             return 0
     
-    def _mark_unmapped_items_no_match(self, db, current_valid_mappings: Set[Tuple[str, int, str]]) -> int:
-        """Mark items without valid mappings as 'No Match'"""
-        
-        # Get all distinct items that should have mappings
-        # This would require checking your invoice items or other source data
-        # For now, let's focus on items that currently have invalid mappings
-        
-        marked_count = 0
+    def _get_supplier_id_by_name(self, db, vendor_name: str) -> int:
+        """Get supplier ID by vendor name"""
+        if not vendor_name:
+            return None
         
         try:
-            # Get unmapped items from the database
-            unmapped_items = db.query(UnmappedItems).all()
-            
-            for item in unmapped_items:
-                # Check if this item has any valid mapping
-                has_valid_mapping = False
-                
-                # Check if any mapping exists for this supplier_item_ids
-                # This should check supplier_item_ids, not mpi_code!
-                for mapping_key in current_valid_mappings:
-                    mpi_code, supplier_id, supplier_item_id = mapping_key
-                    # Check if the unmapped item's supplier_item_ids matches any valid mapping
-                    if (supplier_item_id == item.supplier_item_ids and 
-                        supplier_id == item.supplier_id):
-                        has_valid_mapping = True
-                        break
-                
-                # If no valid mapping exists, ensure it's marked as "No Match"
-                if not has_valid_mapping and item.supplier_item_ids != 'No Match':
-                    logger.info(
-                        f"{'[DRY RUN] ' if self.dry_run else ''}Marking as No Match: "
-                        f"Supplier Item: {item.supplier_item_ids} (Supplier ID: {item.supplier_id}) "
-                        f"MPI: {item.mpi_code}"
-                    )
-                    
-                    if not self.dry_run:
-                        item.supplier_item_ids = 'No Match'
-                        marked_count += 1
-            
-            if not self.dry_run and marked_count > 0:
-                db.commit()
-                logger.info(f"Marked {marked_count} items as 'No Match'")
-            else:
-                logger.info(f"{'[DRY RUN] Would mark' if self.dry_run else 'No items to mark'} as 'No Match'")
-            
-        except Exception as e:
-            logger.error(f"Error marking items as 'No Match': {e}")
-            if not self.dry_run:
-                db.rollback()
-        
-        return marked_count
+            supplier = db.query(Supplier).filter(
+                Supplier.supplier_name.contains(vendor_name)
+            ).first()
+            return supplier.id if supplier else None
+        except Exception:
+            return None
     
     def _get_supplier_name(self, db, supplier_id: int) -> str:
         """Get supplier name by ID"""
@@ -352,11 +392,12 @@ class IntelligentMappingCleaner:
         logger.info("\n" + "="*60)
         logger.info("INTELLIGENT CLEANUP REPORT")
         logger.info("="*60)
-        logger.info(f"Current valid mappings in Google Sheets: {self.stats['current_valid_mappings']:,}")
-        logger.info(f"Invalid mappings removed from database: {self.stats['db_invalid_removed']:,}")
-        logger.info(f"Invalid mappings removed from JSON files: {self.stats['json_invalid_removed']:,}")
-        logger.info(f"Items marked as 'No Match': {self.stats['items_marked_no_match']:,}")
-        logger.info(f"Total cleanup operations: {sum(self.stats.values()):,}")
+        logger.info(f"Valid mappings in Google Sheets: {self.stats['current_valid_mappings']:,}")
+        logger.info(f"Invoice items checked: {self.stats['invoice_items_checked']:,}")
+        logger.info(f"Invoice items marked 'No Match': {self.stats['invoice_items_marked_no_match']:,}")
+        logger.info(f"DB mappings removed: {self.stats['db_invalid_removed']:,}")
+        logger.info(f"JSON mappings removed: {self.stats['json_invalid_removed']:,}")
+        logger.info(f"Total operations: {sum(self.stats.values()):,}")
         logger.info(f"Mode: {'DRY RUN (no changes made)' if self.dry_run else 'LIVE RUN (changes applied)'}")
         logger.info("="*60)
 
