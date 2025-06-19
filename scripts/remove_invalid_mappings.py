@@ -59,31 +59,31 @@ class IntelligentMappingCleaner:
     
     def run_cleanup(self) -> Dict:
         """Main cleanup method"""
-        logger.info("🧠 Starting intelligent mapping cleanup...")
+        logger.info("Starting intelligent mapping cleanup...")
         
         with SessionLocal() as db:
             try:
                 # Step 1: Extract current valid mappings from Google Sheets
-                logger.info("📊 Step 1: Extracting current valid mappings from Google Sheets...")
+                logger.info("Step 1: Extracting current valid mappings from Google Sheets...")
                 current_valid_mappings = self._extract_current_valid_mappings()
                 self.stats['current_valid_mappings'] = len(current_valid_mappings)
                 logger.info(f"Found {len(current_valid_mappings)} currently valid mappings in Google Sheets")
                 
                 # Step 2: Identify invalid mappings in database
-                logger.info("🔍 Step 2: Identifying invalid mappings in database...")
+                logger.info("Step 2: Identifying invalid mappings in database...")
                 invalid_db_mappings = self._identify_invalid_db_mappings(db, current_valid_mappings)
                 logger.info(f"Found {len(invalid_db_mappings)} invalid mappings in database")
                 
                 # Step 3: Remove invalid mappings from database
-                logger.info("🗑️ Step 3: Removing invalid mappings from database...")
+                logger.info("Step 3: Removing invalid mappings from database...")
                 self.stats['db_invalid_removed'] = self._remove_invalid_db_mappings(db, invalid_db_mappings)
                 
                 # Step 4: Clean JSON files
-                logger.info("📄 Step 4: Cleaning JSON files...")
+                logger.info("Step 4: Cleaning JSON files...")
                 self.stats['json_invalid_removed'] = self._clean_json_files(current_valid_mappings)
                 
                 # Step 5: Mark unmapped items as "No Match"
-                logger.info("❌ Step 5: Marking unmapped items as 'No Match'...")
+                logger.info("Step 5: Marking unmapped items as 'No Match'...")
                 self.stats['items_marked_no_match'] = self._mark_unmapped_items_no_match(db, current_valid_mappings)
                 
                 # Generate final report
@@ -96,7 +96,7 @@ class IntelligentMappingCleaner:
                 }
                 
             except Exception as e:
-                logger.error(f"❌ Cleanup failed: {str(e)}")
+                logger.error(f"Cleanup failed: {str(e)}")
                 return {
                     'success': False,
                     'error': str(e),
@@ -194,10 +194,10 @@ class IntelligentMappingCleaner:
         if not self.dry_run and removed_count > 0:
             try:
                 db.commit()
-                logger.info(f"✅ Successfully removed {removed_count} invalid mappings from database")
+                logger.info(f"Successfully removed {removed_count} invalid mappings from database")
             except Exception as e:
                 db.rollback()
-                logger.error(f"❌ Error committing database changes: {e}")
+                logger.error(f"Error committing database changes: {e}")
                 removed_count = 0
         else:
             logger.info(f"{'[DRY RUN] Would remove' if self.dry_run else 'No'} {len(invalid_mappings)} invalid mappings from database")
@@ -277,14 +277,14 @@ class IntelligentMappingCleaner:
             if not self.dry_run and removed_count > 0:
                 with open(json_file, 'w') as f:
                     json.dump(cleaned_data, f, indent=2)
-                logger.info(f"✅ Cleaned {json_file}: {original_count} -> {len(cleaned_data)} (removed {removed_count})")
+                logger.info(f"Cleaned {json_file}: {original_count} -> {len(cleaned_data)} (removed {removed_count})")
             else:
                 logger.info(f"{'[DRY RUN] Would clean' if self.dry_run else 'No changes to'} {json_file}: {removed_count} items would be removed")
             
             return removed_count
             
         except Exception as e:
-            logger.error(f"❌ Error processing {json_file}: {e}")
+            logger.error(f"Error processing {json_file}: {e}")
             return 0
     
     def _mark_unmapped_items_no_match(self, db, current_valid_mappings: Set[Tuple[str, int, str]]) -> int:
@@ -324,12 +324,12 @@ class IntelligentMappingCleaner:
             
             if not self.dry_run and marked_count > 0:
                 db.commit()
-                logger.info(f"✅ Marked {marked_count} items as 'No Match'")
+                logger.info(f"Marked {marked_count} items as 'No Match'")
             else:
                 logger.info(f"{'[DRY RUN] Would mark' if self.dry_run else 'No items to mark'} as 'No Match'")
             
         except Exception as e:
-            logger.error(f"❌ Error marking items as 'No Match': {e}")
+            logger.error(f"Error marking items as 'No Match': {e}")
             if not self.dry_run:
                 db.rollback()
         
@@ -346,7 +346,7 @@ class IntelligentMappingCleaner:
     def _generate_final_report(self):
         """Generate final cleanup report"""
         logger.info("\n" + "="*60)
-        logger.info("🎯 INTELLIGENT CLEANUP REPORT")
+        logger.info("INTELLIGENT CLEANUP REPORT")
         logger.info("="*60)
         logger.info(f"Current valid mappings in Google Sheets: {self.stats['current_valid_mappings']:,}")
         logger.info(f"Invalid mappings removed from database: {self.stats['db_invalid_removed']:,}")
@@ -375,11 +375,11 @@ def main():
     result = cleaner.run_cleanup()
     
     if result['success']:
-        logger.info("✅ Cleanup completed successfully!")
+        logger.info("Cleanup completed successfully!")
         if args.dry_run:
             logger.info("To apply changes, run without --dry-run flag")
     else:
-        logger.error(f"❌ Cleanup failed: {result.get('error')}")
+        logger.error(f"Cleanup failed: {result.get('error')}")
         sys.exit(1)
 
 
