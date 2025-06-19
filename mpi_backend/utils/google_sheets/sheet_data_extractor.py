@@ -217,6 +217,97 @@ class GoogleSheetDataExtractor:
         elif supplier == "Bruce Ferguson":
             info["key_terms"].extend(["BF"])
 
+    def _validate_first_two_rows_have_supplier_data(
+        self, 
+        df_full: pd.DataFrame, 
+        col_idx: int
+    ) -> bool:
+        """
+        Validate that the first two rows of a column contain a meaningful 
+        supplier header or are empty (for pattern-based detection).
+        
+        A column is considered valid if:
+        1. It has a recognized supplier header (BMW, WWPS, Y&S, etc.)
+        2. It has empty first two rows (allows pattern-based detection)
+        
+        A column is rejected if:
+        1. It has non-supplier headers (ADDITIONAL FEES, TOTAL, NOTES, etc.)
+        
+        Args:
+            df_full: Full DataFrame to check
+            col_idx: Column index to validate
+            
+        Returns:
+            True if column should be processed, False otherwise
+        """
+        if col_idx >= len(df_full.columns):
+            return False
+            
+        # Get the first two rows of the column
+        first_two_rows = df_full.iloc[:2, col_idx]
+        
+        # Check each row for content
+        has_any_content = False
+        
+        for cell_value in first_two_rows:
+            # Skip empty or NaN cells
+            if pd.isna(cell_value):
+                continue
+                
+            # Convert to string and clean
+            cell_str = str(cell_value).strip()
+            
+            # Skip empty strings
+            if not cell_str:
+                continue
+                
+            has_any_content = True
+            
+            # Check if this looks like a supplier header
+            cell_lower = cell_str.lower()
+            
+            # Known supplier patterns to accept
+            supplier_patterns = [
+                'bmw', 'wwps', 'y&s', 'y & s', 'supreme', 'pyramid', 
+                'gotham', 'fw webb', 'flow', 'opus', 'af supply', 'af',
+                'lion', 'bruce', 'plumbing', 'supply', 'supplies'
+            ]
+            
+            # Check if cell contains any supplier-related terms
+            is_supplier_header = any(pattern in cell_lower for pattern in supplier_patterns)
+            
+            # Also accept numbered supplier variations (BMW 1, BMW 2, etc.)
+            supplier_with_number = re.match(
+                r'^([A-Za-z&\s]+)[\s]*\d*$', cell_str
+            )
+            if supplier_with_number:
+                base_name = supplier_with_number.group(1).strip().lower()
+                if any(pattern in base_name for pattern in supplier_patterns):
+                    is_supplier_header = True
+            
+            # Reject columns with non-supplier headers
+            non_supplier_terms = [
+                'additional fees', 'total', 'notes', 'comments', 'description',
+                'size', 'item code', 'code', 'mpi', 'price', 'cost', 'amount',
+                'quantity', 'qty', 'date', 'status', 'misc', 'miscellaneous',
+                'fees', 'charges', 'shipping', 'delivery', 'freight'
+            ]
+            
+            # If it contains non-supplier terms, reject it
+            if any(term in cell_lower for term in non_supplier_terms):
+                return False
+                
+            # If it's a supplier header, accept it
+            if is_supplier_header:
+                return True
+        
+        # If no content found in first two rows, reject the column
+        if not has_any_content:
+            return False
+            
+        # If we have content but it's not recognized as supplier-related, reject
+        return False
+
     def _extract_clean_sheet_name(self, sheet_title: str) -> str:
         """
         Extract clean sheet name for classification from Google Sheets tab name.
@@ -485,9 +576,8 @@ class GoogleSheetDataExtractor:
                 
             # Check if this is an unnamed column - collect these for later inspection
             if str(col_name).startswith('Unnamed:'):
-                # Check if column contains any data
-                col_data = df_full.iloc[:, col_idx]
-                if not col_data.dropna().empty:
+                # Check if column contains valid supplier data in first two rows
+                if self._validate_first_two_rows_have_supplier_data(df_full, col_idx):
                     unnamed_columns.append(col_idx)
                 continue
                 
@@ -509,9 +599,8 @@ class GoogleSheetDataExtractor:
                 
                 # If good match, add to supplier columns
                 if supplier_id > 0 and confidence >= self.fuzzy_threshold:
-                    # Check if column contains any data
-                    col_data = df_full.iloc[:, col_idx]
-                    if not col_data.dropna().empty:
+                    # Check if column contains valid supplier data in first two rows
+                    if self._validate_first_two_rows_have_supplier_data(df_full, col_idx):
                         # Add to supplier columns
                         if supplier not in supplier_columns:
                             supplier_columns[supplier] = []
@@ -529,9 +618,8 @@ class GoogleSheetDataExtractor:
             
             # Only keep columns that have a supplier match and contain data
             if supplier_id > 0 and confidence >= self.fuzzy_threshold:
-                # Check if column contains any data
-                col_data = df_full.iloc[:, col_idx]
-                if not col_data.dropna().empty:
+                # Check if column contains valid supplier data in first two rows
+                if self._validate_first_two_rows_have_supplier_data(df_full, col_idx):
                     # Add to supplier columns
                     if supplier not in supplier_columns:
                         supplier_columns[supplier] = []
@@ -598,6 +686,10 @@ class GoogleSheetDataExtractor:
             # If we have a significant number of matches for a supplier, add this column
             for supplier, count in supplier_matches.items():
                 if count >= 2:  # At least 2 matches to consider it a supplier column (reduced from 3)
+                    # Double-check that first two rows have valid supplier data
+                    if not self._validate_first_two_rows_have_supplier_data(df_full, col_idx):
+                        continue  # Skip this column if first two rows don't have valid data
+                        
                     if supplier not in supplier_columns:
                         supplier_columns[supplier] = []
                     supplier_columns[supplier].append(col_idx)
@@ -650,9 +742,8 @@ class GoogleSheetDataExtractor:
                         if re.match(f"^{supplier_pattern}\\s*\\d*$", cell_str, re.IGNORECASE):
                             supplier_id = self.supplier_ids.get(supplier_name, 0)
                             if supplier_id > 0:
-                                # Check if column contains any data
-                                col_data = df_full.iloc[:, col_idx]
-                                if not col_data.dropna().empty:
+                                # Check if column contains valid supplier data in first two rows
+                                if self._validate_first_two_rows_have_supplier_data(df_full, col_idx):
                                     # Add to supplier columns
                                     if supplier_name not in supplier_columns:
                                         supplier_columns[supplier_name] = []
@@ -699,6 +790,10 @@ class GoogleSheetDataExtractor:
                     
                     # If more than 30% of values look like item codes, consider it a supplier column
                     if pattern_matches > 0 and pattern_matches / len(string_values) >= 0.3:
+                        # Additional validation: check if first two rows have valid supplier data
+                        if not self._validate_first_two_rows_have_supplier_data(df_full, col_idx):
+                            continue  # Skip this column if first two rows don't have valid data
+                            
                         # Try to determine which supplier based on patterns
                         # Default to BMW if we can't determine
                         supplier_name = "BMW Plumbing Supplies"
