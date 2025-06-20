@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import pytz
 import logging
 import time as time_module
+import os
+import gc
 
 # Setup logging first, before any other imports
 from mpi_backend.config.logging_config import setup_logging
@@ -37,75 +39,130 @@ from mpi_backend.utils.statement_downloader import statement_download_background
 # ENHANCED: Import priority control utilities
 from mpi_backend.utils.quickbooks_priority import set_scheduler_instance
 
-UTC_TZ = pytz.utc  # UTC Time Zone
+UTC_TZ = pytz.utc
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Initializing ENTERPRISE background task system")
-    logger.info("QuickBooks ABSOLUTE Priority Mode: ENABLED")
-    logger.info("Dedicated QB database pool: 15 connections")
-    logger.info("Background job pausing: ENABLED")
-    logger.info("Dynamic scheduler control: ENABLED")
+    logger.info("Initializing background task system")
+    logger.info("Background task concurrency optimized for stability")
+    logger.info("Memory management enhanced")
+    logger.info("QuickBooks Priority Mode enabled")
 
     scheduler = BackgroundScheduler()
     
-    # ENHANCED: Register scheduler for dynamic job control
+    # Register scheduler for dynamic job control
     set_scheduler_instance(scheduler)
     
-    # OPTIMIZED: Email download with migrate-all priority awareness
+    # Optimized email download with reduced concurrency
     scheduler.add_job(
         email_download_background_task, 
         "interval", 
-        minutes=3, 
-        max_instances=10,  # Reduced further to prioritize migrate-all
+        minutes=5,  # Increased interval to reduce load
+        max_instances=2,  # Reduced from 10 to 2 for stability
         id="email_download",
-        name="Email Download (migrate-all aware)"
+        name="Email Download Task",
+        misfire_grace_time=300
     )
 
-    # OPTIMIZED: Statement download with migrate-all priority awareness
+    # Optimized statement download
     scheduler.add_job(
         statement_download_background_task, 
         "interval", 
-        hours=10,
+        hours=12,  # Increased from 10 to 12 hours
         max_instances=1,
         replace_existing=True,
         id="statement_download",
-        name="Statement Download (migrate-all aware)"
+        name="Statement Download Task",
+        misfire_grace_time=1800
     )
 
-    # OPTIMIZED: Google Sheets sync with migrate-all priority awareness
+    # Optimized Google Sheets sync
     scheduler.add_job(
         GoogleSheetSyncController.execute_sync_task,
         "interval",
-        hours=5,
+        hours=8,  # Increased from 5 to 8 hours
         replace_existing=True,
         max_instances=1,
         id="google_sheets_sync",
-        name="Google Sheets Sync (migrate-all aware)"
+        name="Google Sheets Sync Task",
+        misfire_grace_time=1800
     )
 
-    # OPTIMIZED: Mapping updates with migrate-all priority awareness
+    # Daily mapping updates
     scheduler.add_job(
         ItemsMappingController.execute_update_all_mappings_task,
         CronTrigger(hour=3, minute=0, timezone=UTC_TZ),
         id="update_all_mappings_daily",
         replace_existing=True,
         max_instances=1,
-        name="Daily Mapping Update (migrate-all aware)"
+        name="Daily Mapping Update Task",
+        misfire_grace_time=3600
+    )
+
+    # Memory cleanup job - runs less frequently to avoid overhead
+    def memory_cleanup_task():
+        """Force garbage collection and log memory status"""
+        try:
+            # Only import psutil when needed to avoid import overhead
+            import psutil
+            process = psutil.Process(os.getpid())
+            memory_before = process.memory_info().rss / 1024 / 1024  # MB
+            
+            # Force garbage collection
+            collected = gc.collect()
+            
+            memory_after = process.memory_info().rss / 1024 / 1024  # MB
+            freed = memory_before - memory_after
+            
+            logger.info(f"Memory cleanup: {memory_before:.1f}MB to {memory_after:.1f}MB "
+                       f"(freed: {freed:.1f}MB, collected: {collected} objects)")
+            
+            # Log warning if memory usage is high
+            if memory_after > 1000:  # Over 1GB
+                logger.warning(f"High memory usage detected: {memory_after:.1f}MB")
+                
+        except ImportError:
+            # psutil not available, just run gc
+            collected = gc.collect()
+            logger.info(f"Memory cleanup completed (collected: {collected} objects)")
+        except Exception as e:
+            logger.error(f"Memory cleanup failed: {e}")
+
+    scheduler.add_job(
+        memory_cleanup_task,
+        "interval",
+        minutes=30,  # Reduced frequency from 15 to 30 minutes
+        max_instances=1,
+        id="memory_cleanup",
+        name="Memory Cleanup Task"
     )
 
     scheduler.start()
-    logger.info("Background tasks scheduler started with priority control")
+    logger.info("Background tasks scheduler started successfully")
+    logger.info("Email download: Every 5min (max 2 instances)")
+    logger.info("Statement download: Every 12hrs (max 1 instance)") 
+    logger.info("Google Sheets sync: Every 8hrs (max 1 instance)")
+    logger.info("Memory cleanup: Every 30min")
+    
     yield
+    
     logger.info("Shutting down application")
+    try:
+        scheduler.shutdown(wait=False)
+        logger.info("Scheduler shut down successfully")
+    except Exception as e:
+        logger.error(f"Error shutting down scheduler: {e}")
 
-# CRITICAL FIX: Extended timeout configuration for QuickBooks operations
+# Application configuration
 app = FastAPI(
     lifespan=lifespan,
     title="MPI Backend API",
     description="Enterprise-grade backend with QuickBooks integration",
-    version="1.0.0"
+    version="1.0.0",
+    openapi_url="/openapi.json",
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
 origins = ["*"]
@@ -118,55 +175,86 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ENHANCED TIMEOUT MIDDLEWARE: Priority-aware timeout handling with sync compatibility
+# Enhanced timeout middleware with optional memory monitoring
 @app.middleware("http")
 async def timeout_middleware(request: Request, call_next):
     """
-    Enhanced middleware with absolute priority for migrate-all operations
-    FIXED: Proper handling of sync functions without async wrapping
-    - migrate-all: 15 minutes timeout (absolute priority)
-    - Other QuickBooks: 10 minutes timeout  
-    - Exports: 5 minutes timeout
-    - Standard: 2 minutes timeout
+    Enhanced middleware with optional memory monitoring and timeout handling
+    Memory checks are lightweight and only reject requests in extreme cases
     """
-    # Determine timeout and priority based on route
+    
+    # Quick memory check - only if psutil is available and only for critical endpoints
+    try:
+        # Only check memory for resource-intensive endpoints
+        if any(path in str(request.url) for path in ["/quickbooks/migrate-all", "/export"]):
+            import psutil
+            process = psutil.Process(os.getpid())
+            memory_usage = process.memory_info().rss / 1024 / 1024  # MB
+            
+            # Only reject requests if memory usage is extremely high
+            if memory_usage > 3000:  # Over 3GB (increased threshold)
+                logger.error(f"Memory critical: {memory_usage:.1f}MB - Rejecting request")
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "detail": "Server overloaded. Please try again in a few minutes.",
+                        "memory_usage_mb": round(memory_usage, 1),
+                        "retry_after": 300
+                    }
+                )
+    except ImportError:
+        pass  # psutil not available, continue normally
+    except Exception:
+        pass  # Memory check failed, continue normally
+    
+    # Determine timeout based on route
     if "/quickbooks/migrate-all" in str(request.url):
-        timeout_seconds = 900  # 15 minutes for migrate-all (ABSOLUTE PRIORITY)
-        logger.info(f"MIGRATE-ALL operation started - ABSOLUTE PRIORITY - "
-                   f"timeout: {timeout_seconds}s")
+        timeout_seconds = 900  # 15 minutes for migrate-all
     elif "/quickbooks" in str(request.url):
-        timeout_seconds = 600  # 10 minutes for other QuickBooks operations
-        logger.info(f"QB operation started - timeout: {timeout_seconds}s")
+        timeout_seconds = 600  # 10 minutes for other QuickBooks
     elif "/export" in str(request.url):
-        timeout_seconds = 300  # 5 minutes for export operations
-        logger.info(f"Export operation started - timeout: {timeout_seconds}s")
+        timeout_seconds = 300  # 5 minutes for exports
     else:
         timeout_seconds = 120  # 2 minutes for standard operations
     
     start_time = time_module.time()
     
     try:
-        # CRITICAL FIX: Don't wrap sync QuickBooks functions with asyncio.wait_for
-        # Let FastAPI handle the sync/async conversion naturally
         response = await call_next(request)
         
         elapsed = time_module.time() - start_time
-        if "/quickbooks/migrate-all" in str(request.url):
-            logger.info(f"MIGRATE-ALL completed in {elapsed:.2f}s")
-        elif "/quickbooks" in str(request.url):
-            logger.info(f"QuickBooks completed in {elapsed:.2f}s")
-            
-        # Check if we exceeded timeout (for logging purposes)
-        if elapsed > timeout_seconds:
-            logger.warning(f"Operation took {elapsed:.2f}s, exceeded timeout of {timeout_seconds}s")
         
+        # Log completion for long-running operations only
+        if elapsed > 5:  # Only log operations taking more than 5 seconds
+            try:
+                import psutil
+                process = psutil.Process(os.getpid())
+                memory_after = process.memory_info().rss / 1024 / 1024  # MB
+                
+                if "/quickbooks/migrate-all" in str(request.url):
+                    logger.info(f"MIGRATE-ALL completed in {elapsed:.2f}s (memory: {memory_after:.1f}MB)")
+                elif "/quickbooks" in str(request.url):
+                    logger.info(f"QuickBooks operation completed in {elapsed:.2f}s (memory: {memory_after:.1f}MB)")
+                elif "/export" in str(request.url):
+                    logger.info(f"Export operation completed in {elapsed:.2f}s")
+            except:
+                if "/quickbooks/migrate-all" in str(request.url):
+                    logger.info(f"MIGRATE-ALL completed in {elapsed:.2f}s")
+                elif "/quickbooks" in str(request.url):
+                    logger.info(f"QuickBooks operation completed in {elapsed:.2f}s")
+            
         return response
         
     except Exception as e:
         elapsed = time_module.time() - start_time
         logger.error(f"Request failed after {elapsed:.2f}s: {str(e)}")
         
-        # Return proper error response for timeouts and other errors
+        # Force garbage collection on error (lightweight operation)
+        try:
+            gc.collect()
+        except:
+            pass
+        
         if "timeout" in str(e).lower() or elapsed > timeout_seconds:
             return JSONResponse(
                 status_code=408,
@@ -175,12 +263,10 @@ async def timeout_middleware(request: Request, call_next):
                              f"Operation may still be processing in background.",
                     "timeout": timeout_seconds,
                     "elapsed": elapsed,
-                    "suggestion": "For large QuickBooks exports, consider reducing "
-                                "the dataset size or try again later."
+                    "suggestion": "For large operations, consider reducing dataset size."
                 }
             )
         else:
-            # Re-raise other exceptions for FastAPI to handle
             raise
 
 
@@ -203,13 +289,27 @@ def register_routes(app):
 register_routes(app)
 add_pagination(app)
 
-# ENHANCED: Add startup event to log timeout configuration
+# Add startup event with minimal logging
 @app.on_event("startup")
 async def startup_event():
-    logger.info("MPI Backend started with ENHANCED timeout protections:")
-    logger.info("MIGRATE-ALL operations: 15 minutes timeout (ABSOLUTE PRIORITY)")
-    logger.info(" Other QuickBooks operations: 10 minutes timeout")
-    logger.info("Export operations: 5 minutes timeout")
-    logger.info("Standard operations: 2 minutes timeout")
-    logger.info("Dynamic job pausing: ACTIVE")
-    logger.info("Priority control middleware: ACTIVE")
+    logger.info("MPI Backend started with optimizations")
+    logger.info("Background task concurrency reduced for stability")
+    logger.info("Memory monitoring active for critical endpoints only")
+    logger.info("Automatic garbage collection enabled")
+    logger.info("Request rejection on extreme memory usage enabled")
+    logger.info("Timeout configuration:")
+    logger.info("  MIGRATE-ALL: 15min timeout")
+    logger.info("  QuickBooks: 10min timeout") 
+    logger.info("  Exports: 5min timeout")
+    logger.info("  Standard: 2min timeout")
+    
+    # Initial memory report (optional)
+    try:
+        import psutil
+        process = psutil.Process(os.getpid())
+        memory_usage = process.memory_info().rss / 1024 / 1024
+        logger.info(f"Startup memory usage: {memory_usage:.1f}MB")
+    except ImportError:
+        logger.info("Memory monitoring requires psutil package")
+    except Exception as e:
+        logger.debug(f"Memory check failed: {e}")  # Changed to debug level
