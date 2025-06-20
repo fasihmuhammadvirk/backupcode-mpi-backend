@@ -181,16 +181,16 @@ def update_mpi_items():
         logger.info("\n=== Update Summary ===")
         
         logger.info("\nBefore March 25, 2025 Updates:")
-        logger.info(f"✅ 'UIDI-Job Material' items updated: {before_material_count}")
-        logger.info(f"✅ 'UIDI-Job Equipment' items checked: {before_equipment_count}")
+        logger.info(f" 'UIDI-Job Material' items updated: {before_material_count}")
+        logger.info(f" 'UIDI-Job Equipment' items checked: {before_equipment_count}")
         logger.info(f"   - Items with cost < 100 updated: {before_equipment_updated}")
-        logger.info(f"✅ 'No Match' items checked: {before_nomatch_count}")
+        logger.info(f" 'No Match' items checked: {before_nomatch_count}")
         logger.info(f"   - Items with cost < 100 updated: {before_nomatch_updated}")
         logger.info(f"Total items updated before cutoff: {before_material_count + before_equipment_updated + before_nomatch_updated}")
         
         logger.info("\nAfter March 25, 2025 Updates:")
-        logger.info(f"✅ 'UIDI-Job Material' items updated: {after_material_count}")
-        logger.info(f"✅ 'UIDI-Job Equipment' items checked: {after_equipment_count}")
+        logger.info(f" 'UIDI-Job Material' items updated: {after_material_count}")
+        logger.info(f" 'UIDI-Job Equipment' items checked: {after_equipment_count}")
         logger.info(f"   - Items with cost < 100 updated: {after_equipment_updated}")
         logger.info(f"Total items updated after cutoff: {after_material_count + after_equipment_updated}")
         

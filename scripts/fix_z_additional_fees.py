@@ -16,7 +16,7 @@ sys.path.append(str(project_root))
 
 def test_database_connection():
     """Test database connection before proceeding"""
-    print("🔍 Testing database connection...")
+    print(" Testing database connection...")
     
     try:
         from mpi_backend.database import SessionLocal
@@ -29,21 +29,21 @@ def test_database_connection():
         test_query = db.query(ItemClassification).limit(1).first()
         db.close()
         
-        print("   ✅ Database connection successful")
+        print("    Database connection successful")
         return True
         
     except ImportError as e:
         print(f"   ❌ Import error: {e}")
-        print("   💡 Make sure you're running from the project root directory")
+        print("    Make sure you're running from the project root directory")
         return False
     except Exception as e:
         print(f"   ❌ Database connection failed: {e}")
-        print("   💡 Check your database configuration and ensure the database is running")
+        print("    Check your database configuration and ensure the database is running")
         return False
 
 def check_project_structure():
     """Verify we're in the correct project directory"""
-    print("🔍 Checking project structure...")
+    print(" Checking project structure...")
     
     required_files = [
         'mpi_backend/storage/fixtures/item-classifications.json',
@@ -60,10 +60,10 @@ def check_project_structure():
         print(f"   ❌ Missing required files:")
         for file_path in missing_files:
             print(f"      - {file_path}")
-        print("   💡 Please run this script from the project root directory")
+        print("    Please run this script from the project root directory")
         return False
     
-    print("   ✅ Project structure verified")
+    print("    Project structure verified")
     return True
 
 def update_json_file():
@@ -71,7 +71,7 @@ def update_json_file():
     
     json_path = 'mpi_backend/storage/fixtures/item-classifications.json'
     
-    print("🔧 Updating JSON file...")
+    print(" Updating JSON file...")
     
     try:
         # Read current JSON
@@ -84,25 +84,25 @@ def update_json_file():
             if item.get('item') == '(Z, ADDITIONAL FEES)':
                 old_category = item.get('category')
                 item['category'] = 'M'
-                print(f"   ✅ Updated JSON: '{item['item']}' category: {old_category} → 'M'")
+                print(f"    Updated JSON: '{item['item']}' category: {old_category} → 'M'")
                 updated = True
                 break
         
         if not updated:
-            print("   ⚠️  Item '(Z, ADDITIONAL FEES)' not found in JSON file")
+            print("   ⚠  Item '(Z, ADDITIONAL FEES)' not found in JSON file")
             return False
         
         # Create backup before updating
         backup_path = f"{json_path}.backup"
         with open(backup_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
-        print(f"   📁 Backup created: {backup_path}")
+        print(f"    Backup created: {backup_path}")
         
         # Write updated JSON back to file
         with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         
-        print("   ✅ JSON file updated successfully")
+        print("    JSON file updated successfully")
         return True
         
     except FileNotFoundError:
@@ -118,7 +118,7 @@ def update_json_file():
 def update_database():
     """Update the database to set (Z, ADDITIONAL FEES) category to 'M'"""
     
-    print("🔧 Updating database...")
+    print(" Updating database...")
     
     try:
         from mpi_backend.database import SessionLocal
@@ -141,11 +141,11 @@ def update_database():
             old_category = item.category
             item.category = 'M'
             db.commit()
-            print(f"   ✅ Updated database: '{item.item}' category: {old_category} → 'M'")
+            print(f"    Updated database: '{item.item}' category: {old_category} → 'M'")
             return True
         else:
-            print("   ⚠️  Item '(Z, ADDITIONAL FEES)' not found in database")
-            print("   💡 You may need to run the classification sync script first")
+            print("   ⚠  Item '(Z, ADDITIONAL FEES)' not found in database")
+            print("    You may need to run the classification sync script first")
             return False
             
     except Exception as e:
@@ -160,7 +160,7 @@ def update_database():
 def verify_updates():
     """Verify that both JSON and database have been updated correctly"""
     
-    print("🔍 Verifying updates...")
+    print(" Verifying updates...")
     
     # Check JSON file
     json_path = 'mpi_backend/storage/fixtures/item-classifications.json'
@@ -173,7 +173,7 @@ def verify_updates():
         for item in data:
             if item.get('item') == '(Z, ADDITIONAL FEES)':
                 if item.get('category') == 'M':
-                    print("   ✅ JSON file: category is 'M'")
+                    print("    JSON file: category is 'M'")
                     json_updated = True
                 else:
                     print(f"   ❌ JSON file: category is '{item.get('category')}' (should be 'M')")
@@ -197,7 +197,7 @@ def verify_updates():
         
         if item:
             if item.category == 'M':
-                print("   ✅ Database: category is 'M'")
+                print("    Database: category is 'M'")
                 db_updated = True
             else:
                 print(f"   ❌ Database: category is '{item.category}' (should be 'M')")
@@ -214,7 +214,7 @@ def verify_updates():
 def test_classification():
     """Test the classification after update"""
     
-    print("🧪 Testing classification...")
+    print(" Testing classification...")
     
     try:
         from mpi_backend.database import SessionLocal
@@ -226,16 +226,16 @@ def test_classification():
         result = controller.get_classification('(Z, ADDITIONAL FEES)')
         
         if result == 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased':
-            print("   ✅ Classification test passed: Returns Materials account")
+            print("    Classification test passed: Returns Materials account")
             db.close()
             return True
         elif result == '':
             print("   ❌ Classification test failed: Returns empty string")
-            print("   💡 This means the item has null category or is missing")
+            print("    This means the item has null category or is missing")
             db.close()
             return False
         else:
-            print(f"   ⚠️  Classification test: Returns unexpected account: {result}")
+            print(f"   ⚠  Classification test: Returns unexpected account: {result}")
             db.close()
             return False
             
@@ -246,7 +246,7 @@ def test_classification():
 def get_current_status():
     """Check current status of the item"""
     
-    print("🔍 Checking current status...")
+    print(" Checking current status...")
     
     try:
         from mpi_backend.database import SessionLocal
@@ -262,13 +262,13 @@ def get_current_status():
             print(f"   Database category: {item.category}")
             
             if item.category == 'M':
-                print("   ✅ Item already has category 'M' in database")
+                print("    Item already has category 'M' in database")
                 status = "already_fixed"
             elif item.category is None:
-                print("   ⚠️  Item has null category - needs fixing")
+                print("   ⚠  Item has null category - needs fixing")
                 status = "needs_fixing"
             else:
-                print(f"   ⚠️  Item has category '{item.category}' - will update to 'M'")
+                print(f"   ⚠  Item has category '{item.category}' - will update to 'M'")
                 status = "needs_updating"
         else:
             print("   ❌ Item not found in database")
@@ -284,7 +284,7 @@ def get_current_status():
 def main():
     """Main function with comprehensive error handling"""
     
-    print("🔧 FIX (Z, ADDITIONAL FEES) CLASSIFICATION")
+    print(" FIX (Z, ADDITIONAL FEES) CLASSIFICATION")
     print("=" * 60)
     print("This script will update '(Z, ADDITIONAL FEES)' category from null to 'M'")
     print("in both the JSON file and database.")
@@ -293,13 +293,13 @@ def main():
     # Step 1: Check project structure
     if not check_project_structure():
         print("\n❌ Project structure check failed")
-        print("💡 Please run this script from the mpi-backend project root directory")
+        print(" Please run this script from the mpi-backend project root directory")
         return False
     
     # Step 2: Test database connection
     if not test_database_connection():
         print("\n❌ Database connection failed")
-        print("💡 Please check your database configuration and ensure it's running")
+        print(" Please check your database configuration and ensure it's running")
         return False
     
     # Step 3: Check current status
@@ -310,7 +310,7 @@ def main():
         return False
     elif status == "not_found":
         print("\n❌ Item not found in database")
-        print("💡 You may need to run the classification sync script first")
+        print(" You may need to run the classification sync script first")
         return False
     
     # Step 4: Ask for confirmation
@@ -323,7 +323,7 @@ def main():
         print("❌ Operation cancelled")
         return False
     
-    print("\n🚀 Starting updates...")
+    print("\n Starting updates...")
     
     # Step 5: Update JSON file
     json_success = update_json_file()
@@ -332,22 +332,22 @@ def main():
     db_success = update_database()
     
     # Step 7: Summary
-    print("\n📋 Update Summary:")
-    print(f"   JSON file: {'✅ Success' if json_success else '❌ Failed'}")
-    print(f"   Database:  {'✅ Success' if db_success else '❌ Failed'}")
+    print("\n Update Summary:")
+    print(f"   JSON file: {' Success' if json_success else '❌ Failed'}")
+    print(f"   Database:  {' Success' if db_success else '❌ Failed'}")
     
     if json_success and db_success:
-        print("\n🔍 Verification...")
+        print("\n Verification...")
         if verify_updates():
-            print("\n🧪 Final test...")
+            print("\n Final test...")
             if test_classification():
-                print("\n🎉 SUCCESS!")
-                print("✅ (Z, ADDITIONAL FEES) category updated to 'M'")
-                print("✅ QuickBooks import should now work for this item")
-                print("💡 Item will be assigned to Materials account")
+                print("\n SUCCESS!")
+                print(" (Z, ADDITIONAL FEES) category updated to 'M'")
+                print(" QuickBooks import should now work for this item")
+                print(" Item will be assigned to Materials account")
                 return True
             else:
-                print("\n⚠️  Updates completed but classification test failed")
+                print("\n⚠  Updates completed but classification test failed")
         else:
             print("\n❌ Verification failed")
     else:
@@ -359,9 +359,9 @@ if __name__ == "__main__":
     try:
         success = main()
         if success:
-            print("\n🏁 Script completed successfully!")
+            print("\n Script completed successfully!")
         else:
-            print("\n⚠️  Script completed with issues - please review the output above")
+            print("\n⚠  Script completed with issues - please review the output above")
             sys.exit(1)
     except KeyboardInterrupt:
         print("\n\n❌ Script interrupted by user")

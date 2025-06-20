@@ -72,7 +72,7 @@ def verify_updates():
         
         if material_before > 0:
             logger.warning(
-                f"⚠️ Found {material_before} 'UIDI-Job Material' items before "
+                f"⚠ Found {material_before} 'UIDI-Job Material' items before "
                 f"cutoff that were not updated"
             )
         
@@ -89,7 +89,7 @@ def verify_updates():
                 if cost < 100:
                     equipment_issue_count += 1
                     logger.warning(
-                        f"⚠️ Item {item.id} with cost ${cost} is still "
+                        f"⚠ Item {item.id} with cost ${cost} is still "
                         f"'UIDI-Job Equipment' before cutoff"
                     )
             except (ValueError, TypeError):
@@ -97,7 +97,7 @@ def verify_updates():
         
         if equipment_issue_count:
             logger.warning(
-                f"⚠️ Found {equipment_issue_count} 'UIDI-Job Equipment' items "
+                f"⚠ Found {equipment_issue_count} 'UIDI-Job Equipment' items "
                 f"with cost < 100 before cutoff that were not updated"
             )
         
@@ -114,7 +114,7 @@ def verify_updates():
                 if cost < 100:
                     nomatch_issue_count += 1
                     logger.warning(
-                        f"⚠️ Item {item.id} with cost ${cost} is still "
+                        f"⚠ Item {item.id} with cost ${cost} is still "
                         f"'No Match' before cutoff"
                     )
             except (ValueError, TypeError):
@@ -122,7 +122,7 @@ def verify_updates():
         
         if nomatch_issue_count:
             logger.warning(
-                f"⚠️ Found {nomatch_issue_count} 'No Match' items with cost "
+                f"⚠ Found {nomatch_issue_count} 'No Match' items with cost "
                 f"< 100 before cutoff that were not updated"
             )
         
@@ -150,7 +150,7 @@ def verify_updates():
         
         if material_after > 0:
             logger.warning(
-                f"⚠️ Found {material_after} 'UIDI-Job Material' items after "
+                f"⚠ Found {material_after} 'UIDI-Job Material' items after "
                 f"cutoff that were not updated"
             )
         
@@ -167,7 +167,7 @@ def verify_updates():
                 if cost < 100:
                     equipment_issue_count += 1
                     logger.warning(
-                        f"⚠️ Item {item.id} with cost ${cost} is still "
+                        f"⚠ Item {item.id} with cost ${cost} is still "
                         f"'UIDI-Job Equipment' after cutoff"
                     )
             except (ValueError, TypeError):
@@ -175,7 +175,7 @@ def verify_updates():
         
         if equipment_issue_count:
             logger.warning(
-                f"⚠️ Found {equipment_issue_count} 'UIDI-Job Equipment' items "
+                f"⚠ Found {equipment_issue_count} 'UIDI-Job Equipment' items "
                 f"with cost < 100 after cutoff that were not updated"
             )
         

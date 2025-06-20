@@ -22,7 +22,7 @@ try:
     from sqlalchemy import text
     from sqlalchemy.exc import IntegrityError
     DATABASE_AVAILABLE = True
-    print("✅ Database components imported successfully")
+    print(" Database components imported successfully")
 except ImportError as e:
     DATABASE_AVAILABLE = False
     print(f"❌ Failed to import database components: {e}")
@@ -31,8 +31,8 @@ except ImportError as e:
 def test_database_connection() -> bool:
     """Test if database connection is working"""
     try:
-        print("🔍 Testing database connection...")
-        print(f"📊 Database URI: {SQLALCHEMY_DATABASE_URI[:50]}...")
+        print(" Testing database connection...")
+        print(f" Database URI: {SQLALCHEMY_DATABASE_URI[:50]}...")
         
         db = SessionLocal()
         # Test basic connection
@@ -52,8 +52,8 @@ def test_database_connection() -> bool:
         
         # Test if we can query the table
         count = db.query(ItemClassification).count()
-        print(f"✅ Database connection successful!")
-        print(f"📋 Found {count} existing classifications in database")
+        print(f" Database connection successful!")
+        print(f" Found {count} existing classifications in database")
         
         db.close()
         return True
@@ -71,11 +71,11 @@ def load_json_classifications() -> Optional[List[Dict]]:
     json_path = 'mpi_backend/storage/fixtures/item-classifications.json'
     
     try:
-        print(f"📂 Loading classifications from: {json_path}")
+        print(f" Loading classifications from: {json_path}")
         with open(json_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
-        print(f"✅ Loaded {len(data)} classifications from JSON")
+        print(f" Loaded {len(data)} classifications from JSON")
         return data
         
     except FileNotFoundError:
@@ -91,7 +91,7 @@ def load_json_classifications() -> Optional[List[Dict]]:
 def get_existing_db_classifications() -> Dict[str, str]:
     """Get all existing classifications from database"""
     try:
-        print("🔍 Fetching existing classifications from database...")
+        print(" Fetching existing classifications from database...")
         db = SessionLocal()
         
         existing = {}
@@ -101,7 +101,7 @@ def get_existing_db_classifications() -> Dict[str, str]:
             if classification.item:  # Only add non-null items
                 existing[classification.item] = classification.category
         
-        print(f"✅ Found {len(existing)} existing classifications in database")
+        print(f" Found {len(existing)} existing classifications in database")
         db.close()
         return existing
         
@@ -117,7 +117,7 @@ def find_missing_classifications(json_data: List[Dict], db_existing: Dict[str, s
     """Find classifications that exist in JSON but not in database"""
     missing = []
     
-    print("🔍 Comparing JSON vs Database classifications...")
+    print(" Comparing JSON vs Database classifications...")
     
     for item in json_data:
         if not item.get('item'):  # Skip items with no name
@@ -132,9 +132,9 @@ def find_missing_classifications(json_data: List[Dict], db_existing: Dict[str, s
                 'category': category
             })
         elif db_existing[item_name] != category:
-            print(f"⚠️  Category mismatch for '{item_name}': JSON='{category}' vs DB='{db_existing[item_name]}'")
+            print(f"⚠  Category mismatch for '{item_name}': JSON='{category}' vs DB='{db_existing[item_name]}'")
     
-    print(f"📊 Analysis complete:")
+    print(f" Analysis complete:")
     print(f"   - Total in JSON: {len(json_data)}")
     print(f"   - Total in Database: {len(db_existing)}")
     print(f"   - Missing from Database: {len(missing)}")
@@ -144,10 +144,10 @@ def find_missing_classifications(json_data: List[Dict], db_existing: Dict[str, s
 def insert_missing_classifications(missing_classifications: List[Dict]) -> bool:
     """Insert missing classifications into database"""
     if not missing_classifications:
-        print("✅ No missing classifications to insert!")
+        print(" No missing classifications to insert!")
         return True
     
-    print(f"\n🔧 Inserting {len(missing_classifications)} missing classifications...")
+    print(f"\n Inserting {len(missing_classifications)} missing classifications...")
     
     db = SessionLocal()
     inserted_count = 0
@@ -168,12 +168,12 @@ def insert_missing_classifications(missing_classifications: List[Dict]) -> bool:
                 db.add(new_classification)
                 db.flush()  # Flush to catch any errors before commit
                 
-                print(f"   ✅ Added: '{item_name}' → '{category}'")
+                print(f"    Added: '{item_name}' → '{category}'")
                 inserted_count += 1
                 
             except IntegrityError as e:
                 db.rollback()
-                print(f"   ⚠️  Duplicate: '{item_name}' (already exists)")
+                print(f"   ⚠  Duplicate: '{item_name}' (already exists)")
                 error_count += 1
                 
             except Exception as e:
@@ -183,7 +183,7 @@ def insert_missing_classifications(missing_classifications: List[Dict]) -> bool:
         
         # Commit all changes
         db.commit()
-        print(f"\n✅ Database update complete!")
+        print(f"\n Database update complete!")
         print(f"   - Successfully inserted: {inserted_count}")
         print(f"   - Errors/Duplicates: {error_count}")
         
@@ -206,7 +206,7 @@ def create_backup_sql(missing_classifications: List[Dict]) -> None:
     sql_filename = f"scripts/sync_classifications_backup_{timestamp}.sql"
     
     try:
-        print(f"\n📝 Creating backup SQL script: {sql_filename}")
+        print(f"\n Creating backup SQL script: {sql_filename}")
         
         with open(sql_filename, 'w') as f:
             f.write("-- Backup SQL script for classification sync\n")
@@ -223,7 +223,7 @@ def create_backup_sql(missing_classifications: List[Dict]) -> None:
             
             f.write(f"\n-- End of script\n")
         
-        print(f"✅ Backup SQL script created: {sql_filename}")
+        print(f" Backup SQL script created: {sql_filename}")
         
     except Exception as e:
         print(f"❌ Error creating backup SQL: {e}")
@@ -231,7 +231,7 @@ def create_backup_sql(missing_classifications: List[Dict]) -> None:
 def main():
     """Main execution function"""
     print("=" * 80)
-    print("🔧 CRITICAL: SYNC ITEM CLASSIFICATIONS FROM JSON TO DATABASE")
+    print(" CRITICAL: SYNC ITEM CLASSIFICATIONS FROM JSON TO DATABASE")
     print("=" * 80)
     print("This script will:")
     print("1. Test database connection")
@@ -259,12 +259,12 @@ def main():
     missing_classifications = find_missing_classifications(json_data, db_existing)
     
     if not missing_classifications:
-        print("\n🎉 SUCCESS: All classifications are already in sync!")
-        print("✅ Your database is up to date with the JSON file")
+        print("\n SUCCESS: All classifications are already in sync!")
+        print(" Your database is up to date with the JSON file")
         return True
     
     # Show what will be added
-    print(f"\n📋 Missing classifications to be added:")
+    print(f"\n Missing classifications to be added:")
     for i, classification in enumerate(missing_classifications[:10], 1):  # Show first 10
         category = classification.get('category', 'NULL')
         print(f"   {i:2d}. '{classification['item']}' → '{category}'")
@@ -273,8 +273,8 @@ def main():
         print(f"   ... and {len(missing_classifications) - 10} more")
     
     # Ask for confirmation
-    print(f"\n⚠️  This will add {len(missing_classifications)} new classifications to your database.")
-    print("⚠️  This operation is SAFE - it only ADDS missing items, never modifies existing ones.")
+    print(f"\n⚠  This will add {len(missing_classifications)} new classifications to your database.")
+    print("⚠  This operation is SAFE - it only ADDS missing items, never modifies existing ones.")
     
     response = input(f"\nProceed with adding {len(missing_classifications)} classifications? (y/N): ")
     
@@ -289,20 +289,20 @@ def main():
     success = insert_missing_classifications(missing_classifications)
     
     if success:
-        print(f"\n🎉 SUCCESS! Sync completed successfully!")
-        print(f"✅ Added {len(missing_classifications)} classifications to database")
-        print(f"🎯 Your QuickBooks import should now work correctly!")
+        print(f"\n SUCCESS! Sync completed successfully!")
+        print(f" Added {len(missing_classifications)} classifications to database")
+        print(f" Your QuickBooks import should now work correctly!")
         
         # Check if the NO-HUB FITTINGS issue was fixed
         if any(c['item'] == '(NO-HUB FITTINGS)' for c in missing_classifications):
-            print(f"\n🎯 QUICKBOOKS ISSUE FIXED:")
+            print(f"\n QUICKBOOKS ISSUE FIXED:")
             print(f"   - Added '(NO-HUB FITTINGS)' classification")
             print(f"   - Item ID 330285 should now import successfully!")
         
         return True
     else:
         print(f"\n❌ Sync failed! Check the error messages above.")
-        print(f"💡 You can try running the backup SQL script manually.")
+        print(f" You can try running the backup SQL script manually.")
         return False
 
 if __name__ == "__main__":

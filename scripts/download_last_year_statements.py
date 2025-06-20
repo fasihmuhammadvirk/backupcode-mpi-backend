@@ -814,8 +814,8 @@ class StatementDownloader:
         print(f"Skipped existing:      {self.stats['skipped_existing']:,}")
         print(f"Errors:                {self.stats['errors']:,}")
         print("="*60)
-        print("📧 No emails were marked as read (used BODY.PEEK)")
-        print("📄 Each statement contains multiple invoice records")
+        print(" No emails were marked as read (used BODY.PEEK)")
+        print(" Each statement contains multiple invoice records")
         print("="*60)
 
 
@@ -912,9 +912,9 @@ Examples:
     if args.download_all_historical:
         from_months_ago = 120  # 10 years (12 months * 10)
         to_months_ago = 0
-        logger.info("🚀 DOWNLOADING ALL HISTORICAL STATEMENTS AND INVOICES (PAST 10 YEARS)")
+        logger.info(" DOWNLOADING ALL HISTORICAL STATEMENTS AND INVOICES (PAST 10 YEARS)")
         logger.info("This will download statements and associated invoice data from all suppliers for the past 10 years")
-        logger.info("📧 Using BODY.PEEK commands to ensure NO emails are marked as read")
+        logger.info(" Using BODY.PEEK commands to ensure NO emails are marked as read")
         if not args.dry_run:
             confirmation = input("This is a large operation that will process 10 years of data. Continue? (y/N): ")
             if confirmation.lower() != 'y':
@@ -923,7 +923,7 @@ Examples:
     else:
         from_months_ago = args.from_months_ago
         to_months_ago = args.to_months_ago
-        logger.info(f"📧 Using BODY.PEEK commands to ensure NO emails are marked as read")
+        logger.info(f" Using BODY.PEEK commands to ensure NO emails are marked as read")
     
     # Create downloader and run
     try:
@@ -944,23 +944,23 @@ Examples:
             downloader.print_summary()
             
             if result['success']:
-                print(f"\n✅ Operation completed successfully!")
+                print(f"\n Operation completed successfully!")
                 print(f"Period: {result['period']}")
                 print(f"Files processed: {result['files_processed']}")
                 
                 if args.download_all_historical:
-                    print("\n🎉 Historical download completed!")
+                    print("\n Historical download completed!")
                     print("All available monthly statements and invoices from the past 10 years have been processed.")
-                    print("📧 No emails were marked as read during this process.")
+                    print(" No emails were marked as read during this process.")
                     print("Check the summary above for detailed statistics.")
                 else:
-                    print("📧 No emails were marked as read during this process.")
+                    print(" No emails were marked as read during this process.")
             else:
                 print(f"\n❌ Operation failed: {result.get('error', 'Unknown error')}")
                 return 1
                 
     except KeyboardInterrupt:
-        print("\n⚠️ Operation interrupted by user")
+        print("\n⚠ Operation interrupted by user")
         return 1
     except Exception as e:
         logger.error(f"Critical error: {str(e)}")

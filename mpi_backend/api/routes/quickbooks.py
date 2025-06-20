@@ -415,11 +415,9 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
     df = pd.DataFrame(all_items_data)
     df['account'] = ''
 
-    # =================================================================
     # BUSINESS LOGIC IMPLEMENTATION - CORRECT PRIORITY ORDER
-    # =================================================================
 
-    # STEP 1: 🔤 CLASS-BASED MAPPING (PRIORITY RULE - OVERRIDES ALL)
+    # STEP 1: CLASS-BASED MAPPING (PRIORITY RULE - OVERRIDES ALL)
     # This is the most important rule and must be applied first
 
     # Find all invoices that have ANY item with class 'A' or 'L'
@@ -469,7 +467,7 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
             f"invoices (Labor)"
         )
 
-    # STEP 2: 🧠 SHEET NAME-BASED MAPPING (FALLBACK LOGIC)
+    # STEP 2: SHEET NAME-BASED MAPPING (FALLBACK LOGIC)
     # Only applied to items without accounts from class rules
     unassigned_mask = df['account'] == ''
     if unassigned_mask.any():
@@ -481,7 +479,7 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
             f"Applied sheet name mapping to {unassigned_mask.sum()} items"
         )
 
-    # STEP 3: 📌 SPECIAL CASE MAPPING (MANUAL RULES - SAFETY NET)
+    # STEP 3: SPECIAL CASE MAPPING (MANUAL RULES - SAFETY NET)
     # Only applied to items still without accounts
     mpi_mappings = {
         'UIDI-Job Materials Purchased': (
@@ -507,7 +505,7 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
                 f"{mask.sum()} items"
             )
 
-    # 🚨 VALIDATION: Check for mapping failures
+    # VALIDATION: Check for mapping failures
     # CRITICAL VALIDATION: Check for "No Match" items - STRICT BLOCKING
     no_match_items = df[df['mpi_item'] == 'No Match']
     if not no_match_items.empty:
@@ -584,9 +582,7 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
 
     batch_entry['amount'] = batch_entry.apply(add_tax_per_invoice, axis=1)
 
-    # =================================================================
-    # ✅ CLASS PRESERVATION LOGIC (ENSURES NO CLASS INFO IS LOST)
-    # =================================================================
+    # CLASS PRESERVATION LOGIC (ENSURES NO CLASS INFO IS LOST)
     # This ensures that ANY class value from items within an invoice
     # appears in the Excel Class column - NEVER leave it blank if ANY
     # item has a class!

@@ -234,12 +234,12 @@ class StatementUpdater:
                     self.stats['supplier_corrections'] += 1
                     old_supplier = details.get('old_supplier_name', 'Unknown')
                     new_supplier = details.get('supplier_name', 'Unknown')
-                    logger.warning(f"🚨 SUPPLIER CORRECTION: {old_supplier} → {new_supplier}")
+                    logger.warning(f" SUPPLIER CORRECTION: {old_supplier} → {new_supplier}")
                 
                 # Assume extraction improvements if reprocessing was successful
                 self.stats['extraction_improvements'] += 1
                 
-                logger.info(f"✅ Successfully updated statement {statement_id}")
+                logger.info(f" Successfully updated statement {statement_id}")
                 return result
             else:
                 self.stats['statements_failed'] += 1
@@ -268,7 +268,7 @@ class StatementUpdater:
         """Main method to update all statements with improved extraction logic"""
         try:
             start_time = time.time()
-            logger.info("🚀 Starting statement update process with improved extraction logic")
+            logger.info(" Starting statement update process with improved extraction logic")
             
             # Get statements to update
             statements = self.get_statements_to_update(
@@ -322,7 +322,7 @@ class StatementUpdater:
             logger.info(f"Success rate: {self.stats['statements_successful']}/{self.stats['statements_processed']} ({success_rate:.1f}%)")
             
             if self.stats['supplier_corrections'] > 0:
-                logger.warning(f"🚨 {self.stats['supplier_corrections']} supplier corrections made!")
+                logger.warning(f" {self.stats['supplier_corrections']} supplier corrections made!")
             
             return {
                 'success': True,
@@ -370,11 +370,11 @@ class StatementUpdater:
         print("="*80)
         
         if self.stats['supplier_corrections'] > 0:
-            print("🚨 SUPPLIER CORRECTIONS DETECTED!")
+            print(" SUPPLIER CORRECTIONS DETECTED!")
             print("Previous misassignments have been fixed with improved detection logic.")
         
         if self.stats['extraction_improvements'] > 0:
-            print("✅ EXTRACTION IMPROVEMENTS APPLIED!")
+            print(" EXTRACTION IMPROVEMENTS APPLIED!")
             print("Statements now use enhanced extraction logic for better data accuracy.")
         
         print("="*80)
@@ -466,7 +466,7 @@ Examples:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
     
-    logger.info("🚀 Starting Statement Update Process")
+    logger.info(" Starting Statement Update Process")
     logger.info("Enhanced extraction logic includes:")
     logger.info("  • Improved supplier detection from filename and PDF content")
     logger.info("  • Enhanced date parsing with multiple format support")
@@ -475,7 +475,7 @@ Examples:
     logger.info("  • Advanced table detection strategies")
     
     if args.dry_run:
-        logger.info("🔍 DRY RUN MODE: No changes will be made")
+        logger.info(" DRY RUN MODE: No changes will be made")
     
     # Create updater and run
     try:
@@ -498,19 +498,19 @@ Examples:
             updater.print_summary()
             
             if result['success']:
-                print(f"\n✅ Update process completed successfully!")
+                print(f"\n Update process completed successfully!")
                 if args.dry_run:
                     print("Run without --dry-run flag to apply changes")
                 else:
                     print("All statement invoices have been updated with improved extraction logic")
                     if result['statistics']['supplier_corrections'] > 0:
-                        print("⚠️  Supplier corrections were made - check logs for details")
+                        print("⚠  Supplier corrections were made - check logs for details")
             else:
                 print(f"\n❌ Update process failed: {result.get('error', 'Unknown error')}")
                 return 1
                 
     except KeyboardInterrupt:
-        print("\n⚠️ Update process interrupted by user")
+        print("\n⚠ Update process interrupted by user")
         return 1
     except Exception as e:
         logger.error(f"Critical error: {str(e)}")

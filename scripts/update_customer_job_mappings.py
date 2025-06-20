@@ -72,14 +72,14 @@ def update_existing_invoice_items(db, output_file="mpi_backend/storage/fixtures/
 
         # Commit changes to DB
         db.commit()
-        logger.info(f"✅ Updated {updated_count} invoice items.")
+        logger.info(f" Updated {updated_count} invoice items.")
 
         # Write missing customer jobs to JSON file
         if missing_customer_jobs:
             with open(output_file, mode='w') as file:
                 json.dump({"missing_customer_jobs": missing_customer_jobs}, 
                           file, indent=4)
-            logger.info(f"✅ Missing customer jobs written to {output_file}.")
+            logger.info(f" Missing customer jobs written to {output_file}.")
         else:
             logger.info("No missing customer jobs.")
 
@@ -96,7 +96,7 @@ def main():
 
     try:
         update_existing_invoice_items(db)
-        logger.info("✅ Invoice update completed.")
+        logger.info(" Invoice update completed.")
     except Exception as e:
         logger.error(f"❌ Failed in main: {str(e)}")
     finally:

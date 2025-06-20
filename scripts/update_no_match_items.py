@@ -88,7 +88,7 @@ def update_no_match_items():
         
         # Print update summary
         logger.info("\n=== Update Summary ===")
-        logger.info(f"✅ Successfully updated: {updated_count} items")
+        logger.info(f" Successfully updated: {updated_count} items")
         logger.info(
             f"  - Items as 'UIDI-Job Material': {material_count}"
         )

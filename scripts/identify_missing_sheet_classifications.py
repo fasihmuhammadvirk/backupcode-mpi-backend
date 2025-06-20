@@ -31,7 +31,7 @@ def get_unique_sheet_names_from_invoice_items(db: Session):
     """
     Get unique sheet names from invoice_items table where sheet_name is not null/empty
     """
-    print("🔍 Fetching unique sheet names from invoice_items table...")
+    print(" Fetching unique sheet names from invoice_items table...")
     
     result = db.query(distinct(InvoiceItem.sheet_name)).filter(
         InvoiceItem.sheet_name.is_not(None),
@@ -41,7 +41,7 @@ def get_unique_sheet_names_from_invoice_items(db: Session):
     # Extract sheet names from result tuples
     sheet_names = {row[0] for row in result if row[0] and row[0].strip()}
     
-    print(f"   ✅ Found {len(sheet_names)} unique sheet names in invoice_items")
+    print(f"    Found {len(sheet_names)} unique sheet names in invoice_items")
     return sheet_names
 
 
@@ -49,7 +49,7 @@ def get_unique_sheet_names_from_mappings(db: Session):
     """
     Get unique google_sheet_name from supplier_item_mappings table where not null/empty
     """
-    print("🔍 Fetching unique sheet names from supplier_item_mappings table...")
+    print(" Fetching unique sheet names from supplier_item_mappings table...")
     
     result = db.query(distinct(ItemsMapping.google_sheet_name)).filter(
         ItemsMapping.google_sheet_name.is_not(None),
@@ -59,7 +59,7 @@ def get_unique_sheet_names_from_mappings(db: Session):
     # Extract sheet names from result tuples
     sheet_names = {row[0] for row in result if row[0] and row[0].strip()}
     
-    print(f"   ✅ Found {len(sheet_names)} unique sheet names in supplier_item_mappings")
+    print(f"    Found {len(sheet_names)} unique sheet names in supplier_item_mappings")
     return sheet_names
 
 
@@ -67,7 +67,7 @@ def get_existing_classifications(db: Session):
     """
     Get existing item classifications from item_classification table
     """
-    print("🔍 Fetching existing classifications from item_classification table...")
+    print(" Fetching existing classifications from item_classification table...")
     
     result = db.query(distinct(ItemClassification.item)).filter(
         ItemClassification.item.is_not(None),
@@ -77,7 +77,7 @@ def get_existing_classifications(db: Session):
     # Extract item names from result tuples
     classified_items = {row[0] for row in result if row[0] and row[0].strip()}
     
-    print(f"   ✅ Found {len(classified_items)} existing classifications")
+    print(f"    Found {len(classified_items)} existing classifications")
     return classified_items
 
 
@@ -85,7 +85,7 @@ def analyze_missing_classifications(invoice_sheet_names, mapping_sheet_names, cl
     """
     Analyze which sheet names are missing classifications
     """
-    print("\n📊 Analyzing missing classifications...")
+    print("\n Analyzing missing classifications...")
     
     # Combine all unique sheet names from both sources
     all_sheet_names = invoice_sheet_names.union(mapping_sheet_names)
@@ -113,10 +113,10 @@ def print_summary(invoice_sheet_names, mapping_sheet_names, classified_items, an
     Print a comprehensive summary of the analysis
     """
     print(f"\n" + "="*80)
-    print(f"📈 SUMMARY REPORT - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f" SUMMARY REPORT - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"="*80)
     
-    print(f"\n🔢 COUNTS:")
+    print(f"\n COUNTS:")
     print(f"   • Unique sheet names in invoice_items:        {len(invoice_sheet_names)}")
     print(f"   • Unique sheet names in supplier_item_mappings: {len(mapping_sheet_names)}")
     print(f"   • Total unique sheet names (combined):       {len(analysis['all_sheet_names'])}")
@@ -130,7 +130,7 @@ def print_summary(invoice_sheet_names, mapping_sheet_names, classified_items, an
     
     # Show overlap analysis
     overlap = invoice_sheet_names.intersection(mapping_sheet_names)
-    print(f"\n🔗 OVERLAP ANALYSIS:")
+    print(f"\n OVERLAP ANALYSIS:")
     print(f"   • Sheet names in both tables:                {len(overlap)}")
     print(f"   • Sheet names only in invoice_items:         {len(invoice_sheet_names - mapping_sheet_names)}")
     print(f"   • Sheet names only in supplier_item_mappings: {len(mapping_sheet_names - invoice_sheet_names)}")
@@ -141,7 +141,7 @@ def print_detailed_missing_items(analysis):
     Print detailed lists of missing items
     """
     print(f"\n" + "="*80)
-    print(f"📝 DETAILED MISSING CLASSIFICATIONS")
+    print(f" DETAILED MISSING CLASSIFICATIONS")
     print(f"="*80)
     
     if analysis['missing_overall']:
@@ -150,16 +150,16 @@ def print_detailed_missing_items(analysis):
         for i, sheet_name in enumerate(analysis['missing_overall'], 1):
             print(f"   {i:3d}. '{sheet_name}'")
     else:
-        print(f"\n✅ NO MISSING CLASSIFICATIONS FOUND!")
+        print(f"\n NO MISSING CLASSIFICATIONS FOUND!")
         print(f"   All sheet names in the database have corresponding classifications.")
     
     if analysis['missing_from_invoice_items'] and analysis['missing_from_invoice_items'] != analysis['missing_overall']:
-        print(f"\n📋 MISSING FROM INVOICE_ITEMS ONLY ({len(analysis['missing_from_invoice_items'])} items):")
+        print(f"\n MISSING FROM INVOICE_ITEMS ONLY ({len(analysis['missing_from_invoice_items'])} items):")
         for i, sheet_name in enumerate(analysis['missing_from_invoice_items'], 1):
             print(f"   {i:3d}. '{sheet_name}'")
     
     if analysis['missing_from_mappings'] and analysis['missing_from_mappings'] != analysis['missing_overall']:
-        print(f"\n🗂️  MISSING FROM SUPPLIER_ITEM_MAPPINGS ONLY ({len(analysis['missing_from_mappings'])} items):")
+        print(f"\n  MISSING FROM SUPPLIER_ITEM_MAPPINGS ONLY ({len(analysis['missing_from_mappings'])} items):")
         for i, sheet_name in enumerate(analysis['missing_from_mappings'], 1):
             print(f"   {i:3d}. '{sheet_name}'")
 
@@ -191,10 +191,10 @@ def save_missing_to_file(analysis):
             for i, sheet_name in enumerate(analysis['missing_overall'], 1):
                 f.write(f"{i:3d}. {sheet_name}\n")
         
-        print(f"\n💾 Missing classifications saved to: {filename}")
+        print(f"\n Missing classifications saved to: {filename}")
         return filepath
     except Exception as e:
-        print(f"\n⚠️  Warning: Could not save to file: {e}")
+        print(f"\n⚠  Warning: Could not save to file: {e}")
         return None
 
 
@@ -203,7 +203,7 @@ def export_missing_to_excel(analysis, invoice_sheet_names, mapping_sheet_names):
     Export missing classifications to an Excel file with detailed information
     """
     if not analysis['missing_overall']:
-        print(f"\n📊 No missing classifications to export to Excel.")
+        print(f"\n No missing classifications to export to Excel.")
         return None
     
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -279,15 +279,15 @@ def export_missing_to_excel(analysis, invoice_sheet_names, mapping_sheet_names):
             all_sheets_df = pd.DataFrame(all_sheets_data)
             all_sheets_df.to_excel(writer, sheet_name='All Sheet Names', index=False)
         
-        print(f"\n📊 Excel file created: {filename}")
-        print(f"   📋 Missing Classifications sheet: {len(data)} items")
-        print(f"   📈 Summary sheet: Overview statistics")
-        print(f"   📝 All Sheet Names sheet: Complete reference")
+        print(f"\n Excel file created: {filename}")
+        print(f"    Missing Classifications sheet: {len(data)} items")
+        print(f"    Summary sheet: Overview statistics")
+        print(f"    All Sheet Names sheet: Complete reference")
         
         return filepath
         
     except Exception as e:
-        print(f"\n⚠️  Error creating Excel file: {e}")
+        print(f"\n⚠  Error creating Excel file: {e}")
         return None
 
 
@@ -316,7 +316,7 @@ def determine_category_for_sheet(sheet_name):
 
 def main():
     """Main function to run the script"""
-    print("🚀 Starting Sheet Name Classification Analysis")
+    print(" Starting Sheet Name Classification Analysis")
     print("="*60)
     
     db = SessionLocal()
@@ -347,17 +347,17 @@ def main():
         
         # Final status
         if analysis['missing_overall']:
-            print(f"\n⚠️  ACTION REQUIRED:")
+            print(f"\n⚠  ACTION REQUIRED:")
             print(f"   {len(analysis['missing_overall'])} sheet names need classifications added.")
             print(f"   Consider running the 'add_missing_classifications.py' script to resolve this.")
             if excel_file:
-                print(f"   📊 Excel report available: {os.path.basename(excel_file)}")
+                print(f"    Excel report available: {os.path.basename(excel_file)}")
         else:
-            print(f"\n🎉 ALL SHEET NAMES HAVE CLASSIFICATIONS!")
+            print(f"\n ALL SHEET NAMES HAVE CLASSIFICATIONS!")
             print(f"   Your system is up to date.")
-            print(f"   📊 No Excel file generated (no missing classifications found).")
+            print(f"    No Excel file generated (no missing classifications found).")
         
-        print(f"\n✅ Analysis completed successfully!")
+        print(f"\n Analysis completed successfully!")
         
     except Exception as e:
         print(f"❌ Error during analysis: {e}")

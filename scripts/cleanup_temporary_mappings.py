@@ -75,7 +75,7 @@ def cleanup_temporary_mappings(dry_run: bool = False, migrate_to_temp: bool = Fa
         ).all()
         
         if not temporary_mappings:
-            logger.info("✅ No temporary mappings found in supplier_item_mappings table")
+            logger.info(" No temporary mappings found in supplier_item_mappings table")
             return {
                 "status": "success",
                 "message": "No temporary mappings found",
@@ -106,7 +106,7 @@ def cleanup_temporary_mappings(dry_run: bool = False, migrate_to_temp: bool = Fa
         # Display summary by category
         for category, mappings in categories.items():
             if mappings:
-                logger.info(f"\n📂 {category} mappings ({len(mappings)}):")
+                logger.info(f"\n {category} mappings ({len(mappings)}):")
                 for mapping in mappings[:5]:  # Show first 5 examples
                     supplier_item = mapping.supplier_item_ids or "N/A"
                     mpi_code = mapping.mpi_code or "NULL"
@@ -117,7 +117,7 @@ def cleanup_temporary_mappings(dry_run: bool = False, migrate_to_temp: bool = Fa
                     logger.info(f"  ... and {len(mappings) - 5} more")
         
         if dry_run:
-            logger.info(f"\n🔍 DRY RUN: Would delete {len(temporary_mappings)} temporary mappings")
+            logger.info(f"\n DRY RUN: Would delete {len(temporary_mappings)} temporary mappings")
             logger.info("Run without --dry-run to actually delete these mappings")
             return {
                 "status": "success",
@@ -129,7 +129,7 @@ def cleanup_temporary_mappings(dry_run: bool = False, migrate_to_temp: bool = Fa
         
         # Handle migration or deletion
         if migrate_to_temp:
-            logger.info(f"\n📦 Migrating {len(temporary_mappings)} temporary mappings to temporary_item_mappings table...")
+            logger.info(f"\n Migrating {len(temporary_mappings)} temporary mappings to temporary_item_mappings table...")
             migrated_count = 0
             deleted_count = 0
             
@@ -159,10 +159,10 @@ def cleanup_temporary_mappings(dry_run: bool = False, migrate_to_temp: bool = Fa
                 deleted_count += 1
             
             db.commit()
-            logger.info(f"✅ Migration complete: {migrated_count} migrated, {deleted_count} removed from permanent table")
+            logger.info(f" Migration complete: {migrated_count} migrated, {deleted_count} removed from permanent table")
         else:
             # Just delete the mappings
-            logger.info(f"\n🗑️  Deleting {len(temporary_mappings)} temporary mappings...")
+            logger.info(f"\n  Deleting {len(temporary_mappings)} temporary mappings...")
             
             deleted_count = 0
             for mapping in temporary_mappings:
@@ -170,7 +170,7 @@ def cleanup_temporary_mappings(dry_run: bool = False, migrate_to_temp: bool = Fa
                 deleted_count += 1
             
             db.commit()
-            logger.info(f"✅ Successfully deleted {deleted_count} temporary mappings from supplier_item_mappings table")
+            logger.info(f" Successfully deleted {deleted_count} temporary mappings from supplier_item_mappings table")
         
         return {
             "status": "success",
@@ -212,10 +212,10 @@ def verify_cleanup(dry_run: bool = False) -> dict:
         ).count()
         
         if remaining_temporary == 0:
-            logger.info("✅ Verification successful: No temporary mappings remain in supplier_item_mappings table")
+            logger.info(" Verification successful: No temporary mappings remain in supplier_item_mappings table")
             return {"status": "success", "remaining_count": 0}
         else:
-            logger.warning(f"⚠️  Verification found {remaining_temporary} temporary mappings still in table")
+            logger.warning(f"⚠  Verification found {remaining_temporary} temporary mappings still in table")
             return {"status": "warning", "remaining_count": remaining_temporary}
             
     except Exception as e:
@@ -247,11 +247,11 @@ def main():
     
     args = parser.parse_args()
     
-    logger.info("🧹 Starting temporary mappings cleanup...")
+    logger.info(" Starting temporary mappings cleanup...")
     logger.info(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     if args.verify_only:
-        logger.info("🔍 Running verification only...")
+        logger.info(" Running verification only...")
         result = verify_cleanup()
     else:
         # Run cleanup
@@ -259,12 +259,12 @@ def main():
         
         # Run verification if cleanup was successful and not dry run
         if result["status"] == "success" and not args.dry_run and result["deleted_count"] > 0:
-            logger.info("\n🔍 Running verification...")
+            logger.info("\n Running verification...")
             verify_result = verify_cleanup()
     
-    logger.info(f"\n📊 Final Status: {result['status']}")
+    logger.info(f"\n Final Status: {result['status']}")
     if "message" in result:
-        logger.info(f"📝 Message: {result['message']}")
+        logger.info(f" Message: {result['message']}")
     
     return 0 if result["status"] == "success" else 1
 

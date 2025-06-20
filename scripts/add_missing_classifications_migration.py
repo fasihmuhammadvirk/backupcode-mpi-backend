@@ -42,14 +42,14 @@ def get_missing_classifications():
 def migrate_classifications():
     """Add missing classifications to database"""
     
-    print("🔍 Finding missing classifications...")
+    print(" Finding missing classifications...")
     missing = get_missing_classifications()
     
     if not missing:
-        print("✅ No missing classifications found!")
+        print(" No missing classifications found!")
         return True
     
-    print(f"📊 Found {len(missing)} missing classifications")
+    print(f" Found {len(missing)} missing classifications")
     
     db = SessionLocal()
     added_count = 0
@@ -63,12 +63,12 @@ def migrate_classifications():
                 )
                 db.add(new_item)
                 db.flush()
-                print(f"✅ Added: {item_data['item']}")
+                print(f" Added: {item_data['item']}")
                 added_count += 1
                 
             except IntegrityError:
                 db.rollback()
-                print(f"⚠️  Skipped duplicate: {item_data['item']}")
+                print(f"⚠  Skipped duplicate: {item_data['item']}")
             except Exception as e:
                 db.rollback()
                 print(f"❌ Error adding {item_data['item']}: {e}")
@@ -80,10 +80,10 @@ def migrate_classifications():
         
         if z_item and z_item.category is None:
             z_item.category = 'M'
-            print("✅ Fixed (Z, ADDITIONAL FEES) category")
+            print(" Fixed (Z, ADDITIONAL FEES) category")
         
         db.commit()
-        print(f"\n🎉 Migration complete! Added {added_count} classifications")
+        print(f"\n Migration complete! Added {added_count} classifications")
         return True
         
     except Exception as e:
@@ -94,6 +94,6 @@ def migrate_classifications():
         db.close()
 
 if __name__ == "__main__":
-    print("🚀 Starting production migration...")
+    print(" Starting production migration...")
     success = migrate_classifications()
     sys.exit(0 if success else 1) 

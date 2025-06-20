@@ -14,7 +14,7 @@ json_file = '../mpi_backend/storage/fixtures/customer-job-mapping.json'
 with open(json_file, 'r') as file:
     json_mappings = json.load(file)
 
-print(f"📥 Loaded {len(json_mappings)} customer job mappings from JSON.")
+print(f" Loaded {len(json_mappings)} customer job mappings from JSON.")
 
 # Fetch all existing mappings from the DB
 existing_mappings = session.query(CustomerJobMapping).all()
@@ -51,13 +51,13 @@ for mapping in json_mappings:
 if new_entries:
     session.add_all(new_entries)
     session.commit()
-    print(f"✅ Inserted {len(new_entries)} new customer job mappings.")
+    print(f" Inserted {len(new_entries)} new customer job mappings.")
 else:
     print("No new mappings to insert.")
 
 # Count total mappings now
 total_count = session.query(CustomerJobMapping).count()
-print(f"📊 Total Customer Job Mappings in DB: {total_count}")
+print(f" Total Customer Job Mappings in DB: {total_count}")
 
 # Close session
 session.close()
@@ -77,12 +77,12 @@ session.close()
 # with open('mpi_backend/storage/fixtures/customer-job-mapping.json', 'r') as file:
 #     json_mappings = json.load(file)
 #
-# print(f"📥 Loaded {len(json_mappings)} customer job mappings from JSON.")
+# print(f" Loaded {len(json_mappings)} customer job mappings from JSON.")
 #
 # # Step 1: Delete all existing records
 # deleted_count = session.query(CustomerJobMapping).delete()
 # session.commit()
-# print(f"🗑️ Deleted {deleted_count} existing customer job mappings.")
+# print(f" Deleted {deleted_count} existing customer job mappings.")
 #
 # # Step 2: Prepare new mappings
 # new_entries = [
@@ -97,11 +97,11 @@ session.close()
 # session.add_all(new_entries)
 # session.commit()
 #
-# print(f"✅ Inserted {len(new_entries)} new customer job mappings.")
+# print(f" Inserted {len(new_entries)} new customer job mappings.")
 #
 # # Step 4: Confirm final count
 # total_count = session.query(CustomerJobMapping).count()
-# print(f"📊 Total Customer Job Mappings in DB: {total_count}")
+# print(f" Total Customer Job Mappings in DB: {total_count}")
 #
 # # Close session
 # session.close()

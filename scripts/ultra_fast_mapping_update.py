@@ -80,7 +80,7 @@ class UltraFastMappingUpdater:
         try:
             with db_context() as db:
                 db.execute(text("SELECT 1"))
-            logger.info("✅ Database connection verified")
+            logger.info(" Database connection verified")
         except Exception as e:
             logger.error(f"❌ Database connection failed: {str(e)}")
             logger.error("Please check your database configuration and ensure the database is running")
@@ -89,7 +89,7 @@ class UltraFastMappingUpdater:
     def run_update(self, force_full_sync: bool = True) -> Dict[str, Any]:
         """Run the complete update process: sync mappings first, then ultra-fast UIDI update."""
         total_start = time.time()
-        logger.info("🚀 Starting Complete Mapping Update Process")
+        logger.info(" Starting Complete Mapping Update Process")
         logger.info(f"Target: 25k+ items | DB: 100k+ items | Mappings: 30k+")
         
         try:
@@ -97,11 +97,11 @@ class UltraFastMappingUpdater:
             
             # Step 1: MANDATORY - Update all existing mappings from Google Sheets
             if force_full_sync:
-                logger.info("📥 Step 1: Updating ALL mappings from Google Sheets...")
+                logger.info(" Step 1: Updating ALL mappings from Google Sheets...")
                 sync_start = time.time()
                 sync_result = self._complete_mapping_sync()
                 sync_time = time.time() - sync_start
-                logger.info(f"📥 Mapping sync completed in {sync_time:.2f}s")
+                logger.info(f" Mapping sync completed in {sync_time:.2f}s")
                 
                 if not sync_result.get("success"):
                     logger.error("❌ Critical: Mapping sync failed!")
@@ -111,10 +111,10 @@ class UltraFastMappingUpdater:
                         "total_time": round(time.time() - total_start, 2)
                     }
                 
-                logger.info(f"✅ Successfully synced {sync_result.get('new_mappings_count', 0)} mappings")
+                logger.info(f" Successfully synced {sync_result.get('new_mappings_count', 0)} mappings")
             
             # Step 2: Ultra-fast UIDI item updates using refreshed mappings
-            logger.info("⚡ Step 2: Ultra-fast UIDI item updates...")
+            logger.info(" Step 2: Ultra-fast UIDI item updates...")
             update_start = time.time()
             update_result = self._ultra_fast_bulk_update()
             update_time = time.time() - update_start
@@ -144,7 +144,7 @@ class UltraFastMappingUpdater:
             with db_context() as db:
                 sync_controller = GoogleSheetSyncController(db)
                 
-                logger.info("🔄 Extracting ALL mappings from Google Sheets...")
+                logger.info(" Extracting ALL mappings from Google Sheets...")
                 result = sync_controller.sync_sheet_mappings(
                     sheet_id=DEFAULT_SHEET_ID,
                     output_file=DEFAULT_OUTPUT_FILE,
@@ -155,7 +155,7 @@ class UltraFastMappingUpdater:
                 )
                 
                 if result.get("success"):
-                    logger.info(f"📊 Extraction complete:")
+                    logger.info(f" Extraction complete:")
                     logger.info(f"   • Total mappings extracted: {result.get('total_mappings_extracted', 0):,}")
                     logger.info(f"   • New mappings added: {result.get('new_mappings_count', 0):,}")
                     logger.info(f"   • Updated mappings: {result.get('updated_mappings_count', 0):,}")
@@ -169,22 +169,22 @@ class UltraFastMappingUpdater:
     
     def _ultra_fast_bulk_update(self) -> Dict[str, Any]:
         """Ultra-fast bulk update using raw SQL and hash lookups."""
-        logger.info("🏗️  Building ultra-fast lookup tables...")
+        logger.info("  Building ultra-fast lookup tables...")
         lookup_start = time.time()
         
         with db_context() as db:
             # Step 1: Build super-fast lookup using raw SQL
             mappings_lookup = self._build_ultra_fast_lookup(db)
             lookup_time = time.time() - lookup_start
-            logger.info(f"🏗️  Built {len(mappings_lookup):,} lookups in {lookup_time:.3f}s")
+            logger.info(f"  Built {len(mappings_lookup):,} lookups in {lookup_time:.3f}s")
             
             # Step 2: Get all UIDI items with raw SQL
-            logger.info("🔍 Fetching UIDI items...")
+            logger.info(" Fetching UIDI items...")
             fetch_start = time.time()
             
             uidi_items = self._fetch_uidi_items_raw(db)
             fetch_time = time.time() - fetch_start
-            logger.info(f"🔍 Fetched {len(uidi_items):,} UIDI items in {fetch_time:.3f}s")
+            logger.info(f" Fetched {len(uidi_items):,} UIDI items in {fetch_time:.3f}s")
             
             if not uidi_items:
                 return {
@@ -196,7 +196,7 @@ class UltraFastMappingUpdater:
                 }
             
             # Step 3: Ultra-fast bulk matching and update
-            logger.info("⚡ Processing matches and executing bulk update...")
+            logger.info(" Processing matches and executing bulk update...")
             update_start = time.time()
             
             # Process all items at once for maximum speed
@@ -225,8 +225,8 @@ class UltraFastMappingUpdater:
             update_time = time.time() - update_start
             total_time = lookup_time + fetch_time + update_time
             
-            logger.info(f"⚡ Processed {len(uidi_items):,} items, updated {updated_count:,} in {update_time:.3f}s")
-            logger.info(f"📊 Exact matches: {exact_hits:,} | Suffix matches: {suffix_hits:,}")
+            logger.info(f" Processed {len(uidi_items):,} items, updated {updated_count:,} in {update_time:.3f}s")
+            logger.info(f" Exact matches: {exact_hits:,} | Suffix matches: {suffix_hits:,}")
             
             return {
                 "updated_count": updated_count,
@@ -296,7 +296,6 @@ class UltraFastMappingUpdater:
         return [(row.id, row.item.strip(), row.vendor) for row in result if row.item]
     
 
-    
     def _fast_supplier_lookup(self, vendor: str) -> int:
         """Fast supplier ID lookup."""
         if not vendor:
@@ -382,7 +381,7 @@ class UltraFastMappingUpdater:
 def main():
     """Main execution function."""
     logger.info("=" * 60)
-    logger.info("🚀 COMPLETE MAPPING UPDATE PROCESS")
+    logger.info(" COMPLETE MAPPING UPDATE PROCESS")
     logger.info("=" * 60)
     
     try:
@@ -390,19 +389,19 @@ def main():
         skip_sync = "--no-sync" in sys.argv
         
         if skip_sync:
-            logger.info("⏭️  Skipping Google Sheets sync (NOT RECOMMENDED)")
-            logger.warning("⚠️  This will only update UIDI items with existing mappings!")
+            logger.info("⏭  Skipping Google Sheets sync (NOT RECOMMENDED)")
+            logger.warning("⚠  This will only update UIDI items with existing mappings!")
         else:
-            logger.info("📥 Will update ALL mappings from Google Sheets first")
+            logger.info(" Will update ALL mappings from Google Sheets first")
         
         # Check database URI
-        logger.info(f"🔍 Database URI check: {SQLALCHEMY_DATABASE_URI[:50]}...")
+        logger.info(f" Database URI check: {SQLALCHEMY_DATABASE_URI[:50]}...")
         
         # Create updater and run
-        logger.info("🔧 Initializing updater...")
+        logger.info(" Initializing updater...")
         updater = UltraFastMappingUpdater()
         
-        logger.info("🚀 Starting update process...")
+        logger.info(" Starting update process...")
         result = updater.run_update(force_full_sync=not skip_sync)
         
     except ConnectionError as e:
@@ -414,37 +413,37 @@ def main():
     
     # Print results
     logger.info("=" * 60)
-    logger.info("📊 RESULTS")
+    logger.info(" RESULTS")
     logger.info("=" * 60)
     
     if result["success"]:
-        logger.info(f"✅ SUCCESS!")
-        logger.info(f"📈 Items updated: {result.get('updated_count', 0):,}")
-        logger.info(f"📊 Items processed: {result.get('total_items', 0):,}")
-        logger.info(f"⚡ Speed: {result.get('items_per_second', 0):,.1f} items/second")
-        logger.info(f"⏱️  Total time: {result.get('total_time', 0)}s")
+        logger.info(f" SUCCESS!")
+        logger.info(f" Items updated: {result.get('updated_count', 0):,}")
+        logger.info(f" Items processed: {result.get('total_items', 0):,}")
+        logger.info(f" Speed: {result.get('items_per_second', 0):,.1f} items/second")
+        logger.info(f"⏱  Total time: {result.get('total_time', 0)}s")
         
-        logger.info(f"📥 Mapping sync time: {result.get('sync_time', 0)}s")
+        logger.info(f" Mapping sync time: {result.get('sync_time', 0)}s")
         
         # Show sync details if available
         sync_result = result.get('sync_result')
         if sync_result:
-            logger.info(f"📊 Sync details:")
+            logger.info(f" Sync details:")
             logger.info(f"   • Total extracted: {sync_result.get('total_mappings_extracted', 0):,}")
             logger.info(f"   • New mappings: {sync_result.get('new_mappings_count', 0):,}")
             logger.info(f"   • Updated mappings: {sync_result.get('updated_mappings_count', 0):,}")
-        logger.info(f"🔍 Lookup time: {result.get('lookup_time', 0)}s")
-        logger.info(f"📋 Fetch time: {result.get('fetch_time', 0)}s")
-        logger.info(f"💾 Update time: {result.get('update_time', 0)}s")
+        logger.info(f" Lookup time: {result.get('lookup_time', 0)}s")
+        logger.info(f" Fetch time: {result.get('fetch_time', 0)}s")
+        logger.info(f" Update time: {result.get('update_time', 0)}s")
         
         # Performance summary
         total_items = result.get('total_items', 0)
         if total_items > 0:
             efficiency = (result.get('updated_count', 0) / total_items) * 100
-            logger.info(f"🎯 Update efficiency: {efficiency:.1f}%")
+            logger.info(f" Update efficiency: {efficiency:.1f}%")
     else:
         logger.error(f"❌ FAILED: {result.get('error', 'Unknown error')}")
-        logger.error(f"⏱️  Time elapsed: {result.get('total_time', 0)}s")
+        logger.error(f"⏱  Time elapsed: {result.get('total_time', 0)}s")
     
     logger.info("=" * 60)
 
