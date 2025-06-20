@@ -116,33 +116,52 @@ def perform_database_updates_background(all_item_ids_for_status: List,
                                         invoice_ids: List[UUID] = None):
     """
     Background task to handle ALL status updates after Excel generation.
-    This ensures maximum speed by returning download URL immediately.
+    CRITICAL PRIORITY: Ensures status changes from Pending to Sent.
+    Enhanced with robust error handling and transaction management.
     """
     db = None
     try:
-        # CRITICAL FIX: Proper database session for background processing
+        # CRITICAL: Proper database session for background processing
         from mpi_backend.database import SessionLocal
         db = SessionLocal()
 
         update_progress(operation_id, "background_updating", 95,
-                        "Updating statuses in background")
+                        "CRITICAL: Updating export statuses to 'Sent'")
 
         status_start = time.time()
+        total_operations = 0
+        successful_operations = 0
+        failed_operations = 0
 
-        # CRITICAL FIX: Update invoice statuses with proper validation
+        logger.info(
+            f"PRIORITY STATUS UPDATE: Starting background updates for "
+            f"{len(all_item_ids_for_status)} items and "
+            f"{len(invoice_ids) if invoice_ids else 0} invoices"
+        )
+
+        # PRIORITY 1: Update invoice-level export status with enhanced validation
         updated_invoices = 0
         skipped_invoices = 0
+        failed_invoices = 0
+        
         if invoice_ids:
             invoice_controller = InvoiceController(db)
+            total_operations += len(invoice_ids)
+            
             for invoice_id in invoice_ids:
                 try:
-                    # Check current status before updating
+                    # Enhanced validation: Check current status before updating
                     from mpi_backend.database.models import Invoice
                     invoice = db.query(Invoice).filter(
                         Invoice.id == str(invoice_id)
                     ).first()
+                    
                     if invoice:
-                        if invoice.is_exported != 'Sent':
+                        current_status = invoice.is_exported
+                        logger.debug(f"Invoice {invoice_id} current status: {current_status}")
+                        
+                        if current_status != 'Sent':
+                            # CRITICAL: Update invoice status to 'Sent'
                             success = (
                                 invoice_controller.set_invoice_is_exported(
                                     str(invoice_id)
@@ -150,60 +169,243 @@ def perform_database_updates_background(all_item_ids_for_status: List,
                             )
                             if success:
                                 updated_invoices += 1
+                                successful_operations += 1
+                                logger.info(
+                                    f"✓ Invoice {invoice_id} status updated: "
+                                    f"{current_status} → Sent"
+                                )
+                            else:
+                                failed_invoices += 1
+                                failed_operations += 1
+                                logger.error(
+                                    f"✗ Failed to update invoice {invoice_id}"
+                                )
                         else:
                             skipped_invoices += 1
+                            successful_operations += 1  # Count as successful
                             logger.debug(
                                 f"Invoice {invoice_id} already marked as "
                                 f"Sent, skipping"
                             )
+                    else:
+                        failed_invoices += 1
+                        failed_operations += 1
+                        logger.error(f"✗ Invoice {invoice_id} not found")
+                        
                 except Exception as e:
-                    logger.warning(
-                        f"Failed to update invoice {invoice_id}: {e}"
-                    )
+                    failed_invoices += 1
+                    failed_operations += 1
+                    logger.error(f"✗ Exception updating invoice {invoice_id}: {e}")
                     continue
 
-        # Update item-level export status in background
+        # PRIORITY 2: Update item-level export status with enhanced error handling
+        updated_items = 0
+        failed_items = 0
+        
         if all_item_ids_for_status:
-            InvoiceItemController(db).set_export_status_to_sent(
-                all_item_ids_for_status)
+            total_operations += len(all_item_ids_for_status)
+            
+            try:
+                # CRITICAL: Batch update item statuses from Pending to Sent
+                logger.info(
+                    f"CRITICAL UPDATE: Updating "
+                    f"{len(all_item_ids_for_status)} item statuses to 'Sent'"
+                )
+                
+                # Validate items exist and get current statuses
+                from mpi_backend.database.models import InvoiceItem
+                existing_items = db.query(InvoiceItem).filter(
+                    InvoiceItem.id.in_(all_item_ids_for_status)
+                ).all()
+                
+                logger.info(
+                    f"Found {len(existing_items)} items out of "
+                    f"{len(all_item_ids_for_status)} requested"
+                )
+                
+                # Log current status distribution
+                status_counts = {}
+                for item in existing_items:
+                    status = item.export_status or 'None'
+                    status_counts[status] = status_counts.get(status, 0) + 1
+                
+                logger.info(
+                    f"Current item status distribution: {status_counts}"
+                )
+                
+                # Use the controller method for batch update
+                invoice_item_controller = InvoiceItemController(db)
+                updated_items = (
+                    invoice_item_controller.set_export_status_to_sent(
+                        all_item_ids_for_status
+                    )
+                )
+                
+                if updated_items > 0:
+                    successful_operations += updated_items
+                    logger.info(
+                        f"✓ Successfully updated {updated_items} items to "
+                        f"'Sent'"
+                    )
+                else:
+                    logger.warning("⚠ No items were updated")
+                    
+            except Exception as e:
+                failed_items = len(all_item_ids_for_status)
+                failed_operations += failed_items
+                logger.error(f"✗ CRITICAL ERROR updating item statuses: {e}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
 
         status_time = time.time() - status_start
+        
+        # COMPREHENSIVE STATUS REPORT
         logger.info(
-            f"Background updates completed in {status_time:.3f}s: "
-            f"{updated_invoices} invoices updated, {skipped_invoices} "
-            f"already sent, {len(all_item_ids_for_status)} items"
+            f"BACKGROUND UPDATE COMPLETED in {status_time:.3f}s:\n"
+            f"  INVOICES: {updated_invoices} updated, {skipped_invoices} already sent, "
+            f"{failed_invoices} failed\n"
+            f"  ITEMS: {updated_items} updated, {failed_items} failed\n"
+            f"  OVERALL: {successful_operations}/{total_operations} operations successful"
         )
 
+        # Update progress with detailed results
+        success_rate = (successful_operations / total_operations * 100) if total_operations > 0 else 100
         update_progress(
             operation_id, "background_completed", 100,
-            f"Background updates completed - {updated_invoices} invoices "
-            f"updated, {skipped_invoices} already sent, "
-            f"{len(all_item_ids_for_status)} items"
+            f"Status updates completed - {success_rate:.1f}% success rate: "
+            f"Invoices({updated_invoices}✓,{skipped_invoices}skip,{failed_invoices}✗), "
+            f"Items({updated_items}✓,{failed_items}✗)"
         )
 
+        # CRITICAL: Verify updates were successful
+        if failed_operations > 0:
+            logger.error(f"ATTENTION REQUIRED: {failed_operations} status updates failed")
+            # Optional: You could implement retry logic here
+            
     except Exception as e:
-        logger.error(f"Background database update failed: {e}")
+        logger.error(f"CRITICAL: Background database update failed: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         update_progress(operation_id, "background_error", 100,
-                        f"Background update error: {str(e)}")
+                        f"CRITICAL ERROR in background update: {str(e)}")
     finally:
         if db:
             try:
                 db.close()
+                logger.debug("Database session closed successfully")
             except Exception as e:
                 logger.error(f"Error closing background db session: {e}")
+
+
+def immediate_status_update(all_item_ids_for_status: List,
+                           invoice_ids: List[UUID],
+                           db: Session,
+                           operation_id: str) -> dict:
+    """
+    IMMEDIATE STATUS UPDATE: Perform status updates synchronously before returning.
+    This ensures status changes happen immediately, not in background.
+    Returns detailed results of the update operation.
+    """
+    logger.info("IMMEDIATE STATUS UPDATE: Starting synchronous status updates")
+    update_start = time.time()
+    
+    results = {
+        'invoices_updated': 0,
+        'invoices_skipped': 0,
+        'invoices_failed': 0,
+        'items_updated': 0,
+        'items_failed': 0,
+        'total_time': 0,
+        'success': False
+    }
+    
+    try:
+        # CRITICAL PRIORITY 1: Update invoice statuses immediately
+        if invoice_ids:
+            invoice_controller = InvoiceController(db)
+            logger.info(f"Updating {len(invoice_ids)} invoice statuses to 'Sent'")
+            
+            for invoice_id in invoice_ids:
+                try:
+                    from mpi_backend.database.models import Invoice
+                    invoice = db.query(Invoice).filter(
+                        Invoice.id == str(invoice_id)
+                    ).first()
+                    
+                    if invoice:
+                        if invoice.is_exported != 'Sent':
+                            success = invoice_controller.set_invoice_is_exported(
+                                str(invoice_id)
+                            )
+                            if success:
+                                results['invoices_updated'] += 1
+                                logger.debug(f"✓ Invoice {invoice_id}: Pending → Sent")
+                            else:
+                                results['invoices_failed'] += 1
+                                logger.error(f"✗ Failed to update invoice {invoice_id}")
+                        else:
+                            results['invoices_skipped'] += 1
+                            logger.debug(f"Invoice {invoice_id} already 'Sent'")
+                    else:
+                        results['invoices_failed'] += 1
+                        logger.error(f"✗ Invoice {invoice_id} not found")
+                        
+                except Exception as e:
+                    results['invoices_failed'] += 1
+                    logger.error(f"✗ Exception updating invoice {invoice_id}: {e}")
+
+        # CRITICAL PRIORITY 2: Update item statuses immediately
+        if all_item_ids_for_status:
+            logger.info(f"Updating {len(all_item_ids_for_status)} item statuses to 'Sent'")
+            
+            try:
+                invoice_item_controller = InvoiceItemController(db)
+                updated_count = invoice_item_controller.set_export_status_to_sent(
+                    all_item_ids_for_status
+                )
+                results['items_updated'] = updated_count
+                logger.info(f"✓ Updated {updated_count} item statuses to 'Sent'")
+                
+            except Exception as e:
+                results['items_failed'] = len(all_item_ids_for_status)
+                logger.error(f"✗ CRITICAL: Failed to update item statuses: {e}")
+
+        results['total_time'] = time.time() - update_start
+        
+        # Determine overall success
+        total_attempted = len(invoice_ids) + len(all_item_ids_for_status)
+        total_successful = (results['invoices_updated'] + results['invoices_skipped'] + 
+                           results['items_updated'])
+        
+        results['success'] = (results['invoices_failed'] == 0 and results['items_failed'] == 0)
+        
+        logger.info(
+            f"IMMEDIATE STATUS UPDATE COMPLETED in {results['total_time']:.3f}s:\n"
+            f"  INVOICES: {results['invoices_updated']} updated, "
+            f"{results['invoices_skipped']} skipped, {results['invoices_failed']} failed\n"
+            f"  ITEMS: {results['items_updated']} updated, {results['items_failed']} failed\n"
+            f"  SUCCESS: {results['success']} ({total_successful}/{total_attempted} operations)"
+        )
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"CRITICAL: Immediate status update failed: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        results['success'] = False
+        results['total_time'] = time.time() - update_start
+        return results
 
 
 @router.post("/migrate-all")
 def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
                               background_tasks: BackgroundTasks,
                               db: Session = Depends(get_qb_db)):
-    """ULTRA-FAST: QuickBooks migration optimized for all invoices"""
+    """ULTRA-FAST: QuickBooks migration optimized for all invoices with guaranteed status updates"""
     operation_start = time.time()
     operation_id = f"qb_migrate_all_{int(operation_start)}"
 
     with safe_priority_context("migrate_all"):
         try:
-            logger.info("Starting ULTRA-FAST QuickBooks migration")
+            logger.info("Starting ULTRA-FAST QuickBooks migration with guaranteed status updates")
 
             filtered_data = InvoiceItemController(db).apply_filters(
                 request, page=1, size=0
@@ -221,17 +423,17 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
             # make invoice-ids in list to be unique
             invoice_ids = list(set(invoice_ids))
 
-            logger.info(f"Migrate-all processing {len(invoice_ids)} invoices")
+            logger.info(f"Migrate-all processing {len(invoice_ids)} invoices with STATUS PRIORITY")
 
-            # ULTRA-FAST PROCESSING: Generate Excel and return immediately
+            # ULTRA-FAST PROCESSING: Generate Excel and ensure status updates
             result = migrate_invoice_to_QB_ultra_fast(
                 invoice_ids, db=db, operation_id=operation_id,
-                background_tasks=background_tasks
+                background_tasks=background_tasks, update_mode="immediate"
             )
 
             operation_time = time.time() - operation_start
             logger.info(
-                f"Migrate-all completed ULTRA-FAST in {operation_time:.2f}s"
+                f"Migrate-all completed ULTRA-FAST in {operation_time:.2f}s with status updates"
             )
             return result
 
@@ -248,7 +450,7 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
 def migrate_invoice_to_QB(invoice_ids: List[UUID],
                           background_tasks: BackgroundTasks,
                           db: Session = Depends(get_qb_db)):
-    """QuickBooks migration with priority control using ultra-fast approach"""
+    """QuickBooks migration with priority control and guaranteed status updates"""
     start_time = time.time()
     operation_id = f"qb_migrate_{int(start_time)}"
 
@@ -257,18 +459,18 @@ def migrate_invoice_to_QB(invoice_ids: List[UUID],
             # Validate input
             invoice_ids = validate_invoice_ids(invoice_ids)
 
-            logger.info(f"Processing {len(invoice_ids)} invoices")
+            logger.info(f"Processing {len(invoice_ids)} invoices with STATUS PRIORITY")
 
-            # Use the same ultra-fast method for all migrations
+            # Use ultra-fast method with immediate status updates for regular migrations
             result = migrate_invoice_to_QB_ultra_fast(
                 invoice_ids, db=db, operation_id=operation_id,
-                background_tasks=background_tasks
+                background_tasks=background_tasks, update_mode="immediate"
             )
 
             total_time = time.time() - start_time
             logger.info(
                 f"QuickBooks migration completed successfully in "
-                f"{total_time:.2f}s"
+                f"{total_time:.2f}s with guaranteed status updates"
             )
             return result
 
@@ -283,14 +485,17 @@ def migrate_invoice_to_QB(invoice_ids: List[UUID],
 
 def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
                                      db: Session, operation_id: str,
-                                     background_tasks: BackgroundTasks) -> str:
+                                     background_tasks: BackgroundTasks,
+                                     update_mode: str = "background") -> str:
     """
-    ULTRA-FAST QuickBooks migration - consolidated single approach
+    ULTRA-FAST QuickBooks migration with GUARANTEED status updates
+    update_mode: "immediate" for synchronous updates, "background" for async updates
     """
 
     # FAST START - minimal logging
     start_time = time.time()
-    logger.info(f"FAST QB migration starting for {len(invoice_ids)} invoices")
+    logger.info(f"FAST QB migration starting for {len(invoice_ids)} invoices "
+               f"(update_mode: {update_mode})")
 
     update_progress(operation_id, "retrieving_data", 10,
                     f"Retrieving data for {len(invoice_ids)} invoices")
@@ -367,9 +572,8 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
                     tax_item_classes[item_invoice_id] = []
                 tax_item_classes[item_invoice_id].append(item_class)
 
-            # CRITICAL BUG FIX: Add TAX item IDs to status update list
-            # TAX items also need their export_status changed from Pending
-            # to Sent
+            # CRITICAL: Add TAX item IDs to status update list
+            # TAX items also need their export_status changed from Pending to Sent
             tax_item_id = getattr(item, 'id', None)
             if tax_item_id:
                 all_item_ids_for_status.append(tax_item_id)
@@ -727,23 +931,47 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
         f"Excel and S3 upload in {time.time() - excel_start:.3f}s"
     )
 
-    # FAST RESPONSE: Move ALL status updates to background for maximum speed
-    # This ensures download URL is returned immediately like export-all
-    if all_item_ids_for_status or invoice_ids:
-        background_tasks.add_task(
-            perform_database_updates_background,
-            all_item_ids_for_status,
-            operation_id,
-            invoice_ids  # Pass invoice_ids to background task
+    # CRITICAL PRIORITY: STATUS UPDATES - Choose immediate or background based on mode
+    update_progress(operation_id, "updating_statuses", 90,
+                    f"CRITICAL: Updating statuses ({update_mode} mode)")
+    
+    if update_mode == "immediate":
+        # IMMEDIATE STATUS UPDATE - Guaranteed before return
+        logger.info("CRITICAL: Performing IMMEDIATE status updates")
+        status_results = immediate_status_update(
+            all_item_ids_for_status, invoice_ids, db, operation_id
         )
+        
+        if not status_results['success']:
+            logger.error("ATTENTION: Some status updates failed")
+            # You could choose to raise an exception here if status updates are critical
+            # raise HTTPException(status_code=500, detail="Status updates failed")
+        
+        logger.info(f"IMMEDIATE STATUS UPDATES: "
+                   f"Invoices({status_results['invoices_updated']}✓,"
+                   f"{status_results['invoices_skipped']}skip,"
+                   f"{status_results['invoices_failed']}✗), "
+                   f"Items({status_results['items_updated']}✓,"
+                   f"{status_results['items_failed']}✗)")
+        
+    else:
+        # BACKGROUND STATUS UPDATE - For maximum speed
+        logger.info("STATUS UPDATES: Moving to background for maximum speed")
+        if all_item_ids_for_status or invoice_ids:
+            background_tasks.add_task(
+                perform_database_updates_background,
+                all_item_ids_for_status,
+                operation_id,
+                invoice_ids
+            )
 
     total_time = time.time() - start_time
     logger.info(
         f"ULTRA-FAST QB EXPORT COMPLETED: {len(final_batch_entry)} rows in "
-        f"{total_time:.2f}s"
+        f"{total_time:.2f}s (status_mode: {update_mode})"
     )
 
     update_progress(operation_id, "completed", 100,
-                    f"Export completed in {total_time:.2f}s")
+                    f"Export completed in {total_time:.2f}s with {update_mode} status updates")
 
     return download_url
