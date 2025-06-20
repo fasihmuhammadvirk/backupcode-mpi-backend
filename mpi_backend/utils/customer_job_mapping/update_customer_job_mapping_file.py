@@ -95,10 +95,10 @@ def update_customer_job_mappings_json(excel_file, json_file="mpi_backend/storage
         except Exception as e:
             raise Exception(f"Failed to write to JSON file: {str(e)}")
 
-        logger.info("✅ Added %d new mappings.", len(new_entries))
+        logger.info(" Added %d new mappings.", len(new_entries))
         return len(new_entries)
     else:
-        logger.info("✅ No new mappings to add. JSON file is already up to date.")
+        logger.info(" No new mappings to add. JSON file is already up to date.")
         return len(new_entries)
 
 

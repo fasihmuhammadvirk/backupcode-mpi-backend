@@ -658,15 +658,15 @@ class StatementController:
                 # FRESH SUPPLIER DETECTION: Don't use old (potentially wrong) supplier
                 # Instead, let the system re-detect supplier from filename and PDF
                 old_supplier_name = statement_info['supplier_name']
-                logger.info(f"🔄 REPROCESSING: Old supplier was: {old_supplier_name}")
-                logger.info(f"🔍 FRESH DETECTION: Re-detecting supplier from filename and PDF content...")
+                logger.info(f" REPROCESSING: Old supplier was: {old_supplier_name}")
+                logger.info(f" FRESH DETECTION: Re-detecting supplier from filename and PDF content...")
                 
                 # Try to detect supplier from filename first (using our improved logic)
                 filename_detected_supplier = self._detect_supplier_from_filename(pdf_filename)
                 if filename_detected_supplier:
-                    logger.info(f"📄 Filename detected supplier: {filename_detected_supplier}")
+                    logger.info(f" Filename detected supplier: {filename_detected_supplier}")
                 else:
-                    logger.warning(f"⚠️  Could not detect supplier from filename: {pdf_filename}")
+                    logger.warning(f"  Could not detect supplier from filename: {pdf_filename}")
                 
                 # Create extractor WITHOUT pre-set supplier name to allow fresh detection
                 extractor = StatementExtractor(
@@ -679,16 +679,16 @@ class StatementController:
                 
                 # Verify what supplier was actually detected
                 detected_supplier = extractor.detect_supplier()
-                logger.info(f"🎯 FINAL DETECTED SUPPLIER: {detected_supplier}")
+                logger.info(f" FINAL DETECTED SUPPLIER: {detected_supplier}")
                 
                 # Compare with old assignment
                 if old_supplier_name != detected_supplier:
-                    logger.warning(f"🚨 SUPPLIER CHANGE DETECTED!")
+                    logger.warning(f" SUPPLIER CHANGE DETECTED!")
                     logger.warning(f"   OLD: {old_supplier_name}")
                     logger.warning(f"   NEW: {detected_supplier}")
                     logger.warning(f"   This indicates the previous assignment was incorrect!")
                 else:
-                    logger.info(f"✅ Supplier assignment confirmed: {detected_supplier}")
+                    logger.info(f" Supplier assignment confirmed: {detected_supplier}")
                 
                 final_supplier_name = detected_supplier
                 
@@ -882,10 +882,10 @@ class StatementController:
                         
                         # Enhanced logging with supplier change information
                         if supplier_changed:
-                            logger.warning(f"✅ Statement {statement.id} reprocessed successfully - SUPPLIER CHANGED!")
+                            logger.warning(f" Statement {statement.id} reprocessed successfully - SUPPLIER CHANGED!")
                             logger.warning(f"   OLD: {old_supplier_name} → NEW: {new_supplier_name}")
                         else:
-                            logger.info(f"✅ Statement {statement.id} reprocessed successfully - supplier confirmed: {new_supplier_name}")
+                            logger.info(f" Statement {statement.id} reprocessed successfully - supplier confirmed: {new_supplier_name}")
                     else:
                         statement_result.update({
                             'supplier_name': old_supplier_name,  # Keep old if reprocessing failed
@@ -894,7 +894,7 @@ class StatementController:
                         })
                         statistics['failed'] += 1
                         statistics['errors'].append(f"Statement {statement.id}: {result.get('error', 'Unknown error')}")
-                        logger.error(f"❌ Statement {statement.id} reprocessing failed: {result.get('error')}")
+                        logger.error(f" Statement {statement.id} reprocessing failed: {result.get('error')}")
                     
                     results.append(statement_result)
                     
@@ -923,10 +923,10 @@ class StatementController:
             
             logger.info(f"Bulk reprocessing completed: {statistics['successful']}/{statistics['total_statements']} successful ({success_rate:.1f}%)")
             if supplier_change_count > 0:
-                logger.warning(f"🚨 SUPPLIER CHANGES: {supplier_change_count} statements had supplier corrections!")
+                logger.warning(f" SUPPLIER CHANGES: {supplier_change_count} statements had supplier corrections!")
                 logger.warning("   This indicates previous misassignments that have now been fixed.")
             else:
-                logger.info("✅ No supplier changes detected - all assignments were already correct.")
+                logger.info(" No supplier changes detected - all assignments were already correct.")
             
             return {
                 'success': True,

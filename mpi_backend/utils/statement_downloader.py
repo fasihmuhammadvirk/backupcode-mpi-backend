@@ -519,23 +519,23 @@ def process_statement_files(base_folder_path: Path):
                     supplier_dir = pdf_file.parts[-3]  # supplier_name directory
                     if supplier_dir in STATEMENT_SUPPLIERS:
                         path_supplier = supplier_dir
-                        logger.info(f"📁 Path extracted supplier: {path_supplier}")
+                        logger.info(f" Path extracted supplier: {path_supplier}")
                 
                 # Strategy 2: Extract from filename (FIXED LOGIC)
                 filename_supplier = extract_supplier_from_filename(pdf_file.name)
                 if filename_supplier:
-                    logger.info(f"📄 Filename extracted supplier: {filename_supplier}")
+                    logger.info(f" Filename extracted supplier: {filename_supplier}")
                 
                 # Strategy 3: Determine final supplier with priority
                 if path_supplier and filename_supplier and path_supplier == filename_supplier:
                     final_supplier = path_supplier
-                    logger.info(f"🎯 Supplier confirmed by both path and filename: {final_supplier}")
+                    logger.info(f" Supplier confirmed by both path and filename: {final_supplier}")
                 elif path_supplier:
                     final_supplier = path_supplier
-                    logger.info(f"🎯 Using path-extracted supplier: {final_supplier}")
+                    logger.info(f" Using path-extracted supplier: {final_supplier}")
                 elif filename_supplier:
                     final_supplier = filename_supplier
-                    logger.info(f"🎯 Using filename-extracted supplier: {final_supplier}")
+                    logger.info(f" Using filename-extracted supplier: {final_supplier}")
                 else:
                     logger.error(f"CRITICAL: Could not extract supplier name for {pdf_file}")
                     logger.error(f"Path parts: {pdf_file.parts}")
@@ -563,11 +563,11 @@ def process_statement_files(base_folder_path: Path):
                     
                     # Verify what supplier the extractor is actually using
                     detected_supplier = extractor.detect_supplier()
-                    logger.info(f"🔍 StatementExtractor detected supplier: {detected_supplier}")
+                    logger.info(f" StatementExtractor detected supplier: {detected_supplier}")
                     
                     # Critical validation: Check for supplier mismatch
                     if final_supplier and detected_supplier != final_supplier:
-                        logger.error(f"🚨 CRITICAL SUPPLIER MISMATCH DETECTED!")
+                        logger.error(f" CRITICAL SUPPLIER MISMATCH DETECTED!")
                         logger.error(f"   Expected (from email/path): {final_supplier}")
                         logger.error(f"   StatementExtractor using: {detected_supplier}")
                         logger.error(f"   PDF File: {pdf_file}")
@@ -578,7 +578,7 @@ def process_statement_files(base_folder_path: Path):
                         # Save to database
                         db_success = extractor.save_to_database()
                         if db_success:
-                            logger.info(f"✅ Successfully processed and saved statement: {pdf_file}")
+                            logger.info(f" Successfully processed and saved statement: {pdf_file}")
                             logger.info(f"   Final supplier used: {detected_supplier}")
                             
                             # Upload PDF to S3 for storage

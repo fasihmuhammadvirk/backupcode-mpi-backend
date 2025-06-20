@@ -40,7 +40,7 @@ class ItemsMappingController:
         try:
             from mpi_backend.utils.quickbooks_priority import is_migrate_all_active
             if is_migrate_all_active():
-                logger.info("⏸️ Mapping updates paused - MIGRATE-ALL has absolute priority")
+                logger.info("Mapping updates paused - MIGRATE-ALL has absolute priority")
                 return {
                     "status": "paused",
                     "message": "Mapping updates paused for MIGRATE-ALL priority operation"
@@ -52,7 +52,7 @@ class ItemsMappingController:
         try:
             from mpi_backend.utils.quickbooks_priority import is_qb_export_active
             if is_qb_export_active():
-                logger.info("⏸️ Mapping updates paused - QuickBooks priority export in progress")
+                logger.info("Mapping updates paused - QuickBooks priority export in progress")
                 return {
                     "status": "paused",
                     "message": "Mapping updates paused for QuickBooks priority export"

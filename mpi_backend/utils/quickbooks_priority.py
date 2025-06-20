@@ -51,7 +51,7 @@ def pause_background_jobs():
         with _qb_export_lock:
             _qb_export_active = True
         logger.info(
-            "⏸️  Background jobs paused for QuickBooks priority export")
+            "  Background jobs paused for QuickBooks priority export")
 
 
 def pause_all_background_jobs_for_migrate_all():

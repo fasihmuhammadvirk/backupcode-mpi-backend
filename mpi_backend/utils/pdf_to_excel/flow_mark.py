@@ -378,7 +378,6 @@ def extract_invoice_items(tables):
     return merged_invoice_items
 
 
-
 def extract_tax(filename, page):
     tax = '0'
     data = fitz.open(filename)

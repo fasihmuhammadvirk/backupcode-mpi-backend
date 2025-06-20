@@ -145,7 +145,7 @@ class YSStatementExtractor:
                     
                     # Validate the extracted data
                     if self._validate_ys_data(df):
-                        logger.info(f"✅ Successfully extracted {len(df)} rows using {strategy['name']}")
+                        logger.info(f" Successfully extracted {len(df)} rows using {strategy['name']}")
                         all_data.append(df)
                         break  # Use first successful extraction
                     else:
