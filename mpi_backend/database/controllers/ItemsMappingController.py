@@ -604,10 +604,13 @@ class ItemsMappingController:
             ).all()
             
             if not no_match_items:
+                logger.info("No items with No Match / UIDI found for update")
                 return {
                     "status": "success",
                     "message": "No items with No Match / UIDI found"
                 }
+                
+            logger.info(f"Found {len(no_match_items)} items with No Match / UIDI for update")
                 
             # Get ONLY valid permanent mappings for UIDI update
             # We want real mappings, not temporary placeholders
@@ -620,33 +623,60 @@ class ItemsMappingController:
             ).all()
             
             if not valid_mappings:
+                logger.info("No valid permanent mappings available for UIDI update")
                 return {
                     "status": "error",
                     "message": "No valid permanent mappings available"
                 }
                 
+            logger.info(f"Found {len(valid_mappings)} valid permanent mappings for matching")
+            
+            # Create lookup dictionaries for faster matching
+            # Group mappings by supplier for more efficient lookup
+            supplier_mappings = {}
+            for mapping in valid_mappings:
+                # Validate this is truly a permanent mapping
+                if is_temporary_mapping(mapping.mpi_code, mapping.description):
+                    logger.warning(f"Skipping temporary mapping in permanent table: {mapping.mpi_code}")
+                    continue
+                
+                supplier_id = mapping.supplier_id
+                if supplier_id not in supplier_mappings:
+                    supplier_mappings[supplier_id] = []
+                supplier_mappings[supplier_id].append(mapping)
+            
+            logger.info(f"Organized mappings across {len(supplier_mappings)} suppliers")
+            
             # Update No Match / UIDI items if valid mappings are found
             updated_count = 0
+            no_match_found_count = 0
             
             for item in no_match_items:
                 # Find matching mapping using supplier-specific suffix cleaning
                 matched = False
                 
-                for mapping in valid_mappings:
-                    # Validate this is truly a permanent mapping
-                    if is_temporary_mapping(mapping.mpi_code, mapping.description):
-                        logger.warning(f"Skipping temporary mapping in permanent table: {mapping.mpi_code}")
-                        continue
-                    
+                # Extract supplier_id from the invoice item's supplier/vendor
+                supplier_id, supplier_name = self._extract_supplier_id(item.vendor)
+                
+                # Get mappings for this specific supplier
+                mappings_for_supplier = supplier_mappings.get(supplier_id, [])
+                
+                if not mappings_for_supplier:
+                    logger.debug(f"No mappings available for supplier {supplier_name} (ID: {supplier_id})")
+                    continue
+                
+                # Clean the invoice item for comparison
+                clean_invoice_item = str(item.item).strip()
+                
+                # Log the item we're trying to match
+                logger.debug(f"Attempting to match item: '{clean_invoice_item}' from supplier {supplier_name}")
+                
+                for mapping in mappings_for_supplier:
                     supplier_item_ids = mapping.supplier_item_ids
                     if not supplier_item_ids:
                         continue
                     
-                    # Extract supplier_id from the invoice item's supplier/vendor
-                    supplier_id, _ = self._extract_supplier_id(item.vendor)
-                    
-                    # Clean both items for comparison (strip whitespace and apply suffix cleaning)
-                    clean_invoice_item = str(item.item).strip()
+                    # Clean the mapping item
                     clean_mapping_item = supplier_item_ids.strip()
                     
                     # First try exact match
@@ -657,43 +687,67 @@ class ItemsMappingController:
                         item.sheet_name = mapping.google_sheet_name or ""
                         updated_count += 1
                         matched = True
+                        
                         if old_status.startswith("UIDI"):
-                            logger.info(f"UIDI override: {clean_invoice_item} | {old_status} -> {mapping.mpi_code}")
+                            logger.info(f"UIDI override (exact): {clean_invoice_item} | {old_status} -> {mapping.mpi_code}")
                         elif old_status == "No Match":
-                            logger.info(f"No Match override: {clean_invoice_item} | No Match -> {mapping.mpi_code}")
+                            logger.info(f"No Match override (exact): {clean_invoice_item} | No Match -> {mapping.mpi_code}")
                         else:
-                            logger.info(f"Item update: {clean_invoice_item} | {old_status} -> {mapping.mpi_code}")
+                            logger.info(f"Item update (exact): {clean_invoice_item} | {old_status} -> {mapping.mpi_code}")
                         break
                     
-                    # If no exact match, try with suffix cleaning
+                    # Try with enhanced suffix cleaning for BMW and other suppliers
                     if supplier_id:
                         from mpi_backend.utils.item_utils import clean_supplier_suffix
-                        cleaned_mapping_item = clean_supplier_suffix(clean_mapping_item, supplier_id)
-                        if clean_invoice_item == cleaned_mapping_item:
-                            old_status = item.mpi_item or "Empty"
-                            item.mpi_item = mapping.mpi_code
-                            item.mpi_description = mapping.description
-                            item.sheet_name = mapping.google_sheet_name or ""
-                            updated_count += 1
-                            matched = True
-                            if old_status.startswith("UIDI"):
-                                logger.info(f"UIDI override (cleaned): {clean_invoice_item} == {cleaned_mapping_item} | {old_status} -> {mapping.mpi_code}")
-                            elif old_status == "No Match":
-                                logger.info(f"No Match override (cleaned): {clean_invoice_item} == {cleaned_mapping_item} | No Match -> {mapping.mpi_code}")
-                            else:
-                                logger.info(f"Item update (cleaned): {clean_invoice_item} == {cleaned_mapping_item} | {old_status} -> {mapping.mpi_code}")
-                            break
                         
-                # If no match found, do NOT change the item status
-                # We want to preserve UIDI items as UIDI until a valid mapping is found
-                # Only convert "No Match" to proper mappings, never UIDI to "No Match"
+                        # Apply suffix cleaning to the mapping item
+                        cleaned_mapping_item = clean_supplier_suffix(clean_mapping_item, supplier_id)
+                        
+                        # Also try cleaning the invoice item (in case it has suffixes)
+                        cleaned_invoice_item = clean_supplier_suffix(clean_invoice_item, supplier_id)
+                        
+                        # Try multiple combinations for better matching
+                        match_combinations = [
+                            (clean_invoice_item, cleaned_mapping_item),  # Original invoice vs cleaned mapping
+                            (cleaned_invoice_item, clean_mapping_item),  # Cleaned invoice vs original mapping
+                            (cleaned_invoice_item, cleaned_mapping_item)  # Both cleaned
+                        ]
+                        
+                        for inv_item, map_item in match_combinations:
+                            if inv_item == map_item and inv_item:  # Ensure not empty
+                                old_status = item.mpi_item or "Empty"
+                                item.mpi_item = mapping.mpi_code
+                                item.mpi_description = mapping.description
+                                item.sheet_name = mapping.google_sheet_name or ""
+                                updated_count += 1
+                                matched = True
+                                
+                                if old_status.startswith("UIDI"):
+                                    logger.info(f"UIDI override (cleaned): {clean_invoice_item} ({inv_item}) == {clean_mapping_item} ({map_item}) | {old_status} -> {mapping.mpi_code}")
+                                elif old_status == "No Match":
+                                    logger.info(f"No Match override (cleaned): {clean_invoice_item} ({inv_item}) == {clean_mapping_item} ({map_item}) | No Match -> {mapping.mpi_code}")
+                                else:
+                                    logger.info(f"Item update (cleaned): {clean_invoice_item} ({inv_item}) == {clean_mapping_item} ({map_item}) | {old_status} -> {mapping.mpi_code}")
+                                break
+                        
+                        if matched:
+                            break
+                
+                # Log when no match is found for debugging
+                if not matched:
+                    no_match_found_count += 1
+                    logger.debug(f"No mapping found for item: '{clean_invoice_item}' from supplier {supplier_name}")
                     
             db.commit()
+            
+            logger.info(f"UIDI update completed: {updated_count} items updated, {no_match_found_count} items remain unmatched")
             
             return {
                 "status": "success",
                 "message": f"Updated {updated_count} items with No Match / UIDI mappings",
-                "updated_count": updated_count
+                "updated_count": updated_count,
+                "unmatched_count": no_match_found_count,
+                "total_processed": len(no_match_items)
             }
             
         except Exception as e:

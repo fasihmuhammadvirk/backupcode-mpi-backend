@@ -922,6 +922,7 @@ class GoogleSheetDataExtractor:
     ) -> List[Dict[str, Any]]:
         """
         Process a chunk of rows from a DataFrame.
+        Enhanced to handle sparse data where MPI codes might be separated by many empty rows.
         
         Args:
             df: DataFrame chunk to process
@@ -939,26 +940,49 @@ class GoogleSheetDataExtractor:
             # Calculate actual row index
             actual_row = start_row + row_idx - df.index[0] + 1
             
-            # Get MPI code explicitly from column 1 (index 1)
+            # Enhanced MPI code detection - check multiple columns for MPI codes
             mpi_code = None
             description = None
             size = None
             
-            # Use consistent logic for finding MPI code and description
+            # Primary logic: Look for MPI code in column 1 (index 1)
             if len(row) > 1:
                 mpi_code_val = row.iloc[1]  # MPI code in column 1 (index 1)
                 if not pd.isna(mpi_code_val):
-                    mpi_code = str(mpi_code_val).strip()
-                    
-                    # Get description from column 2 (index 2)
-                    if len(row) > 2:
-                        desc_val = row.iloc[2]
-                        if not pd.isna(desc_val):
-                            description = str(desc_val).strip()
+                    mpi_code_str = str(mpi_code_val).strip()
+                    # Only accept if it looks like a valid MPI code (not empty, not just numbers)
+                    if mpi_code_str and len(mpi_code_str) > 1:
+                        mpi_code = mpi_code_str
                         
-                        # Get size from column 3 (index 3) if available
-                        if len(row) > 3:
-                            size_val = row.iloc[3]
+                        # Get description from column 2 (index 2)
+                        if len(row) > 2:
+                            desc_val = row.iloc[2]
+                            if not pd.isna(desc_val):
+                                description = str(desc_val).strip()
+                            
+                            # Get size from column 3 (index 3) if available
+                            if len(row) > 3:
+                                size_val = row.iloc[3]
+                                if not pd.isna(size_val):
+                                    size = str(size_val).strip()
+            
+            # Fallback: If no MPI code in column 1, check column 0 (sometimes MPI codes are in first column)
+            if not mpi_code and len(row) > 0:
+                mpi_code_val = row.iloc[0]
+                if not pd.isna(mpi_code_val):
+                    mpi_code_str = str(mpi_code_val).strip()
+                    # Check if this looks like an MPI code (alphanumeric, reasonable length)
+                    if (mpi_code_str and len(mpi_code_str) > 2 and 
+                        not mpi_code_str.lower() in ['item code', 'mpi', 'code', 'item', 'description']):
+                        mpi_code = mpi_code_str
+                        
+                        # Shift description and size columns
+                        if len(row) > 1:
+                            desc_val = row.iloc[1]
+                            if not pd.isna(desc_val):
+                                description = str(desc_val).strip()
+                        if len(row) > 2:
+                            size_val = row.iloc[2]
                             if not pd.isna(size_val):
                                 size = str(size_val).strip()
             
@@ -967,7 +991,7 @@ class GoogleSheetDataExtractor:
                 continue
                 
             # Skip header rows - check for common header text patterns
-            header_terms = ["item code", "mpi", "code", "item", "description", "size"]
+            header_terms = ["item code", "mpi", "code", "item", "description", "size", "supplier"]
             mpi_lower = mpi_code.lower()
             
             # Skip if the MPI code or description field contains header-like text
@@ -979,12 +1003,10 @@ class GoogleSheetDataExtractor:
                 logger.debug(f"Skipping header row {actual_row}: {mpi_code}")
                 continue
             
-            # Create a combined description with size and sheet name
+            # Create a combined description with size
             combined_description = description or ""
             if size:
                 combined_description = f"{size} {combined_description}"
-            
-            # Remove sheet name from the description, only use size + description
             combined_description = combined_description.strip()
             
             logger.debug(
@@ -992,7 +1014,7 @@ class GoogleSheetDataExtractor:
                 f"Desc={combined_description}"
             )
             
-            # Process supplier columns for this row
+            # Process supplier columns for this row - Enhanced to handle sparse data
             for supplier, col_indices in supplier_columns.items():
                 for col_idx in col_indices:
                     if col_idx >= len(row):
@@ -1000,27 +1022,51 @@ class GoogleSheetDataExtractor:
                         
                     cell_value = row.iloc[col_idx]
                     
-                    # Skip empty or non-string cells
-                    if pd.isna(cell_value) or not isinstance(cell_value, str) or not cell_value.strip():
+                    # Enhanced cell value processing
+                    if pd.isna(cell_value):
                         continue
                     
-                    # Clean the supplier_item_ids by removing prefixes
+                    # Convert to string and clean
                     supplier_value = str(cell_value).strip()
-                    # Remove common prefix patterns like -B, -W, -Y, -S
-                    cleaned_value = re.sub(
-                        r'\s*-\s*[BWYSGFPA](\s|$)', 
-                        '', 
-                        supplier_value
-                    )
+                    
+                    # Skip truly empty cells
+                    if not supplier_value:
+                        continue
+                    
+                    # Skip cells that are just whitespace or special characters
+                    if not re.search(r'[A-Za-z0-9]', supplier_value):
+                        continue
+                    
+                    # Clean the supplier_item_ids by removing suffix patterns
+                    # Enhanced cleaning for BMW suffix patterns like -B
+                    cleaned_value = supplier_value
+                    
+                    # Remove common BMW suffix patterns (but preserve the base item code)
+                    # Pattern: 6204-B -> 6204, but keep 6204B as is
+                    if supplier == "BMW Plumbing Supplies":
+                        # Remove dash followed by single letter at end
+                        cleaned_value = re.sub(r'-[BWYSGFPA]$', '', cleaned_value)
+                    else:
+                        # For other suppliers, remove space-dash-letter patterns
+                        cleaned_value = re.sub(r'\s*-\s*[BWYSGFPA](\s|$)', '', cleaned_value)
+                    
                     # Remove any extra spaces
                     cleaned_value = cleaned_value.strip()
                     
+                    # Skip if cleaned value is empty
+                    if not cleaned_value:
+                        continue
+                    
                     # Skip if the supplier ID field contains header-like text
-                    if any(term in cleaned_value.lower() for term in ["supplier", "item", "id", "code"]):
+                    if any(term in cleaned_value.lower() for term in ["supplier", "item", "id", "code", "description"]):
+                        continue
+                    
+                    # Additional validation: Skip values that are too short to be meaningful item codes
+                    if len(cleaned_value) < 2:
                         continue
                     
                     # Get the original column name
-                    supplier_column_name = str(df.columns[col_idx])
+                    supplier_column_name = str(df.columns[col_idx]) if col_idx < len(df.columns) else f"Column_{col_idx}"
                     
                     # Extract clean sheet name for classification
                     clean_sheet_name = self._extract_clean_sheet_name(sheet_title)
@@ -1029,14 +1075,21 @@ class GoogleSheetDataExtractor:
                     item_mapping = {
                         "mpi_code": mpi_code,
                         "description": combined_description,
-                        "size": size if size else "",  # Add size as a separate field
+                        "size": size if size else "",
                         "supplier_name": supplier,
                         "supplier_id": self.supplier_ids[supplier],
                         "supplier_item_ids": cleaned_value,
                         "google_sheet_name": clean_sheet_name,
                         "row_index": actual_row,
-                        "supplier_column_name": supplier_column_name
+                        "supplier_column_name": supplier_column_name,
+                        "original_supplier_value": supplier_value  # Keep original for debugging
                     }
+                    
+                    # Log detailed extraction info for debugging
+                    logger.debug(
+                        f"Extracted mapping: MPI={mpi_code}, Supplier={supplier}, "
+                        f"Original={supplier_value}, Cleaned={cleaned_value}, Row={actual_row}"
+                    )
                     
                     extracted_items.append(item_mapping)
         
