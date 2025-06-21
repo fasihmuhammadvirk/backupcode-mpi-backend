@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
 from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
-from mpi_backend.database.schemas import ItemMappingsResponse,ItemMappingsByMpiTypeResponse,UpdateMappingRequest
+from mpi_backend.database.schemas import ItemMappingsResponse, UpdateMappingRequest
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 
 router = APIRouter(prefix="/mapping", tags=['Item Mappings'])
@@ -79,8 +79,14 @@ def search_item_mapping(
         raise HTTPException(status_code=500, detail=f"Failed to search item mapping: {e}")
 
 
-@router.get("/mpi_types", response_model=ItemMappingsByMpiTypeResponse)
+@router.get("/mpi_types")
 def get_mapping_by_mpi_type(db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+    """
+    Get all MPI type mappings.
+    
+    Returns:
+        Dict: Dictionary with MPI codes as keys and mapping details as values
+    """
     try:
         mappings = ItemsMappingController(db).get_items_mappings_by_mpi_type()
         return mappings

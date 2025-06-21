@@ -377,7 +377,17 @@ class ItemsMappingController:
             ]
 
     def get_items_mappings_by_mpi_type(self):
-        with self.db_context() as db:
+        # Check if db_context is callable (session factory) or a Session object
+        if callable(self.db_context):
+            with self.db_context() as db:
+                return self._get_mappings_by_mpi_type(db)
+        else:
+            # Direct session object
+            return self._get_mappings_by_mpi_type(self.db_context)
+    
+    def _get_mappings_by_mpi_type(self, db):
+        """Helper method to get mappings by MPI type"""
+        try:
             query_result = db.query(ItemsMapping).filter(
                 ~ItemsMapping.mpi_code.like("UIDI%"),
                 ItemsMapping.mpi_code != "No Match",
@@ -398,6 +408,9 @@ class ItemsMappingController:
                     logger.warning(f"Filtered out temporary mapping from MPI type data: {item.mpi_code}")
             
             return data
+        except Exception as e:
+            logger.error(f"Error getting mappings by MPI type: {e}")
+            raise
 
     def update_mapping(self, supplier_id: str, mapping_data: dict):
         """
