@@ -341,40 +341,49 @@ class ItemsMappingController:
                   'type', 'description', 'mpi_code', 'supplier_item_ids', and 
                   'supplier_id'.
         """
-        with self.db_context() as db:
-            query_result = (
-                db.query(ItemsMapping)
-                .filter_by(supplier_id=supplier_id)
-                .filter(
-                    ~ItemsMapping.mpi_code.like("UIDI%"),
-                    ItemsMapping.mpi_code != "No Match",
-                    ItemsMapping.mpi_code != "No Match / UIDI",
-                    ItemsMapping.mpi_code.isnot(None),
-                    ItemsMapping.mpi_code != ""
-                )
-                .limit(limit)
-                .offset(offset)
-                .all()  # Fetch as a list instead of yielding
+        # Check if db_context is callable (session factory) or a Session object
+        if callable(self.db_context):
+            with self.db_context() as db:
+                return self._get_mappings_by_supplier_id(db, supplier_id, limit, offset)
+        else:
+            # Direct session object
+            return self._get_mappings_by_supplier_id(self.db_context, supplier_id, limit, offset)
+    
+    def _get_mappings_by_supplier_id(self, db, supplier_id: int, limit: int, offset: int):
+        """Helper method to get mappings by supplier ID"""
+        query_result = (
+            db.query(ItemsMapping)
+            .filter_by(supplier_id=supplier_id)
+            .filter(
+                ~ItemsMapping.mpi_code.like("UIDI%"),
+                ItemsMapping.mpi_code != "No Match",
+                ItemsMapping.mpi_code != "No Match / UIDI",
+                ItemsMapping.mpi_code.isnot(None),
+                ItemsMapping.mpi_code != ""
             )
+            .limit(limit)
+            .offset(offset)
+            .all()  # Fetch as a list instead of yielding
+        )
 
-            # Additional validation to filter out any temporary mappings
-            filtered_results = []
-            for item in query_result:
-                if not is_temporary_mapping(item.mpi_code, item.description):
-                    filtered_results.append(item)
-                else:
-                    logger.warning(f"Filtered out temporary mapping for supplier {supplier_id}: {item.mpi_code}")
+        # Additional validation to filter out any temporary mappings
+        filtered_results = []
+        for item in query_result:
+            if not is_temporary_mapping(item.mpi_code, item.description):
+                filtered_results.append(item)
+            else:
+                logger.warning(f"Filtered out temporary mapping for supplier {supplier_id}: {item.mpi_code}")
 
-            return [
-                {
-                    "type": item.google_sheet_name,
-                    "description": item.description,
-                    "mpi_code": item.mpi_code,
-                    "supplier_item_ids": item.supplier_item_ids,
-                    "supplier_id": item.supplier_id
-                }
-                for item in filtered_results
-            ]
+        return [
+            {
+                "type": item.google_sheet_name,
+                "description": item.description,
+                "mpi_code": item.mpi_code,
+                "supplier_item_ids": item.supplier_item_ids,
+                "supplier_id": item.supplier_id
+            }
+            for item in filtered_results
+        ]
 
     def get_items_mappings_by_mpi_type(self):
         # Check if db_context is callable (session factory) or a Session object
