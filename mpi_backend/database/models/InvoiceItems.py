@@ -1,4 +1,6 @@
-from sqlalchemy import Column, String, Date, Integer, Float, ForeignKey, UUID, Boolean
+from sqlalchemy import (
+    Column, String, Date, Integer, Float, ForeignKey, UUID, Boolean
+)
 from sqlalchemy.orm import relationship
 from mpi_backend.database import Base
 from sqlalchemy import event, or_
@@ -64,6 +66,15 @@ class InvoiceItem(Base):
         if not self.item:
             return self.item
         
+        # Exclude tax and administrative items from getting suffixes
+        item_str = str(self.item).strip()
+        excluded_items = [
+            "tax", "freight", "shipping", "handling", "subtotal", "total"
+        ]
+        if (item_str.startswith("10 Materials") or 
+                item_str.lower() in excluded_items):
+            return self.item
+        
         # Get suffix for the supplier
         suffix = ""
         if self.vendor:
@@ -73,8 +84,27 @@ class InvoiceItem(Base):
                     suffix = supplier_suffix
                     break
         
-        # Return item code with suffix (if any)
-        return f"{self.item}{suffix}" if suffix else self.item
+        if not suffix:
+            return self.item
+        
+        # Remove ALL existing suffixes first (including double suffixes)
+        all_suffixes = set(self.SUPPLIER_SUFFIX_MAP.values())
+        all_suffixes.discard("")  # Remove empty suffix
+        
+        clean_item = item_str
+        # Keep removing suffixes until none are found
+        while True:
+            found_suffix = False
+            for existing_suffix in all_suffixes:
+                if existing_suffix and clean_item.endswith(existing_suffix):
+                    clean_item = clean_item[:-len(existing_suffix)]
+                    found_suffix = True
+                    break
+            if not found_suffix:
+                break
+        
+        # Return item code with suffix
+        return f"{clean_item}{suffix}"
 
 
 @event.listens_for(Query, "before_compile", retval=True)

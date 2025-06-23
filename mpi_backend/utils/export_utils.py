@@ -176,6 +176,15 @@ def _apply_suffix_to_row(row):
     if not item_code or not vendor:
         return item_code
     
+    # Exclude tax and administrative items from getting suffixes
+    item_str = str(item_code).strip()
+    excluded_items = [
+        "tax", "freight", "shipping", "handling", "subtotal", "total"
+    ]
+    if (item_str.startswith("10 Materials") or 
+            item_str.lower() in excluded_items):
+        return item_code
+    
     # Supplier suffix mapping (from InvoiceItems model)
     suffix_map = {
         "BMW Plumbing Supplies": "-B",
@@ -201,7 +210,26 @@ def _apply_suffix_to_row(row):
             suffix = supplier_suffix
             break
     
-    return f"{item_code}{suffix}" if suffix else item_code
+    if not suffix:
+        return item_code
+    
+    # Remove ALL existing suffixes first (including double suffixes)
+    all_suffixes = set(suffix_map.values())
+    all_suffixes.discard("")  # Remove empty suffix
+    
+    clean_item = item_str
+    # Keep removing suffixes until none are found
+    while True:
+        found_suffix = False
+        for existing_suffix in all_suffixes:
+            if existing_suffix and clean_item.endswith(existing_suffix):
+                clean_item = clean_item[:-len(existing_suffix)]
+                found_suffix = True
+                break
+        if not found_suffix:
+            break
+    
+    return f"{clean_item}{suffix}"
 
 
 # because of circular dependency, had to duplicate code here, will find a better way soon (hopefully)

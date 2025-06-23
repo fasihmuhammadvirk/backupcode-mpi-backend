@@ -138,20 +138,36 @@ def restore_suffix_by_supplier_id(item_code: str, supplier_id: int) -> str:
     if not clean_item:
         return clean_item
     
+    # Exclude tax and administrative items from getting suffixes
+    excluded_items = [
+        "tax", "freight", "shipping", "handling", "subtotal", "total"
+    ]
+    if (clean_item.startswith("10 Materials") or 
+            clean_item.lower() in excluded_items):
+        return clean_item
+    
     # Get suffix for supplier
     suffix = SUPPLIER_SUFFIX_MAP.get(supplier_id)
     if not suffix:
         return clean_item
     
-    # Check if suffix already exists and is correct
-    expected_suffix = f"-{suffix}"
-    if clean_item.endswith(expected_suffix):
-        return clean_item
+    # Remove ALL existing suffixes first (including double suffixes like -B-B)
+    all_suffixes = set(SUPPLIER_SUFFIX_MAP.values())
+    all_suffixes.discard(None)  # Remove None values
     
-    # Remove any existing suffix first, then add correct one
-    # Clean ALL possible suffixes first to handle wrong suffix scenarios
-    cleaned_item = clean_supplier_suffix(clean_item)  # Remove all suffixes
-    return f"{cleaned_item}-{suffix}"
+    # Keep removing suffixes until none are found
+    while True:
+        found_suffix = False
+        for existing_suffix in all_suffixes:
+            if existing_suffix and clean_item.endswith(f"-{existing_suffix}"):
+                clean_item = clean_item[:-len(f"-{existing_suffix}")]
+                found_suffix = True
+                break
+        if not found_suffix:
+            break
+    
+    # Add the correct suffix
+    return f"{clean_item}-{suffix}"
 
 
 def restore_suffix_by_supplier_name(item_code: str, supplier_name: str) -> str:
@@ -169,6 +185,19 @@ def restore_suffix_by_supplier_name(item_code: str, supplier_name: str) -> str:
     if not item_code or not supplier_name:
         return item_code
     
+    # Clean whitespace from item code
+    clean_item = str(item_code).strip()
+    if not clean_item:
+        return clean_item
+    
+    # Exclude tax and administrative items from getting suffixes
+    excluded_items = [
+        "tax", "freight", "shipping", "handling", "subtotal", "total"
+    ]
+    if (clean_item.startswith("10 Materials") or 
+            clean_item.lower() in excluded_items):
+        return clean_item
+    
     # Clean whitespace from supplier name
     clean_supplier_name = supplier_name.strip()
     
@@ -177,24 +206,23 @@ def restore_suffix_by_supplier_name(item_code: str, supplier_name: str) -> str:
     if not suffix:
         return item_code
     
-    # Clean whitespace from item code
-    clean_item = str(item_code).strip()
+    # Remove ALL existing suffixes first (including double suffixes)
+    all_suffixes = set(SUPPLIER_NAME_SUFFIX_MAP.values())
+    all_suffixes.discard(None)  # Remove None values
     
-    # Check if suffix already exists and is correct
-    expected_suffix = f"-{suffix}"
-    if clean_item.endswith(expected_suffix):
-        return clean_item
-    
-    # Remove any existing suffix first, then add correct one
-    # Find supplier ID for cleaning logic
-    supplier_id = None
-    for sid, s in SUPPLIER_SUFFIX_MAP.items():
-        if s == suffix:
-            supplier_id = sid
+    # Keep removing suffixes until none are found
+    while True:
+        found_suffix = False
+        for existing_suffix in all_suffixes:
+            if existing_suffix and clean_item.endswith(f"-{existing_suffix}"):
+                clean_item = clean_item[:-len(f"-{existing_suffix}")]
+                found_suffix = True
+                break
+        if not found_suffix:
             break
     
-    cleaned_item = clean_supplier_suffix(clean_item, supplier_id)
-    return f"{cleaned_item}-{suffix}"
+    # Add the correct suffix
+    return f"{clean_item}-{suffix}"
 
 
 def bulk_restore_suffixes(items: Union[List[str], List[Dict[str, Any]]], 
