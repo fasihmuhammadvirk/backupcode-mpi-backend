@@ -437,4 +437,74 @@ def reprocess_statement(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
         )
+
+
+@router.delete("/{statement_id}")
+def delete_statement(
+    statement_id: int,
+    db: Session = Depends(get_db),
+    token: str = Depends(JWTBearer())
+):
+    """
+    Delete a monthly statement and all its associated invoice items.
+    
+    **Parameters:**
+    - **statement_id**: The ID of the statement to delete
+    
+    **Returns:**
+    - **success**: Boolean indicating if deletion was successful
+    - **message**: Summary message
+    - **details**: Information about what was deleted
+    
+    **Response Example:**
+    ```json
+    {
+        "success": true,
+        "message": "Statement 123 deleted successfully",
+        "details": {
+            "statement_id": 123,
+            "supplier_name": "BMW Plumbing Supplies",
+            "statement_date": "2025-01-31",
+            "invoices_deleted": 15,
+            "statements_deleted": 1
+        }
+    }
+    ```
+    
+    **Note:** This operation is irreversible. All invoice data 
+    associated with this statement will be permanently deleted.
+    """
+    try:
+        logger.info(f"Delete request for statement ID: {statement_id}")
+        
+        controller = StatementController(db)
+        result = controller.delete_statement(statement_id)
+        
+        if not result['success']:
+            if 'not found' in result.get('error', '').lower():
+                raise HTTPException(
+                    status_code=404,
+                    detail=result['error']
+                )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=result['error']
+                )
+        
+        logger.info(
+            f"Successfully deleted statement {statement_id}: "
+            f"{result['details']['invoices_deleted']} invoices removed"
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in delete statement endpoint: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
        

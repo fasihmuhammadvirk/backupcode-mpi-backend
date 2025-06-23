@@ -950,4 +950,81 @@ class StatementController:
                     'failed': 0,
                     'errors': [str(e)]
                 }
+            }
+
+    def delete_statement(self, statement_id: int) -> Dict[str, Any]:
+        """
+        Delete a statement and all its associated invoice items
+        
+        Args:
+            statement_id: ID of the statement to delete
+            
+        Returns:
+            Dict with success status and details
+        """
+        try:
+            logger.info(f"Starting deletion of statement ID: {statement_id}")
+            
+            # First, check if the statement exists
+            statement = self.db.query(PlumbingStatement).filter(
+                PlumbingStatement.id == statement_id
+            ).first()
+            
+            if not statement:
+                return {
+                    'success': False,
+                    'error': f'Statement with ID {statement_id} not found'
+                }
+            
+            # Get supplier name for logging
+            supplier_name = self._get_supplier_name_safe(statement)
+            statement_date = statement.statement_date
+            
+            # Count associated invoices before deletion
+            invoice_count = self.db.query(PlumbingInvoice).filter(
+                PlumbingInvoice.statement_id == statement_id
+            ).count()
+            
+            logger.info(
+                f"Statement {statement_id} ({supplier_name}, {statement_date}) "
+                f"has {invoice_count} associated invoices"
+            )
+            
+            # Delete all associated invoices first
+            deleted_invoices = self.db.query(PlumbingInvoice).filter(
+                PlumbingInvoice.statement_id == statement_id
+            ).delete()
+            
+            # Delete the statement
+            deleted_statement = self.db.query(PlumbingStatement).filter(
+                PlumbingStatement.id == statement_id
+            ).delete()
+            
+            # Commit the transaction
+            self.db.commit()
+            
+            logger.info(
+                f"Successfully deleted statement {statement_id}: "
+                f"{deleted_invoices} invoices and 1 statement record removed"
+            )
+            
+            return {
+                'success': True,
+                'message': f'Statement {statement_id} deleted successfully',
+                'details': {
+                    'statement_id': statement_id,
+                    'supplier_name': supplier_name,
+                    'statement_date': statement_date.isoformat() if statement_date else None,
+                    'invoices_deleted': deleted_invoices,
+                    'statements_deleted': deleted_statement
+                }
+            }
+            
+        except Exception as e:
+            # Rollback in case of error
+            self.db.rollback()
+            logger.error(f"Error deleting statement {statement_id}: {str(e)}")
+            return {
+                'success': False,
+                'error': f'Failed to delete statement: {str(e)}'
             } 
