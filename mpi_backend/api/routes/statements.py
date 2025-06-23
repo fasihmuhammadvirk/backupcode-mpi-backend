@@ -53,7 +53,7 @@ def get_statement_invoice_data(
     ),
     status: Optional[str] = Query(
         None,
-        description="Invoice status filter: 'Processed', 'Failed', or 'all'"
+        description="Invoice status filter: 'Processed', 'Failed', 'Unlisted', or 'all'"
     ),
     page: int = Query(
         1,
@@ -83,7 +83,7 @@ def get_statement_invoice_data(
     - **supplier_names**: Filter by list of supplier names (partial match supported), 
       supplier IDs (numeric), ["All"] for all suppliers, or ["0"] for all suppliers
     - **status**: Filter by reconciliation status 
-      ('Processed', 'Failed', 'all')
+      ('Processed', 'Failed', 'Unlisted', 'all')
     - **page**: Page number for pagination (starts from 1)
     - **page_size**: Number of items per page (1-100)
     
@@ -100,7 +100,7 @@ def get_statement_invoice_data(
     - **customer_po**: Customer PO number (customer_pi in requirements)
     - **statement_date**: Date of the statement containing this invoice
     - **supplier_name**: Name of the supplier
-    - **status**: Reconciliation status (Processed/Failed/Unknown)
+    - **status**: Reconciliation status (Processed/Failed/Unlisted/Unknown)
     - **original_amount**: Original invoice amount
     - **balance**: Outstanding balance
     
@@ -157,7 +157,7 @@ def get_statement_invoice_data(
             )
         
         # Validate status parameter
-        valid_statuses = ['processed', 'failed', 'all', None]
+        valid_statuses = ['processed', 'failed', 'unlisted', 'all', None]
         if status and status.lower() not in valid_statuses:
             raise HTTPException(
                 status_code=400,
@@ -230,7 +230,7 @@ def search_statement_invoice_data(
     ),
     status: Optional[str] = Query(
         None,
-        description="Invoice status filter: 'Processed', 'Failed', or 'all'"
+        description="Invoice status filter: 'Processed', 'Failed', 'Unlisted', or 'all'"
     ),
     page: int = Query(
         1,
@@ -312,7 +312,7 @@ def search_statement_invoice_data(
             )
         
         # Validate status parameter
-        valid_statuses = ['processed', 'failed', 'all', None]
+        valid_statuses = ['processed', 'failed', 'unlisted', 'all', None]
         if status and status.lower() not in valid_statuses:
             raise HTTPException(
                 status_code=400,

@@ -407,6 +407,17 @@ class StatementController:
             # Execute query
             results = query.all()
             
+            # Handle "unlisted" status filter separately
+            if status and status.lower() == "unlisted":
+                # Return unlisted invoices instead
+                return self.get_unlisted_invoices(
+                    from_date=from_date,
+                    to_date=to_date,
+                    supplier_names=supplier_names,
+                    page=page,
+                    page_size=page_size
+                )
+            
             # Process results and apply status filter if needed
             invoice_data = []
             for plumbing_invoice, plumbing_statement, plumbing_supplier in results:
@@ -1106,6 +1117,36 @@ class StatementController:
             # Execute query
             results = query.all()
             
+            # Handle "unlisted" status filter separately for search
+            if status and status.lower() == "unlisted":
+                # For search with unlisted status, we need to find system invoices
+                # that match the invoice number but are not in statements
+                unlisted_results = self.get_unlisted_invoices(
+                    from_date=from_date,
+                    to_date=to_date,
+                    supplier_names=supplier_names,
+                    page=page,
+                    page_size=page_size
+                )
+                
+                # Filter by invoice number
+                if unlisted_results['success']:
+                    filtered_data = [
+                        item for item in unlisted_results['data']
+                        if invoice_number.lower() in item['invoice_number'].lower()
+                    ]
+                    unlisted_results['data'] = filtered_data
+                    unlisted_results['pagination']['total_results'] = len(filtered_data)
+                    unlisted_results['filters_applied'] = {
+                        'invoice_number': invoice_number,
+                        'from_date': from_date.isoformat() if from_date else None,
+                        'to_date': to_date.isoformat() if to_date else None,
+                        'supplier_names': supplier_names,
+                        'status': status
+                    }
+                
+                return unlisted_results
+            
             # Process results and apply status filter if needed
             invoice_data = []
             for plumbing_invoice, plumbing_statement, plumbing_supplier in results:
@@ -1184,6 +1225,137 @@ class StatementController:
             
         except Exception as e:
             logger.error(f"Error searching statement invoice data: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'data': [],
+                'pagination': {
+                    'current_page': page,
+                    'page_size': page_size,
+                    'total_results': 0,
+                    'total_pages': 0,
+                    'has_next': False,
+                    'has_previous': False
+                }
+            } 
+
+    def get_unlisted_invoices(
+        self,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None,
+        supplier_names: Optional[List[str]] = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Dict[str, Any]:
+        """
+        Find invoices that exist in our system but are not in any statement
+        
+        Args:
+            from_date: Start date filter (filters by invoice date)
+            to_date: End date filter (filters by invoice date)
+            supplier_names: List of supplier names/IDs or ["All"] for all suppliers
+            page: Page number (1-based)
+            page_size: Number of items per page
+            
+        Returns:
+            Dict with unlisted invoice data and pagination metadata
+        """
+        try:
+            # Build base query for system invoices
+            query = (
+                self.db.query(InvoiceItem, Invoice)
+                .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
+                .join(PlumbingSupplier, Invoice.supplier_id == PlumbingSupplier.id)
+            )
+            
+            # Apply date filters on InvoiceItem date
+            if from_date:
+                query = query.filter(InvoiceItem.date >= from_date)
+            if to_date:
+                query = query.filter(InvoiceItem.date <= to_date)
+            
+            # Apply supplier filter
+            if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
+                supplier_conditions = []
+                
+                for supplier_name in supplier_names:
+                    if supplier_name.isdigit():
+                        supplier_id = int(supplier_name)
+                        if supplier_id == 0:
+                            supplier_conditions = []
+                            break
+                        else:
+                            supplier_conditions.append(Invoice.supplier_id == supplier_id)
+                    else:
+                        supplier_conditions.append(
+                            PlumbingSupplier.name.ilike(f"%{supplier_name}%")
+                        )
+                
+                if supplier_conditions:
+                    query = query.filter(or_(*supplier_conditions))
+            
+            # Exclude invoices that exist in statement data
+            subquery = self.db.query(PlumbingInvoice.invoice_number).subquery()
+            query = query.filter(~InvoiceItem.ref_no.in_(subquery))
+            
+            # Get total count before pagination
+            total_count = query.count()
+            
+            # Order by date (most recent first)
+            query = query.order_by(InvoiceItem.date.desc())
+            
+            # Apply pagination
+            offset = (page - 1) * page_size
+            query = query.offset(offset).limit(page_size)
+            
+            # Execute query and get supplier info
+            results = query.all()
+            
+            # Process results
+            invoice_data = []
+            for invoice_item, invoice in results:
+                # Get supplier name
+                supplier = self.db.query(PlumbingSupplier).filter(
+                    PlumbingSupplier.id == invoice.supplier_id
+                ).first()
+                supplier_name = supplier.name if supplier else "Unknown"
+                
+                invoice_data.append({
+                    'invoice_number': invoice_item.ref_no,
+                    'invoice_date': (
+                        invoice_item.date.isoformat() 
+                        if invoice_item.date else None
+                    ),
+                    'customer_po': invoice_item.po_number,
+                    'statement_date': None,  # No statement for unlisted items
+                    'supplier_name': supplier_name,
+                    'status': 'Unlisted',
+                    'original_amount': float(invoice_item.amount) if invoice_item.amount else 0.0,
+                    'balance': 0.0,  # System invoices don't have balance
+                    'statement_id': None,
+                    'invoice_id': None,
+                    'system_invoice_id': str(invoice.id),
+                    'customer_job': invoice_item.customer_job
+                })
+            
+            # Calculate pagination metadata
+            total_pages = ceil(total_count / page_size) if page_size > 0 else 1
+            
+            return {
+                'success': True,
+                'data': invoice_data,
+                'pagination': {
+                    'current_page': page,
+                    'page_size': page_size,
+                    'total_results': len(invoice_data),
+                    'total_pages': total_pages,
+                    'has_next': page < total_pages,
+                    'has_previous': page > 1
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting unlisted invoices: {str(e)}")
             return {
                 'success': False,
                 'error': str(e),
