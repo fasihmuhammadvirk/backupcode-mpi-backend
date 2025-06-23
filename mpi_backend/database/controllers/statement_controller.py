@@ -1027,4 +1027,173 @@ class StatementController:
             return {
                 'success': False,
                 'error': f'Failed to delete statement: {str(e)}'
+            }
+
+    def search_statement_invoice_data(
+        self,
+        invoice_number: str,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None, 
+        supplier_names: Optional[List[str]] = None,
+        status: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Dict[str, Any]:
+        """
+        Search statement invoice data by invoice number with optional filters
+        
+        Args:
+            invoice_number: Invoice number to search (partial match supported)
+            from_date: Start date filter (DD/MM/YYYY converted to date)
+            to_date: End date filter (DD/MM/YYYY converted to date)
+            supplier_names: List of supplier names/IDs or ["All"] for all suppliers
+            status: Invoice status filter (Processed/Failed)
+            page: Page number (1-based)
+            page_size: Number of items per page
+            
+        Returns:
+            Dict with invoice data and pagination metadata
+        """
+        try:
+            # Build base query joining all necessary tables
+            query = (
+                self.db.query(PlumbingInvoice, PlumbingStatement, PlumbingSupplier)
+                .join(PlumbingStatement, PlumbingInvoice.statement_id == PlumbingStatement.id)
+                .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
+            )
+            
+            # Apply invoice number filter (primary filter)
+            query = query.filter(
+                PlumbingInvoice.invoice_number.ilike(f"%{invoice_number}%")
+            )
+            
+            # Apply date filters on statement_date
+            if from_date:
+                query = query.filter(PlumbingStatement.statement_date >= from_date)
+            if to_date:
+                query = query.filter(PlumbingStatement.statement_date <= to_date)
+            
+            # Apply supplier filter - same logic as existing method
+            if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
+                supplier_conditions = []
+                
+                for supplier_name in supplier_names:
+                    if supplier_name.isdigit():
+                        supplier_id = int(supplier_name)
+                        if supplier_id == 0:
+                            supplier_conditions = []
+                            break
+                        else:
+                            supplier_conditions.append(PlumbingSupplier.id == supplier_id)
+                    else:
+                        supplier_conditions.append(
+                            PlumbingSupplier.name.ilike(f"%{supplier_name}%")
+                        )
+                
+                if supplier_conditions:
+                    query = query.filter(or_(*supplier_conditions))
+            
+            # Get total count before pagination
+            total_count = query.count()
+            
+            # Order by statement date (most recent first) BEFORE pagination
+            query = query.order_by(PlumbingStatement.statement_date.desc())
+            
+            # Apply pagination
+            offset = (page - 1) * page_size
+            query = query.offset(offset).limit(page_size)
+            
+            # Execute query
+            results = query.all()
+            
+            # Process results and apply status filter if needed
+            invoice_data = []
+            for plumbing_invoice, plumbing_statement, plumbing_supplier in results:
+                # Determine reconciliation status by checking system
+                reconciliation_status = "Unknown"
+                if status:
+                    match_result = self.check_invoice_exists_in_system(
+                        plumbing_invoice.invoice_number,
+                        plumbing_supplier.id,
+                        plumbing_invoice.invoice_date
+                    )
+                    reconciliation_status = "Processed" if match_result['matched'] else "Failed"
+                    
+                    # Apply status filter
+                    if status.lower() != "all":
+                        if status.lower() == "processed" and not match_result['matched']:
+                            continue
+                        elif status.lower() == "failed" and match_result['matched']:
+                            continue
+                
+                invoice_data.append({
+                    'invoice_number': plumbing_invoice.invoice_number,
+                    'invoice_date': (
+                        plumbing_invoice.invoice_date.isoformat() 
+                        if plumbing_invoice.invoice_date else None
+                    ),
+                    'customer_po': plumbing_invoice.customer_po,
+                    'statement_date': (
+                        plumbing_statement.statement_date.isoformat() 
+                        if plumbing_statement.statement_date else None
+                    ),
+                    'supplier_name': plumbing_supplier.name,
+                    'status': reconciliation_status,
+                    'original_amount': (
+                        float(plumbing_invoice.original_amount) 
+                        if plumbing_invoice.original_amount else 0.0
+                    ),
+                    'balance': (
+                        float(plumbing_invoice.balance) 
+                        if plumbing_invoice.balance else 0.0
+                    ),
+                    'statement_id': plumbing_statement.id,
+                    'invoice_id': plumbing_invoice.id
+                })
+            
+            # Calculate pagination metadata
+            total_pages = ceil(total_count / page_size) if page_size > 0 else 1
+            
+            return {
+                'success': True,
+                'data': invoice_data,
+                'pagination': {
+                    'current_page': page,
+                    'page_size': page_size,
+                    'total_results': len(invoice_data),
+                    'total_pages': total_pages,
+                    'has_next': page < total_pages,
+                    'has_previous': page > 1
+                },
+                'filters_applied': {
+                    'invoice_number': invoice_number,
+                    'from_date': from_date.isoformat() if from_date else None,
+                    'to_date': to_date.isoformat() if to_date else None,
+                    'supplier_names': supplier_names,
+                    'supplier_filter_type': (
+                        'all' if supplier_names and len(supplier_names) == 1 and supplier_names[0].lower() == 'all'
+                        else 'all' if supplier_names and len(supplier_names) == 1 and supplier_names[0] == '0'
+                        else 'multiple' if supplier_names and len(supplier_names) > 1
+                        else 'id' if supplier_names and len(supplier_names) == 1 and supplier_names[0].isdigit()
+                        else 'name' if supplier_names and len(supplier_names) == 1
+                        else None
+                    ),
+                    'status': status
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error searching statement invoice data: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'data': [],
+                'pagination': {
+                    'current_page': page,
+                    'page_size': page_size,
+                    'total_results': 0,
+                    'total_pages': 0,
+                    'has_next': False,
+                    'has_previous': False
+                }
             } 
