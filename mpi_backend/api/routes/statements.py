@@ -37,6 +37,11 @@ def parse_date_ddmmyyyy(date_str: str) -> datetime.date:
 
 @router.get("/invoice-data")
 def get_statement_invoice_data(
+    invoice_number: Optional[str] = Query(
+        None,
+        description="Invoice number to search (full or partial match)",
+        min_length=1
+    ),
     from_date: Optional[str] = Query(
         None,
         description="Start date in DD/MM/YYYY format (e.g., '01/05/2025')",
@@ -76,6 +81,7 @@ def get_statement_invoice_data(
     statement information, and reconciliation status.
     
     **Parameters:**
+    - **invoice_number**: Invoice number to search (full or partial match)
     - **from_date**: Start date filter in DD/MM/YYYY format 
       (filters by statement_date)
     - **to_date**: End date filter in DD/MM/YYYY format 
@@ -106,24 +112,20 @@ def get_statement_invoice_data(
     
     **Examples:**
     ```
-    # Filter by date and status
-    GET /statements/invoice-data?from_date=01/05/2025&to_date=01/06/2025&
-    status=Processed&page=1&page_size=20
+    # Search by invoice number
+    GET /statements/invoice-data?invoice_number=INV-12345
+    
+    # Search by invoice number with date filter
+    GET /statements/invoice-data?invoice_number=456&from_date=01/05/2025&to_date=01/06/2025
+    
+    # Filter by date and status (no search)
+    GET /statements/invoice-data?from_date=01/05/2025&to_date=01/06/2025&status=Processed
     
     # Get all suppliers' data
     GET /statements/invoice-data?supplier_names=All&page=1&page_size=20
     
-    # Get all suppliers' data using supplier_id = 0
-    GET /statements/invoice-data?supplier_names=0&page=1&page_size=20
-    
     # Filter by single supplier ID
     GET /statements/invoice-data?supplier_names=3&page=1&page_size=20
-    
-    # Filter by multiple suppliers
-    GET /statements/invoice-data?supplier_names=BMW Plumbing Supplies&supplier_names=Y & S Plumbing Supply&page=1&page_size=20
-    
-    # Filter by multiple supplier IDs
-    GET /statements/invoice-data?supplier_names=1&supplier_names=2&supplier_names=3&page=1&page_size=20
     ```
     """
     try:
@@ -165,21 +167,35 @@ def get_statement_invoice_data(
             )
         
         logger.info(
-            f"Getting invoice data - Dates: {from_date} to {to_date}, "
+            f"Getting invoice data - Invoice: {invoice_number}, "
+            f"Dates: {from_date} to {to_date}, "
             f"Suppliers: {supplier_names}, Status: {status}, "
             f"Page: {page}, Size: {page_size}"
         )
         
         # Get data from controller
         controller = StatementController(db)
-        result = controller.get_statement_invoice_data(
-            from_date=from_date_obj,
-            to_date=to_date_obj,
-            supplier_names=supplier_names,
-            status=status,
-            page=page,
-            page_size=page_size
-        )
+        
+        # Use search method if invoice_number is provided
+        if invoice_number:
+            result = controller.search_statement_invoice_data(
+                invoice_number=invoice_number,
+                from_date=from_date_obj,
+                to_date=to_date_obj,
+                supplier_names=supplier_names,
+                status=status,
+                page=page,
+                page_size=page_size
+            )
+        else:
+            result = controller.get_statement_invoice_data(
+                from_date=from_date_obj,
+                to_date=to_date_obj,
+                supplier_names=supplier_names,
+                status=status,
+                page=page,
+                page_size=page_size
+            )
         
         if not result['success']:
             raise HTTPException(
@@ -206,161 +222,6 @@ def get_statement_invoice_data(
             detail=f"Internal server error: {str(e)}"
         )
 
-
-@router.get("/search")
-def search_statement_invoice_data(
-    invoice_number: str = Query(
-        ...,
-        description="Invoice number to search (full or partial match)",
-        min_length=1
-    ),
-    from_date: Optional[str] = Query(
-        None,
-        description="Start date in DD/MM/YYYY format (e.g., '01/05/2025')",
-        regex=r"^\d{1,2}/\d{1,2}/\d{4}$"
-    ),
-    to_date: Optional[str] = Query(
-        None,
-        description="End date in DD/MM/YYYY format (e.g., '01/06/2025')",
-        regex=r"^\d{1,2}/\d{1,2}/\d{4}$"
-    ),
-    supplier_names: Optional[List[str]] = Query(
-        None,
-        description="List of supplier names, supplier IDs, or ['All'] to filter by. Use '0' for all suppliers."
-    ),
-    status: Optional[str] = Query(
-        None,
-        description="Invoice status filter: 'Processed', 'Failed', 'Unlisted', or 'all'"
-    ),
-    page: int = Query(
-        1,
-        ge=1,
-        description="Page number (1-based)"
-    ),
-    page_size: int = Query(
-        20,
-        ge=1,
-        le=100,
-        description="Number of items per page (1-100)"
-    ),
-    db: Session = Depends(get_db),
-    token: str = Depends(JWTBearer())
-):
-    """
-    Search statement invoice data by invoice number with optional filters.
-    
-    Returns invoice data from statements where the invoice number matches
-    the search term (full or partial match). Supports all existing filters.
-    
-    **Parameters:**
-    - **invoice_number**: Invoice number to search (required, partial match supported)
-    - **from_date**: Start date filter in DD/MM/YYYY format (filters by statement_date)
-    - **to_date**: End date filter in DD/MM/YYYY format (filters by statement_date)
-    - **supplier_names**: Filter by list of supplier names or IDs
-    - **status**: Filter by reconciliation status ('Processed', 'Failed', 'all')
-    - **page**: Page number for pagination (starts from 1)
-    - **page_size**: Number of items per page (1-100)
-    
-    **Returns:**
-    - **data**: Array of invoice objects matching the search criteria
-    - **pagination**: Metadata about pagination
-    - **filters_applied**: Summary of applied filters including invoice_number
-    
-    **Examples:**
-    ```
-    # Search by full invoice number
-    GET /statements/invoice-data/search?invoice_number=INV-12345
-    
-    # Search by partial invoice number with pagination
-    GET /statements/invoice-data/search?invoice_number=456&page=1&page_size=10
-    
-    # Search with date range and supplier filter
-    GET /statements/invoice-data/search?invoice_number=2025-001&from_date=01/01/2025&to_date=30/06/2025&supplier_names=BMW Plumbing Supplies
-    
-    # Search with status filter
-    GET /statements/invoice-data/search?invoice_number=INV&status=Processed&page=1&page_size=20
-    ```
-    """
-    try:
-        # Parse and validate dates - same logic as existing endpoint
-        from_date_obj = None
-        to_date_obj = None
-        
-        if from_date:
-            try:
-                from_date_obj = parse_date_ddmmyyyy(from_date)
-            except ValueError as e:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid from_date format: {str(e)}"
-                )
-        
-        if to_date:
-            try:
-                to_date_obj = parse_date_ddmmyyyy(to_date)
-            except ValueError as e:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid to_date format: {str(e)}"
-                )
-        
-        # Validate date range
-        if from_date_obj and to_date_obj and from_date_obj > to_date_obj:
-            raise HTTPException(
-                status_code=400,
-                detail="from_date must be earlier than or equal to to_date"
-            )
-        
-        # Validate status parameter
-        valid_statuses = ['processed', 'failed', 'unlisted', 'all', None]
-        if status and status.lower() not in valid_statuses:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid status. Must be one of: {valid_statuses[:-1]}"
-            )
-        
-        logger.info(
-            f"Searching invoice data - Invoice: {invoice_number}, "
-            f"Dates: {from_date} to {to_date}, Suppliers: {supplier_names}, "
-            f"Status: {status}, Page: {page}, Size: {page_size}"
-        )
-        
-        # Get data from controller using new search method
-        controller = StatementController(db)
-        result = controller.search_statement_invoice_data(
-            invoice_number=invoice_number,
-            from_date=from_date_obj,
-            to_date=to_date_obj,
-            supplier_names=supplier_names,
-            status=status,
-            page=page,
-            page_size=page_size
-        )
-        
-        if not result['success']:
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    f"Failed to retrieve data: "
-                    f"{result.get('error', 'Unknown error')}"
-                )
-            )
-        
-        logger.info(
-            f"Successfully found {len(result['data'])} invoices matching "
-            f"'{invoice_number}' (page {page} of {result['pagination']['total_pages']})"
-        )
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in invoice search endpoint: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error: {str(e)}"
-        )
 
 
 @router.get("/download")
