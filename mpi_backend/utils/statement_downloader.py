@@ -63,6 +63,19 @@ STATEMENT_SUPPLIERS = [
 ]
 
 
+def is_monthly_statement_subject(subject: str) -> bool:
+    """
+    Check if email subject contains the exact phrase "Monthly Statement"
+    """
+    if not subject:
+        return False
+    
+    subject_lower = subject.lower().strip()
+    
+    # Must contain the exact phrase "monthly statement"
+    return "monthly statement" in subject_lower
+
+
 def login():
     """Establish IMAP connection with error handling"""
     try:
@@ -81,12 +94,12 @@ def search_statement_emails(mail):
     try:
         # Search for emails from last 30 days (similar to invoice logic)
         date_30_days_ago = (datetime.now(TIMEZONE) - 
-                           timedelta(days=30)).strftime('%d-%b-%Y')
+                            timedelta(days=30)).strftime('%d-%b-%Y')
         logger.info(f"Searching for statement emails since {date_30_days_ago}")
         
         # Search all emails in timeframe first
         result, data = mail.uid('search', None, 
-                               f'(SINCE "{date_30_days_ago}")')
+                                f'(SINCE "{date_30_days_ago}")')
         if result != 'OK':
             logger.error(f"Statement email search failed: {result}")
             return []
@@ -123,12 +136,11 @@ def search_statement_emails(mail):
                 raw_email = msg_data[0][1]
                 msg = email.message_from_bytes(raw_email)
                 from_email = email.utils.parseaddr(msg.get('From', ''))[1]
-                subject = msg.get('Subject', '').lower()
+                subject = msg.get('Subject', '')
 
-                # Check if from statement sender AND has statement keyword 
-                # (case-insensitive)
+                # FIXED: More precise monthly statement detection
                 if (from_email in STATEMENT_SENDERS and 
-                        'monthly statement' in subject):
+                        is_monthly_statement_subject(subject)):
                     filtered_email_ids.append(email_id)
                     logger.debug(
                         f"Statement email UID {email_id} from: {from_email}, "
@@ -295,8 +307,8 @@ def download_statement_attachments(email_message, base_folder_path: Path):
             try:
                 payload = part.get_payload()
                 payload_text = (' '.join(str(p) for p in payload) 
-                               if isinstance(payload, list) 
-                               else str(payload))
+                                if isinstance(payload, list) 
+                                else str(payload))
 
                 if ((part.get_content_maintype() != 'multipart' and 
                      part.get('Content-Disposition') is not None) or
@@ -415,7 +427,6 @@ def download_statement_attachments(email_message, base_folder_path: Path):
             except Exception as part_error:
                 logger.error(
                     f"Error processing part {part_idx}: {str(part_error)}"
-                    f"\n{traceback.format_exc()}"
                 )
                 continue
         
@@ -428,32 +439,40 @@ def download_statement_attachments(email_message, base_folder_path: Path):
     except Exception as e:
         logger.error(
             f"Error in download_statement_attachments: {str(e)}"
-            f"\n{traceback.format_exc()}"
         )
         return False
 
 
 def extract_supplier_from_filename(filename: str) -> Optional[str]:
     """
-    Extract supplier name from statement filename with multiple fallback strategies
+    Extract supplier name from statement filename with multiple fallback
+    strategies
     """
     try:
         basename = filename.replace('.pdf', '').replace('.PDF', '')
         
-        # Strategy 1: Direct supplier name matching (filename starts with exact supplier name)
+        # Strategy 1: Direct supplier name matching (filename starts with 
+        # exact supplier name)
         for supplier in STATEMENT_SUPPLIERS:
             if basename.startswith(supplier + '_'):
-                logger.info(f"Extracted supplier from filename (direct match): {supplier}")
+                logger.info(
+                    f"Extracted supplier from filename (direct match): "
+                    f"{supplier}"
+                )
                 return supplier
         
         # Strategy 2: Underscore replacement matching
         for supplier in STATEMENT_SUPPLIERS:
             supplier_underscore = supplier.replace(' ', '_').replace('&', '_')
             if basename.startswith(supplier_underscore + '_'):
-                logger.info(f"Extracted supplier from filename (underscore match): {supplier}")
+                logger.info(
+                    f"Extracted supplier from filename (underscore match): "
+                    f"{supplier}"
+                )
                 return supplier
         
-        # Strategy 2b: Special case for Y & S with different underscore patterns
+        # Strategy 2b: Special case for Y & S with different underscore 
+        # patterns
         for supplier in STATEMENT_SUPPLIERS:
             if "Y & S" in supplier:
                 patterns = [
@@ -464,7 +483,10 @@ def extract_supplier_from_filename(filename: str) -> Optional[str]:
                 ]
                 for pattern in patterns:
                     if basename.startswith(pattern + '_'):
-                        logger.info(f"Extracted supplier from filename (Y&S special match): {supplier}")
+                        logger.info(
+                            f"Extracted supplier from filename "
+                            f"(Y&S special match): {supplier}"
+                        )
                         return supplier
         
         # Strategy 3: Pattern matching for special cases
@@ -490,18 +512,26 @@ def extract_supplier_from_filename(filename: str) -> Optional[str]:
         elif 'flow' in basename_lower or 'mark' in basename_lower:
             return "Flow Mark Plumbing Supply"
         
-        logger.warning(f"Could not extract supplier from filename: {filename}")
+        logger.warning(
+            f"Could not extract supplier from filename: {filename}"
+        )
         return None
         
     except Exception as e:
-        logger.error(f"Error extracting supplier from filename {filename}: {str(e)}")
+        logger.error(
+            f"Error extracting supplier from filename {filename}: {str(e)}"
+        )
         return None
 
 
 def process_statement_files(base_folder_path: Path):
-    """Process all downloaded statement files with improved supplier detection"""
+    """Process all downloaded statement files with improved supplier 
+    detection"""
     try:
-        logger.info("Starting statement file processing with improved supplier detection")
+        logger.info(
+            "Starting statement file processing with improved supplier "
+            "detection"
+        )
         processed_count = 0
         
         # Find all PDF files in the download directory
@@ -516,40 +546,63 @@ def process_statement_files(base_folder_path: Path):
                 
                 # Strategy 1: Extract from file path directory structure
                 if len(pdf_file.parts) >= 3:
-                    supplier_dir = pdf_file.parts[-3]  # supplier_name directory
+                    # supplier_name directory
+                    supplier_dir = pdf_file.parts[-3]
                     if supplier_dir in STATEMENT_SUPPLIERS:
                         path_supplier = supplier_dir
-                        logger.info(f" Path extracted supplier: {path_supplier}")
+                        logger.info(
+                            f" Path extracted supplier: {path_supplier}"
+                        )
                 
                 # Strategy 2: Extract from filename (FIXED LOGIC)
-                filename_supplier = extract_supplier_from_filename(pdf_file.name)
+                filename_supplier = extract_supplier_from_filename(
+                    pdf_file.name
+                )
                 if filename_supplier:
-                    logger.info(f" Filename extracted supplier: {filename_supplier}")
+                    logger.info(
+                        f" Filename extracted supplier: {filename_supplier}"
+                    )
                 
                 # Strategy 3: Determine final supplier with priority
-                if path_supplier and filename_supplier and path_supplier == filename_supplier:
+                if (path_supplier and filename_supplier and 
+                        path_supplier == filename_supplier):
                     final_supplier = path_supplier
-                    logger.info(f" Supplier confirmed by both path and filename: {final_supplier}")
+                    logger.info(
+                        f" Supplier confirmed by both path and filename: "
+                        f"{final_supplier}"
+                    )
                 elif path_supplier:
                     final_supplier = path_supplier
-                    logger.info(f" Using path-extracted supplier: {final_supplier}")
+                    logger.info(
+                        f" Using path-extracted supplier: {final_supplier}"
+                    )
                 elif filename_supplier:
                     final_supplier = filename_supplier
-                    logger.info(f" Using filename-extracted supplier: {final_supplier}")
+                    logger.info(
+                        f" Using filename-extracted supplier: {final_supplier}"
+                    )
                 else:
-                    logger.error(f"CRITICAL: Could not extract supplier name for {pdf_file}")
+                    logger.error(
+                        f"CRITICAL: Could not extract supplier name for "
+                        f"{pdf_file}"
+                    )
                     logger.error(f"Path parts: {pdf_file.parts}")
                     logger.error(f"Filename: {pdf_file.name}")
-                    logger.error("This statement will use unreliable PDF OCR detection!")
+                    logger.error(
+                        "This statement will use unreliable PDF OCR detection!"
+                    )
                 
                 # Log comprehensive supplier information for verification
-                logger.info(f"SUPPLIER DETECTION SUMMARY:")
+                logger.info("SUPPLIER DETECTION SUMMARY:")
                 logger.info(f"Path supplier: {path_supplier}")
                 logger.info(f"Filename supplier: {filename_supplier}")
                 logger.info(f"Final supplier: {final_supplier}")
                 
                 if not final_supplier:
-                    logger.warning(f"Could not extract supplier name for {pdf_file}, will rely on PDF detection")
+                    logger.warning(
+                        f"Could not extract supplier name for {pdf_file}, "
+                        f"will rely on PDF detection"
+                    )
                 
                 # Extract data using statement extractor with supplier name
                 with db_context() as db:
@@ -558,18 +611,26 @@ def process_statement_files(base_folder_path: Path):
                         save_to_db=True,  # Save to database
                         save_to_excel=False,  # Don't save Excel
                         db_session=db,
-                        supplier_name=final_supplier  # Pass the final determined supplier
+                        supplier_name=final_supplier
                     )
                     
                     # Verify what supplier the extractor is actually using
                     detected_supplier = extractor.detect_supplier()
-                    logger.info(f" StatementExtractor detected supplier: {detected_supplier}")
+                    logger.info(
+                        f" StatementExtractor detected supplier: "
+                        f"{detected_supplier}"
+                    )
                     
                     # Critical validation: Check for supplier mismatch
-                    if final_supplier and detected_supplier != final_supplier:
-                        logger.error(f" CRITICAL SUPPLIER MISMATCH DETECTED!")
-                        logger.error(f"   Expected (from email/path): {final_supplier}")
-                        logger.error(f"   StatementExtractor using: {detected_supplier}")
+                    if (final_supplier and 
+                            detected_supplier != final_supplier):
+                        logger.error(" CRITICAL SUPPLIER MISMATCH DETECTED!")
+                        logger.error(
+                            f"   Expected (from email/path): {final_supplier}"
+                        )
+                        logger.error(
+                            f"   StatementExtractor using: {detected_supplier}"
+                        )
                         logger.error(f"   PDF File: {pdf_file}")
                         # This could indicate a serious issue
                     
@@ -578,8 +639,13 @@ def process_statement_files(base_folder_path: Path):
                         # Save to database
                         db_success = extractor.save_to_database()
                         if db_success:
-                            logger.info(f" Successfully processed and saved statement: {pdf_file}")
-                            logger.info(f"   Final supplier used: {detected_supplier}")
+                            logger.info(
+                                f" Successfully processed and saved "
+                                f"statement: {pdf_file}"
+                            )
+                            logger.info(
+                                f"   Final supplier used: {detected_supplier}"
+                            )
                             
                             # Upload PDF to S3 for storage
                             file_key = f"statements/{pdf_file.name}"
@@ -588,23 +654,29 @@ def process_statement_files(base_folder_path: Path):
                             
                             processed_count += 1
                         else:
-                            logger.error(f"Failed to save statement to database: {pdf_file}")
+                            logger.error(
+                                f"Failed to save statement to database: "
+                                f"{pdf_file}"
+                            )
                     else:
-                        logger.error(f"Failed to extract statement data: {pdf_file}")
+                        logger.error(
+                            f"Failed to extract statement data: {pdf_file}"
+                        )
                         
             except Exception as file_error:
                 logger.error(
-                    f"Error processing statement {pdf_file}: {str(file_error)}"
-                    f"\n{traceback.format_exc()}"
+                    f"Error processing statement {pdf_file}: "
+                    f"{str(file_error)}"
                 )
         
-        logger.info(f"Statement processing complete. Processed {processed_count} files")
+        logger.info(
+            f"Statement processing complete. Processed {processed_count} files"
+        )
         return processed_count
         
     except Exception as e:
         logger.error(
             f"Error in process_statement_files: {str(e)}"
-            f"\n{traceback.format_exc()}"
         )
         return 0
 
@@ -613,9 +685,13 @@ def statement_download_background_task():
     """ENHANCED: Statement download with migrate-all priority awareness"""
     # ABSOLUTE PRIORITY: Check if migrate-all operation is active
     try:
-        from mpi_backend.utils.quickbooks_priority import is_migrate_all_active
+        from mpi_backend.utils.quickbooks_priority import (
+            is_migrate_all_active
+        )
         if is_migrate_all_active():
-            logger.info("Statement download paused - MIGRATE-ALL has absolute priority")
+            logger.info(
+                "Statement download paused - MIGRATE-ALL has absolute priority"
+            )
             return
     except ImportError:
         pass
@@ -624,7 +700,10 @@ def statement_download_background_task():
     try:
         from mpi_backend.utils.quickbooks_priority import is_qb_export_active
         if is_qb_export_active():
-            logger.info("Statement download paused - QuickBooks priority export in progress")
+            logger.info(
+                "Statement download paused - QuickBooks priority export "
+                "in progress"
+            )
             return
     except ImportError:
         pass
@@ -643,7 +722,7 @@ def statement_download_background_task():
                 f"{datetime.now(TIMEZONE).strftime('%d-%b-%Y_%H-%M-%S')}"
             )
             base_folder_path = (Path(INVOICE_DOWNLOAD_FOLDER) / 
-                               "statements" / base_folder)
+                                "statements" / base_folder)
             base_folder_path.mkdir(parents=True, exist_ok=True)
             logger.info(
                 f"Created statement download directory: {base_folder_path}"
@@ -691,14 +770,13 @@ def statement_download_background_task():
                 except Exception as email_error:
                     logger.error(
                         f"Failed to process email UID {e_id}: "
-                        f"{str(email_error)}\n{traceback.format_exc()}"
+                        f"{str(email_error)}"
                     )
                     continue
         
         except Exception as processing_error:
             logger.error(
                 f"Email processing failed: {str(processing_error)}"
-                f"\n{traceback.format_exc()}"
             )
             raise
         
@@ -713,7 +791,6 @@ def statement_download_background_task():
         except Exception as post_error:
             logger.error(
                 f"Post-processing failed: {str(post_error)}"
-                f"\n{traceback.format_exc()}"
             )
             raise
         
@@ -731,7 +808,6 @@ def statement_download_background_task():
     except Exception as main_error:
         logger.error(
             f"Critical error in statement background task: {str(main_error)}"
-            f"\n{traceback.format_exc()}"
         )
         raise
     
