@@ -1,9 +1,12 @@
 import pandas as pd
+from sqlalchemy import func
+from mpi_backend.utils.item_utils import is_empty_or_invalid_item
 
 
 def convert_items_to_dataframe(items, use_suffix=True):
     """
     Convert invoice items to DataFrame with optional suffix support.
+    Automatically filters out items with empty or invalid item codes.
     
     Args:
         items: List of InvoiceItem objects
@@ -33,6 +36,10 @@ def convert_items_to_dataframe(items, use_suffix=True):
 
     items_dict = []
     for item in items:
+        # Filter out items with empty or invalid item codes
+        if is_empty_or_invalid_item(getattr(item, 'item', '')):
+            continue
+            
         item_data = item.__dict__.copy()
         # Use item_code_with_suffix for display if requested
         if use_suffix and hasattr(item, 'item_code_with_suffix'):
@@ -117,8 +124,17 @@ def convert_items_to_dataframe_optimized(db_session, ids, columns=None, order_by
         if hasattr(InvoiceItem, col):
             select_columns.append(getattr(InvoiceItem, col))
     
-    # Base query
+    # Base query with empty item filter
     query = db_session.query(*select_columns).filter(InvoiceItem.id.in_(ids))
+    
+    # Filter out empty, null, or just dot item codes
+    query = query.filter(
+        InvoiceItem.item.isnot(None),
+        InvoiceItem.item != "",
+        InvoiceItem.item != ".",
+        func.trim(InvoiceItem.item) != "",
+        func.trim(InvoiceItem.item) != "."
+    )
     
     # Apply ordering if specified
     if order_by:

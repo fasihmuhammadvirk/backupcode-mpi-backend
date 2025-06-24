@@ -10,8 +10,11 @@ from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.pdf_to_excel.formatting_util import export_price_history_to_excel
 from mpi_backend.utils.s3_utils import upload_file, get_presigned_url
 import os
+import logging
 
 router = APIRouter(prefix="/filter",tags=["Filtering Data"])
+
+logger = logging.getLogger(__name__)
 
 
 @router.get("/get-locations", response_model=List[str])
@@ -100,8 +103,56 @@ def get_price_difference(request: FilterRequest, db: Session = Depends(get_db),
 
 @router.post("/price-history",response_model=List[PriceHistoryResponse])
 def get_price_history(request: PriceHistoryRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
-    price_history = InvoiceItemController(db).get_price_history(request)
-    return price_history
+    """
+    Get price history for a specific item and vendor.
+    
+    Args:
+        request: PriceHistoryRequest containing item_number, vendor, and description
+        
+    Returns:
+        List[PriceHistoryResponse]: List of price history records sorted by date
+        
+    Raises:
+        HTTPException: If validation fails or no data found
+    """
+    try:
+        # Validate input parameters
+        if not request.item_number or not request.item_number.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="item_number is required and cannot be empty"
+            )
+        
+        if not request.vendor or not request.vendor.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="vendor is required and cannot be empty"
+            )
+        
+        logger.info(f"Price history request - Item: {request.item_number}, Vendor: {request.vendor}")
+        
+        # Get price history from controller
+        price_history = InvoiceItemController(db).get_price_history(request)
+        
+        # Log result for debugging
+        logger.info(f"Price history response - Found {len(price_history)} records")
+        
+        if not price_history:
+            logger.warning(f"No price history found for item: {request.item_number}, vendor: {request.vendor}")
+            # Return empty list instead of 404 to allow frontend to handle gracefully
+            return []
+        
+        return price_history
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Error in price history endpoint: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve price history: {str(e)}"
+        )
 
 @router.post("/download-price-history")
 def get_price_history(request: PriceHistoryRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):

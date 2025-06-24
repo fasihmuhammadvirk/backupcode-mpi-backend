@@ -1,21 +1,22 @@
-from datetime import datetime
-from sqlalchemy import asc, desc, distinct, case, cast, Float, func, and_
+from datetime import date, datetime, timedelta
+from sqlalchemy import asc, desc, distinct, case, cast, Float, func, and_, or_
 from fastapi import HTTPException, BackgroundTasks
 from typing import List, Dict
-from datetime import date, datetime, timedelta
 from math import ceil
 from mpi_backend.database.models import InvoiceItem
 # Import moved inside methods to avoid circular imports
-from mpi_backend.database.controllers.CustomerJobMappingContorller import CustomerJobMappingController
+from mpi_backend.database.controllers.CustomerJobMappingContorller import (
+    CustomerJobMappingController
+)
 from mpi_backend.database.schemas import InvoiceItems as InvoiceItemsResponse
 from mpi_backend.database.schemas import PriceHistoryResponse
 from mpi_backend.utils.export_utils import extract_supplier_id
 import math
 import logging
 import sqlalchemy.orm
-from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
+
 
 class InvoiceItemController:
     def __init__(self, db):
@@ -87,6 +88,9 @@ class InvoiceItemController:
         query = self.db_context.query(InvoiceItem)
         if invoice_id:
             query = query.filter(InvoiceItem.invoice_id == invoice_id)
+        
+        # Apply empty item filter
+        query = self._apply_empty_item_filter(query)
         query = query.order_by(InvoiceItem.id.desc())
         items = query.all()
 
@@ -655,6 +659,9 @@ class InvoiceItemController:
 
     def apply_filters(self, request, page, size, col_param=None):
         query = self.db_context.query(InvoiceItem)
+        
+        # Apply empty item filter
+        query = self._apply_empty_item_filter(query)
 
         # applying 'IN' filters dynamically
         for column_name, values in request.filters.items():
@@ -793,18 +800,138 @@ class InvoiceItemController:
         }
 
     def get_price_history(self, request):
-        query = self.db_context.query(InvoiceItem)
-        query = query.filter(InvoiceItem.item == request.item_number)
-        query = query.filter(InvoiceItem.vendor == request.vendor)
-
-        matched_items = query.all()
-
-        response = [
-            PriceHistoryResponse(
-                ref_no=item.ref_no, date=item.date.strftime("%m-%d-%Y"),
-                cost=item.cost, qty=item.qty, invoice_id=str(item.invoice_id))
-            for item in matched_items]
-        return response
+        """
+        Get price history for a specific item and vendor.
+        
+        Args:
+            request: PriceHistoryRequest with item_number, vendor, and description
+            
+        Returns:
+            List[PriceHistoryResponse]: Price history records sorted by date (newest first)
+        """
+        try:
+            logger.info(f"Getting price history for item: {request.item_number}, "
+                       f"vendor: {request.vendor}")
+            
+            # Clean and prepare search terms
+            original_item = request.item_number.strip()
+            original_vendor = request.vendor.strip()
+            
+            # Handle potential suffix issues - create multiple search variations
+            from mpi_backend.utils.item_utils import clean_supplier_suffix
+            
+            # Prepare item code variations for search
+            item_variations = [original_item]
+            
+            # Add cleaned version (without suffix)
+            cleaned_item = clean_supplier_suffix(original_item)
+            if cleaned_item != original_item:
+                item_variations.append(cleaned_item)
+            
+            # Add common suffix variations for this vendor
+            from mpi_backend.database.models.Suppliers import Supplier
+            vendor_query = self.db_context.query(Supplier).filter(
+                Supplier.supplier_name.ilike(f"%{original_vendor}%")
+            ).first()
+            
+            if vendor_query:
+                from mpi_backend.utils.item_utils import get_supplier_suffix
+                suffix = get_supplier_suffix(vendor_query.id)
+                if suffix:
+                    # Add suffixed version if it doesn't already exist
+                    suffixed_item = f"{cleaned_item}-{suffix}"
+                    if suffixed_item not in item_variations:
+                        item_variations.append(suffixed_item)
+            
+            logger.info(f"Searching for item variations: {item_variations}")
+            
+            # Build query with multiple item code variations
+            query = self.db_context.query(InvoiceItem)
+            
+            # More flexible item matching - search for any of the variations
+            item_filter = or_(*[InvoiceItem.item.ilike(item_var) 
+                               for item_var in item_variations])
+            query = query.filter(item_filter)
+            
+            # More flexible vendor matching - case insensitive and partial
+            vendor_filter = or_(
+                InvoiceItem.vendor.ilike(f"%{original_vendor}%"),
+                InvoiceItem.vendor.ilike(original_vendor),
+                InvoiceItem.vendor == original_vendor
+            )
+            query = query.filter(vendor_filter)
+            
+            # Apply basic filters (not the restrictive empty item filter)
+            query = query.filter(
+                InvoiceItem.item.isnot(None),
+                InvoiceItem.item != "",
+                InvoiceItem.vendor.isnot(None),
+                InvoiceItem.vendor != ""
+            )
+            
+            # Filter out items with invalid costs
+            query = query.filter(
+                InvoiceItem.cost.isnot(None),
+                InvoiceItem.cost > 0
+            )
+            
+            # Order by date descending (newest first)
+            query = query.order_by(InvoiceItem.date.desc())
+            
+            matched_items = query.all()
+            
+            logger.info(f"Found {len(matched_items)} price history records")
+            
+            if not matched_items:
+                logger.warning(f"No price history found for item: "
+                              f"{request.item_number}, vendor: {request.vendor}")
+                
+                # Additional debugging - try to find similar items
+                debug_query = self.db_context.query(
+                    InvoiceItem.item, 
+                    InvoiceItem.vendor, 
+                    func.count().label('count')
+                ).filter(
+                    or_(
+                        InvoiceItem.item.ilike(f"%{cleaned_item}%"),
+                        InvoiceItem.vendor.ilike(f"%{original_vendor}%")
+                    )
+                ).group_by(InvoiceItem.item, InvoiceItem.vendor).limit(5).all()
+                
+                logger.info(f"Similar items found in database: "
+                           f"{[(item, vendor, count) for item, vendor, count in debug_query]}")
+                return []
+            
+            response = []
+            for item in matched_items:
+                try:
+                    # Validate required fields
+                    if not item.ref_no or not item.date:
+                        logger.warning(f"Skipping item with missing ref_no or "
+                                      f"date: {item.id}")
+                        continue
+                        
+                    price_record = PriceHistoryResponse(
+                        ref_no=item.ref_no,
+                        date=item.date.strftime("%m-%d-%Y"),
+                        cost=float(item.cost) if item.cost else 0.0,
+                        qty=int(item.qty) if item.qty else 0,
+                        invoice_id=str(item.invoice_id) if item.invoice_id else ""
+                    )
+                    response.append(price_record)
+                except Exception as e:
+                    logger.error(f"Error processing price history item "
+                                f"{item.id}: {str(e)}")
+                    continue
+            
+            logger.info(f"Successfully processed {len(response)} "
+                       f"price history records")
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error in get_price_history: {str(e)}")
+            # Return empty list instead of raising exception
+            return []
 
     def get_aggregates(self, request):
         query = self.db_context.query(InvoiceItem)
@@ -1032,6 +1159,9 @@ class InvoiceItemController:
         if invoice_id:
             query = query.filter(InvoiceItem.invoice_id == invoice_id)
             
+        # Apply empty item filter
+        query = self._apply_empty_item_filter(query)
+            
         # Use only the columns we need for better performance
         query = query.options(
             # Load only the columns we need for QuickBooks export
@@ -1107,6 +1237,9 @@ class InvoiceItemController:
             InvoiceItem.invoice_id.in_(processed_invoice_ids)
         )
         
+        # Apply empty item filter
+        query = self._apply_empty_item_filter(query)
+        
         # Use optimized loading for QuickBooks export - only load necessary columns
         query = query.options(
             sqlalchemy.orm.load_only(
@@ -1171,3 +1304,21 @@ class InvoiceItemController:
         
         logger.debug(f"Retrieved {len(suppliers)} suppliers for {len(supplier_ids)} supplier IDs")
         return suppliers
+
+    def _apply_empty_item_filter(self, query):
+        """
+        Apply filter to exclude items with empty or invalid item codes.
+        Items with empty item codes, dots, or whitespace-only codes are excluded.
+        """
+        from mpi_backend.database.models.InvoiceItems import InvoiceItem
+        
+        # Filter out empty, null, or just dot item codes
+        query = query.filter(
+            InvoiceItem.item.isnot(None),
+            InvoiceItem.item != "",
+            InvoiceItem.item != ".",
+            func.trim(InvoiceItem.item) != "",
+            func.trim(InvoiceItem.item) != "."
+        )
+        
+        return query

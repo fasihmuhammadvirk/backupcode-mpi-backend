@@ -291,3 +291,26 @@ def should_restore_suffix(context: str) -> bool:
     
     # Check case-insensitive
     return context.lower() in display_contexts 
+
+
+def is_empty_or_invalid_item(item_code: str) -> bool:
+    """
+    Check if an item code is empty, just a dot, or invalid and should be filtered out.
+    
+    Args:
+        item_code (str): Original item code to check
+        
+    Returns:
+        bool: True if item should be filtered out, False if it's valid
+    """
+    if not item_code:
+        return True
+    
+    # Clean whitespace
+    clean_item = str(item_code).strip()
+    
+    # Check for empty or just dot
+    if not clean_item or clean_item == "." or clean_item == "":
+        return True
+    
+    return False 

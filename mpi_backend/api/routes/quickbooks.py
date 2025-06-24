@@ -337,20 +337,20 @@ def immediate_status_update(all_item_ids_for_status: List,
                             )
                             if success:
                                 results['invoices_updated'] += 1
-                                logger.debug(f"✓ Invoice {invoice_id}: Pending → Sent")
+                                logger.debug(f"Invoice {invoice_id}: Pending → Sent")
                             else:
                                 results['invoices_failed'] += 1
-                                logger.error(f"✗ Failed to update invoice {invoice_id}")
+                                logger.error(f"Failed to update invoice {invoice_id}")
                         else:
                             results['invoices_skipped'] += 1
                             logger.debug(f"Invoice {invoice_id} already 'Sent'")
                     else:
                         results['invoices_failed'] += 1
-                        logger.error(f"✗ Invoice {invoice_id} not found")
+                        logger.error(f"Invoice {invoice_id} not found")
                         
                 except Exception as e:
                     results['invoices_failed'] += 1
-                    logger.error(f"✗ Exception updating invoice {invoice_id}: {e}")
+                    logger.error(f"Exception updating invoice {invoice_id}: {e}")
 
         # CRITICAL PRIORITY 2: Update item statuses immediately
         if all_item_ids_for_status:
@@ -362,11 +362,11 @@ def immediate_status_update(all_item_ids_for_status: List,
                     all_item_ids_for_status
                 )
                 results['items_updated'] = updated_count
-                logger.info(f"✓ Updated {updated_count} item statuses to 'Sent'")
+                logger.info(f"Updated {updated_count} item statuses to 'Sent'")
                 
             except Exception as e:
                 results['items_failed'] = len(all_item_ids_for_status)
-                logger.error(f"✗ CRITICAL: Failed to update item statuses: {e}")
+                logger.error(f"CRITICAL: Failed to update item statuses: {e}")
 
         results['total_time'] = time.time() - update_start
         
@@ -378,7 +378,7 @@ def immediate_status_update(all_item_ids_for_status: List,
         results['success'] = (results['invoices_failed'] == 0 and results['items_failed'] == 0)
         
         logger.info(
-            f"IMMEDIATE STATUS UPDATE COMPLETED in {results['total_time']:.3f}s:\n"
+            f" IMMEDIATE STATUS UPDATE COMPLETED in {results['total_time']:.3f}s:\n"
             f"  INVOICES: {results['invoices_updated']} updated, "
             f"{results['invoices_skipped']} skipped, {results['invoices_failed']} failed\n"
             f"  ITEMS: {results['items_updated']} updated, {results['items_failed']} failed\n"
