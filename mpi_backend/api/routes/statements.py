@@ -58,7 +58,7 @@ def get_statement_invoice_data(
     ),
     status: Optional[str] = Query(
         None,
-        description="Invoice status filter: 'Processed', 'Failed', 'Unlisted', 'Missing', or 'all'"
+        description="Invoice status filter: 'Processed', 'Failed', 'Unlisted', 'Missing System', 'Missing Statement', or 'all'"
     ),
     page: int = Query(
         1,
@@ -91,8 +91,10 @@ def get_statement_invoice_data(
     - **supplier_names**: Filter by list of supplier names (partial match supported), 
       supplier IDs (numeric), ["All"] for all suppliers, or ["0"] for all suppliers
     - **status**: Filter by reconciliation status 
-      ('Processed', 'Failed', 'Unlisted', 'Missing', 'All')
-      - 'All' returns combined data from all 4 categories
+      ('Processed', 'Failed', 'Unlisted', 'Missing System', 'Missing Statement', 'All')
+      - 'All' returns combined data from all categories
+      - 'Missing System' returns invalid invoices from system (InvoiceItem table)
+      - 'Missing Statement' returns invalid invoices from statements (PlumbingInvoice table)
     - **page**: Page number for pagination (starts from 1)
     - **page_size**: Number of items per page (1-100)
     
@@ -109,7 +111,7 @@ def get_statement_invoice_data(
     - **customer_po**: Customer PO number (customer_pi in requirements)
     - **statement_date**: Date of the statement containing this invoice
     - **supplier_name**: Name of the supplier
-    - **status**: Reconciliation status (Processed/Failed/Unlisted/Missing)
+    - **status**: Reconciliation status (Processed/Failed/Unlisted/Missing System/Missing Statement)
     - **original_amount**: Original invoice amount
     - **balance**: Outstanding balance
     
@@ -130,8 +132,11 @@ def get_statement_invoice_data(
     # Filter by single supplier ID
     GET /statements/invoice-data?supplier_names=3&page=1&page_size=20
     
-    # Find missing/invalid invoice data
-    GET /statements/invoice-data?status=Missing&page=1&page_size=20
+    # Find missing/invalid invoice data from system
+    GET /statements/invoice-data?status=Missing System&page=1&page_size=20
+    
+    # Find missing/invalid invoice data from statements  
+    GET /statements/invoice-data?status=Missing Statement&page=1&page_size=20
     ```
     """
     try:
@@ -165,7 +170,7 @@ def get_statement_invoice_data(
             )
         
         # Validate status parameter
-        valid_statuses = ['processed', 'failed', 'unlisted', 'missing', 'all', None]
+        valid_statuses = ['processed', 'failed', 'unlisted', 'missing', 'missing system', 'missing statement', 'all', None]
         if status and status.lower() not in valid_statuses:
             raise HTTPException(
                 status_code=400,

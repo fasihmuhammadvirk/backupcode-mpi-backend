@@ -411,8 +411,10 @@ class StatementController:
                     page_size=page_size
                 )
             
-            # Handle "missing" status filter separately
-            if status and status.lower() == "missing":
+            # Handle "missing" status filters separately
+            if status and (status.lower() == "missing" or 
+                          status.lower() == "missing system" or 
+                          status.lower() == "missing statement"):
                 # Return missing/invalid invoices instead
                 return self.get_missing_invalid_invoices(
                     from_date=from_date,
@@ -1161,8 +1163,10 @@ class StatementController:
                 
                 return unlisted_results
             
-            # Handle "missing" status filter separately for search
-            if status and status.lower() == "missing":
+            # Handle "missing" status filters separately for search
+            if status and (status.lower() == "missing" or 
+                          status.lower() == "missing system" or 
+                          status.lower() == "missing statement"):
                 # For search with missing status, we need to find system invoices
                 # with missing/invalid data that match the invoice number
                 missing_results = self.get_missing_invalid_invoices(
@@ -1709,7 +1713,7 @@ class StatementController:
                         'customer_po': invoice_item.po_number,
                         'statement_date': None,
                         'supplier_name': supplier_name,
-                        'status': 'Missing',
+                        'status': 'Missing System',
                         'original_amount': safe_amount,
                         'balance': "0",
                         'statement_id': None,
@@ -1770,7 +1774,7 @@ class StatementController:
                             if plumbing_statement.statement_date else None
                         ),
                         'supplier_name': plumbing_supplier.name,
-                        'status': 'Missing',
+                        'status': 'Missing Statement',
                         'original_amount': safe_amount,
                         'balance': safe_balance,
                         'statement_id': plumbing_statement.id,
@@ -1955,7 +1959,7 @@ class StatementController:
                 has_issues = self._has_validation_issues_system(inv)
                 
                 if has_issues:
-                    status = "Missing"
+                    status = "Missing System"
                 elif inv.invoice_number in statement_matches:
                     status = "Processed"
                 else:
@@ -1983,7 +1987,7 @@ class StatementController:
                 has_issues = self._has_validation_issues_statement(inv)
                 
                 if has_issues:
-                    status = "Missing"
+                    status = "Missing Statement"
                 elif inv.invoice_number in system_matches:
                     status = "Processed"
                 else:
@@ -2054,7 +2058,8 @@ class StatementController:
                 },
                 'summary': {
                     'total_all_categories': total_count,
-                    'missing_count': status_counts.get('Missing', 0),
+                    'missing_system_count': status_counts.get('Missing System', 0),
+                    'missing_statement_count': status_counts.get('Missing Statement', 0),
                     'unlisted_count': status_counts.get('Unlisted', 0),
                     'processed_count': status_counts.get('Processed', 0),
                     'failed_count': status_counts.get('Failed', 0),
