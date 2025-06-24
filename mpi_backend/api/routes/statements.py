@@ -91,7 +91,8 @@ def get_statement_invoice_data(
     - **supplier_names**: Filter by list of supplier names (partial match supported), 
       supplier IDs (numeric), ["All"] for all suppliers, or ["0"] for all suppliers
     - **status**: Filter by reconciliation status 
-      ('Processed', 'Failed', 'Unlisted', 'Missing', 'all')
+      ('Processed', 'Failed', 'Unlisted', 'Missing', 'All')
+      - 'All' returns combined data from all 4 categories
     - **page**: Page number for pagination (starts from 1)
     - **page_size**: Number of items per page (1-100)
     

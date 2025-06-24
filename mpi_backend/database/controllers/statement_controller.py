@@ -430,6 +430,17 @@ class StatementController:
                     page_size=page_size
                 )
             
+            # Handle "all" status filter separately - combine all categories
+            if status and status.lower() == "all":
+                # Return combined data from all categories
+                return self.get_all_invoices_combined(
+                    from_date=from_date,
+                    to_date=to_date,
+                    supplier_names=supplier_names,
+                    page=page,
+                    page_size=page_size
+                )
+            
             # Process results and apply status filter if needed
             invoice_data = []
             for plumbing_invoice, plumbing_statement, plumbing_supplier in results:
@@ -1187,6 +1198,37 @@ class StatementController:
                 
                 return missing_results
             
+            # Handle "all" status filter separately for search
+            if status and status.lower() == "all":
+                # For search with all status, we need to get data from all categories
+                # and filter by search term
+                all_results = self.get_all_invoices_combined(
+                    from_date=from_date,
+                    to_date=to_date,
+                    supplier_names=supplier_names,
+                    page=page,
+                    page_size=page_size
+                )
+                
+                # Filter by search term
+                if all_results['success']:
+                    filtered_data = [
+                        item for item in all_results['data']
+                        if item['invoice_number'] != "MISSING" and
+                        search.lower() in item['invoice_number'].lower()
+                    ]
+                    all_results['data'] = filtered_data
+                    all_results['pagination']['total_results'] = len(filtered_data)
+                    all_results['filters_applied'] = {
+                        'search': search,
+                        'from_date': from_date.isoformat() if from_date else None,
+                        'to_date': to_date.isoformat() if to_date else None,
+                        'supplier_names': supplier_names,
+                        'status': status
+                    }
+                
+                return all_results
+            
             # Process results and apply status filter if needed
             invoice_data = []
             for plumbing_invoice, plumbing_statement, plumbing_supplier in results:
@@ -1755,6 +1797,184 @@ class StatementController:
             
         except Exception as e:
             logger.error(f"Error getting missing/invalid invoices: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'data': [],
+                'pagination': {
+                    'current_page': page,
+                    'page_size': page_size,
+                    'total_results': 0,
+                    'total_pages': 0,
+                    'has_next': False,
+                    'has_previous': False
+                }
+            } 
+
+    def get_all_invoices_combined(
+        self,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None,
+        supplier_names: Optional[List[str]] = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Dict[str, Any]:
+        """
+        Get ALL invoices from all categories: Missing, Unlisted, Failed, and Processed
+        
+        This method combines results from all 4 invoice categories to provide
+        a comprehensive view when status="all" is requested.
+        
+        Args:
+            from_date: Start date filter (filters by invoice date)
+            to_date: End date filter (filters by invoice date)
+            supplier_names: List of supplier names/IDs or ["All"] for all suppliers
+            page: Page number (1-based)
+            page_size: Number of items per page
+            
+        Returns:
+            Dict with combined invoice data from all categories and pagination metadata
+        """
+        try:
+            # Get data from all categories without pagination (we'll paginate the combined results)
+            large_page_size = 10000  # Use large page size to get all data for combining
+            
+            # 1. Get Missing invoices
+            missing_result = self.get_missing_invalid_invoices(
+                from_date=from_date,
+                to_date=to_date,
+                supplier_names=supplier_names,
+                page=1,
+                page_size=large_page_size
+            )
+            missing_data = missing_result.get('data', []) if missing_result.get('success') else []
+            
+            # 2. Get Unlisted invoices
+            unlisted_result = self.get_unlisted_invoices(
+                from_date=from_date,
+                to_date=to_date,
+                supplier_names=supplier_names,
+                page=1,
+                page_size=large_page_size
+            )
+            unlisted_data = unlisted_result.get('data', []) if unlisted_result.get('success') else []
+            
+            # 3. Get statement invoices (Processed/Failed) - get ALL with no status filter
+            statement_query = (
+                self.db.query(PlumbingInvoice, PlumbingStatement, PlumbingSupplier)
+                .join(PlumbingStatement, PlumbingInvoice.statement_id == PlumbingStatement.id)
+                .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
+            )
+            
+            # Apply date filters
+            if from_date:
+                statement_query = statement_query.filter(PlumbingInvoice.invoice_date >= from_date)
+            if to_date:
+                statement_query = statement_query.filter(PlumbingInvoice.invoice_date <= to_date)
+            
+            # Apply supplier filter
+            if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
+                supplier_conditions = []
+                
+                for supplier_name in supplier_names:
+                    if supplier_name.isdigit():
+                        supplier_id = int(supplier_name)
+                        if supplier_id == 0:
+                            supplier_conditions = []
+                            break
+                        else:
+                            supplier_conditions.append(PlumbingSupplier.id == supplier_id)
+                    else:
+                        supplier_conditions.append(
+                            PlumbingSupplier.name.ilike(f"%{supplier_name}%")
+                        )
+                
+                if supplier_conditions:
+                    statement_query = statement_query.filter(or_(*supplier_conditions))
+            
+            # Get all statement invoices
+            statement_results = statement_query.all()
+            
+            # Process statement invoices to determine Processed/Failed status
+            processed_failed_data = []
+            for plumbing_invoice, plumbing_statement, plumbing_supplier in statement_results:
+                # Determine reconciliation status
+                match_result = self.check_invoice_exists_in_system(
+                    plumbing_invoice.invoice_number,
+                    plumbing_supplier.id,
+                    plumbing_invoice.invoice_date
+                )
+                reconciliation_status = "Processed" if match_result['matched'] else "Failed"
+                
+                processed_failed_data.append({
+                    'invoice_number': plumbing_invoice.invoice_number,
+                    'invoice_date': (
+                        plumbing_invoice.invoice_date.isoformat() 
+                        if plumbing_invoice.invoice_date else None
+                    ),
+                    'customer_po': plumbing_invoice.customer_po,
+                    'statement_date': (
+                        plumbing_statement.statement_date.isoformat() 
+                        if plumbing_statement.statement_date else None
+                    ),
+                    'supplier_name': plumbing_supplier.name,
+                    'status': reconciliation_status,
+                    'original_amount': (
+                        float(plumbing_invoice.original_amount) 
+                        if plumbing_invoice.original_amount else 0.0
+                    ),
+                    'balance': (
+                        float(plumbing_invoice.balance) 
+                        if plumbing_invoice.balance else 0.0
+                    ),
+                    'statement_id': plumbing_statement.id,
+                    'invoice_id': plumbing_invoice.id,
+                    'system_invoice_id': None,
+                    'customer_job': None,
+                    'source': 'statement'
+                })
+            
+            # Combine all data
+            all_data = missing_data + unlisted_data + processed_failed_data
+            
+            # Sort by invoice_date (most recent first)
+            all_data.sort(key=lambda x: datetime.fromisoformat(x['invoice_date']) if x.get('invoice_date') else datetime.min, reverse=True)
+            
+            # Apply pagination to combined results
+            total_count = len(all_data)
+            offset = (page - 1) * page_size
+            paginated_data = all_data[offset:offset + page_size]
+            
+            # Calculate pagination metadata
+            total_pages = ceil(total_count / page_size) if page_size > 0 else 1
+            
+            return {
+                'success': True,
+                'data': paginated_data,
+                'pagination': {
+                    'current_page': page,
+                    'page_size': page_size,
+                    'total_results': len(paginated_data),
+                    'total_pages': total_pages,
+                    'has_next': page < total_pages,
+                    'has_previous': page > 1
+                },
+                'filters_applied': {
+                    'from_date': from_date.isoformat() if from_date else None,
+                    'to_date': to_date.isoformat() if to_date else None,
+                    'supplier_names': supplier_names,
+                    'status': 'all'
+                },
+                'summary': {
+                    'total_all_categories': total_count,
+                    'missing_count': len(missing_data),
+                    'unlisted_count': len(unlisted_data),
+                    'processed_failed_count': len(processed_failed_data)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting all combined invoices: {str(e)}")
             return {
                 'success': False,
                 'error': str(e),
