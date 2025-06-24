@@ -37,9 +37,9 @@ def parse_date_ddmmyyyy(date_str: str) -> datetime.date:
 
 @router.get("/invoice-data")
 def get_statement_invoice_data(
-    invoice_number: Optional[str] = Query(
+    search: Optional[str] = Query(
         None,
-        description="Invoice number to search (full or partial match)",
+        description="Search term to look for in invoice numbers (full or partial match)",
         min_length=1
     ),
     from_date: Optional[str] = Query(
@@ -80,12 +80,14 @@ def get_statement_invoice_data(
     Returns invoice data from statements including invoice details, 
     statement information, and reconciliation status.
     
+    **Note:** Date filtering is applied to invoice_date, not statement_date.
+    
     **Parameters:**
-    - **invoice_number**: Invoice number to search (full or partial match)
+    - **search**: Search term to look for in invoice numbers (full or partial match)
     - **from_date**: Start date filter in DD/MM/YYYY format 
-      (filters by statement_date)
+      (filters by invoice_date)
     - **to_date**: End date filter in DD/MM/YYYY format 
-      (filters by statement_date)
+      (filters by invoice_date)
     - **supplier_names**: Filter by list of supplier names (partial match supported), 
       supplier IDs (numeric), ["All"] for all suppliers, or ["0"] for all suppliers
     - **status**: Filter by reconciliation status 
@@ -106,17 +108,17 @@ def get_statement_invoice_data(
     - **customer_po**: Customer PO number (customer_pi in requirements)
     - **statement_date**: Date of the statement containing this invoice
     - **supplier_name**: Name of the supplier
-    - **status**: Reconciliation status (Processed/Failed/Unlisted/Missing/Unknown)
+    - **status**: Reconciliation status (Processed/Failed/Unlisted/Missing)
     - **original_amount**: Original invoice amount
     - **balance**: Outstanding balance
     
     **Examples:**
     ```
     # Search by invoice number
-    GET /statements/invoice-data?invoice_number=INV-12345
+    GET /statements/invoice-data?search=INV-12345
     
     # Search by invoice number with date filter
-    GET /statements/invoice-data?invoice_number=456&from_date=01/05/2025&to_date=01/06/2025
+    GET /statements/invoice-data?search=456&from_date=01/05/2025&to_date=01/06/2025
     
     # Filter by date and status (no search)
     GET /statements/invoice-data?from_date=01/05/2025&to_date=01/06/2025&status=Processed
@@ -170,7 +172,7 @@ def get_statement_invoice_data(
             )
         
         logger.info(
-            f"Getting invoice data - Invoice: {invoice_number}, "
+            f"Getting invoice data - Search: {search}, "
             f"Dates: {from_date} to {to_date}, "
             f"Suppliers: {supplier_names}, Status: {status}, "
             f"Page: {page}, Size: {page_size}"
@@ -179,10 +181,10 @@ def get_statement_invoice_data(
         # Get data from controller
         controller = StatementController(db)
         
-        # Use search method if invoice_number is provided
-        if invoice_number:
+        # Use search method if search term is provided
+        if search:
             result = controller.search_statement_invoice_data(
-                invoice_number=invoice_number,
+                search=search,
                 from_date=from_date_obj,
                 to_date=to_date_obj,
                 supplier_names=supplier_names,
