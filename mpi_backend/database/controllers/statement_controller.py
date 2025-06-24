@@ -395,19 +395,7 @@ class StatementController:
                 if supplier_conditions:
                     query = query.filter(or_(*supplier_conditions))
             
-            # Get total count before pagination
-            total_count = query.count()
-            
-            # Order by invoice date (most recent first) BEFORE pagination
-            query = query.order_by(PlumbingInvoice.invoice_date.desc())
-            
-            # Apply pagination
-            offset = (page - 1) * page_size
-            query = query.offset(offset).limit(page_size)
-            
-            # Execute query
-            results = query.all()
-            
+            # Handle special status filters BEFORE executing query
             # Handle "unlisted" status filter separately
             if status and status.lower() == "unlisted":
                 # Return unlisted invoices instead
@@ -440,6 +428,20 @@ class StatementController:
                     page=page,
                     page_size=page_size
                 )
+            
+            # For statement invoices only (Processed/Failed) - execute query
+            # Get total count before pagination
+            total_count = query.count()
+            
+            # Order by invoice date (most recent first) BEFORE pagination
+            query = query.order_by(PlumbingInvoice.invoice_date.desc())
+            
+            # Apply pagination
+            offset = (page - 1) * page_size
+            query = query.offset(offset).limit(page_size)
+            
+            # Execute query
+            results = query.all()
             
             # Process results and apply status filter if needed
             invoice_data = []
@@ -1124,19 +1126,7 @@ class StatementController:
                 if supplier_conditions:
                     query = query.filter(or_(*supplier_conditions))
             
-            # Get total count before pagination
-            total_count = query.count()
-            
-            # Order by invoice date (most recent first) BEFORE pagination
-            query = query.order_by(PlumbingInvoice.invoice_date.desc())
-            
-            # Apply pagination
-            offset = (page - 1) * page_size
-            query = query.offset(offset).limit(page_size)
-            
-            # Execute query
-            results = query.all()
-            
+            # Handle special status filters BEFORE executing query
             # Handle "unlisted" status filter separately for search
             if status and status.lower() == "unlisted":
                 # For search with unlisted status, we need to find system invoices
@@ -1228,6 +1218,20 @@ class StatementController:
                     }
                 
                 return all_results
+            
+            # For statement invoices only (Processed/Failed) - execute query
+            # Get total count before pagination
+            total_count = query.count()
+            
+            # Order by invoice date (most recent first) BEFORE pagination
+            query = query.order_by(PlumbingInvoice.invoice_date.desc())
+            
+            # Apply pagination
+            offset = (page - 1) * page_size
+            query = query.offset(offset).limit(page_size)
+            
+            # Execute query
+            results = query.all()
             
             # Process results and apply status filter if needed
             invoice_data = []
@@ -1700,7 +1704,7 @@ class StatementController:
                         'customer_po': invoice_item.po_number,
                         'statement_date': None,
                         'supplier_name': supplier_name,
-                        'status': 'Missing/Invalid (System)',
+                        'status': 'Missing',
                         'original_amount': safe_amount,
                         'balance': 0.0,
                         'statement_id': None,
@@ -1763,7 +1767,7 @@ class StatementController:
                             if plumbing_statement.statement_date else None
                         ),
                         'supplier_name': plumbing_supplier.name,
-                        'status': 'Missing/Invalid (Statement)',
+                        'status': 'Missing',
                         'original_amount': safe_amount,
                         'balance': (
                             float(plumbing_invoice.balance) 
@@ -1859,7 +1863,82 @@ class StatementController:
             )
             unlisted_data = unlisted_result.get('data', []) if unlisted_result.get('success') else []
             
-            # 3. Get statement invoices (Processed/Failed) - get ALL with no status filter
+            # 3. Get ALL system invoices (InvoiceItem) - not just unlisted ones
+            system_query = (
+                self.db.query(InvoiceItem, Invoice)
+                .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
+                .join(PlumbingSupplier, Invoice.supplier_id == PlumbingSupplier.id)
+            )
+            
+            # Apply date filters on system invoices
+            if from_date:
+                system_query = system_query.filter(InvoiceItem.date >= from_date)
+            if to_date:
+                system_query = system_query.filter(InvoiceItem.date <= to_date)
+            
+            # Apply supplier filter to system invoices
+            if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
+                supplier_conditions_system = []
+                
+                for supplier_name in supplier_names:
+                    if supplier_name.isdigit():
+                        supplier_id = int(supplier_name)
+                        if supplier_id == 0:
+                            supplier_conditions_system = []
+                            break
+                        else:
+                            supplier_conditions_system.append(Invoice.supplier_id == supplier_id)
+                    else:
+                        supplier_conditions_system.append(
+                            PlumbingSupplier.name.ilike(f"%{supplier_name}%")
+                        )
+                
+                if supplier_conditions_system:
+                    system_query = system_query.filter(or_(*supplier_conditions_system))
+            
+            # Get all system invoices
+            system_results = system_query.all()
+            
+            # Process system invoices to determine their status
+            system_invoices_data = []
+            for invoice_item, invoice in system_results:
+                # Get supplier name
+                supplier = self.db.query(PlumbingSupplier).filter(
+                    PlumbingSupplier.id == invoice.supplier_id
+                ).first()
+                supplier_name = supplier.name if supplier else f"Supplier ID {invoice.supplier_id}"
+                
+                # Check if this system invoice exists in statements
+                statement_match = self.db.query(PlumbingInvoice).filter(
+                    PlumbingInvoice.invoice_number == invoice_item.ref_no
+                ).first()
+                
+                # Determine status based on statement presence
+                if statement_match:
+                    status = "Processed"  # System invoice found in statement
+                else:
+                    status = "Unlisted"   # System invoice not in any statement
+                
+                system_invoices_data.append({
+                    'invoice_number': invoice_item.ref_no,
+                    'invoice_date': (
+                        invoice_item.date.isoformat() 
+                        if invoice_item.date else None
+                    ),
+                    'customer_po': invoice_item.po_number,
+                    'statement_date': None,  # System invoices don't have statement dates
+                    'supplier_name': supplier_name,
+                    'status': status,
+                    'original_amount': float(invoice_item.amount) if invoice_item.amount else 0.0,
+                    'balance': 0.0,  # System invoices don't have balance
+                    'statement_id': None,
+                    'invoice_id': None,
+                    'system_invoice_id': str(invoice.id),
+                    'customer_job': invoice_item.customer_job,
+                    'source': 'system'
+                })
+            
+            # 4. Get statement invoices (Processed/Failed) - get ALL with no status filter
             statement_query = (
                 self.db.query(PlumbingInvoice, PlumbingStatement, PlumbingSupplier)
                 .join(PlumbingStatement, PlumbingInvoice.statement_id == PlumbingStatement.id)
@@ -1934,8 +2013,20 @@ class StatementController:
                     'source': 'statement'
                 })
             
-            # Combine all data
-            all_data = missing_data + unlisted_data + processed_failed_data
+            # Remove duplicates from system invoices that are already in missing/unlisted
+            # Create sets of invoice numbers already included
+            missing_invoice_numbers = {item.get('invoice_number') for item in missing_data if item.get('source') == 'system'}
+            unlisted_invoice_numbers = {item.get('invoice_number') for item in unlisted_data}
+            
+            # Filter system invoices to exclude duplicates
+            unique_system_invoices = [
+                item for item in system_invoices_data 
+                if item.get('invoice_number') not in missing_invoice_numbers 
+                and item.get('invoice_number') not in unlisted_invoice_numbers
+            ]
+            
+            # Combine all data from all sources (avoiding duplicates)
+            all_data = missing_data + unlisted_data + unique_system_invoices + processed_failed_data
             
             # Sort by invoice_date (most recent first)
             all_data.sort(key=lambda x: datetime.fromisoformat(x['invoice_date']) if x.get('invoice_date') else datetime.min, reverse=True)
@@ -1969,7 +2060,8 @@ class StatementController:
                     'total_all_categories': total_count,
                     'missing_count': len(missing_data),
                     'unlisted_count': len(unlisted_data),
-                    'processed_failed_count': len(processed_failed_data)
+                    'system_invoices_count': len(unique_system_invoices),
+                    'statement_invoices_count': len(processed_failed_data)
                 }
             }
             
