@@ -20,6 +20,30 @@ from mpi_backend.database.models.InvoiceItems import InvoiceItem
 logger = logging.getLogger(__name__)
 
 
+def safe_float_conversion(value) -> float:
+    """
+    Safely convert a value to float, handling commas and None values
+    
+    Args:
+        value: The value to convert (string, number, or None)
+        
+    Returns:
+        float: The converted value, or 0.0 if conversion fails
+    """
+    if value is None:
+        return 0.0
+    
+    if isinstance(value, (int, float)):
+        return float(value)
+    
+    try:
+        # Convert to string and remove commas, then convert to float
+        clean_value = str(value).strip().replace(',', '')
+        return float(clean_value) if clean_value else 0.0
+    except (ValueError, TypeError):
+        return 0.0
+
+
 class StatementController:
     """Controller for managing statement operations and reconciliation"""
     
@@ -113,7 +137,7 @@ class StatementController:
                     'system_invoice_id': str(system_invoice.invoice_id),
                     'system_ref_no': system_invoice.ref_no,
                     'system_date': system_invoice.date,
-                    'system_amount': float(system_invoice.amount) if system_invoice.amount else 0.0,
+                    'system_amount': safe_float_conversion(system_invoice.amount),
                     'customer_job': system_invoice.customer_job,
                     'export_status': system_invoice.export_status
                 }
@@ -204,14 +228,14 @@ class StatementController:
                     'statement_id': statement.id,
                     'statement_date': statement.statement_date.isoformat() if statement.statement_date else None,
                     'account_number': statement.account_number,
-                    'total_amount': float(statement.total_amount) if statement.total_amount else 0.0,
+                    'total_amount': safe_float_conversion(statement.total_amount),
                     'total_invoices': len(statement_invoices),
                     'pdf_filename': statement.pdf_filename,
                     'invoices': []
                 }
                 
                 overall_stats['total_statement_invoices'] += len(statement_invoices)
-                overall_stats['total_statement_amount'] += float(statement.total_amount) if statement.total_amount else 0.0
+                overall_stats['total_statement_amount'] += safe_float_conversion(statement.total_amount)
                 
                 # Check each invoice in the statement
                 for stmt_invoice in statement_invoices:
@@ -232,10 +256,10 @@ class StatementController:
                         'invoice_number': stmt_invoice.invoice_number,
                         'invoice_date': stmt_invoice.invoice_date.isoformat() if stmt_invoice.invoice_date else None,
                         'customer_po': stmt_invoice.customer_po,
-                        'original_amount': float(stmt_invoice.original_amount) if stmt_invoice.original_amount else 0.0,
+                        'original_amount': safe_float_conversion(stmt_invoice.original_amount),
                         'payment_date': stmt_invoice.payment_date.isoformat() if stmt_invoice.payment_date else None,
-                        'amount_paid': float(stmt_invoice.amount_paid) if stmt_invoice.amount_paid else 0.0,
-                        'balance': float(stmt_invoice.balance) if stmt_invoice.balance else 0.0,
+                        'amount_paid': safe_float_conversion(stmt_invoice.amount_paid),
+                        'balance': safe_float_conversion(stmt_invoice.balance),
                         'reconciliation_status': 'Processed' if match_result['matched'] else 'Failed',
                         'match_details': match_result
                     }
@@ -252,7 +276,7 @@ class StatementController:
                     # Update stats
                     if match_result['matched']:
                         overall_stats['matched_invoices'] += 1
-                        overall_stats['total_matched_amount'] += float(stmt_invoice.original_amount) if stmt_invoice.original_amount else 0.0
+                        overall_stats['total_matched_amount'] += safe_float_conversion(stmt_invoice.original_amount)
                     else:
                         overall_stats['unmatched_invoices'] += 1
                 
@@ -318,7 +342,7 @@ class StatementController:
                     'id': stmt.id,
                     'supplier_name': stmt.supplier.name,
                     'statement_date': stmt.statement_date.isoformat() if stmt.statement_date else None,
-                    'total_amount': float(stmt.total_amount) if stmt.total_amount else 0.0,
+                    'total_amount': safe_float_conversion(stmt.total_amount),
                     'total_invoices': stmt.total_invoices,
                     'account_number': stmt.account_number,
                     'pdf_filename': stmt.pdf_filename
@@ -563,10 +587,7 @@ class StatementController:
                     if statement.statement_date else None
                 ),
                 'account_number': statement.account_number,
-                'total_amount': (
-                    float(statement.total_amount) 
-                    if statement.total_amount else 0.0
-                ),
+                'total_amount': safe_float_conversion(statement.total_amount),
                 'total_invoices': statement.total_invoices,
                 'pdf_filename': statement.pdf_filename
             }
@@ -1598,7 +1619,7 @@ class StatementController:
                     has_issues = True
                 else:
                     try:
-                        float(str(plumbing_invoice.original_amount).strip())
+                        safe_float_conversion(plumbing_invoice.original_amount)
                     except (ValueError, TypeError):
                         has_issues = True
                 
@@ -1654,7 +1675,7 @@ class StatementController:
                         issues.append("Missing Amount")
                     else:
                         try:
-                            float(str(invoice_item.amount).strip())
+                            safe_float_conversion(invoice_item.amount)
                         except (ValueError, TypeError):
                             issues.append("Invalid Amount Format")
                     
@@ -1691,7 +1712,7 @@ class StatementController:
                     safe_amount = 0.0
                     if invoice_item.amount:
                         try:
-                            safe_amount = float(str(invoice_item.amount).strip())
+                            safe_amount = safe_float_conversion(invoice_item.amount)
                         except (ValueError, TypeError):
                             safe_amount = 0.0
                     
@@ -1728,7 +1749,7 @@ class StatementController:
                         issues.append("Missing Amount")
                     else:
                         try:
-                            float(str(plumbing_invoice.original_amount).strip())
+                            safe_float_conversion(plumbing_invoice.original_amount)
                         except (ValueError, TypeError):
                             issues.append("Invalid Amount Format")
                     
@@ -1751,7 +1772,7 @@ class StatementController:
                     safe_amount = 0.0
                     if plumbing_invoice.original_amount:
                         try:
-                            safe_amount = float(str(plumbing_invoice.original_amount).strip())
+                            safe_amount = safe_float_conversion(plumbing_invoice.original_amount)
                         except (ValueError, TypeError):
                             safe_amount = 0.0
                     
@@ -1769,10 +1790,7 @@ class StatementController:
                         'supplier_name': plumbing_supplier.name,
                         'status': 'Missing',
                         'original_amount': safe_amount,
-                        'balance': (
-                            float(plumbing_invoice.balance) 
-                            if plumbing_invoice.balance else 0.0
-                        ),
+                        'balance': safe_float_conversion(plumbing_invoice.balance),
                         'statement_id': plumbing_statement.id,
                         'invoice_id': plumbing_invoice.id,
                         'system_invoice_id': None,
@@ -1929,7 +1947,7 @@ class StatementController:
                     'statement_date': None,  # System invoices don't have statement dates
                     'supplier_name': supplier_name,
                     'status': status,
-                    'original_amount': float(invoice_item.amount) if invoice_item.amount else 0.0,
+                    'original_amount': safe_float_conversion(invoice_item.amount),
                     'balance': 0.0,  # System invoices don't have balance
                     'statement_id': None,
                     'invoice_id': None,
@@ -1998,14 +2016,8 @@ class StatementController:
                     ),
                     'supplier_name': plumbing_supplier.name,
                     'status': reconciliation_status,
-                    'original_amount': (
-                        float(plumbing_invoice.original_amount) 
-                        if plumbing_invoice.original_amount else 0.0
-                    ),
-                    'balance': (
-                        float(plumbing_invoice.balance) 
-                        if plumbing_invoice.balance else 0.0
-                    ),
+                    'original_amount': safe_float_conversion(plumbing_invoice.original_amount),
+                    'balance': safe_float_conversion(plumbing_invoice.balance),
                     'statement_id': plumbing_statement.id,
                     'invoice_id': plumbing_invoice.id,
                     'system_invoice_id': None,
