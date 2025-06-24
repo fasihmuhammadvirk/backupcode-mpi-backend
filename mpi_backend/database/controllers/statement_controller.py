@@ -361,11 +361,11 @@ class StatementController:
                 .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
             )
             
-            # Apply date filters on statement_date
+            # Apply date filters on invoice_date
             if from_date:
-                query = query.filter(PlumbingStatement.statement_date >= from_date)
+                query = query.filter(PlumbingInvoice.invoice_date >= from_date)
             if to_date:
-                query = query.filter(PlumbingStatement.statement_date <= to_date)
+                query = query.filter(PlumbingInvoice.invoice_date <= to_date)
             
             # Apply supplier filter - support ["All"], multiple supplier IDs, or supplier names
             # Handle supplier_id = 0 as "all suppliers"
@@ -398,8 +398,8 @@ class StatementController:
             # Get total count before pagination
             total_count = query.count()
             
-            # Order by statement date (most recent first) BEFORE pagination
-            query = query.order_by(PlumbingStatement.statement_date.desc())
+            # Order by invoice date (most recent first) BEFORE pagination
+            query = query.order_by(PlumbingInvoice.invoice_date.desc())
             
             # Apply pagination
             offset = (page - 1) * page_size
@@ -1054,7 +1054,7 @@ class StatementController:
 
     def search_statement_invoice_data(
         self,
-        invoice_number: str,
+        search: str,
         from_date: Optional[date] = None,
         to_date: Optional[date] = None, 
         supplier_names: Optional[List[str]] = None,
@@ -1063,12 +1063,12 @@ class StatementController:
         page_size: int = 20
     ) -> Dict[str, Any]:
         """
-        Search statement invoice data by invoice number with optional filters
+        Search statement invoice data by search term with optional filters
         
         Args:
-            invoice_number: Invoice number to search (partial match supported)
-            from_date: Start date filter (DD/MM/YYYY converted to date)
-            to_date: End date filter (DD/MM/YYYY converted to date)
+            search: Search term to look for in invoice numbers (partial match supported)
+            from_date: Start date filter (DD/MM/YYYY converted to date) - filters by invoice_date
+            to_date: End date filter (DD/MM/YYYY converted to date) - filters by invoice_date
             supplier_names: List of supplier names/IDs or ["All"] for all suppliers
             status: Invoice status filter (Processed/Failed)
             page: Page number (1-based)
@@ -1085,16 +1085,16 @@ class StatementController:
                 .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
             )
             
-            # Apply invoice number filter (primary filter)
+            # Apply search filter (primary filter)
             query = query.filter(
-                PlumbingInvoice.invoice_number.ilike(f"%{invoice_number}%")
+                PlumbingInvoice.invoice_number.ilike(f"%{search}%")
             )
             
-            # Apply date filters on statement_date
+            # Apply date filters on invoice_date
             if from_date:
-                query = query.filter(PlumbingStatement.statement_date >= from_date)
+                query = query.filter(PlumbingInvoice.invoice_date >= from_date)
             if to_date:
-                query = query.filter(PlumbingStatement.statement_date <= to_date)
+                query = query.filter(PlumbingInvoice.invoice_date <= to_date)
             
             # Apply supplier filter - same logic as existing method
             if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
@@ -1119,8 +1119,8 @@ class StatementController:
             # Get total count before pagination
             total_count = query.count()
             
-            # Order by statement date (most recent first) BEFORE pagination
-            query = query.order_by(PlumbingStatement.statement_date.desc())
+            # Order by invoice date (most recent first) BEFORE pagination
+            query = query.order_by(PlumbingInvoice.invoice_date.desc())
             
             # Apply pagination
             offset = (page - 1) * page_size
@@ -1141,16 +1141,16 @@ class StatementController:
                     page_size=page_size
                 )
                 
-                # Filter by invoice number
+                # Filter by search term
                 if unlisted_results['success']:
                     filtered_data = [
                         item for item in unlisted_results['data']
-                        if invoice_number.lower() in item['invoice_number'].lower()
+                        if search.lower() in item['invoice_number'].lower()
                     ]
                     unlisted_results['data'] = filtered_data
                     unlisted_results['pagination']['total_results'] = len(filtered_data)
                     unlisted_results['filters_applied'] = {
-                        'invoice_number': invoice_number,
+                        'search': search,
                         'from_date': from_date.isoformat() if from_date else None,
                         'to_date': to_date.isoformat() if to_date else None,
                         'supplier_names': supplier_names,
@@ -1171,17 +1171,17 @@ class StatementController:
                     page_size=page_size
                 )
                 
-                # Filter by invoice number
+                # Filter by search term
                 if missing_results['success']:
                     filtered_data = [
                         item for item in missing_results['data']
                         if item['invoice_number'] != "MISSING" and
-                        invoice_number.lower() in item['invoice_number'].lower()
+                        search.lower() in item['invoice_number'].lower()
                     ]
                     missing_results['data'] = filtered_data
                     missing_results['pagination']['total_results'] = len(filtered_data)
                     missing_results['filters_applied'] = {
-                        'invoice_number': invoice_number,
+                        'search': search,
                         'from_date': from_date.isoformat() if from_date else None,
                         'to_date': to_date.isoformat() if to_date else None,
                         'supplier_names': supplier_names,
@@ -1250,7 +1250,7 @@ class StatementController:
                     'has_previous': page > 1
                 },
                 'filters_applied': {
-                    'invoice_number': invoice_number,
+                    'search': search,
                     'from_date': from_date.isoformat() if from_date else None,
                     'to_date': to_date.isoformat() if to_date else None,
                     'supplier_names': supplier_names,
@@ -1422,14 +1422,18 @@ class StatementController:
         page_size: int = 20
     ) -> Dict[str, Any]:
         """
-        Find invoices that exist in our system but have missing or invalid data
+        Find invoices that have missing or invalid data from both system and statement sources
         
-        Checks for missing or invalid:
+        Checks for missing or invalid data in:
+        1. System invoice items (InvoiceItem table)
+        2. Statement invoice items (PlumbingInvoice table)
+        
+        Validates:
         - Amount (null, empty, or non-numeric values)
         - Date (null values)
         - Tax information (malformed tax entries like "zinexx tax 004 $3.93")
         - Invoice Number (null, empty, or invalid patterns like "inv # 88992")
-        - Original Item description (null or empty)
+        - Original Item description (null or empty - system invoices only)
         
         Args:
             from_date: Start date filter (filters by invoice date)
@@ -1439,11 +1443,13 @@ class StatementController:
             page_size: Number of items per page
             
         Returns:
-            Dict with missing/invalid invoice data and pagination metadata
+            Dict with missing/invalid invoice data and pagination metadata from both sources
         """
         try:
-            # Build base query for system invoices
-            query = (
+            all_invalid_invoices = []
+            
+            # 1. Check system invoices (InvoiceItem table)
+            system_query = (
                 self.db.query(InvoiceItem, Invoice)
                 .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
                 .join(PlumbingSupplier, Invoice.supplier_id == PlumbingSupplier.id)
@@ -1451,11 +1457,11 @@ class StatementController:
             
             # Apply date filters on InvoiceItem date
             if from_date:
-                query = query.filter(InvoiceItem.date >= from_date)
+                system_query = system_query.filter(InvoiceItem.date >= from_date)
             if to_date:
-                query = query.filter(InvoiceItem.date <= to_date)
+                system_query = system_query.filter(InvoiceItem.date <= to_date)
             
-            # Apply supplier filter
+            # Apply supplier filter for system invoices
             if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
                 supplier_conditions = []
                 
@@ -1473,152 +1479,127 @@ class StatementController:
                         )
                 
                 if supplier_conditions:
-                    query = query.filter(or_(*supplier_conditions))
+                    system_query = system_query.filter(or_(*supplier_conditions))
             
-            # Order by date (most recent first)
-            query = query.order_by(InvoiceItem.date.desc())
+            # Get all system invoice items
+            system_results = system_query.all()
             
-            # Execute query to get all invoice items (we'll filter in Python)
-            all_results = query.all()
-            
-            # Filter results in Python for complex validation
-            filtered_results = []
-            for invoice_item, invoice in all_results:
-                has_issues = False
-                
-                # Check for missing/invalid amount
-                if not invoice_item.amount or invoice_item.amount == "":
-                    has_issues = True
-                else:
-                    try:
-                        float(str(invoice_item.amount).strip())
-                    except (ValueError, TypeError):
-                        has_issues = True
-                
-                # Check for missing date
-                if not invoice_item.date:
-                    has_issues = True
-                
-                # Check for missing/invalid invoice number
-                if not invoice_item.ref_no or invoice_item.ref_no == "":
-                    has_issues = True
-                else:
-                    ref_no_str = str(invoice_item.ref_no).strip().lower()
-                    if (ref_no_str.startswith("inv #") or 
-                        ref_no_str.startswith("invoice #") or
-                        ref_no_str.startswith("inv#") or
-                        " # " in ref_no_str):
-                        has_issues = True
-                
-                # Check for missing item description
-                if not invoice_item.item or invoice_item.item == "":
-                    has_issues = True
-                
-                # Check for tax format issues
-                if invoice_item.description:
-                    desc_str = str(invoice_item.description).lower()
-                    if ("tax" in desc_str and 
-                        any(char.isalpha() for char in desc_str) and
-                        any(char.isdigit() for char in desc_str) and
-                        "$" in desc_str):
-                        if re.search(r'[a-zA-Z]+\s+tax\s+\d+\s*\$', desc_str):
-                            has_issues = True
-                
-                if has_issues:
-                    filtered_results.append((invoice_item, invoice))
-            
-            # Get total count of filtered results
-            total_count = len(filtered_results)
-            
-            # Apply pagination to filtered results
-            offset = (page - 1) * page_size
-            results = filtered_results[offset:offset + page_size]
-            
-            # Process results
-            invoice_data = []
-            for invoice_item, invoice in results:
-                # Get supplier name
-                supplier = self.db.query(PlumbingSupplier).filter(
-                    PlumbingSupplier.id == invoice.supplier_id
-                ).first()
-                supplier_name = supplier.name if supplier else "Unknown"
-                
-                # Determine specific issues with enhanced validation
-                issues = []
-                
-                # Validate amount (check if non-numeric or empty)
-                if not invoice_item.amount or invoice_item.amount == "":
-                    issues.append("Missing Amount")
-                else:
-                    # Check if amount contains non-numeric characters (except decimal point and minus sign)
-                    amount_str = str(invoice_item.amount).strip()
-                    try:
-                        float(amount_str)
-                    except (ValueError, TypeError):
-                        issues.append("Invalid Amount Format")
-                
-                # Validate date
-                if not invoice_item.date:
-                    issues.append("Missing Date")
-                
-                # Validate invoice number pattern
-                if not invoice_item.ref_no or invoice_item.ref_no == "":
-                    issues.append("Missing Invoice Number")
-                else:
-                    ref_no_str = str(invoice_item.ref_no).strip().lower()
-                    # Check for invalid patterns like "inv # 88992"
-                    if (ref_no_str.startswith("inv #") or 
-                        ref_no_str.startswith("invoice #") or
-                        ref_no_str.startswith("inv#") or
-                        " # " in ref_no_str):
-                        issues.append("Invalid Invoice Number Format")
-                
-                # Validate original item description
-                if not invoice_item.item or invoice_item.item == "":
-                    issues.append("Missing Original Item")
-                
-                # Check for tax-related issues in description or memo fields
-                if invoice_item.description:
-                    desc_str = str(invoice_item.description).lower()
-                    # Look for tax entries with invalid format like "zinexx tax 004 $3.93"
-                    if ("tax" in desc_str and 
-                        any(char.isalpha() for char in desc_str) and
-                        any(char.isdigit() for char in desc_str) and
-                        "$" in desc_str):
-                        # Check if it's a malformed tax entry
-                        if re.search(r'[a-zA-Z]+\s+tax\s+\d+\s*\$', desc_str):
-                            issues.append("Invalid Tax Format")
-                
-                # Only include items that actually have issues
+            # Validate system invoice items
+            for invoice_item, invoice in system_results:
+                issues = self._validate_system_invoice_item(invoice_item)
                 if issues:
-                    # Try to parse amount safely
-                    safe_amount = 0.0
-                    if invoice_item.amount:
-                        try:
-                            safe_amount = float(str(invoice_item.amount).strip())
-                        except (ValueError, TypeError):
-                            safe_amount = 0.0
+                    supplier = self.db.query(PlumbingSupplier).filter(
+                        PlumbingSupplier.id == invoice.supplier_id
+                    ).first()
+                    supplier_name = supplier.name if supplier else "Unknown"
                     
-                    invoice_data.append({
+                    all_invalid_invoices.append({
+                        'source': 'System',
                         'invoice_number': invoice_item.ref_no or "MISSING",
-                        'invoice_date': (
-                            invoice_item.date.isoformat() 
-                            if invoice_item.date else None
-                        ),
+                        'invoice_date': invoice_item.date,
                         'customer_po': invoice_item.po_number,
-                        'statement_date': None,  # No statement for missing/invalid items
                         'supplier_name': supplier_name,
-                        'status': 'Missing/Invalid',
-                        'original_amount': safe_amount,
-                        'balance': 0.0,  # System invoices don't have balance
-                        'statement_id': None,
-                        'invoice_id': None,
+                        'original_amount': self._safe_float_conversion(invoice_item.amount),
                         'system_invoice_id': str(invoice.id),
                         'customer_job': invoice_item.customer_job,
-                        'issues': issues,  # List of specific data issues
+                        'issues': issues,
                         'item_description': invoice_item.item,
                         'vendor': invoice_item.vendor
                     })
+            
+            # 2. Check statement invoices (PlumbingInvoice table)
+            statement_query = (
+                self.db.query(PlumbingInvoice, PlumbingStatement, PlumbingSupplier)
+                .join(PlumbingStatement, PlumbingInvoice.statement_id == PlumbingStatement.id)
+                .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
+            )
+            
+            # Apply date filters on PlumbingInvoice date
+            if from_date:
+                statement_query = statement_query.filter(PlumbingInvoice.invoice_date >= from_date)
+            if to_date:
+                statement_query = statement_query.filter(PlumbingInvoice.invoice_date <= to_date)
+            
+            # Apply supplier filter for statement invoices
+            if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
+                supplier_conditions = []
+                
+                for supplier_name in supplier_names:
+                    if supplier_name.isdigit():
+                        supplier_id = int(supplier_name)
+                        if supplier_id == 0:
+                            supplier_conditions = []
+                            break
+                        else:
+                            supplier_conditions.append(PlumbingSupplier.id == supplier_id)
+                    else:
+                        supplier_conditions.append(
+                            PlumbingSupplier.name.ilike(f"%{supplier_name}%")
+                        )
+                
+                if supplier_conditions:
+                    statement_query = statement_query.filter(or_(*supplier_conditions))
+            
+            # Get all statement invoice items
+            statement_results = statement_query.all()
+            
+            # Validate statement invoice items
+            for plumbing_invoice, plumbing_statement, plumbing_supplier in statement_results:
+                issues = self._validate_statement_invoice_item(plumbing_invoice)
+                if issues:
+                    all_invalid_invoices.append({
+                        'source': 'Statement',
+                        'invoice_number': plumbing_invoice.invoice_number or "MISSING",
+                        'invoice_date': plumbing_invoice.invoice_date,
+                        'customer_po': plumbing_invoice.customer_po,
+                        'supplier_name': plumbing_supplier.name,
+                        'original_amount': self._safe_float_conversion(plumbing_invoice.original_amount),
+                        'statement_id': plumbing_statement.id,
+                        'statement_date': plumbing_statement.statement_date,
+                        'balance': self._safe_float_conversion(plumbing_invoice.balance),
+                        'issues': issues
+                    })
+            
+            # Sort all results by date (most recent first)
+            all_invalid_invoices.sort(
+                key=lambda x: x['invoice_date'] or date.min, 
+                reverse=True
+            )
+            
+            # Get total count
+            total_count = len(all_invalid_invoices)
+            
+            # Apply pagination
+            offset = (page - 1) * page_size
+            paginated_results = all_invalid_invoices[offset:offset + page_size]
+            
+            # Process results - convert to standard API format
+            invoice_data = []
+            for item in paginated_results:
+                invoice_data.append({
+                    'invoice_number': item['invoice_number'],
+                    'invoice_date': (
+                        item['invoice_date'].isoformat() 
+                        if item['invoice_date'] else None
+                    ),
+                    'customer_po': item.get('customer_po'),
+                    'statement_date': (
+                        item['statement_date'].isoformat() 
+                        if item.get('statement_date') else None
+                    ),
+                    'supplier_name': item['supplier_name'],
+                    'status': 'Missing/Invalid',
+                    'original_amount': item['original_amount'],
+                    'balance': item.get('balance', 0.0),
+                    'statement_id': item.get('statement_id'),
+                    'invoice_id': None,
+                    'system_invoice_id': item.get('system_invoice_id'),
+                    'customer_job': item.get('customer_job'),
+                    'issues': item['issues'],
+                    'item_description': item.get('item_description'),
+                    'vendor': item.get('vendor'),
+                    'source': item['source']  # 'System' or 'Statement'
+                })
             
             # Calculate pagination metadata
             total_pages = ceil(total_count / page_size) if page_size > 0 else 1
@@ -1650,4 +1631,87 @@ class StatementController:
                     'has_next': False,
                     'has_previous': False
                 }
-            } 
+            }
+    
+    def _validate_system_invoice_item(self, invoice_item) -> List[str]:
+        """Validate system invoice item and return list of issues"""
+        issues = []
+        
+        # Validate amount (check if non-numeric or empty)
+        if not invoice_item.amount or invoice_item.amount == "":
+            issues.append("Missing Amount")
+        else:
+            try:
+                float(str(invoice_item.amount).strip())
+            except (ValueError, TypeError):
+                issues.append("Invalid Amount Format")
+        
+        # Validate date
+        if not invoice_item.date:
+            issues.append("Missing Date")
+        
+        # Validate invoice number pattern
+        if not invoice_item.ref_no or invoice_item.ref_no == "":
+            issues.append("Missing Invoice Number")
+        else:
+            ref_no_str = str(invoice_item.ref_no).strip().lower()
+            if (ref_no_str.startswith("inv #") or 
+                ref_no_str.startswith("invoice #") or
+                ref_no_str.startswith("inv#") or
+                " # " in ref_no_str):
+                issues.append("Invalid Invoice Number Format")
+        
+        # Validate original item description
+        if not invoice_item.item or invoice_item.item == "":
+            issues.append("Missing Original Item")
+        
+        # Check for tax format issues
+        if invoice_item.description:
+            desc_str = str(invoice_item.description).lower()
+            if ("tax" in desc_str and 
+                any(char.isalpha() for char in desc_str) and
+                any(char.isdigit() for char in desc_str) and
+                "$" in desc_str):
+                if re.search(r'[a-zA-Z]+\s+tax\s+\d+\s*\$', desc_str):
+                    issues.append("Invalid Tax Format")
+        
+        return issues
+    
+    def _validate_statement_invoice_item(self, plumbing_invoice) -> List[str]:
+        """Validate statement invoice item and return list of issues"""
+        issues = []
+        
+        # Validate amount
+        if not plumbing_invoice.original_amount or plumbing_invoice.original_amount == "":
+            issues.append("Missing Amount")
+        else:
+            try:
+                float(str(plumbing_invoice.original_amount).strip())
+            except (ValueError, TypeError):
+                issues.append("Invalid Amount Format")
+        
+        # Validate date
+        if not plumbing_invoice.invoice_date:
+            issues.append("Missing Date")
+        
+        # Validate invoice number pattern
+        if not plumbing_invoice.invoice_number or plumbing_invoice.invoice_number == "":
+            issues.append("Missing Invoice Number")
+        else:
+            ref_no_str = str(plumbing_invoice.invoice_number).strip().lower()
+            if (ref_no_str.startswith("inv #") or 
+                ref_no_str.startswith("invoice #") or
+                ref_no_str.startswith("inv#") or
+                " # " in ref_no_str):
+                issues.append("Invalid Invoice Number Format")
+        
+        return issues
+    
+    def _safe_float_conversion(self, value) -> float:
+        """Safely convert value to float, return 0.0 if invalid"""
+        if not value:
+            return 0.0
+        try:
+            return float(str(value).strip())
+        except (ValueError, TypeError):
+            return 0.0 
