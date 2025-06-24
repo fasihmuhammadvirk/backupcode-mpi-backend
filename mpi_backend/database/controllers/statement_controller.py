@@ -418,6 +418,17 @@ class StatementController:
                     page_size=page_size
                 )
             
+            # Handle "missing" status filter separately
+            if status and status.lower() == "missing":
+                # Return missing/invalid invoices instead
+                return self.get_missing_invalid_invoices(
+                    from_date=from_date,
+                    to_date=to_date,
+                    supplier_names=supplier_names,
+                    page=page,
+                    page_size=page_size
+                )
+            
             # Process results and apply status filter if needed
             invoice_data = []
             for plumbing_invoice, plumbing_statement, plumbing_supplier in results:
@@ -1147,6 +1158,37 @@ class StatementController:
                 
                 return unlisted_results
             
+            # Handle "missing" status filter separately for search
+            if status and status.lower() == "missing":
+                # For search with missing status, we need to find system invoices
+                # with missing/invalid data that match the invoice number
+                missing_results = self.get_missing_invalid_invoices(
+                    from_date=from_date,
+                    to_date=to_date,
+                    supplier_names=supplier_names,
+                    page=page,
+                    page_size=page_size
+                )
+                
+                # Filter by invoice number
+                if missing_results['success']:
+                    filtered_data = [
+                        item for item in missing_results['data']
+                        if item['invoice_number'] != "MISSING" and
+                        invoice_number.lower() in item['invoice_number'].lower()
+                    ]
+                    missing_results['data'] = filtered_data
+                    missing_results['pagination']['total_results'] = len(filtered_data)
+                    missing_results['filters_applied'] = {
+                        'invoice_number': invoice_number,
+                        'from_date': from_date.isoformat() if from_date else None,
+                        'to_date': to_date.isoformat() if to_date else None,
+                        'supplier_names': supplier_names,
+                        'status': status
+                    }
+                
+                return missing_results
+            
             # Process results and apply status filter if needed
             invoice_data = []
             for plumbing_invoice, plumbing_statement, plumbing_supplier in results:
@@ -1356,6 +1398,180 @@ class StatementController:
             
         except Exception as e:
             logger.error(f"Error getting unlisted invoices: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'data': [],
+                'pagination': {
+                    'current_page': page,
+                    'page_size': page_size,
+                    'total_results': 0,
+                    'total_pages': 0,
+                    'has_next': False,
+                    'has_previous': False
+                }
+            } 
+
+    def get_missing_invalid_invoices(
+        self,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None,
+        supplier_names: Optional[List[str]] = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Dict[str, Any]:
+        """
+        Find invoices that exist in our system but have missing or invalid data
+        
+        Checks for missing or invalid:
+        - Amount (null, empty, or 0)
+        - Date (null or invalid)
+        - Tax information (if expected)
+        - Invoice Number (null or empty)
+        - Original Item description (null or empty)
+        
+        Args:
+            from_date: Start date filter (filters by invoice date)
+            to_date: End date filter (filters by invoice date)
+            supplier_names: List of supplier names/IDs or ["All"] for all suppliers
+            page: Page number (1-based)
+            page_size: Number of items per page
+            
+        Returns:
+            Dict with missing/invalid invoice data and pagination metadata
+        """
+        try:
+            # Build base query for system invoices
+            query = (
+                self.db.query(InvoiceItem, Invoice)
+                .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
+                .join(PlumbingSupplier, Invoice.supplier_id == PlumbingSupplier.id)
+            )
+            
+            # Apply date filters on InvoiceItem date
+            if from_date:
+                query = query.filter(InvoiceItem.date >= from_date)
+            if to_date:
+                query = query.filter(InvoiceItem.date <= to_date)
+            
+            # Apply supplier filter
+            if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
+                supplier_conditions = []
+                
+                for supplier_name in supplier_names:
+                    if supplier_name.isdigit():
+                        supplier_id = int(supplier_name)
+                        if supplier_id == 0:
+                            supplier_conditions = []
+                            break
+                        else:
+                            supplier_conditions.append(Invoice.supplier_id == supplier_id)
+                    else:
+                        supplier_conditions.append(
+                            PlumbingSupplier.name.ilike(f"%{supplier_name}%")
+                        )
+                
+                if supplier_conditions:
+                    query = query.filter(or_(*supplier_conditions))
+            
+            # Filter for missing or invalid data
+            missing_data_conditions = [
+                # Missing or invalid amount
+                or_(
+                    InvoiceItem.amount.is_(None),
+                    InvoiceItem.amount == "",
+                    InvoiceItem.amount == "0",
+                    InvoiceItem.amount == "0.00"
+                ),
+                # Missing date
+                InvoiceItem.date.is_(None),
+                # Missing invoice number (ref_no)
+                or_(
+                    InvoiceItem.ref_no.is_(None),
+                    InvoiceItem.ref_no == ""
+                ),
+                # Missing original item description
+                or_(
+                    InvoiceItem.item.is_(None),
+                    InvoiceItem.item == ""
+                )
+            ]
+            
+            # Apply OR condition for any missing data
+            query = query.filter(or_(*missing_data_conditions))
+            
+            # Get total count before pagination
+            total_count = query.count()
+            
+            # Order by date (most recent first)
+            query = query.order_by(InvoiceItem.date.desc())
+            
+            # Apply pagination
+            offset = (page - 1) * page_size
+            query = query.offset(offset).limit(page_size)
+            
+            # Execute query and get supplier info
+            results = query.all()
+            
+            # Process results
+            invoice_data = []
+            for invoice_item, invoice in results:
+                # Get supplier name
+                supplier = self.db.query(PlumbingSupplier).filter(
+                    PlumbingSupplier.id == invoice.supplier_id
+                ).first()
+                supplier_name = supplier.name if supplier else "Unknown"
+                
+                # Determine specific issues
+                issues = []
+                if not invoice_item.amount or invoice_item.amount in ["", "0", "0.00"]:
+                    issues.append("Missing/Invalid Amount")
+                if not invoice_item.date:
+                    issues.append("Missing Date")
+                if not invoice_item.ref_no or invoice_item.ref_no == "":
+                    issues.append("Missing Invoice Number")
+                if not invoice_item.item or invoice_item.item == "":
+                    issues.append("Missing Original Item")
+                
+                invoice_data.append({
+                    'invoice_number': invoice_item.ref_no or "MISSING",
+                    'invoice_date': (
+                        invoice_item.date.isoformat() 
+                        if invoice_item.date else None
+                    ),
+                    'customer_po': invoice_item.po_number,
+                    'statement_date': None,  # No statement for missing/invalid items
+                    'supplier_name': supplier_name,
+                    'status': 'Missing/Invalid',
+                    'original_amount': float(invoice_item.amount) if invoice_item.amount and invoice_item.amount not in ["", "0", "0.00"] else 0.0,
+                    'balance': 0.0,  # System invoices don't have balance
+                    'statement_id': None,
+                    'invoice_id': None,
+                    'system_invoice_id': str(invoice.id),
+                    'customer_job': invoice_item.customer_job,
+                    'issues': issues,  # List of specific data issues
+                    'item_description': invoice_item.item,
+                    'vendor': invoice_item.vendor
+                })
+            
+            # Calculate pagination metadata
+            total_pages = ceil(total_count / page_size) if page_size > 0 else 1
+            
+            return {
+                'success': True,
+                'data': invoice_data,
+                'pagination': {
+                    'current_page': page,
+                    'page_size': page_size,
+                    'total_results': len(invoice_data),
+                    'total_pages': total_pages,
+                    'has_next': page < total_pages,
+                    'has_previous': page > 1
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting missing/invalid invoices: {str(e)}")
             return {
                 'success': False,
                 'error': str(e),

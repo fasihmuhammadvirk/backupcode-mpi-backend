@@ -58,7 +58,7 @@ def get_statement_invoice_data(
     ),
     status: Optional[str] = Query(
         None,
-        description="Invoice status filter: 'Processed', 'Failed', 'Unlisted', or 'all'"
+        description="Invoice status filter: 'Processed', 'Failed', 'Unlisted', 'Missing', or 'all'"
     ),
     page: int = Query(
         1,
@@ -89,7 +89,7 @@ def get_statement_invoice_data(
     - **supplier_names**: Filter by list of supplier names (partial match supported), 
       supplier IDs (numeric), ["All"] for all suppliers, or ["0"] for all suppliers
     - **status**: Filter by reconciliation status 
-      ('Processed', 'Failed', 'Unlisted', 'all')
+      ('Processed', 'Failed', 'Unlisted', 'Missing', 'all')
     - **page**: Page number for pagination (starts from 1)
     - **page_size**: Number of items per page (1-100)
     
@@ -106,7 +106,7 @@ def get_statement_invoice_data(
     - **customer_po**: Customer PO number (customer_pi in requirements)
     - **statement_date**: Date of the statement containing this invoice
     - **supplier_name**: Name of the supplier
-    - **status**: Reconciliation status (Processed/Failed/Unlisted/Unknown)
+    - **status**: Reconciliation status (Processed/Failed/Unlisted/Missing/Unknown)
     - **original_amount**: Original invoice amount
     - **balance**: Outstanding balance
     
@@ -126,6 +126,9 @@ def get_statement_invoice_data(
     
     # Filter by single supplier ID
     GET /statements/invoice-data?supplier_names=3&page=1&page_size=20
+    
+    # Find missing/invalid invoice data
+    GET /statements/invoice-data?status=Missing&page=1&page_size=20
     ```
     """
     try:
@@ -159,7 +162,7 @@ def get_statement_invoice_data(
             )
         
         # Validate status parameter
-        valid_statuses = ['processed', 'failed', 'unlisted', 'all', None]
+        valid_statuses = ['processed', 'failed', 'unlisted', 'missing', 'all', None]
         if status and status.lower() not in valid_statuses:
             raise HTTPException(
                 status_code=400,
