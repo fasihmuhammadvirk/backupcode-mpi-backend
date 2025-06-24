@@ -7,6 +7,7 @@ from math import ceil
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 import tempfile
 import requests
+import re
 from pathlib import Path
 import logging
 
@@ -1424,10 +1425,10 @@ class StatementController:
         Find invoices that exist in our system but have missing or invalid data
         
         Checks for missing or invalid:
-        - Amount (null, empty, or 0)
-        - Date (null or invalid)
-        - Tax information (if expected)
-        - Invoice Number (null or empty)
+        - Amount (null, empty, or non-numeric values)
+        - Date (null values)
+        - Tax information (malformed tax entries like "zinexx tax 004 $3.93")
+        - Invoice Number (null, empty, or invalid patterns like "inv # 88992")
         - Original Item description (null or empty)
         
         Args:
@@ -1474,44 +1475,64 @@ class StatementController:
                 if supplier_conditions:
                     query = query.filter(or_(*supplier_conditions))
             
-            # Filter for missing or invalid data
-            missing_data_conditions = [
-                # Missing or invalid amount
-                or_(
-                    InvoiceItem.amount.is_(None),
-                    InvoiceItem.amount == "",
-                    InvoiceItem.amount == "0",
-                    InvoiceItem.amount == "0.00"
-                ),
-                # Missing date
-                InvoiceItem.date.is_(None),
-                # Missing invoice number (ref_no)
-                or_(
-                    InvoiceItem.ref_no.is_(None),
-                    InvoiceItem.ref_no == ""
-                ),
-                # Missing original item description
-                or_(
-                    InvoiceItem.item.is_(None),
-                    InvoiceItem.item == ""
-                )
-            ]
-            
-            # Apply OR condition for any missing data
-            query = query.filter(or_(*missing_data_conditions))
-            
-            # Get total count before pagination
-            total_count = query.count()
-            
             # Order by date (most recent first)
             query = query.order_by(InvoiceItem.date.desc())
             
-            # Apply pagination
-            offset = (page - 1) * page_size
-            query = query.offset(offset).limit(page_size)
+            # Execute query to get all invoice items (we'll filter in Python)
+            all_results = query.all()
             
-            # Execute query and get supplier info
-            results = query.all()
+            # Filter results in Python for complex validation
+            filtered_results = []
+            for invoice_item, invoice in all_results:
+                has_issues = False
+                
+                # Check for missing/invalid amount
+                if not invoice_item.amount or invoice_item.amount == "":
+                    has_issues = True
+                else:
+                    try:
+                        float(str(invoice_item.amount).strip())
+                    except (ValueError, TypeError):
+                        has_issues = True
+                
+                # Check for missing date
+                if not invoice_item.date:
+                    has_issues = True
+                
+                # Check for missing/invalid invoice number
+                if not invoice_item.ref_no or invoice_item.ref_no == "":
+                    has_issues = True
+                else:
+                    ref_no_str = str(invoice_item.ref_no).strip().lower()
+                    if (ref_no_str.startswith("inv #") or 
+                        ref_no_str.startswith("invoice #") or
+                        ref_no_str.startswith("inv#") or
+                        " # " in ref_no_str):
+                        has_issues = True
+                
+                # Check for missing item description
+                if not invoice_item.item or invoice_item.item == "":
+                    has_issues = True
+                
+                # Check for tax format issues
+                if invoice_item.description:
+                    desc_str = str(invoice_item.description).lower()
+                    if ("tax" in desc_str and 
+                        any(char.isalpha() for char in desc_str) and
+                        any(char.isdigit() for char in desc_str) and
+                        "$" in desc_str):
+                        if re.search(r'[a-zA-Z]+\s+tax\s+\d+\s*\$', desc_str):
+                            has_issues = True
+                
+                if has_issues:
+                    filtered_results.append((invoice_item, invoice))
+            
+            # Get total count of filtered results
+            total_count = len(filtered_results)
+            
+            # Apply pagination to filtered results
+            offset = (page - 1) * page_size
+            results = filtered_results[offset:offset + page_size]
             
             # Process results
             invoice_data = []
@@ -1522,37 +1543,82 @@ class StatementController:
                 ).first()
                 supplier_name = supplier.name if supplier else "Unknown"
                 
-                # Determine specific issues
+                # Determine specific issues with enhanced validation
                 issues = []
-                if not invoice_item.amount or invoice_item.amount in ["", "0", "0.00"]:
-                    issues.append("Missing/Invalid Amount")
+                
+                # Validate amount (check if non-numeric or empty)
+                if not invoice_item.amount or invoice_item.amount == "":
+                    issues.append("Missing Amount")
+                else:
+                    # Check if amount contains non-numeric characters (except decimal point and minus sign)
+                    amount_str = str(invoice_item.amount).strip()
+                    try:
+                        float(amount_str)
+                    except (ValueError, TypeError):
+                        issues.append("Invalid Amount Format")
+                
+                # Validate date
                 if not invoice_item.date:
                     issues.append("Missing Date")
+                
+                # Validate invoice number pattern
                 if not invoice_item.ref_no or invoice_item.ref_no == "":
                     issues.append("Missing Invoice Number")
+                else:
+                    ref_no_str = str(invoice_item.ref_no).strip().lower()
+                    # Check for invalid patterns like "inv # 88992"
+                    if (ref_no_str.startswith("inv #") or 
+                        ref_no_str.startswith("invoice #") or
+                        ref_no_str.startswith("inv#") or
+                        " # " in ref_no_str):
+                        issues.append("Invalid Invoice Number Format")
+                
+                # Validate original item description
                 if not invoice_item.item or invoice_item.item == "":
                     issues.append("Missing Original Item")
                 
-                invoice_data.append({
-                    'invoice_number': invoice_item.ref_no or "MISSING",
-                    'invoice_date': (
-                        invoice_item.date.isoformat() 
-                        if invoice_item.date else None
-                    ),
-                    'customer_po': invoice_item.po_number,
-                    'statement_date': None,  # No statement for missing/invalid items
-                    'supplier_name': supplier_name,
-                    'status': 'Missing/Invalid',
-                    'original_amount': float(invoice_item.amount) if invoice_item.amount and invoice_item.amount not in ["", "0", "0.00"] else 0.0,
-                    'balance': 0.0,  # System invoices don't have balance
-                    'statement_id': None,
-                    'invoice_id': None,
-                    'system_invoice_id': str(invoice.id),
-                    'customer_job': invoice_item.customer_job,
-                    'issues': issues,  # List of specific data issues
-                    'item_description': invoice_item.item,
-                    'vendor': invoice_item.vendor
-                })
+                # Check for tax-related issues in description or memo fields
+                if invoice_item.description:
+                    desc_str = str(invoice_item.description).lower()
+                    # Look for tax entries with invalid format like "zinexx tax 004 $3.93"
+                    if ("tax" in desc_str and 
+                        any(char.isalpha() for char in desc_str) and
+                        any(char.isdigit() for char in desc_str) and
+                        "$" in desc_str):
+                        # Check if it's a malformed tax entry
+                        if re.search(r'[a-zA-Z]+\s+tax\s+\d+\s*\$', desc_str):
+                            issues.append("Invalid Tax Format")
+                
+                # Only include items that actually have issues
+                if issues:
+                    # Try to parse amount safely
+                    safe_amount = 0.0
+                    if invoice_item.amount:
+                        try:
+                            safe_amount = float(str(invoice_item.amount).strip())
+                        except (ValueError, TypeError):
+                            safe_amount = 0.0
+                    
+                    invoice_data.append({
+                        'invoice_number': invoice_item.ref_no or "MISSING",
+                        'invoice_date': (
+                            invoice_item.date.isoformat() 
+                            if invoice_item.date else None
+                        ),
+                        'customer_po': invoice_item.po_number,
+                        'statement_date': None,  # No statement for missing/invalid items
+                        'supplier_name': supplier_name,
+                        'status': 'Missing/Invalid',
+                        'original_amount': safe_amount,
+                        'balance': 0.0,  # System invoices don't have balance
+                        'statement_id': None,
+                        'invoice_id': None,
+                        'system_invoice_id': str(invoice.id),
+                        'customer_job': invoice_item.customer_job,
+                        'issues': issues,  # List of specific data issues
+                        'item_description': invoice_item.item,
+                        'vendor': invoice_item.vendor
+                    })
             
             # Calculate pagination metadata
             total_pages = ceil(total_count / page_size) if page_size > 0 else 1
