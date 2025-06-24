@@ -1824,10 +1824,10 @@ class StatementController:
         page_size: int = 20
     ) -> Dict[str, Any]:
         """
-        Get ALL invoices from all categories: Missing, Unlisted, Failed, and Processed
+        OPTIMIZED: Get ALL invoices from all categories efficiently using minimal queries
         
-        This method combines results from all 4 invoice categories to provide
-        a comprehensive view when status="all" is requested.
+        This method uses efficient SQL joins and bulk operations to avoid N+1 queries
+        and reduce database load significantly.
         
         Args:
             from_date: Start date filter (filters by invoice date)
@@ -1840,201 +1840,197 @@ class StatementController:
             Dict with combined invoice data from all categories and pagination metadata
         """
         try:
-            # Get data from all categories without pagination (we'll paginate the combined results)
-            large_page_size = 10000  # Use large page size to get all data for combining
+            # Limit the total query scope to prevent SQL server overload
+            max_total_records = 5000
             
-            # 1. Get Missing invoices
-            missing_result = self.get_missing_invalid_invoices(
-                from_date=from_date,
-                to_date=to_date,
-                supplier_names=supplier_names,
-                page=1,
-                page_size=large_page_size
-            )
-            missing_data = missing_result.get('data', []) if missing_result.get('success') else []
+            # Build supplier conditions once for reuse
+            supplier_conditions_system = []
+            supplier_conditions_statement = []
             
-            # 2. Get Unlisted invoices
-            unlisted_result = self.get_unlisted_invoices(
-                from_date=from_date,
-                to_date=to_date,
-                supplier_names=supplier_names,
-                page=1,
-                page_size=large_page_size
-            )
-            unlisted_data = unlisted_result.get('data', []) if unlisted_result.get('success') else []
-            
-            # 3. Get ALL system invoices (InvoiceItem) - not just unlisted ones
-            system_query = (
-                self.db.query(InvoiceItem, Invoice)
-                .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
-                .join(PlumbingSupplier, Invoice.supplier_id == PlumbingSupplier.id)
-            )
-            
-            # Apply date filters on system invoices
-            if from_date:
-                system_query = system_query.filter(InvoiceItem.date >= from_date)
-            if to_date:
-                system_query = system_query.filter(InvoiceItem.date <= to_date)
-            
-            # Apply supplier filter to system invoices
             if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
-                supplier_conditions_system = []
-                
                 for supplier_name in supplier_names:
                     if supplier_name.isdigit():
                         supplier_id = int(supplier_name)
-                        if supplier_id == 0:
-                            supplier_conditions_system = []
-                            break
-                        else:
+                        if supplier_id != 0:
                             supplier_conditions_system.append(Invoice.supplier_id == supplier_id)
+                            supplier_conditions_statement.append(PlumbingStatement.supplier_id == supplier_id)
                     else:
-                        supplier_conditions_system.append(
-                            PlumbingSupplier.name.ilike(f"%{supplier_name}%")
-                        )
-                
-                if supplier_conditions_system:
-                    system_query = system_query.filter(or_(*supplier_conditions_system))
+                        supplier_conditions_system.append(PlumbingSupplier.name.ilike(f"%{supplier_name}%"))
+                        supplier_conditions_statement.append(PlumbingSupplier.name.ilike(f"%{supplier_name}%"))
             
-            # Get all system invoices
-            system_results = system_query.all()
+            # OPTIMIZED: Single efficient query for system invoices with all needed data
+            system_base_query = (
+                self.db.query(
+                    InvoiceItem.ref_no.label('invoice_number'),
+                    InvoiceItem.date.label('invoice_date'),
+                    InvoiceItem.po_number.label('customer_po'),
+                    InvoiceItem.amount.label('original_amount'),
+                    InvoiceItem.customer_job,
+                    InvoiceItem.item,
+                    InvoiceItem.description,
+                    Invoice.id.label('system_invoice_id'),
+                    PlumbingSupplier.name.label('supplier_name'),
+                    PlumbingSupplier.id.label('supplier_id')
+                )
+                .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
+                .join(PlumbingSupplier, Invoice.supplier_id == PlumbingSupplier.id)
+                .filter(InvoiceItem.ref_no.isnot(None))  # Exclude null invoice numbers
+            )
             
-            # Process system invoices to determine their status
-            system_invoices_data = []
-            for invoice_item, invoice in system_results:
-                # Get supplier name
-                supplier = self.db.query(PlumbingSupplier).filter(
-                    PlumbingSupplier.id == invoice.supplier_id
-                ).first()
-                supplier_name = supplier.name if supplier else f"Supplier ID {invoice.supplier_id}"
+            # Apply filters to system query
+            if from_date:
+                system_base_query = system_base_query.filter(InvoiceItem.date >= from_date)
+            if to_date:
+                system_base_query = system_base_query.filter(InvoiceItem.date <= to_date)
+            if supplier_conditions_system:
+                system_base_query = system_base_query.filter(or_(*supplier_conditions_system))
+            
+            # Limit and order system invoices
+            system_base_query = system_base_query.order_by(InvoiceItem.date.desc()).limit(max_total_records)
+            
+            # OPTIMIZED: Single query for statement invoices with all needed data
+            statement_base_query = (
+                self.db.query(
+                    PlumbingInvoice.invoice_number,
+                    PlumbingInvoice.invoice_date,
+                    PlumbingInvoice.customer_po,
+                    PlumbingInvoice.original_amount,
+                    PlumbingInvoice.balance,
+                    PlumbingInvoice.id.label('invoice_id'),
+                    PlumbingStatement.id.label('statement_id'),
+                    PlumbingStatement.statement_date,
+                    PlumbingSupplier.name.label('supplier_name'),
+                    PlumbingSupplier.id.label('supplier_id')
+                )
+                .join(PlumbingStatement, PlumbingInvoice.statement_id == PlumbingStatement.id)
+                .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
+                .filter(PlumbingInvoice.invoice_number.isnot(None))  # Exclude null invoice numbers
+            )
+            
+            # Apply filters to statement query
+            if from_date:
+                statement_base_query = statement_base_query.filter(PlumbingInvoice.invoice_date >= from_date)
+            if to_date:
+                statement_base_query = statement_base_query.filter(PlumbingInvoice.invoice_date <= to_date)
+            if supplier_conditions_statement:
+                statement_base_query = statement_base_query.filter(or_(*supplier_conditions_statement))
+            
+            # Limit and order statement invoices
+            statement_base_query = statement_base_query.order_by(PlumbingInvoice.invoice_date.desc()).limit(max_total_records)
+            
+            # Execute both queries
+            system_invoices = system_base_query.all()
+            statement_invoices = statement_base_query.all()
+            
+            # OPTIMIZED: Bulk check for statement matches using a single query
+            system_invoice_numbers = [inv.invoice_number for inv in system_invoices if inv.invoice_number]
+            statement_matches = set()
+            if system_invoice_numbers:
+                matched_statements = (
+                    self.db.query(PlumbingInvoice.invoice_number)
+                    .filter(PlumbingInvoice.invoice_number.in_(system_invoice_numbers))
+                    .distinct()
+                    .all()
+                )
+                statement_matches = {match.invoice_number for match in matched_statements}
+            
+            # OPTIMIZED: Bulk check for system matches using a single query
+            statement_invoice_numbers = [inv.invoice_number for inv in statement_invoices if inv.invoice_number]
+            system_matches = set()
+            if statement_invoice_numbers:
+                matched_systems = (
+                    self.db.query(InvoiceItem.ref_no)
+                    .filter(InvoiceItem.ref_no.in_(statement_invoice_numbers))
+                    .distinct()
+                    .all()
+                )
+                system_matches = {match.ref_no for match in matched_systems}
+            
+            # Process all invoices efficiently
+            all_invoices = []
+            
+            # Process system invoices
+            for inv in system_invoices:
+                # Check for validation issues efficiently
+                has_issues = self._has_validation_issues_system(inv)
                 
-                # Check if this system invoice exists in statements
-                statement_match = self.db.query(PlumbingInvoice).filter(
-                    PlumbingInvoice.invoice_number == invoice_item.ref_no
-                ).first()
-                
-                # Determine status based on statement presence
-                if statement_match:
-                    status = "Processed"  # System invoice found in statement
+                if has_issues:
+                    status = "Missing"
+                elif inv.invoice_number in statement_matches:
+                    status = "Processed"
                 else:
-                    status = "Unlisted"   # System invoice not in any statement
+                    status = "Unlisted"
                 
-                system_invoices_data.append({
-                    'invoice_number': invoice_item.ref_no,
-                    'invoice_date': (
-                        invoice_item.date.isoformat() 
-                        if invoice_item.date else None
-                    ),
-                    'customer_po': invoice_item.po_number,
-                    'statement_date': None,  # System invoices don't have statement dates
-                    'supplier_name': supplier_name,
+                all_invoices.append({
+                    'invoice_number': inv.invoice_number,
+                    'invoice_date': inv.invoice_date.isoformat() if inv.invoice_date else None,
+                    'customer_po': inv.customer_po,
+                    'statement_date': None,
+                    'supplier_name': inv.supplier_name,
                     'status': status,
-                    'original_amount': str(invoice_item.amount) if invoice_item.amount else "0",
-                    'balance': "0",  # System invoices don't have balance
+                    'original_amount': str(inv.original_amount) if inv.original_amount else "0",
+                    'balance': "0",
                     'statement_id': None,
                     'invoice_id': None,
-                    'system_invoice_id': str(invoice.id),
-                    'customer_job': invoice_item.customer_job,
+                    'system_invoice_id': str(inv.system_invoice_id),
+                    'customer_job': inv.customer_job,
                     'source': 'system'
                 })
             
-            # 4. Get statement invoices (Processed/Failed) - get ALL with no status filter
-            statement_query = (
-                self.db.query(PlumbingInvoice, PlumbingStatement, PlumbingSupplier)
-                .join(PlumbingStatement, PlumbingInvoice.statement_id == PlumbingStatement.id)
-                .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
-            )
-            
-            # Apply date filters
-            if from_date:
-                statement_query = statement_query.filter(PlumbingInvoice.invoice_date >= from_date)
-            if to_date:
-                statement_query = statement_query.filter(PlumbingInvoice.invoice_date <= to_date)
-            
-            # Apply supplier filter
-            if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
-                supplier_conditions = []
+            # Process statement invoices
+            for inv in statement_invoices:
+                # Check for validation issues efficiently
+                has_issues = self._has_validation_issues_statement(inv)
                 
-                for supplier_name in supplier_names:
-                    if supplier_name.isdigit():
-                        supplier_id = int(supplier_name)
-                        if supplier_id == 0:
-                            supplier_conditions = []
-                            break
-                        else:
-                            supplier_conditions.append(PlumbingSupplier.id == supplier_id)
-                    else:
-                        supplier_conditions.append(
-                            PlumbingSupplier.name.ilike(f"%{supplier_name}%")
-                        )
+                if has_issues:
+                    status = "Missing"
+                elif inv.invoice_number in system_matches:
+                    status = "Processed"
+                else:
+                    status = "Failed"
                 
-                if supplier_conditions:
-                    statement_query = statement_query.filter(or_(*supplier_conditions))
-            
-            # Get all statement invoices
-            statement_results = statement_query.all()
-            
-            # Process statement invoices to determine Processed/Failed status
-            processed_failed_data = []
-            for plumbing_invoice, plumbing_statement, plumbing_supplier in statement_results:
-                # Determine reconciliation status
-                match_result = self.check_invoice_exists_in_system(
-                    plumbing_invoice.invoice_number,
-                    plumbing_supplier.id,
-                    plumbing_invoice.invoice_date
-                )
-                reconciliation_status = "Processed" if match_result['matched'] else "Failed"
-                
-                processed_failed_data.append({
-                    'invoice_number': plumbing_invoice.invoice_number,
-                    'invoice_date': (
-                        plumbing_invoice.invoice_date.isoformat() 
-                        if plumbing_invoice.invoice_date else None
-                    ),
-                    'customer_po': plumbing_invoice.customer_po,
-                    'statement_date': (
-                        plumbing_statement.statement_date.isoformat() 
-                        if plumbing_statement.statement_date else None
-                    ),
-                    'supplier_name': plumbing_supplier.name,
-                    'status': reconciliation_status,
-                    'original_amount': (
-                        str(plumbing_invoice.original_amount) 
-                        if plumbing_invoice.original_amount else "0"
-                    ),
-                    'balance': (
-                        str(plumbing_invoice.balance) 
-                        if plumbing_invoice.balance else "0"
-                    ),
-                    'statement_id': plumbing_statement.id,
-                    'invoice_id': plumbing_invoice.id,
+                all_invoices.append({
+                    'invoice_number': inv.invoice_number,
+                    'invoice_date': inv.invoice_date.isoformat() if inv.invoice_date else None,
+                    'customer_po': inv.customer_po,
+                    'statement_date': inv.statement_date.isoformat() if inv.statement_date else None,
+                    'supplier_name': inv.supplier_name,
+                    'status': status,
+                    'original_amount': str(inv.original_amount) if inv.original_amount else "0",
+                    'balance': str(inv.balance) if inv.balance else "0",
+                    'statement_id': inv.statement_id,
+                    'invoice_id': inv.invoice_id,
                     'system_invoice_id': None,
                     'customer_job': None,
                     'source': 'statement'
                 })
             
-            # Remove duplicates from system invoices that are already in missing/unlisted
-            # Create sets of invoice numbers already included
-            missing_invoice_numbers = {item.get('invoice_number') for item in missing_data if item.get('source') == 'system'}
-            unlisted_invoice_numbers = {item.get('invoice_number') for item in unlisted_data}
+            # Remove duplicates (prefer system invoices over statement for same invoice number)
+            seen_invoices = set()
+            unique_invoices = []
             
-            # Filter system invoices to exclude duplicates
-            unique_system_invoices = [
-                item for item in system_invoices_data 
-                if item.get('invoice_number') not in missing_invoice_numbers 
-                and item.get('invoice_number') not in unlisted_invoice_numbers
-            ]
+            # Sort by invoice_date desc, then by source (system first)
+            all_invoices.sort(key=lambda x: (
+                datetime.fromisoformat(x['invoice_date']) if x.get('invoice_date') else datetime.min,
+                x['source'] == 'statement'  # False for system (comes first), True for statement
+            ), reverse=True)
             
-            # Combine all data from all sources (avoiding duplicates)
-            all_data = missing_data + unlisted_data + unique_system_invoices + processed_failed_data
+            for invoice in all_invoices:
+                invoice_key = f"{invoice['invoice_number']}_{invoice['supplier_name']}"
+                if invoice_key not in seen_invoices:
+                    seen_invoices.add(invoice_key)
+                    unique_invoices.append(invoice)
             
-            # Sort by invoice_date (most recent first)
-            all_data.sort(key=lambda x: datetime.fromisoformat(x['invoice_date']) if x.get('invoice_date') else datetime.min, reverse=True)
-            
-            # Apply pagination to combined results
-            total_count = len(all_data)
+            # Apply pagination
+            total_count = len(unique_invoices)
             offset = (page - 1) * page_size
-            paginated_data = all_data[offset:offset + page_size]
+            paginated_data = unique_invoices[offset:offset + page_size]
+            
+            # Calculate counts by status
+            status_counts = {}
+            for invoice in unique_invoices:
+                status = invoice['status']
+                status_counts[status] = status_counts.get(status, 0) + 1
             
             # Calculate pagination metadata
             total_pages = ceil(total_count / page_size) if page_size > 0 else 1
@@ -2058,10 +2054,12 @@ class StatementController:
                 },
                 'summary': {
                     'total_all_categories': total_count,
-                    'missing_count': len(missing_data),
-                    'unlisted_count': len(unlisted_data),
-                    'system_invoices_count': len(unique_system_invoices),
-                    'statement_invoices_count': len(processed_failed_data)
+                    'missing_count': status_counts.get('Missing', 0),
+                    'unlisted_count': status_counts.get('Unlisted', 0),
+                    'processed_count': status_counts.get('Processed', 0),
+                    'failed_count': status_counts.get('Failed', 0),
+                    'system_source_count': len([inv for inv in unique_invoices if inv['source'] == 'system']),
+                    'statement_source_count': len([inv for inv in unique_invoices if inv['source'] == 'statement'])
                 }
             }
             
@@ -2080,3 +2078,95 @@ class StatementController:
                     'has_previous': False
                 }
             } 
+
+    def _has_validation_issues_system(self, invoice) -> bool:
+        """
+        Efficiently check if a system invoice has validation issues
+        
+        Args:
+            invoice: System invoice record with fields: original_amount, invoice_date, 
+                    invoice_number, item, description
+                    
+        Returns:
+            bool: True if invoice has validation issues
+        """
+        # Check for missing/invalid amount
+        if not invoice.original_amount or invoice.original_amount == "":
+            return True
+        
+        try:
+            # Remove commas for validation, but amounts with commas are valid
+            amount_str = str(invoice.original_amount).strip().replace(',', '')
+            float(amount_str)
+        except (ValueError, TypeError):
+            return True
+        
+        # Check for missing date
+        if not invoice.invoice_date:
+            return True
+        
+        # Check for missing/invalid invoice number
+        if not invoice.invoice_number or invoice.invoice_number == "":
+            return True
+        
+        ref_no_str = str(invoice.invoice_number).strip().lower()
+        if (ref_no_str.startswith("inv #") or 
+            ref_no_str.startswith("invoice #") or
+            ref_no_str.startswith("inv#") or
+            " # " in ref_no_str):
+            return True
+        
+        # Check for missing item description
+        if not invoice.item or invoice.item == "":
+            return True
+        
+        # Check for tax format issues
+        if invoice.description:
+            desc_str = str(invoice.description).lower()
+            if ("tax" in desc_str and 
+                any(char.isalpha() for char in desc_str) and
+                any(char.isdigit() for char in desc_str) and
+                "$" in desc_str):
+                if re.search(r'[a-zA-Z]+\s+tax\s+\d+\s*\$', desc_str):
+                    return True
+        
+        return False
+
+    def _has_validation_issues_statement(self, invoice) -> bool:
+        """
+        Efficiently check if a statement invoice has validation issues
+        
+        Args:
+            invoice: Statement invoice record with fields: original_amount, invoice_date, 
+                    invoice_number
+                    
+        Returns:
+            bool: True if invoice has validation issues
+        """
+        # Check for missing/invalid amount
+        if not invoice.original_amount or invoice.original_amount == "":
+            return True
+        
+        try:
+            # Remove commas for validation, but amounts with commas are valid
+            amount_str = str(invoice.original_amount).strip().replace(',', '')
+            float(amount_str)
+        except (ValueError, TypeError):
+            return True
+        
+        # Check for missing date
+        if not invoice.invoice_date:
+            return True
+        
+        # Check for missing/invalid invoice number
+        if not invoice.invoice_number or invoice.invoice_number == "":
+            return True
+        
+        ref_no_str = str(invoice.invoice_number).strip().lower()
+        if (ref_no_str.startswith("inv #") or 
+            ref_no_str.startswith("invoice #") or
+            ref_no_str.startswith("inv#") or
+            " # " in ref_no_str):
+            return True
+        
+        return False
