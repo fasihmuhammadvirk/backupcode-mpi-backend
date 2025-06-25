@@ -86,15 +86,28 @@ def get_price_difference(request: FilterRequest, db: Session = Depends(get_db),
                 page: int = Query(1, ge=1),
                 size: int = Query(10)):
     filtered_data = InvoiceItemController(db).apply_filters(request, page,size)
-    item_id_pairs = [(invoice_item.item, invoice_item.id) for invoice_item in filtered_data["items"]]
-    invoice_items = [invoice_item.item for invoice_item in filtered_data["items"]]
-    price_increase = InvoiceItemController(db).calculate_price_increase(item_numbers=invoice_items)
+    controller = InvoiceItemController(db)
+    
+    # Extract item codes and clean suffixes for database search
+    item_id_pairs = []
+    invoice_items = []
+    
+    for invoice_item in filtered_data["items"]:
+        # The item from apply_filters has suffix for display
+        suffixed_item = invoice_item.item
+        # Remove suffix to get original database item code for search
+        original_item = controller._remove_suffix_from_item_code(suffixed_item)
+        
+        item_id_pairs.append((suffixed_item, invoice_item.id))  # Keep suffixed for response
+        invoice_items.append(original_item)  # Use original for database search
+    
+    price_increase = controller.calculate_price_increase(item_numbers=invoice_items)
 
     result = []
     for i, (item, percentage) in enumerate(price_increase):
-        _, item_id = item_id_pairs[i]
+        suffixed_item, item_id = item_id_pairs[i]
         result.append({
-            "item": item,
+            "item": suffixed_item,  # Return suffixed item for UI consistency
             "id": item_id,
             "percentage_increase": percentage
         })
