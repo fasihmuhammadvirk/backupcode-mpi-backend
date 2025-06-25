@@ -765,26 +765,50 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
     update_progress(operation_id, "aggregating", 70,
                     "Aggregating data for QuickBooks export")
 
-    # FAST aggregation
+    # FAST aggregation - FIXED GROUPING LOGIC
     agg_start = time.time()
 
+    # CRITICAL FIX: Group by account AND ref_no only 
+    # (remove customer_job to avoid over-splitting)
+    # This prevents creating multiple rows for same invoice account combination
     batch_entry = df.groupby(
-        ['account', 'ref_no', 'customer_job'], as_index=False
+        ['account', 'ref_no'], as_index=False
     ).agg({
         'amount': 'sum',
-        'tax_amount': 'first',
+        'tax_amount': 'first',  # Tax is per invoice, not per account
         'date': 'first',
         'vendor': 'first',
         'memo': 'first',
-        'class_': 'first'  # This preserves original class values
+        'class_': 'first',
+        'customer_job': 'first'  # Take first customer_job per invoice
     })
 
-    # CRITICAL BUSINESS LOGIC FIX: Apply tax like original working code
-    # Tax should be added per invoice, not per row
-    def add_tax_per_invoice(row):
-        return row['amount'] + row['tax_amount']
+    # CRITICAL TAX FIX: Add tax only ONCE per invoice (ref_no)
+    # Tax distributed across accounts within same invoice proportionally
+    
+    # Calculate total amount per invoice before tax addition
+    invoice_totals = batch_entry.groupby('ref_no')['amount'].sum().to_dict()
+    
+    def add_tax_proportionally(row):
+        ref_no = row['ref_no']
+        tax_amount = row['tax_amount']
+        current_amount = row['amount']
+        invoice_total = invoice_totals[ref_no]
+        
+        # If this is the only account for this invoice, add all tax
+        invoice_rows = batch_entry[batch_entry['ref_no'] == ref_no]
+        if len(invoice_rows) == 1:
+            return current_amount + tax_amount
+        
+        # Otherwise, add tax proportionally based on amount percentage
+        if invoice_total > 0:
+            tax_proportion = (current_amount / invoice_total) * tax_amount
+            return current_amount + tax_proportion
+        else:
+            return current_amount
 
-    batch_entry['amount'] = batch_entry.apply(add_tax_per_invoice, axis=1)
+    batch_entry['amount'] = batch_entry.apply(
+        add_tax_proportionally, axis=1)
 
     # CLASS PRESERVATION LOGIC (ENSURES NO CLASS INFO IS LOST)
     # This ensures that ANY class value from items within an invoice
