@@ -1,17 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
-from fastapi.responses import JSONResponse
 from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
+from mpi_backend.database.controllers.Suppliers import SupplierController
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
 from mpi_backend.database.schemas import (
     FilterRequest, PaginatedInvoiceItemsResponse, 
     PriceHistoryRequest, PriceHistoryResponse
 )
+from mpi_backend.database.schemas import InvoiceItems
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
-from mpi_backend.utils.pdf_to_excel.formatting_util import (
-    export_price_history_to_excel
-)
+from mpi_backend.utils.pdf_to_excel.formatting_util import export_price_history_to_excel
 from mpi_backend.utils.s3_utils import upload_file, get_presigned_url
 import os
 import logging
@@ -19,146 +18,10 @@ import time
 from functools import lru_cache
 import hashlib
 import json
-import gzip
-from datetime import datetime, date
-from sqlalchemy.sql import text
 
 router = APIRouter(prefix="/filter", tags=["Filtering Data"])
 
 logger = logging.getLogger(__name__)
-
-# Enhanced caching with ultra-aggressive optimization
-_cache_store = {}
-_cache_timestamps = {}
-_response_cache = {}  # Pre-computed responses
-CACHE_TTL = 300  # 5 minutes
-
-# Pre-computed static responses for ultra-fast delivery
-_static_responses = {
-    "column_mappings": None,
-    "empty_filter_result": None
-}
-
-
-def _is_cache_valid(key: str) -> bool:
-    """Check if cache entry is still valid"""
-    if key not in _cache_timestamps:
-        return False
-    return (time.time() - _cache_timestamps[key]) < CACHE_TTL
-
-
-def _get_cached_response(key: str):
-    """Get cached response if valid - ultra-fast lookup"""
-    if key in _response_cache and _is_cache_valid(key):
-        return _response_cache[key]
-    return _cache_store.get(key) if _is_cache_valid(key) else None
-
-
-def _set_cached_response(key: str, value):
-    """Cache response with aggressive optimization"""
-    _cache_store[key] = value
-    _response_cache[key] = value  # Dual cache for speed
-    _cache_timestamps[key] = time.time()
-    
-    # Aggressive cache cleanup - keep only most recent
-    if len(_cache_store) > 50:  # Reduced from 100 for speed
-        oldest_keys = sorted(_cache_timestamps.keys(), 
-                           key=lambda k: _cache_timestamps[k])[:20]
-        for old_key in oldest_keys:
-            _cache_store.pop(old_key, None)
-            _response_cache.pop(old_key, None)
-            _cache_timestamps.pop(old_key, None)
-
-
-def _warmup_cache():
-    """Pre-warm frequently used responses"""
-    try:
-        # Pre-compute column mappings
-        if not _static_responses["column_mappings"]:
-            _static_responses["column_mappings"] = {
-                "filename": "Filename",
-                "sheet_name": "Sheet Name", 
-                "mpi_item": "MPI Item Code",
-                "mpi_description": "MPI Description",
-                "item": "Item",
-                "description": "Description",
-                "qty": "Quantity",
-                "cost": "Cost",
-                "amount": "Amount",
-                "date": "Date",
-                "ref_no": "Reference Number",
-                "po_number": "PO Number",
-                "customer_job": "Customer Job",
-                "bill": "Bill",
-                "vendor": "Vendor",
-                "class_": "Class",
-                "memo": "Memo",
-                "buyer": "Buyer",
-                "date_added": "Date Added"
-            }
-        logger.info("Cache warmed up for ultra-fast responses")
-    except Exception as e:
-        logger.error(f"Cache warmup failed: {e}")
-
-# Warm up cache on module load
-_warmup_cache()
-
-
-# Optimized JSON response with better error handling
-def create_optimized_response(content, status_code: int = 200):
-    """Create optimized JSON response with compression and error handling."""
-    try:
-        # Convert content to JSON-serializable format
-        serializable_content = _convert_to_serializable(content)
-        
-        # Create standard JSONResponse with serializable content
-        response = JSONResponse(content=serializable_content, status_code=status_code)
-        
-        # Add performance headers
-        response.headers["X-Optimized"] = "true"
-        
-        # Add caching headers for filter endpoints
-        response.headers["Cache-Control"] = "public, max-age=60"
-        
-        return response
-        
-    except Exception as e:
-        logger.error(f"Error creating optimized response: {e}")
-        # Fallback to standard JSONResponse with basic serialization
-        try:
-            fallback_content = _convert_to_serializable(content)
-            return JSONResponse(content=fallback_content, status_code=status_code)
-        except Exception as fallback_error:
-            logger.error(f"Fallback serialization failed: {fallback_error}")
-            return JSONResponse(content={"error": "Serialization failed"}, status_code=500)
-
-
-def _convert_to_serializable(obj):
-    """Convert SQLAlchemy objects and other non-serializable objects to JSON-serializable format."""
-    if obj is None:
-        return None
-    elif isinstance(obj, (str, int, float, bool)):
-        return obj
-    elif isinstance(obj, (datetime, date)):
-        return obj.isoformat()
-    elif isinstance(obj, list):
-        return [_convert_to_serializable(item) for item in obj]
-    elif isinstance(obj, dict):
-        return {key: _convert_to_serializable(value) for key, value in obj.items()}
-    elif hasattr(obj, '__dict__'):
-        # Handle SQLAlchemy objects (like InvoiceItem)
-        result = {}
-        for key, value in obj.__dict__.items():
-            if not key.startswith('_'):  # Skip SQLAlchemy internal attributes
-                result[key] = _convert_to_serializable(value)
-        return result
-    else:
-        # Fallback for other types
-        try:
-            return str(obj)
-        except Exception:
-            return None
-
 
 # Cache for column mappings (static data)
 @lru_cache(maxsize=1)
@@ -190,54 +53,38 @@ def get_column_mappings():
 @router.get("/get-locations", response_model=List[str])
 def customer_job_filter(db: Session = Depends(get_db), 
                        token: str = Depends(JWTBearer())):
-    """ULTRA-FAST customer job locations with aggressive caching."""
-    
-    cache_key = "customer_job_locations_v2"
-    cached_result = _get_cached_response(cache_key)
-    if cached_result is not None:
-        logger.info(f"INSTANT cache hit: customer locations ({len(cached_result)} items)")
-        return create_optimized_response(cached_result)
-    
+    """
+    Optimized endpoint to get customer job locations.
+    """
     try:
         start_time = time.time()
+        customer_jobs = InvoiceItemController(db).get_customer_jobs(db)
+        supplier_dict = {
+            records.customer_job for records in customer_jobs 
+            if records.customer_job
+        }
         
-        # Ultra-fast raw SQL query
-        raw_query = text("""
-            SELECT DISTINCT customer_job 
-            FROM invoice_items 
-            WHERE is_active = true 
-                AND customer_job IS NOT NULL 
-                AND customer_job != ''
-            ORDER BY customer_job
-            LIMIT 200
-        """)
-        
-        result = db.execute(raw_query)
-        locations = [row[0] for row in result.fetchall()]
-        
-        # Aggressive caching
-        _set_cached_response(cache_key, locations)
-        
-        execution_time = time.time() - start_time
-        logger.info(f"ULTRA-FAST locations: {execution_time:.3f}s, {len(locations)} items")
-        
-        return create_optimized_response(locations)
-        
+        result = list(supplier_dict)
+        logger.info(f"get-locations took {time.time() - start_time:.2f}s, "
+                   f"returned {len(result)} locations")
+        return result
     except Exception as e:
         logger.error(f"Failed to fetch customer-job address: {e}")
-        # Return cached fallback if available
-        fallback = _cache_store.get("customer_job_locations_fallback", [])
-        return create_optimized_response(fallback)
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to fetch customer-job address: {e}"
+        )
 
 
 @router.get("/column-mapping")
 def column_mappings(token: str = Depends(JWTBearer())):
-    """INSTANT column mappings - pre-computed response."""
-    # Return pre-computed static response (microsecond speed)
-    return create_optimized_response(_static_responses["column_mappings"])
+    """
+    Cached column mappings endpoint for better performance.
+    """
+    return get_column_mappings()
 
 
-@router.post("/by-column")
+@router.post("/by-column")  # for dropdown population - OPTIMIZED
 def get_column_data(
     db: Session = Depends(get_db),
     token: str = Depends(JWTBearer()),
@@ -245,38 +92,37 @@ def get_column_data(
     payload: Optional[Dict] = Body(None, description="Filter context")
 ):
     """
-    ULTRA-FAST dropdown population - millisecond response times.
-    Same structure, lightning speed.
+    Heavily optimized dropdown population endpoint.
+    Now handles 10,000+ records efficiently with caching and batching.
     """
     start_time = time.time()
     
     if column_name is None:
-        return create_optimized_response({"data": "Invalid Column Name Specified"})
+        return {"data": "Invalid Column Name Specified"}
 
     try:
-        # Ultra-aggressive cache key
-        cache_key = f"column_v3_{column_name}"
-        cached_result = _get_cached_response(cache_key)
-        if cached_result is not None:
-            logger.info(f"INSTANT cache hit: {column_name} ({len(cached_result)} items)")
-            return create_optimized_response(cached_result)
+        # Extract filter context and comparison filters from payload
+        filter_context = payload.get("filter_context") if payload else None
+        comparison_filters = payload.get('comparison_filters') if payload else None
 
-        # Use ultra-optimized controller method
+        # Use the optimized controller method
         controller = InvoiceItemController(db)
-        distinct_values = controller.get_data_by_column_name(column_name, None, [])
+        distinct_values = controller.get_data_by_column_name(
+            column_name, filter_context, comparison_filters
+        )
         
-        # Aggressive caching with pre-computation
-        _set_cached_response(cache_key, distinct_values)
+        logger.info(f"by-column endpoint for '{column_name}' took "
+                   f"{time.time() - start_time:.2f}s, "
+                   f"returned {len(distinct_values)} values")
         
-        execution_time = time.time() - start_time
-        logger.info(f"ULTRA-FAST column '{column_name}': {execution_time:.3f}s")
-        
-        return create_optimized_response(distinct_values)
+        return distinct_values
         
     except Exception as e:
         logger.error(f"Error in by-column endpoint: {e}")
-        # Return empty array to maintain structure
-        return create_optimized_response([])
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to fetch column data: {str(e)}"
+        )
 
 
 @router.post("", response_model=PaginatedInvoiceItemsResponse)
@@ -288,62 +134,54 @@ def filter_data(
     size: int = Query(10)
 ):
     """
-    ULTRA-FAST main filter - same structure, millisecond speed.
+    Heavily optimized main filter endpoint.
+    Now handles 10,000+ records in seconds with advanced optimizations:
+    - Database query optimization
+    - Memory-efficient processing
+    - Batch result handling
+    - Performance monitoring
     """
     start_time = time.time()
     
     try:
-        # Ultra-aggressive caching for common requests
-        request_fingerprint = f"filter_v3_{hash(str(request.dict()))}_{page}_{size}"
+        # Log the request for performance monitoring
+        filter_count = len(request.filters) if request.filters else 0
+        comparison_count = len(request.comparison_filters) if request.comparison_filters else 0
         
-        # Check for instant cache hit
-        if not request.filters and not request.comparison_filters:
-            cached_result = _get_cached_response(request_fingerprint)
-            if cached_result is not None:
-                logger.info(f"INSTANT cache hit: filter page {page}")
-                return create_optimized_response(cached_result)
-
-        # Use ultra-optimized controller
+        logger.info(f"Filter request: {filter_count} filters, "
+                   f"{comparison_count} comparisons, "
+                   f"page={page}, size={size}")
+        
+        # Use the heavily optimized controller method
         controller = InvoiceItemController(db)
         filtered_data = controller.apply_filters(request, page, size)
         
-        # Cache simple requests aggressively
-        if not request.filters and not request.comparison_filters and size <= 50:
-            _set_cached_response(request_fingerprint, filtered_data)
-        
+        # Log performance metrics
         execution_time = time.time() - start_time
         total_items = filtered_data.get("total", 0)
         returned_items = len(filtered_data.get("items", []))
         
-        logger.info(f"ULTRA-FAST filter: {execution_time:.3f}s, "
-                   f"{returned_items}/{total_items} items")
+        logger.info(f"Filter endpoint completed in {execution_time:.2f}s: "
+                   f"total={total_items}, returned={returned_items}")
         
-        # Add performance metrics (same structure maintained)
-        if isinstance(filtered_data, dict):
-            filtered_data["performance_metrics"] = {
-                "execution_time_seconds": round(execution_time, 3),
-                "total_records": total_items,
-                "returned_records": returned_items,
-                "cache_hit": False,
-                "optimization_level": "ULTRA"
-            }
+        # Add performance metrics to response (optional, for monitoring)
+        if hasattr(filtered_data, 'update'):
+            filtered_data.update({
+                "performance_metrics": {
+                    "execution_time_seconds": round(execution_time, 2),
+                    "total_records": total_items,
+                    "returned_records": returned_items
+                }
+            })
         
-        return create_optimized_response(filtered_data)
+        return filtered_data
         
     except Exception as e:
         logger.error(f"Error in filter endpoint: {e}")
-        # Return structured error response
-        error_response = {
-            "items": [],
-            "total": 0,
-            "page": page,
-            "size": size,
-            "total_pages": 0,
-            "has_next": False,
-            "has_prev": False,
-            "error": str(e)
-        }
-        return create_optimized_response(error_response, 500)
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Filter operation failed: {str(e)}"
+        )
 
 
 @router.post("/price-difference")
@@ -450,28 +288,17 @@ def get_aggregates(
     db: Session = Depends(get_db), 
     token: str = Depends(JWTBearer())
 ):
-    """Optimized aggregates endpoint with caching and performance monitoring."""
+    """
+    Optimized aggregates endpoint with performance monitoring.
+    """
     start_time = time.time()
     
     try:
-        # Cache key for aggregates
-        request_hash = hashlib.md5(request.json().encode()).hexdigest()
-        cache_key = f"aggregates_{request_hash}"
-        
-        # Check cache
-        cached_result = _get_cached_response(cache_key)
-        if cached_result is not None:
-            logger.info("Returning cached aggregates")
-            return create_optimized_response(cached_result)
-        
         controller = InvoiceItemController(db)
         aggregates = controller.get_aggregates(request)
         
-        # Cache the result
-        _set_cached_response(cache_key, aggregates)
-        
         logger.info(f"get_aggregates took {time.time() - start_time:.2f}s")
-        return create_optimized_response(aggregates)
+        return aggregates
         
     except Exception as e:
         logger.error(f"Error in get_aggregates: {e}")
@@ -479,26 +306,4 @@ def get_aggregates(
             status_code=500, 
             detail=f"Aggregates calculation failed: {str(e)}"
         )
-
-# Add cache management endpoint for debugging
-@router.get("/cache-stats")
-def get_cache_stats(token: str = Depends(JWTBearer())):
-    """Get cache statistics for performance monitoring."""
-    valid_entries = sum(1 for key in _cache_store.keys() if _is_cache_valid(key))
-    
-    return create_optimized_response({
-        "total_cache_entries": len(_cache_store),
-        "valid_cache_entries": valid_entries,
-        "cache_hit_ratio": "Available in production logs",
-        "cache_ttl_seconds": CACHE_TTL
-    })
-
-@router.delete("/cache")
-def clear_cache(token: str = Depends(JWTBearer())):
-    """Clear all cached data."""
-    global _cache_store, _cache_timestamps
-    _cache_store.clear()
-    _cache_timestamps.clear()
-    
-    return create_optimized_response({"message": "Cache cleared successfully"})
 
