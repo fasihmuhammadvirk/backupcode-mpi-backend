@@ -400,217 +400,174 @@ class InvoiceItemController:
         comparison_filters: Optional[List] = None
     ) -> List[str]:
         """
-        ULTRA-OPTIMIZED column data - Same response structure, millisecond speed.
+        Optimized version of get_data_by_column_name with caching and better performance.
+        Now handles 10,000+ records efficiently while preserving ALL business logic.
         """
         start_time = time.time()
         
-        try:
-            # Use raw SQL for maximum speed - same logic, faster execution
-            if column_name == 'item':
-                # BMW/Y&S suffix logic preserved but ultra-fast
-                raw_query = text("""
-                    SELECT DISTINCT 
-                        CASE 
-                            WHEN vendor LIKE '%BMW%' THEN item || '-B'
-                            WHEN vendor LIKE '%Y&S%' OR vendor LIKE '%Y & S%' 
-                                THEN item || '-Y'
-                            ELSE item 
-                        END as item_display
-                    FROM invoice_items 
-                    WHERE is_active = true 
-                        AND item IS NOT NULL 
-                        AND item != ''
-                    ORDER BY item_display
-                    LIMIT 1000
-                """)
-            else:
-                # Standard distinct - ultra-fast with limit
-                raw_query = text(f"""
-                    SELECT DISTINCT {column_name} 
-                    FROM invoice_items 
-                    WHERE is_active = true 
-                        AND {column_name} IS NOT NULL 
-                        AND {column_name} != ''
-                    ORDER BY {column_name}
-                    LIMIT 500
-                """)
-            
-            # Execute with minimal overhead
-            result = self.db.execute(raw_query)
-            values = [row[0] for row in result.fetchall()]
-            
-            execution_time = time.time() - start_time
-            logger.info(f"ULTRA-FAST column '{column_name}': "
-                       f"{execution_time:.3f}s, {len(values)} values")
-            
-            return values
-            
-        except Exception as e:
-            logger.error(f"Ultra-fast column query failed: {e}")
-            # Fallback to simple query
+        # Create cache keys for filter context and comparison filters
+        filter_hash, comparison_hash = self._create_filter_hash(filter_context, comparison_filters or [])
+        
+        # For frequently accessed columns, use caching
+        cacheable_columns = ['vendor', 'customer_job', 'class_', 'export_status']
+        if column_name in cacheable_columns and not filter_context and not comparison_filters:
             try:
-                column_attr = getattr(InvoiceItem, column_name)
-                simple_result = (
-                    self.db.query(column_attr)
-                    .filter(InvoiceItem.is_active == True)
-                    .filter(column_attr.isnot(None))
-                    .distinct()
-                    .limit(200)
-                    .all()
-                )
-                return [str(row[0]) for row in simple_result]
-            except Exception:
-                return []
+                return self._get_cached_distinct_values(column_name, filter_hash, comparison_hash)
+            except:
+                pass  # Fall back to non-cached version if caching fails
+        
+        # Use the optimized implementation
+        result = self._get_distinct_values_optimized(column_name, filter_context, comparison_filters or [])
+        
+        logging.info(f"get_data_by_column_name for '{column_name}' took {time.time() - start_time:.2f}s")
+        return result
 
     def apply_filters(
         self, 
         request: FilterRequest, 
         page: int = 1, 
-        size: int = 10
+        size: int = 10,
+        col_param: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        ULTRA-OPTIMIZED filters - Same response structure, lightning speed.
+        Optimized version of apply_filters for handling 10,000+ records efficiently.
+        Preserves ALL business logic including BMW/Y&S suffixes and proper pagination.
+        Supports col_param for getting specific column values (used by export).
         """
         start_time = time.time()
         
-        try:
-            # Build WHERE conditions for raw SQL (preserves all logic)
-            where_conditions = ["is_active = true"]
-            params = {}
+        # Build base query with proper filtering
+        query = self.db.query(InvoiceItem)
+        
+        # Apply empty item filter
+        query = self._apply_empty_item_filter(query)
+        
+        # Apply 'IN' filters dynamically
+        for column_name, values in request.filters.items():
+            if not hasattr(InvoiceItem, column_name):
+                continue  # Skip invalid columns
+                
+            column = getattr(InvoiceItem, column_name)
             
-            # Handle filter conditions (same logic, faster execution)
-            if request.filters:
-                for column, values in request.filters.items():
-                    if values and len(values) > 0:
-                        # Create parameterized query for safety
-                        placeholders = []
-                        for i, value in enumerate(values[:50]):  # Limit for performance
-                            param_name = f"{column}_{i}"
-                            placeholders.append(f":{param_name}")
-                            params[param_name] = value
-                        
-                        where_conditions.append(
-                            f"{column} IN ({','.join(placeholders)})"
-                        )
+            # Special handling for 'item' column - convert suffixed values back to original values
+            if column_name == "item":
+                original_values = []
+                for value in values:
+                    original_value = self._remove_suffix_from_item_code(value)
+                    original_values.append(original_value)
+                values = original_values
             
-            # Handle comparison filters (same logic, faster execution)
-            if request.comparison_filters:
-                for i, comp_filter in enumerate(request.comparison_filters):
-                    param_name = f"comp_{i}"
-                    column = comp_filter.column
-                    operator = comp_filter.operator
-                    value = comp_filter.value
-                    
-                    if operator == 'gt':
-                        where_conditions.append(f"{column} > :{param_name}")
-                    elif operator == 'lt':
-                        where_conditions.append(f"{column} < :{param_name}")
-                    elif operator == 'gte':
-                        where_conditions.append(f"{column} >= :{param_name}")
-                    elif operator == 'lte':
-                        where_conditions.append(f"{column} <= :{param_name}")
-                    elif operator == 'eq':
-                        where_conditions.append(f"{column} = :{param_name}")
-                    
-                    params[param_name] = value
+            # Optimize large IN clauses
+            if len(values) > 1000:
+                # Split into smaller batches for better database performance
+                batch_conditions = []
+                batch_size = 1000
+                for i in range(0, len(values), batch_size):
+                    batch_values = values[i:i + batch_size]
+                    batch_conditions.append(column.in_(batch_values))
+                query = query.filter(or_(*batch_conditions))
+            else:
+                query = query.filter(column.in_(values))
+        
+        # Apply comparison filters
+        for comp_filter in request.comparison_filters:
+            if not hasattr(InvoiceItem, comp_filter.column):
+                continue  # Skip invalid columns
+                
+            column = getattr(InvoiceItem, comp_filter.column)
             
-            # Count query (ultra-fast)
-            count_query = text(f"""
-                SELECT COUNT(*) 
-                FROM invoice_items 
-                WHERE {' AND '.join(where_conditions)}
-            """)
-            total_count = self.db.execute(count_query, params).scalar()
+            # Special handling for 'amount' column (string to float conversion)
+            if comp_filter.column == "amount":
+                column = cast(column, Float)
             
-            # Data query with BMW/Y&S suffix logic preserved
-            offset = (page - 1) * size
-            data_query = text(f"""
-                SELECT 
-                    id, item, vendor, customer_job, cost, qty, date, amount,
-                    description, mpi_item, class_, export_status,
-                    CASE 
-                        WHEN vendor LIKE '%BMW%' THEN item || '-B'
-                        WHEN vendor LIKE '%Y&S%' OR vendor LIKE '%Y & S%' 
-                            THEN item || '-Y'
-                        ELSE item 
-                    END as display_item
-                FROM invoice_items 
-                WHERE {' AND '.join(where_conditions)}
-                ORDER BY date DESC, id DESC
-                LIMIT {size} OFFSET {offset}
-            """)
+            try:
+                value = self._convert_filter_value(comp_filter.__dict__, column)
+                query = self._apply_operator_filter(query, column, comp_filter.operator, value)
+            except (ValueError, TypeError):
+                continue  # Skip invalid values
+        
+        # Handle col_param for specific column extraction (used by export)
+        if col_param and size == 0:
+            if not hasattr(InvoiceItem, col_param):
+                raise HTTPException(status_code=400, detail=f"Invalid column name: {col_param}")
             
-            result = self.db.execute(data_query, params)
+            column_attr = getattr(InvoiceItem, col_param)
             
-            # Convert to InvoiceItem objects (same structure maintained)
-            items = []
-            for row in result.fetchall():
-                item = InvoiceItem()
-                # Map fields (same as original structure)
-                item.id = row[0]
-                item.item = row[1] 
-                item.vendor = row[2]
-                item.customer_job = row[3]
-                item.cost = row[4]
-                item.qty = row[5]
-                item.date = row[6]
-                item.amount = row[7]
-                item.description = row[8]
-                item.mpi_item = row[9]
-                item.class_ = row[10]
-                item.export_status = row[11]
-                item.display_item = row[12]  # BMW/Y&S suffix preserved
-                items.append(item)
+            # Apply sorting if specified
+            if request.order_by:
+                for order_filter in request.order_by:
+                    if not hasattr(InvoiceItem, order_filter.column):
+                        continue
+                    order_column = getattr(InvoiceItem, order_filter.column)
+                    if order_filter.order == "asc":
+                        query = query.order_by(order_column.asc())
+                    elif order_filter.order == "desc":
+                        query = query.order_by(order_column.desc())
+            else:
+                # Default sorting
+                query = query.order_by(InvoiceItem.date.desc(), InvoiceItem.id.desc())
             
-            # Calculate pagination (same structure as original)
-            total_pages = (total_count + size - 1) // size
-            has_next = page < total_pages
-            has_prev = page > 1
+            # Execute query to get specific column values
+            results = query.with_entities(column_attr).all()
+            column_values = [row[0] for row in results if row[0] is not None]
             
             execution_time = time.time() - start_time
-            logger.info(f"ULTRA-FAST filter: {execution_time:.3f}s, "
-                       f"{len(items)}/{total_count} items")
+            logger.info(f"apply_filters with col_param='{col_param}' completed in {execution_time:.3f}s: "
+                       f"returned {len(column_values)} values")
             
-            # Return exact same structure as original
-            return {
-                "items": items,
-                "total": total_count,
-                "page": page,
-                "size": size,
-                "total_pages": total_pages,
-                "has_next": has_next,
-                "has_prev": has_prev
-            }
-            
-        except Exception as e:
-            logger.error(f"Ultra-fast filter failed: {e}")
-            # Fallback to simplified query
-            try:
-                simple_query = self.db.query(InvoiceItem).filter(
-                    InvoiceItem.is_active == True
-                )
-                total = simple_query.count()
-                items = simple_query.offset((page - 1) * size).limit(size).all()
-                
-                return {
-                    "items": items,
-                    "total": total,
-                    "page": page,
-                    "size": size,
-                    "total_pages": (total + size - 1) // size,
-                    "has_next": page < (total + size - 1) // size,
-                    "has_prev": page > 1
-                }
-            except Exception:
-                return {
-                    "items": [],
-                    "total": 0,
-                    "page": page,
-                    "size": size,
-                    "total_pages": 0,
-                    "has_next": False,
-                    "has_prev": False
-                }
+            return column_values
+        
+        # Apply sorting
+        if request.order_by:
+            for order_filter in request.order_by:
+                if not hasattr(InvoiceItem, order_filter.column):
+                    continue
+                    
+                column = getattr(InvoiceItem, order_filter.column)
+                if order_filter.order == "asc":
+                    query = query.order_by(column.asc())
+                elif order_filter.order == "desc":
+                    query = query.order_by(column.desc())
+        else:
+            # Default sorting by date descending
+            query = query.order_by(InvoiceItem.date.desc(), InvoiceItem.id.desc())
+        
+        # Get total count efficiently
+        total = query.count()
+        
+        # Apply pagination if size > 0
+        if size > 0:
+            query = query.limit(size).offset((page - 1) * size)
+        
+        # Execute query and get results
+        items = query.all()
+        
+        # Process results for display (add suffix logic)
+        invoices_items = []
+        for item in items:
+            item_dict = item.__dict__.copy()
+            # Replace the item field with the suffixed version for display
+            item_dict['item'] = item.item_code_with_suffix
+            invoices_items.append(InvoiceItemsResponse(**item_dict))
+        
+        # Calculate pagination metadata
+        total_pages = (total + size - 1) // size if size > 0 else 1
+        has_next = page < total_pages if size > 0 else False
+        has_prev = page > 1 if size > 0 else False
+        
+        execution_time = time.time() - start_time
+        logger.info(f"apply_filters completed in {execution_time:.3f}s: "
+                   f"total={total}, returned={len(invoices_items)}")
+        
+        return {
+            "items": invoices_items,
+            "total": total,
+            "page": page,
+            "size": size if size > 0 else total,
+            "total_pages": total_pages,
+            "has_next": has_next,
+            "has_prev": has_prev
+        }
 
     def _calculate_item_with_suffix(self, item, vendor):
         """
