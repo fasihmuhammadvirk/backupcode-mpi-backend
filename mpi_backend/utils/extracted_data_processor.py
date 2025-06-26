@@ -34,25 +34,25 @@ def validate_invoice_data(data):
     validation_errors = []
     
     # Check for reference number
-    if 'Ref NO' not in data.columns:
-        validation_errors.append("Missing 'Ref NO' column")
+    if 'ref no' not in data.columns:
+        validation_errors.append("Missing 'ref no' column")
     elif data.empty or len(data) == 0:
         validation_errors.append("Invoice data is empty")
-    elif pd.isna(data['Ref NO'][0]) or str(data['Ref NO'][0]).strip() == '':
+    elif pd.isna(data['ref no'][0]) or str(data['ref no'][0]).strip() == '':
         validation_errors.append("Missing reference number value")
     
     # Check for total amount (using the sum of all line item amounts)
-    if 'Amount' not in data.columns:
-        validation_errors.append("Missing 'Amount' column")
-    elif data['Amount'].isnull().all():
+    if 'amount' not in data.columns:
+        validation_errors.append("Missing 'amount' column")
+    elif data['amount'].isnull().all():
         validation_errors.append("All amount values are null")
-    elif len(data['Amount']) == 0:
+    elif len(data['amount']) == 0:
         validation_errors.append("No amount values found")
     
     # Check for date
-    if 'Date' not in data.columns:
-        validation_errors.append("Missing 'Date' column")
-    elif pd.isna(data['Date'][0]) or str(data['Date'][0]).strip() == '':
+    if 'date' not in data.columns:
+        validation_errors.append("Missing 'date' column")
+    elif pd.isna(data['date'][0]) or str(data['date'][0]).strip() == '':
         validation_errors.append("Missing date value")
     
     if validation_errors:
@@ -128,17 +128,21 @@ def process_extracted_data(converted_files, failed_files):
             'Cost': 0,
             'Class': '',
             'Memo': '',
-            'Ref NO': '',
+            'ref no': '',
             'PO #': '',
             'Customer Job': '',
             'Buyer': '',
-            'Date': datetime.today().strftime('%m/%d/%Y')
+            'date': datetime.today().strftime('%m/%d/%Y')
         })
 
         # Create invoice record initially with PROCESSING status
-        invoice_record = InvoiceController(db).insert_invoice(extracted_data['Date'][0], file.rsplit('/')[-1],
-                                                              supplier_id, 'PROCESSING',
-                                                              file)  # one record for every file in invoices table
+        invoice_record = InvoiceController(db).insert_invoice(
+            extracted_data['date'][0],
+            file.rsplit('/')[-1],
+            supplier_id,
+            'PROCESSING',
+            file
+        )  # one record for every file in invoices table
 
         # Validate the invoice has all critical fields
         if validate_invoice_data(extracted_data):
