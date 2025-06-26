@@ -164,7 +164,9 @@ def process_extracted_data(converted_files, failed_files):
 
         # Store invoice items regardless of status
         for index, row in extracted_data.iterrows():  # every item has its own record
-            InvoiceItemController(db).insert_invoice_items(row, file.rsplit('/')[-1], invoice_record.id)
+            InvoiceItemController(db).insert_invoice_items(
+                row, file.rsplit('/')[-1], invoice_record.id
+            )
 
     for file in failed_files:
         supplier_id, supplier_name = extract_supplier_id(file_path=file)
@@ -234,7 +236,9 @@ def search_replace(row, temp_items, item_mappings):
 
     # THIRD: If no mapping found at all, add to unmapped items
     if not UnmappedItemsController(db).is_item_code_present(row['item'], supplier_id):
-        UnmappedItemsController(db).insert_unmapped_item(row['item'], row['description'], supplier_id)
+        UnmappedItemsController(db).insert_unmapped_item(
+            row['item'], row['description'], supplier_id
+        )
 
     # Return with default "No Match" - this will be set by the calling function
     return row
