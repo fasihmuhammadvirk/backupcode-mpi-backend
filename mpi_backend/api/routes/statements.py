@@ -6,7 +6,7 @@ import logging
 import boto3
 
 from mpi_backend.database import get_db
-from mpi_backend.database.controllers.statement_controller import (
+from mpi_backend.database.controllers.StatementController import (
     StatementController
 )
 from mpi_backend.utils.auth.auth_bearer import JWTBearer

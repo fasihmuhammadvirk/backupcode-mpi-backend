@@ -55,7 +55,7 @@ from mpi_backend.database.models.statement_models import (
 )
 from mpi_backend.utils.statement_extractor.extractor import StatementExtractor
 from mpi_backend.utils.s3_utils import upload_file
-from mpi_backend.database.controllers.statement_controller import (
+from mpi_backend.database.controllers.StatementController import (
     StatementController
 )
 

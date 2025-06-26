@@ -42,7 +42,7 @@ import time
 sys.path.append(str(Path(__file__).parent.parent))
 
 from mpi_backend.database import SessionLocal, get_db
-from mpi_backend.database.controllers.statement_controller import StatementController
+from mpi_backend.database.controllers.StatementController import StatementController
 from mpi_backend.database.models.statement_models import (
     PlumbingSupplier, PlumbingStatement, PlumbingInvoice
 )
