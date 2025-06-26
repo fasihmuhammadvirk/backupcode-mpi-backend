@@ -97,7 +97,8 @@ async def upload_and_process_invoice(supplier_id : int, file: UploadFile = File(
     # Check if any invoices failed validation but don't change the response structure
     for file_path in converted_files:
         file_name = os.path.basename(file_path)
-        invoice = db.query(InvoiceController(db).db_context.query).filter_by(filename=file_name).first()
+        from mpi_backend.database.models.invoice import Invoice
+        invoice = db.query(Invoice).filter_by(filename=file_name).first()
         if invoice and invoice.status == "FAILED":
             logger.warning(f"Invoice {file_name} failed validation (missing ref number, amount, or date)")
 
@@ -136,7 +137,8 @@ async def process_again(invoice_id : str, db: Session = Depends(get_db),
     # Check if reprocessed invoice failed validation but don't change response structure
     for file_path in converted_files:
         file_name = os.path.basename(file_path)
-        new_invoice = db.query(InvoiceController(db).db_context.query).filter_by(filename=file_name).first()
+        from mpi_backend.database.models.invoice import Invoice
+        new_invoice = db.query(Invoice).filter_by(filename=file_name).first()
         if new_invoice and new_invoice.status == "FAILED":
             logger.warning(f"Reprocessed invoice {file_name} failed validation (missing ref number, amount, or date)")
 
