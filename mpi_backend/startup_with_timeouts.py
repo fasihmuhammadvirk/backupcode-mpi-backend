@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Enhanced startup script for MPI Backend with QuickBooks timeout protection.
 
