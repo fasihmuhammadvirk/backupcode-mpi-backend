@@ -97,15 +97,15 @@ def process_extracted_data(converted_files, failed_files):
             continue
 
         supplier_id = SupplierController(db).get_supplier_name(
-            extracted_data['Vendor'][0]
+            extracted_data['vendor'][0]
         )
 
         if InvoiceItemController(db).invoice_exists(
-            str(extracted_data['Ref NO'][0]),
-            str(extracted_data['Vendor'][0])
+            str(extracted_data['ref no'][0]),
+            str(extracted_data['vendor'][0])
         ):
             logger.warning(
-                f'Invoice with REF-NO-> {str(extracted_data["Ref NO"][0])} already processed and is being skipped!'
+                f'Invoice with REF-NO-> {str(extracted_data["ref no"][0])} already processed and is being skipped!'
             )
             continue
 
@@ -118,8 +118,8 @@ def process_extracted_data(converted_files, failed_files):
             search_replace, args=(temp_items, item_mappings,), axis=1
         )
 
-        extracted_customer_job = extracted_data['Customer Job'][0]
-        extracted_data['Customer Job'] = get_updated_customer_job(
+        extracted_customer_job = extracted_data['customer job'][0]
+        extracted_data['customer job'] = get_updated_customer_job(
             extracted_customer_job, customer_job_mappings
         )
 
@@ -156,7 +156,7 @@ def process_extracted_data(converted_files, failed_files):
             logger.warning(f'Invoice {file.rsplit("/")[-1]} marked as failed due to missing critical data')
         
         # Upload to S3 regardless of status
-        upload_file(file_name=file, file_key=f'{extracted_data["Vendor"][0]}/{invoice_record.id}')
+        upload_file(file_name=file, file_key=f'{extracted_data["vendor"][0]}/{invoice_record.id}')
 
         # Store invoice items regardless of status
         for index, row in extracted_data.iterrows():  # every item has its own record
@@ -180,8 +180,8 @@ def search_replace(row, temp_items, item_mappings):
     """
     from mpi_backend.utils.mapping_validators import is_temporary_mapping
     
-    original_item = row['Item']  # This is the CLEAN supplier_item_ids from invoice
-    supplier_id, _ = extract_supplier_id(row['Vendor'])
+    original_item = row['item']  # This is the CLEAN supplier_item_ids from invoice
+    supplier_id, _ = extract_supplier_id(row['vendor'])
     
     # FIRST: Search in permanent mappings (supplier_item_mappings table)
     # This ensures permanent mappings override temporary ones
@@ -229,8 +229,8 @@ def search_replace(row, temp_items, item_mappings):
         return row
 
     # THIRD: If no mapping found at all, add to unmapped items
-    if not UnmappedItemsController(db).is_item_code_present(row['Item'], supplier_id):
-        UnmappedItemsController(db).insert_unmapped_item(row['Item'],row['Description'],supplier_id)
+    if not UnmappedItemsController(db).is_item_code_present(row['item'], supplier_id):
+        UnmappedItemsController(db).insert_unmapped_item(row['item'], row['description'], supplier_id)
 
     # Return with default "No Match" - this will be set by the calling function
     return row
