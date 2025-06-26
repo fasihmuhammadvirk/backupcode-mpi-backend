@@ -19,6 +19,13 @@ RECOMMENDED:
 """
 import time
 import logging
+import sys
+import os
+
+# Add project root to path
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+
 from datetime import datetime, timedelta
 from mpi_backend.utils import missing_invoice_downaloder as downloader
 from mpi_backend.config import TIMEZONE
