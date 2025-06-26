@@ -1,17 +1,24 @@
 # the file will be responsible to read all the converted excel files, map their items, descriptions and customer jobs
 # and store them in database.
+import re
 import pandas as pd
 from datetime import datetime
-import re
 import logging
+from contextlib import contextmanager
+from mpi_backend.database.models.invoice import Invoice
+from mpi_backend.utils.s3_utils import upload_file
+from mpi_backend.utils.item_utils import clean_supplier_suffix
+
 logger = logging.getLogger(__name__)
 
 from mpi_backend.database import get_db
-from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
-# Import controllers lazily to avoid circular imports
-from contextlib import contextmanager
-from mpi_backend.utils.s3_utils import upload_file,get_presigned_url
-from mpi_backend.utils.item_utils import clean_supplier_suffix
+from mpi_backend.database.controllers.TemporaryItemMappingController import TempItemsMappingController
+from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
+from mpi_backend.database.controllers.CustomerJobMappingContorller import CustomerJobMappingController
+from mpi_backend.database.controllers.Suppliers import SupplierController
+from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
+from mpi_backend.database.controllers.invoice import InvoiceController
+from mpi_backend.database.controllers.UnmappedItems import UnmappedItemsController
 
 db = contextmanager(get_db)
 
@@ -54,14 +61,6 @@ def validate_invoice_data(data):
 
 
 def process_extracted_data(converted_files, failed_files):
-    # Lazy imports to avoid circular imports
-    from mpi_backend.database.controllers.TemporaryItemMappingController import TempItemsMappingController
-    from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
-    from mpi_backend.database.controllers.CustomerJobMappingContorller import CustomerJobMappingController
-    from mpi_backend.database.controllers.Suppliers import SupplierController
-    from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
-    from mpi_backend.database.controllers.invoice import InvoiceController
-
     temp_items = TempItemsMappingController(db).get_temp_items_mappings()
     item_mappings = ItemsMappingController(db).get_items_mappings()
     customer_job_mappings = CustomerJobMappingController(db).get_customer_job_mappings()
@@ -108,7 +107,7 @@ def process_extracted_data(converted_files, failed_files):
             # Invoice invalid - mark as failed
             invoice_record.status = 'FAILED'
             with db() as session:
-                invoice = session.query(InvoiceController(session).db_context.query).filter_by(id=invoice_record.id).first()
+                invoice = session.query(Invoice).filter_by(id=invoice_record.id).first()
                 if invoice:
                     invoice.status = 'FAILED'
                     session.commit()
@@ -188,7 +187,6 @@ def search_replace(row, temp_items, item_mappings):
         return row
 
     # THIRD: If no mapping found at all, add to unmapped items
-    from mpi_backend.database.controllers.UnmappedItems import UnmappedItemsController
     if not UnmappedItemsController(db).is_item_code_present(row['Item'], supplier_id):
         UnmappedItemsController(db).insert_unmapped_item(row['Item'],row['Description'],supplier_id)
 
