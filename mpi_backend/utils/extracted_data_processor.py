@@ -73,24 +73,15 @@ def process_extracted_data(converted_files, failed_files):
             extracted_data = pd.read_excel(
                 file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
             )
-            # Clean up column names: strip spaces and lowercase
-            extracted_data.columns = [
-                col.strip().lower() for col in extracted_data.columns
-            ]
-            # Normalize column names to expected ones (all lowercase)
+            # Normalize column names to expected ones
             column_renames = {
-                'unit price': 'cost',
-                'price': 'cost',
-                'unitprice': 'cost',
-                'rate': 'cost',
+                'Unit Price': 'Cost',
+                'Price': 'Cost',
+                'UnitPrice': 'Cost',
+                'Rate': 'Cost',
                 # Add more mappings as needed
             }
             extracted_data.rename(columns=column_renames, inplace=True)
-            if 'cost' not in extracted_data.columns:
-                logger.error(
-                    "Column 'cost' not found after normalization. Columns: "
-                    f"{extracted_data.columns.tolist()}"
-                )
         except FileNotFoundError:
             logger.error(f'Invoice ->{file} does not exists')
             failed_files.append(file)  # Add to failed files if Excel not found
