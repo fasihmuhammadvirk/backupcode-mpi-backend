@@ -113,11 +113,11 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(
         email_download_background_task,
         "interval",
-        minutes=5,  # Increased interval to reduce load
-        max_instances=2,  # Reduced from 10 to 2 for stability
+        minutes=3,  # Further increased interval to reduce load
+        max_instances=1,  # Reduced to 1 for maximum stability
         id="email_download",
         name="Email Download Task",
-        misfire_grace_time=300
+        misfire_grace_time=600
     )
     
     # Optimized statement download
@@ -195,7 +195,7 @@ async def lifespan(app: FastAPI):
 
     scheduler.start()
     logger.info("Background tasks scheduler started successfully")
-    logger.info("Email download: Every 5min (max 2 instances)")
+    logger.info("Email download: Every 15min (max 1 instance)")
     logger.info("Statement download: Every 12hrs (max 1 instance)") 
     logger.info("Google Sheets sync: Every 8hrs (max 1 instance)")
     logger.info("Memory cleanup: Every 30min")
@@ -359,32 +359,7 @@ def register_routes(app):
 register_routes(app)
 add_pagination(app)
 
-# Add startup event with minimal logging
-@app.on_event("startup")
-async def startup_event():
-    logger.info("MPI Backend started with optimizations")
-    logger.info("Background task concurrency reduced for stability")
-    logger.info("Memory monitoring active for critical endpoints only")
-    logger.info("Automatic garbage collection enabled")
-    logger.info("Request rejection on extreme memory usage enabled")
-    logger.info("Timeout configuration:")
-    logger.info("  MIGRATE-ALL: 15min timeout")
-    logger.info("  QuickBooks: 10min timeout") 
-    logger.info("  Exports: 5min timeout")
-    logger.info("  Standard: 2min timeout")
-    
-    # Initial memory report (optional)
-    try:
-        import psutil
-        process = psutil.Process(os.getpid())
-        memory_usage = process.memory_info().rss / 1024 / 1024
-        logger.info(f"Startup memory usage: {memory_usage:.1f}MB")
-    except ImportError:
-        logger.info("Memory monitoring requires psutil package")
-    except Exception as e:
-        logger.debug(f"Memory check failed: {e}")  # Changed to debug level
-
-
+# Add performance stats endpoint
 @app.get("/performance-stats")
 async def get_performance_stats():
     """Get performance statistics for monitoring."""
@@ -499,9 +474,20 @@ def _convert_to_serializable(obj):
 # Memory management for large datasets
 async def cleanup_memory():
     """Periodic memory cleanup for sustained performance."""
-    while True:
-        await asyncio.sleep(300)  # Every 5 minutes
-        gc.collect()
+    try:
+        while True:
+            await asyncio.sleep(300)  # Every 5 minutes
+            try:
+                collected = gc.collect()
+                logger.debug(f"Memory cleanup: collected {collected} objects")
+            except Exception as gc_error:
+                logger.error(f"Garbage collection failed: {gc_error}")
+    except asyncio.CancelledError:
+        logger.info("Memory cleanup task cancelled")
+        raise
+    except Exception as e:
+        logger.error(f"Memory cleanup task failed: {e}")
+        raise
 
 
 # Ultra-fast health check
@@ -533,10 +519,58 @@ async def ultra_health_check():
         }, 500)
 
 
-# Start background memory management
+# Global task reference for proper cleanup
+_cleanup_task = None
+
+
+# Single startup event with proper task management
 @app.on_event("startup")
 async def startup_event():
-    asyncio.create_task(cleanup_memory())
+    global _cleanup_task
+    logger.info("MPI Backend started with optimizations")
+    logger.info("Background task concurrency reduced for stability")
+    logger.info("Memory monitoring active for critical endpoints only")
+    logger.info("Automatic garbage collection enabled")
+    logger.info("Request rejection on extreme memory usage enabled")
+    logger.info("Timeout configuration:")
+    logger.info("  MIGRATE-ALL: 15min timeout")
+    logger.info("  QuickBooks: 10min timeout") 
+    logger.info("  Exports: 5min timeout")
+    logger.info("  Standard: 2min timeout")
+    
+    # Initial memory report (optional)
+    try:
+        import psutil
+        process = psutil.Process(os.getpid())
+        memory_usage = process.memory_info().rss / 1024 / 1024
+        logger.info(f"Startup memory usage: {memory_usage:.1f}MB")
+    except ImportError:
+        logger.info("Memory monitoring requires psutil package")
+    except Exception as e:
+        logger.debug(f"Memory check failed: {e}")  # Changed to debug level
+    
+    # Start background memory management with proper task tracking
+    try:
+        _cleanup_task = asyncio.create_task(cleanup_memory())
+        logger.info("Memory cleanup task started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start memory cleanup task: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    global _cleanup_task
+    logger.info("Shutting down MPI Backend")
+    
+    # Cancel the cleanup task properly
+    if _cleanup_task and not _cleanup_task.done():
+        _cleanup_task.cancel()
+        try:
+            await _cleanup_task
+        except asyncio.CancelledError:
+            logger.info("Memory cleanup task cancelled successfully")
+        except Exception as e:
+            logger.error(f"Error cancelling cleanup task: {e}")
 
 
 if __name__ == "__main__":
