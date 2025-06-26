@@ -8,17 +8,20 @@ from contextlib import contextmanager
 from mpi_backend.database.models.invoice import Invoice
 from mpi_backend.utils.s3_utils import upload_file
 from mpi_backend.utils.item_utils import clean_supplier_suffix
-
-logger = logging.getLogger(__name__)
-
 from mpi_backend.database import get_db
-from mpi_backend.database.controllers.TemporaryItemMappingController import TempItemsMappingController
-from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
-from mpi_backend.database.controllers.CustomerJobMappingContorller import CustomerJobMappingController
+from mpi_backend.database.controllers.TemporaryItemMappingController import \
+    TempItemsMappingController
+from mpi_backend.database.controllers.ItemsMappingController import \
+    ItemsMappingController
+from mpi_backend.database.controllers.CustomerJobMappingContorller import \
+    CustomerJobMappingController
 from mpi_backend.database.controllers.Suppliers import SupplierController
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
 from mpi_backend.database.controllers.invoice import InvoiceController
-from mpi_backend.database.controllers.UnmappedItems import UnmappedItemsController
+from mpi_backend.database.controllers.UnmappedItems import \
+    UnmappedItemsController
+
+logger = logging.getLogger(__name__)
 
 db = contextmanager(get_db)
 
@@ -67,16 +70,34 @@ def process_extracted_data(converted_files, failed_files):
 
     for file in converted_files:
         try:
-            extracted_data = pd.read_excel(file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
+            extracted_data = pd.read_excel(
+                file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
+            )
+            # Normalize column names to expected ones
+            column_renames = {
+                'Unit Price': 'Cost',
+                'Price': 'Cost',
+                'UnitPrice': 'Cost',
+                'Rate': 'Cost',
+                # Add more mappings as needed
+            }
+            extracted_data.rename(columns=column_renames, inplace=True)
         except FileNotFoundError:
             logger.error(f'Invoice ->{file} does not exists')
             failed_files.append(file)  # Add to failed files if Excel not found
             continue
 
-        supplier_id = SupplierController(db).get_supplier_name(extracted_data['Vendor'][0])
+        supplier_id = SupplierController(db).get_supplier_name(
+            extracted_data['Vendor'][0]
+        )
 
-        if InvoiceItemController(db).invoice_exists(str(extracted_data['Ref NO'][0]),str(extracted_data['Vendor'][0])) :
-            logger.warning(f'Invoice with REF-NO-> {str(extracted_data["Ref NO"][0])} already processed and is being skipped!')
+        if InvoiceItemController(db).invoice_exists(
+            str(extracted_data['Ref NO'][0]),
+            str(extracted_data['Vendor'][0])
+        ):
+            logger.warning(
+                f'Invoice with REF-NO-> {str(extracted_data["Ref NO"][0])} already processed and is being skipped!'
+            )
             continue
 
         extracted_data.insert(0, 'Sheet Name', '')
@@ -84,14 +105,26 @@ def process_extracted_data(converted_files, failed_files):
         extracted_data['MpiDescription'] = 'No Match'
         extracted_data['email_date'] = extract_email_date(file)
 
-        extracted_data = extracted_data.apply(search_replace, args=(temp_items, item_mappings,), axis=1)
+        extracted_data = extracted_data.apply(
+            search_replace, args=(temp_items, item_mappings,), axis=1
+        )
 
         extracted_customer_job = extracted_data['Customer Job'][0]
-        extracted_data['Customer Job'] = get_updated_customer_job(extracted_customer_job, customer_job_mappings)
+        extracted_data['Customer Job'] = get_updated_customer_job(
+            extracted_customer_job, customer_job_mappings
+        )
 
-        extracted_data = extracted_data.fillna({'Qty': 0, 'Cost': 0, 'Class': '', 'Memo': '', 'Ref NO': '',
-                                                'PO #': '', 'Customer Job': '', 'Buyer': '',
-                                                'Date': datetime.today().strftime('%m/%d/%Y')})
+        extracted_data = extracted_data.fillna({
+            'Qty': 0,
+            'Cost': 0,
+            'Class': '',
+            'Memo': '',
+            'Ref NO': '',
+            'PO #': '',
+            'Customer Job': '',
+            'Buyer': '',
+            'Date': datetime.today().strftime('%m/%d/%Y')
+        })
 
         # Create invoice record initially with PROCESSING status
         invoice_record = InvoiceController(db).insert_invoice(extracted_data['Date'][0], file.rsplit('/')[-1],
