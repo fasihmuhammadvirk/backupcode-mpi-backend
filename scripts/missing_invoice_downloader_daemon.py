@@ -131,6 +131,7 @@ if __name__ == "__main__":
         )
         try:
             main()
+        except Exception as e2:
             logger.critical(
                 f"Repeated fatal error: {str(e2)}", exc_info=True
             )
