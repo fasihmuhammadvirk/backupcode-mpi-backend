@@ -1,7 +1,7 @@
 from datetime import date, datetime, timedelta
 from sqlalchemy import asc, desc, case, cast, Float, func, and_, or_, text, select
 from fastapi import HTTPException, BackgroundTasks
-from typing import List, Dict, Any, Optional, Tuple, Generator
+from typing import List, Dict, Any, Optional, Tuple
 from math import ceil
 from mpi_backend.database.models import InvoiceItem
 # Import moved inside methods to avoid circular imports
@@ -15,15 +15,14 @@ from mpi_backend.utils.export_utils import extract_supplier_id
 import math
 import logging
 import sqlalchemy.orm
-from sqlalchemy.orm import load_only, Session, defer
+from sqlalchemy.orm import load_only, Session
 import time
 from functools import lru_cache
 import hashlib
 import json
 import traceback
 import gc
-from concurrent.futures import ThreadPoolExecutor
-import asyncio
+
 
 logger = logging.getLogger(__name__)
 
@@ -1555,7 +1554,9 @@ class InvoiceItemController:
 
     def calculate_price_increase(self, item_numbers):
         """
-        Calculate percentage price increase by comparing current price with price from ~1 year ago.
+        Calculate percentage price increase by comparing the highest price within the last year 
+        with the price from ~1 year ago.
+        Shows price increase even if current price has dropped from the peak.
         Optimized for minimal latency.
         Preserves duplicates and maintains original order of item numbers.
 
@@ -1593,12 +1594,11 @@ class InvoiceItemController:
                     # Sort by date descending (most recent first)
                     items.sort(key=lambda x: x.date, reverse=True)
 
-                    # Get most recent price
-                    current_item = items[0]
-                    current_price = current_item.cost
-
-                    # Find items purchased before target date (1 year ago)
+                    # Find items purchased before target date (1 year ago) for baseline price
                     past_items = []
+                    # Find items purchased within the last year for peak price tracking
+                    recent_items = []
+                    
                     for item in items:
                         # Safely compare dates by ensuring both are datetime objects
                         item_date = item.date
@@ -1613,9 +1613,12 @@ class InvoiceItemController:
 
                         if item_date < compare_date:
                             past_items.append(item)
+                        else:
+                            # Items within the last year
+                            recent_items.append(item)
 
-                    if past_items:
-                        # Find the item with date closest to target date
+                    if past_items and recent_items:
+                        # Find the item with date closest to target date (1 year ago baseline)
                         def date_difference(item):
                             item_date = item.date
                             compare_date = target_date
@@ -1633,11 +1636,14 @@ class InvoiceItemController:
                         past_item = min(past_items, key=date_difference)
                         previous_price = past_item.cost
 
-                        # Calculate percentage increase
+                        # Find the highest price within the last year (peak price)
+                        peak_price = max(item.cost for item in recent_items if item.cost is not None and item.cost > 0)
+
+                        # Calculate percentage increase using peak price vs baseline price
                         if previous_price == 0:
                             percentage_increase = "∞%"
                         else:
-                            percentage_value = ((current_price - previous_price) / previous_price) * 100
+                            percentage_value = ((peak_price - previous_price) / previous_price) * 100
                             percentage_increase = f"{round(percentage_value, 1)}%"
 
             result.append((item_number, percentage_increase))
