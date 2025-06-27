@@ -1637,14 +1637,20 @@ class InvoiceItemController:
                         previous_price = past_item.cost
 
                         # Find the highest price within the last year (peak price)
-                        peak_price = max(item.cost for item in recent_items if item.cost is not None and item.cost > 0)
-
-                        # Calculate percentage increase using peak price vs baseline price
-                        if previous_price == 0:
-                            percentage_increase = "∞%"
+                        valid_recent_costs = [item.cost for item in recent_items if item.cost is not None and item.cost > 0]
+                        
+                        if not valid_recent_costs:
+                            # No valid recent prices, skip this item
+                            percentage_increase = "N/A"
                         else:
-                            percentage_value = ((peak_price - previous_price) / previous_price) * 100
-                            percentage_increase = f"{round(percentage_value, 1)}%"
+                            peak_price = max(valid_recent_costs)
+
+                            # Calculate percentage increase using peak price vs baseline price
+                            if previous_price == 0:
+                                percentage_increase = "∞%"
+                            else:
+                                percentage_value = ((peak_price - previous_price) / previous_price) * 100
+                                percentage_increase = f"{round(percentage_value, 1)}%"
 
             result.append((item_number, percentage_increase))
 
