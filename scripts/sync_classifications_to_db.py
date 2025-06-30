@@ -25,7 +25,7 @@ try:
     print(" Database components imported successfully")
 except ImportError as e:
     DATABASE_AVAILABLE = False
-    print(f"❌ Failed to import database components: {e}")
+    print(f"ERROR: Failed to import database components: {e}")
     sys.exit(1)
 
 def test_database_connection() -> bool:
@@ -46,7 +46,7 @@ def test_database_connection() -> bool:
         """)).fetchone()
         
         if result[0] == 0:
-            print("❌ item_classification table does not exist!")
+            print("ERROR: item_classification table does not exist!")
             db.close()
             return False
         
@@ -59,7 +59,7 @@ def test_database_connection() -> bool:
         return True
         
     except Exception as e:
-        print(f"❌ Database connection failed: {e}")
+        print(f"ERROR: Database connection failed: {e}")
         try:
             db.close()
         except:
@@ -79,13 +79,13 @@ def load_json_classifications() -> Optional[List[Dict]]:
         return data
         
     except FileNotFoundError:
-        print(f"❌ JSON file not found: {json_path}")
+        print(f"ERROR: JSON file not found: {json_path}")
         return None
     except json.JSONDecodeError as e:
-        print(f"❌ Invalid JSON: {e}")
+        print(f"ERROR: Invalid JSON: {e}")
         return None
     except Exception as e:
-        print(f"❌ Error loading JSON: {e}")
+        print(f"ERROR: Error loading JSON: {e}")
         return None
 
 def get_existing_db_classifications() -> Dict[str, str]:
@@ -106,7 +106,7 @@ def get_existing_db_classifications() -> Dict[str, str]:
         return existing
         
     except Exception as e:
-        print(f"❌ Error fetching database classifications: {e}")
+        print(f"ERROR: Error fetching database classifications: {e}")
         try:
             db.close()
         except:
@@ -178,7 +178,7 @@ def insert_missing_classifications(missing_classifications: List[Dict]) -> bool:
                 
             except Exception as e:
                 db.rollback()
-                print(f"   ❌ Error inserting '{item_name}': {e}")
+                print(f"   ERROR: Error inserting '{item_name}': {e}")
                 error_count += 1
         
         # Commit all changes
@@ -191,7 +191,7 @@ def insert_missing_classifications(missing_classifications: List[Dict]) -> bool:
         
     except Exception as e:
         db.rollback()
-        print(f"❌ Failed to commit changes: {e}")
+        print(f"ERROR: Failed to commit changes: {e}")
         return False
         
     finally:
@@ -226,7 +226,7 @@ def create_backup_sql(missing_classifications: List[Dict]) -> None:
         print(f" Backup SQL script created: {sql_filename}")
         
     except Exception as e:
-        print(f"❌ Error creating backup SQL: {e}")
+        print(f"ERROR: Error creating backup SQL: {e}")
 
 def main():
     """Main execution function"""
@@ -243,13 +243,13 @@ def main():
     
     # Step 1: Test database connection
     if not test_database_connection():
-        print("❌ Cannot proceed without database connection!")
+        print("ERROR: Cannot proceed without database connection!")
         return False
     
     # Step 2: Load JSON data
     json_data = load_json_classifications()
     if not json_data:
-        print("❌ Cannot proceed without JSON data!")
+        print("ERROR: Cannot proceed without JSON data!")
         return False
     
     # Step 3: Get existing database classifications
@@ -279,7 +279,7 @@ def main():
     response = input(f"\nProceed with adding {len(missing_classifications)} classifications? (y/N): ")
     
     if response.lower() != 'y':
-        print("❌ Operation cancelled by user")
+        print("ERROR: Operation cancelled by user")
         return False
     
     # Step 5: Create backup SQL
@@ -301,7 +301,7 @@ def main():
         
         return True
     else:
-        print(f"\n❌ Sync failed! Check the error messages above.")
+        print(f"\nERROR: Sync failed! Check the error messages above.")
         print(f" You can try running the backup SQL script manually.")
         return False
 
@@ -310,10 +310,10 @@ if __name__ == "__main__":
         success = main()
         sys.exit(0 if success else 1)
     except KeyboardInterrupt:
-        print("\n❌ Operation interrupted by user")
+        print("\nERROR: Operation interrupted by user")
         sys.exit(1)
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}")
+        print(f"\nERROR: Unexpected error: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1) 

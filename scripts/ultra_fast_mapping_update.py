@@ -42,7 +42,7 @@ try:
     )
     from mpi_backend.config import SQLALCHEMY_DATABASE_URI
 except ImportError as e:
-    print(f"❌ Import error: {e}")
+    print(f"ERROR: Import error: {e}")
     print("Make sure you're running from the correct directory and all dependencies are installed.")
     sys.exit(1)
 
@@ -82,7 +82,7 @@ class UltraFastMappingUpdater:
                 db.execute(text("SELECT 1"))
             logger.info(" Database connection verified")
         except Exception as e:
-            logger.error(f"❌ Database connection failed: {str(e)}")
+            logger.error(f"ERROR: Database connection failed: {str(e)}")
             logger.error("Please check your database configuration and ensure the database is running")
             raise ConnectionError(f"Database connection failed: {str(e)}")
     
@@ -104,7 +104,7 @@ class UltraFastMappingUpdater:
                 logger.info(f" Mapping sync completed in {sync_time:.2f}s")
                 
                 if not sync_result.get("success"):
-                    logger.error("❌ Critical: Mapping sync failed!")
+                    logger.error("ERROR: Critical: Mapping sync failed!")
                     return {
                         "success": False,
                         "error": f"Mapping sync failed: {sync_result.get('error', 'Unknown error')}",
@@ -131,7 +131,7 @@ class UltraFastMappingUpdater:
             }
             
         except Exception as e:
-            logger.error(f"❌ Complete update failed: {str(e)}")
+            logger.error(f"ERROR: Complete update failed: {str(e)}")
             return {
                 "success": False,
                 "error": str(e),
@@ -405,10 +405,10 @@ def main():
         result = updater.run_update(force_full_sync=not skip_sync)
         
     except ConnectionError as e:
-        logger.error("❌ Database connection error - cannot proceed")
+        logger.error("ERROR: Database connection error - cannot proceed")
         result = {"success": False, "error": str(e), "total_time": 0}
     except Exception as e:
-        logger.error(f"❌ Initialization failed: {str(e)}")
+        logger.error(f"ERROR: Initialization failed: {str(e)}")
         result = {"success": False, "error": str(e), "total_time": 0}
     
     # Print results
@@ -442,7 +442,7 @@ def main():
             efficiency = (result.get('updated_count', 0) / total_items) * 100
             logger.info(f" Update efficiency: {efficiency:.1f}%")
     else:
-        logger.error(f"❌ FAILED: {result.get('error', 'Unknown error')}")
+        logger.error(f"ERROR: FAILED: {result.get('error', 'Unknown error')}")
         logger.error(f"⏱  Time elapsed: {result.get('total_time', 0)}s")
     
     logger.info("=" * 60)

@@ -123,7 +123,7 @@ def print_summary(invoice_sheet_names, mapping_sheet_names, classified_items, an
     print(f"   • Existing classifications:                  {len(classified_items)}")
     print(f"   • Missing classifications (overall):         {len(analysis['missing_overall'])}")
     
-    print(f"\n❌ MISSING CLASSIFICATIONS BREAKDOWN:")
+    print(f"\nERROR: MISSING CLASSIFICATIONS BREAKDOWN:")
     print(f"   • Missing from invoice_items only:           {len(analysis['missing_from_invoice_items'])}")
     print(f"   • Missing from supplier_item_mappings only:  {len(analysis['missing_from_mappings'])}")
     print(f"   • Missing overall (from both sources):       {len(analysis['missing_overall'])}")
@@ -145,7 +145,7 @@ def print_detailed_missing_items(analysis):
     print(f"="*80)
     
     if analysis['missing_overall']:
-        print(f"\n❌ ALL MISSING CLASSIFICATIONS ({len(analysis['missing_overall'])} items):")
+        print(f"\nERROR: ALL MISSING CLASSIFICATIONS ({len(analysis['missing_overall'])} items):")
         print(f"   (These sheet names exist in database but have no classification)")
         for i, sheet_name in enumerate(analysis['missing_overall'], 1):
             print(f"   {i:3d}. '{sheet_name}'")
@@ -360,7 +360,7 @@ def main():
         print(f"\n Analysis completed successfully!")
         
     except Exception as e:
-        print(f"❌ Error during analysis: {e}")
+        print(f"ERROR: Error during analysis: {e}")
         raise
     finally:
         db.close()

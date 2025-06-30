@@ -29,10 +29,10 @@ def load_json_file(filepath):
         with open(filepath, 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
-        print(f"❌ Error: File not found: {filepath}")
+        print(f"ERROR: Error: File not found: {filepath}")
         return None
     except json.JSONDecodeError as e:
-        print(f"❌ Error: Invalid JSON in {filepath}: {e}")
+        print(f"ERROR: Error: Invalid JSON in {filepath}: {e}")
         return None
 
 def find_missing_classifications():
@@ -99,7 +99,7 @@ def update_database(new_classifications):
     """Update the database with new classifications"""
     
     if not DATABASE_CONNECTION_AVAILABLE:
-        print("❌ Database connection not available. Skipping database update.")
+        print("ERROR: Database connection not available. Skipping database update.")
         print("   You'll need to run the generated SQL script manually.")
         return False
     
@@ -131,7 +131,7 @@ def update_database(new_classifications):
         return True
         
     except Exception as e:
-        print(f"❌ Database error: {e}")
+        print(f"ERROR: Database error: {e}")
         print("   Falling back to SQL script generation only.")
         return False
 
@@ -142,7 +142,7 @@ def add_missing_classifications(missing_sheet_names, existing_data):
         print("\n No missing classifications found! Your system is up to date.")
         return False
     
-    print(f"\n❌ Missing sheet names that need to be added:")
+    print(f"\nERROR: Missing sheet names that need to be added:")
     for i, sheet_name in enumerate(missing_sheet_names, 1):
         print(f"   {i:2d}. '{sheet_name}'")
     
@@ -153,7 +153,7 @@ def add_missing_classifications(missing_sheet_names, existing_data):
     response = input(f"\nProceed with adding {len(missing_sheet_names)} missing classifications? (y/N): ")
     
     if response.lower() != 'y':
-        print("❌ Operation cancelled by user")
+        print("ERROR: Operation cancelled by user")
         return False
     
     # Create new classifications
@@ -223,7 +223,7 @@ def update_json_file(existing_data, new_classifications):
         print(f"⚠  Warning: Could not create backup: {e}")
         response = input("Continue without backup? (y/N): ")
         if response.lower() != 'y':
-            print("❌ Operation cancelled")
+            print("ERROR: Operation cancelled")
             return False
     
     # Write updated data
@@ -239,7 +239,7 @@ def update_json_file(existing_data, new_classifications):
         return True
         
     except Exception as e:
-        print(f"❌ Error writing JSON file: {e}")
+        print(f"ERROR: Error writing JSON file: {e}")
         return False
 
 def generate_sql_script(new_classifications):
@@ -267,7 +267,7 @@ def generate_sql_script(new_classifications):
         print(f"   Use this script as backup or for manual database updates")
         
     except Exception as e:
-        print(f"❌ Error generating SQL script: {e}")
+        print(f"ERROR: Error generating SQL script: {e}")
 
 def main():
     """Main function"""
@@ -289,7 +289,7 @@ def main():
     
     for filepath in required_files:
         if not os.path.exists(filepath):
-            print(f"❌ Error: Required file not found: {filepath}")
+            print(f"ERROR: Error: Required file not found: {filepath}")
             return
     
     # Show database connection status

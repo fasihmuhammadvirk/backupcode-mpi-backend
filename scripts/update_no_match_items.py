@@ -96,7 +96,7 @@ def update_no_match_items():
             f"  - Items as 'UIDI-Job Equipment': {equipment_count}"
         )
         if error_count:
-            logger.warning(f"❌ Items with errors: {error_count}")
+            logger.warning(f"ERROR: Items with errors: {error_count}")
         
         # VERIFICATION SECTION
         # Verify the results by checking for remaining 'No Match' items

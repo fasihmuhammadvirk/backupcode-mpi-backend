@@ -85,7 +85,7 @@ def update_existing_invoice_items(db, output_file="mpi_backend/storage/fixtures/
 
     except Exception as e:
         db.rollback()
-        logger.error(f"❌ Error updating invoice items: {str(e)}")
+        logger.error(f"ERROR: Error updating invoice items: {str(e)}")
         raise
 
 
@@ -98,7 +98,7 @@ def main():
         update_existing_invoice_items(db)
         logger.info(" Invoice update completed.")
     except Exception as e:
-        logger.error(f"❌ Failed in main: {str(e)}")
+        logger.error(f"FAILED: Failed in main: {str(e)}")
     finally:
         db.close()
 

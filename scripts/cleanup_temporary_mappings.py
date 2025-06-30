@@ -182,7 +182,7 @@ def cleanup_temporary_mappings(dry_run: bool = False, migrate_to_temp: bool = Fa
         
     except Exception as e:
         db.rollback()
-        logger.error(f"❌ Error during cleanup: {str(e)}")
+        logger.error(f"ERROR: Error during cleanup: {str(e)}")
         return {
             "status": "error",
             "message": f"Error during cleanup: {str(e)}",
@@ -219,7 +219,7 @@ def verify_cleanup(dry_run: bool = False) -> dict:
             return {"status": "warning", "remaining_count": remaining_temporary}
             
     except Exception as e:
-        logger.error(f"❌ Error during verification: {str(e)}")
+        logger.error(f"ERROR: Error during verification: {str(e)}")
         return {"status": "error", "message": str(e)}
     finally:
         db.close()

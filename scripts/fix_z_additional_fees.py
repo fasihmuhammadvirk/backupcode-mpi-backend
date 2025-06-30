@@ -33,11 +33,11 @@ def test_database_connection():
         return True
         
     except ImportError as e:
-        print(f"   ❌ Import error: {e}")
+        print(f"   ERROR: Import error: {e}")
         print("    Make sure you're running from the project root directory")
         return False
     except Exception as e:
-        print(f"   ❌ Database connection failed: {e}")
+        print(f"   ERROR: Database connection failed: {e}")
         print("    Check your database configuration and ensure the database is running")
         return False
 
@@ -57,7 +57,7 @@ def check_project_structure():
             missing_files.append(file_path)
     
     if missing_files:
-        print(f"   ❌ Missing required files:")
+        print(f"   ERROR: Missing required files:")
         for file_path in missing_files:
             print(f"      - {file_path}")
         print("    Please run this script from the project root directory")
@@ -106,13 +106,13 @@ def update_json_file():
         return True
         
     except FileNotFoundError:
-        print(f"   ❌ JSON file not found: {json_path}")
+        print(f"   ERROR: JSON file not found: {json_path}")
         return False
     except json.JSONDecodeError as e:
-        print(f"   ❌ Invalid JSON format: {e}")
+        print(f"   ERROR: Invalid JSON format: {e}")
         return False
     except Exception as e:
-        print(f"   ❌ Error updating JSON file: {e}")
+        print(f"   ERROR: Error updating JSON file: {e}")
         return False
 
 def update_database():
@@ -124,7 +124,7 @@ def update_database():
         from mpi_backend.database import SessionLocal
         from mpi_backend.database.models.ItemClassification import ItemClassification
     except ImportError as e:
-        print(f"   ❌ Import error: {e}")
+        print(f"   ERROR: Import error: {e}")
         return False
     
     db = None
@@ -151,7 +151,7 @@ def update_database():
     except Exception as e:
         if db:
             db.rollback()
-        print(f"   ❌ Error updating database: {e}")
+        print(f"   ERROR: Error updating database: {e}")
         return False
     finally:
         if db:
@@ -176,12 +176,12 @@ def verify_updates():
                     print("    JSON file: category is 'M'")
                     json_updated = True
                 else:
-                    print(f"   ❌ JSON file: category is '{item.get('category')}' (should be 'M')")
+                    print(f"   ERROR: JSON file: category is '{item.get('category')}' (should be 'M')")
                 break
         else:
-            print("   ❌ JSON file: item not found")
+            print("   ERROR: JSON file: item not found")
     except Exception as e:
-        print(f"   ❌ JSON file error: {e}")
+        print(f"   ERROR: JSON file error: {e}")
     
     # Check database
     db_updated = False
@@ -200,14 +200,14 @@ def verify_updates():
                 print("    Database: category is 'M'")
                 db_updated = True
             else:
-                print(f"   ❌ Database: category is '{item.category}' (should be 'M')")
+                print(f"   ERROR: Database: category is '{item.category}' (should be 'M')")
         else:
-            print("   ❌ Database: item not found")
+            print("   ERROR: Database: item not found")
             
         db.close()
         
     except Exception as e:
-        print(f"   ❌ Database error: {e}")
+        print(f"   ERROR: Database error: {e}")
     
     return json_updated and db_updated
 
@@ -230,7 +230,7 @@ def test_classification():
             db.close()
             return True
         elif result == '':
-            print("   ❌ Classification test failed: Returns empty string")
+            print("   ERROR: Classification test failed: Returns empty string")
             print("    This means the item has null category or is missing")
             db.close()
             return False
@@ -240,7 +240,7 @@ def test_classification():
             return False
             
     except Exception as e:
-        print(f"   ❌ Classification test error: {e}")
+        print(f"   ERROR: Classification test error: {e}")
         return False
 
 def get_current_status():
@@ -271,14 +271,14 @@ def get_current_status():
                 print(f"   ⚠  Item has category '{item.category}' - will update to 'M'")
                 status = "needs_updating"
         else:
-            print("   ❌ Item not found in database")
+            print("   ERROR: Item not found in database")
             status = "not_found"
             
         db.close()
         return status
         
     except Exception as e:
-        print(f"   ❌ Error checking status: {e}")
+        print(f"   ERROR: Error checking status: {e}")
         return "error"
 
 def main():
@@ -292,13 +292,13 @@ def main():
     
     # Step 1: Check project structure
     if not check_project_structure():
-        print("\n❌ Project structure check failed")
+        print("\nERROR: Project structure check failed")
         print(" Please run this script from the mpi-backend project root directory")
         return False
     
     # Step 2: Test database connection
     if not test_database_connection():
-        print("\n❌ Database connection failed")
+        print("\nERROR: Database connection failed")
         print(" Please check your database configuration and ensure it's running")
         return False
     
@@ -306,10 +306,10 @@ def main():
     status = get_current_status()
     
     if status == "error":
-        print("\n❌ Cannot proceed due to errors")
+        print("\nERROR: Cannot proceed due to errors")
         return False
     elif status == "not_found":
-        print("\n❌ Item not found in database")
+        print("\nERROR: Item not found in database")
         print(" You may need to run the classification sync script first")
         return False
     
@@ -320,7 +320,7 @@ def main():
         response = input("\nProceed with updating category to 'M'? (y/N): ")
     
     if response.lower() != 'y':
-        print("❌ Operation cancelled")
+        print("ERROR: Operation cancelled")
         return False
     
     print("\n Starting updates...")
@@ -333,8 +333,8 @@ def main():
     
     # Step 7: Summary
     print("\n Update Summary:")
-    print(f"   JSON file: {' Success' if json_success else '❌ Failed'}")
-    print(f"   Database:  {' Success' if db_success else '❌ Failed'}")
+    print(f"   JSON file: {' Success' if json_success else 'ERROR: Failed'}")
+    print(f"   Database:  {' Success' if db_success else 'ERROR: Failed'}")
     
     if json_success and db_success:
         print("\n Verification...")
@@ -349,9 +349,9 @@ def main():
             else:
                 print("\n⚠  Updates completed but classification test failed")
         else:
-            print("\n❌ Verification failed")
+            print("\nERROR: Verification failed")
     else:
-        print("\n❌ Some updates failed - check the errors above")
+        print("\nERROR: Some updates failed - check the errors above")
     
     return False
 
@@ -364,8 +364,8 @@ if __name__ == "__main__":
             print("\n⚠  Script completed with issues - please review the output above")
             sys.exit(1)
     except KeyboardInterrupt:
-        print("\n\n❌ Script interrupted by user")
+        print("\n\nERROR: Script interrupted by user")
         sys.exit(1)
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}")
+        print(f"\nERROR: Unexpected error: {e}")
         sys.exit(1) 

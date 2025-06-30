@@ -956,7 +956,7 @@ Examples:
                 else:
                     print(" No emails were marked as read during this process.")
             else:
-                print(f"\n❌ Operation failed: {result.get('error', 'Unknown error')}")
+                print(f"\nERROR: Operation failed: {result.get('error', 'Unknown error')}")
                 return 1
                 
     except KeyboardInterrupt:
@@ -964,7 +964,7 @@ Examples:
         return 1
     except Exception as e:
         logger.error(f"Critical error: {str(e)}")
-        print(f"\n❌ Critical error: {str(e)}")
+        print(f"\nERROR: Critical error: {str(e)}")
         return 1
     
     return 0

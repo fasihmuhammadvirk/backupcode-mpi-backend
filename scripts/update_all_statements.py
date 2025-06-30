@@ -245,7 +245,7 @@ class StatementUpdater:
                 self.stats['statements_failed'] += 1
                 error_msg = result.get('error', 'Unknown error')
                 self.stats['errors'].append(f"Statement {statement_id}: {error_msg}")
-                logger.error(f"❌ Failed to update statement {statement_id}: {error_msg}")
+                logger.error(f"ERROR: Failed to update statement {statement_id}: {error_msg}")
                 return result
                 
         except Exception as e:
@@ -506,7 +506,7 @@ Examples:
                     if result['statistics']['supplier_corrections'] > 0:
                         print("⚠  Supplier corrections were made - check logs for details")
             else:
-                print(f"\n❌ Update process failed: {result.get('error', 'Unknown error')}")
+                print(f"\nERROR: Update process failed: {result.get('error', 'Unknown error')}")
                 return 1
                 
     except KeyboardInterrupt:
@@ -514,7 +514,7 @@ Examples:
         return 1
     except Exception as e:
         logger.error(f"Critical error: {str(e)}")
-        print(f"\n❌ Critical error: {str(e)}")
+        print(f"\nERROR: Critical error: {str(e)}")
         return 1
     
     return 0

@@ -11,9 +11,11 @@ LOGGING_CONFIG = {
     "formatters": {
         "default": {
             "format": "%(asctime)s - %(levelname)s - %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S"
         },
         "detailed": {
             "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S"
         },
     },
     "handlers": {
@@ -21,6 +23,7 @@ LOGGING_CONFIG = {
             "class": "logging.StreamHandler",
             "formatter": "default",
             "level": "INFO",
+            "stream": "ext://sys.stdout"
         },
         "file": {
             "class": "logging.handlers.RotatingFileHandler",
@@ -29,6 +32,7 @@ LOGGING_CONFIG = {
             "maxBytes": 10485760,  # 10MB
             "backupCount": 5,
             "level": "INFO",
+            "encoding": "utf-8"
         },
         "error_file": {
             "class": "logging.handlers.RotatingFileHandler",
@@ -37,6 +41,7 @@ LOGGING_CONFIG = {
             "maxBytes": 10485760,  # 10MB
             "backupCount": 5,
             "level": "ERROR",
+            "encoding": "utf-8"
         }
     },
     "root": {
@@ -56,12 +61,12 @@ LOGGING_CONFIG = {
         },
         "uvicorn.access": {
             "handlers": ["console"],
-            "level": "INFO",
+            "level": "WARNING",  # Reduce uvicorn access log noise
             "propagate": False,
         },
         "sqlalchemy.engine": {
             "handlers": ["file"],
-            "level": "WARNING",  # Only log warnings and errors for SQL queries
+            "level": "WARNING",
             "propagate": False,
         },
         "mpi_backend.database.controllers": {
@@ -79,4 +84,21 @@ LOGGING_CONFIG = {
 
 def setup_logging():
     logging.config.dictConfig(LOGGING_CONFIG)
-    logging.info("Logging configured successfully")
+    
+    # Ensure all log messages are ASCII-safe
+    class ASCIIFilter(logging.Filter):
+        def filter(self, record):
+            # Convert message to ASCII-safe string, removing any special characters
+            if hasattr(record, 'msg'):
+                try:
+                    # Convert to string and encode/decode to remove non-ASCII chars
+                    record.msg = str(record.msg).encode('ascii', 'ignore').decode('ascii')
+                except:
+                    record.msg = "Log message encoding error"
+            return True
+    
+    # Add ASCII filter to all handlers
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(ASCIIFilter())
+    
+    logging.info("Logging configured successfully - ASCII mode enabled")

@@ -71,7 +71,7 @@ def migrate_classifications():
                 print(f"⚠  Skipped duplicate: {item_data['item']}")
             except Exception as e:
                 db.rollback()
-                print(f"❌ Error adding {item_data['item']}: {e}")
+                print(f"ERROR: Error adding {item_data['item']}: {e}")
         
         # Fix Z, ADDITIONAL FEES if it has null category
         z_item = db.query(ItemClassification).filter(
@@ -88,7 +88,7 @@ def migrate_classifications():
         
     except Exception as e:
         db.rollback()
-        print(f"❌ Migration failed: {e}")
+        print(f"ERROR: Migration failed: {e}")
         return False
     finally:
         db.close()
