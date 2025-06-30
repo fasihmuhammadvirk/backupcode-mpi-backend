@@ -11,6 +11,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from mpi_backend.utils.google_sheets import GoogleSheetDataExtractor
+from mpi_backend.utils.sync_mapping.temporary_mapping_sync import TemporaryMappingSync
 from mpi_backend.config.spreadsheet_config import (
     DEFAULT_SHEET_ID,
     DEFAULT_OUTPUT_FILE,
@@ -49,6 +50,7 @@ class GoogleSheetSyncController:
         from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
         self.db = db
         self.mapping_controller = ItemsMappingController(db)
+        self.temp_mapping_sync = TemporaryMappingSync(db)
         
     @classmethod
     def execute_sync_task(cls, db: Session = None, operation: str = 'sync'):
@@ -215,6 +217,27 @@ class GoogleSheetSyncController:
                     batch_size=MAPPING_CONFIG["batch_size"],
                     fuzzy_threshold=MAPPING_CONFIG["fuzzy_threshold"]
                 )
+                
+                # Step 2: Sync temporary mappings and update invoice items
+                if result.get("success"):
+                    self.__class__._current_sub_operation = "syncing_temporary_mappings"
+                    temp_result = self.temp_mapping_sync.perform_complete_temporary_mapping_sync(
+                        sheet_id=DEFAULT_SHEET_ID,
+                        api_key=GOOGLE_API_KEY,
+                        skip_sheets=SKIP_SHEETS
+                    )
+                    
+                    # Enhance result with temporary mapping info
+                    result["temporary_mapping_result"] = temp_result
+                    if temp_result.get("success"):
+                        logger.info(
+                            f"Temporary mapping sync: {temp_result['extraction_result']['total_mappings_extracted']} "
+                            f"mappings extracted, {temp_result['update_result']['items_updated']} items updated"
+                        )
+                    else:
+                        logger.warning(f"Temporary mapping sync failed: {temp_result['message']}")
+                        # Don't fail the whole operation if temporary mapping fails
+                        result["temporary_mapping_warning"] = temp_result["message"]
 
             # Update last sync time on success
             if result.get("success"):
