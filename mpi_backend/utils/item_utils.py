@@ -293,6 +293,25 @@ def should_restore_suffix(context: str) -> bool:
     return context.lower() in display_contexts 
 
 
+def clean_suffix(original_item_id: str) -> str:
+    """
+    Clean supplier suffixes from original_item_id for deduplication.
+    Removes patterns like -W, -B, -Y, -S from the end of item codes.
+    
+    Args:
+        original_item_id (str): Item code potentially with suffix
+        
+    Returns:
+        str: Cleaned item code without suffix
+    """
+    if not original_item_id or not isinstance(original_item_id, str):
+        return original_item_id or ""
+    
+    # Remove suffix patterns at the end (-W, -B, -Y, -S, etc.)
+    cleaned = re.sub(r'\s*-\s*[A-Z]\s*$', '', original_item_id.strip())
+    return cleaned.strip()
+
+
 def is_empty_or_invalid_item(item_code: str) -> bool:
     """
     Check if an item code is empty, just a dot, or invalid and should be filtered out.

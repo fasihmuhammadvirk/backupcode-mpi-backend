@@ -4,9 +4,16 @@ from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
+from mpi_backend.database.controllers.UnmappedItems import (
+    UnmappedItemsController
+)
 from mpi_backend.database.schemas import (
     FilterRequest, PaginatedInvoiceItemsResponse, 
     PriceHistoryRequest, PriceHistoryResponse
+)
+from mpi_backend.database.schemas.InvoiceItems import (
+    UnmappedItemsFilterRequest,
+    PaginatedUnmappedItemsResponse
 )
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.pdf_to_excel.formatting_util import (
@@ -501,4 +508,130 @@ def clear_cache(token: str = Depends(JWTBearer())):
     _cache_timestamps.clear()
     
     return create_optimized_response({"message": "Cache cleared successfully"})
+
+
+@router.post("/unmapped-items", response_model=PaginatedUnmappedItemsResponse)
+def get_unmapped_items(
+    request: UnmappedItemsFilterRequest,
+    db: Session = Depends(get_db),
+    token: str = Depends(JWTBearer()),
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    size: int = Query(10, ge=1, description="Number of items per page")
+):
+    """
+    Retrieve unique unmapped or temporary items with advanced filtering, search, and ordering.
+
+    **Summary:**
+        Returns a paginated, de-duplicated list of invoice items that are either unmapped or temporarily mapped, with support for search and flexible ordering. Items are grouped by cleaned item code (suffixes like -W, -B, -Y, -S, -F are removed).
+
+    **Request Body:**
+
+    - **item_type** (`str`, required):
+        - "temporary": Items with `sheet_name` and either `mpi_item_id` or `mpi_description` is "No Match" or starts with "UIDI"
+        - "unmapped": Items with `sheet_name` null or empty
+    - **date_from** (`str`, optional): Start date filter (YYYY-MM-DD)
+    - **date_to** (`str`, optional): End date filter (YYYY-MM-DD)
+    - **supplier_names** (`List[str]`, optional): List of supplier names to filter by
+    - **search** (`str`, optional): Search term for item code or description
+    - **order_by** (`List[dict]`, optional): List of ordering criteria, e.g. `[{"column": "original_item_id", "order": "asc"}]`
+
+    **Query Parameters:**
+
+    - **page** (`int`, default=1): Page number (1-based)
+    - **size** (`int`, default=10): Number of items per page
+
+    **Request Example:**
+
+    ```json
+    {
+      "item_type": "temporary",
+      "date_from": "2024-01-01",
+      "date_to": "2024-12-31",
+      "supplier_names": ["BMW Plumbing Supplies"],
+      "search": "006-ST4",
+      "order_by": [
+        {"column": "original_item_id", "order": "desc"},
+        {"column": "supplier", "order": "asc"}
+      ]
+    }
+    ```
+
+    **Response Example:**
+
+    ```json
+    {
+      "items": [
+        {
+          "original_item_id": "006-ST4",
+          "mpi_item_id": "No Match",
+          "mpi_description": "No Match",
+          "sheet_name": "Sheet X",
+          "supplier": "BMW Plumbing Supplies"
+        }
+      ],
+      "total_count": 1,
+      "page": 1,
+      "size": 10,
+      "pages": 1
+    }
+    ```
+
+    **Response Fields:**
+
+    - **items** (`List[object]`): List of unique unmapped/temporary items (suffixes removed)
+        - **original_item_id** (`str`): Cleaned item code (e.g., "ABC-123")
+        - **mpi_item_id** (`str`): MPI item code or "No Match"/"UIDI" for temporary items
+        - **mpi_description** (`str`): MPI description or "No Match"
+        - **sheet_name** (`str`): Google sheet name (null/empty for unmapped)
+        - **supplier** (`str`): Supplier/vendor name
+    - **total_count** (`int`): Total number of unique items found
+    - **page** (`int`): Current page number
+    - **size** (`int`): Number of items per page
+    - **pages** (`int`): Total number of pages
+
+    **Notes:**
+    - Items are grouped by cleaned item code (suffixes like -W, -B, -Y, -S, -F are removed)
+    - Search is case-insensitive and matches both item code and description
+    - Ordering supports multiple columns; default is ascending by `original_item_id`
+    - Only unique items are returned in the response
+    """
+    try:
+        # Validate item_type
+        if request.item_type not in ["temporary", "unmapped"]:
+            raise HTTPException(
+                status_code=400,
+                detail="item_type must be either 'temporary' or 'unmapped'"
+            )
+        
+        # Initialize controller
+        controller = UnmappedItemsController(db)
+        
+        # Get filtered items
+        result = controller.get_unmapped_items(
+            item_type=request.item_type,
+            date_from=request.date_from,
+            date_to=request.date_to,
+            supplier_names=request.supplier_names,
+            search=request.search,
+            order_by=request.order_by,
+            page=page,
+            size=size
+        )
+        
+        logger.info(
+            f"Retrieved {len(result['items'])} {request.item_type} items "
+            f"(page {page}/{result['pages']}, total: {result['total_count']})"
+        )
+        
+        return PaginatedUnmappedItemsResponse(**result)
+        
+    except ValueError as e:
+        logger.error(f"Invalid request parameters: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error retrieving unmapped items: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while retrieving unmapped items"
+        )
 
