@@ -1577,19 +1577,24 @@ class InvoiceItemController:
         start_time = time.time()
         
         result = []
-        if not item_numbers:
+        
+        # Check if we have either item_numbers or item_vendor_pairs
+        if not item_numbers and not item_vendor_pairs:
             return result
 
-        # Remove duplicates while preserving order for processing efficiency
-        unique_items = list(dict.fromkeys(item_numbers))
-        
-        logger.info(f"Calculating price increase for {len(unique_items)} unique "
-                   f"items (total: {len(item_numbers)})")
+        # Remove duplicates while preserving order for processing efficiency (only if item_numbers provided)
+        unique_items = []
+        if item_numbers:
+            unique_items = list(dict.fromkeys(item_numbers))
+            logger.info(f"Calculating price increase for {len(unique_items)} unique "
+                       f"items (total: {len(item_numbers)})")
+        elif item_vendor_pairs:
+            logger.info(f"Calculating supplier-specific price increase for {len(item_vendor_pairs)} item-vendor pairs")
 
         try:
             # Determine if we should use supplier-specific comparison
             if item_vendor_pairs:
-                # Use supplier-specific SQL query
+                # Use supplier-specific SQL query with dynamic time periods
                 price_increase_query = text("""
                     WITH item_vendor_pairs_table AS (
                         SELECT unnest(:items) as item, unnest(:vendors) as vendor
@@ -1598,7 +1603,8 @@ class InvoiceItemController:
                         SELECT DISTINCT 
                             ii.item,
                             ii.vendor,
-                            MAX(ii.date) OVER (PARTITION BY ii.item, ii.vendor) as most_recent_date
+                            MAX(ii.date) OVER (PARTITION BY ii.item, ii.vendor) as most_recent_date,
+                            MIN(ii.date) OVER (PARTITION BY ii.item, ii.vendor) as earliest_date
                         FROM invoice_items ii
                         JOIN item_vendor_pairs_table ivp ON ii.item = ivp.item AND ii.vendor = ivp.vendor
                         WHERE ii.cost IS NOT NULL 
@@ -1611,23 +1617,62 @@ class InvoiceItemController:
                             ii.date,
                             ii.cost,
                             ivd.most_recent_date,
-                            (ivd.most_recent_date - INTERVAL '1 year') as target_date,
+                            ivd.earliest_date,
+                            -- Use flexible time period: try 1 year, 6 months, 3 months, 1 month
                             CASE 
-                                WHEN ii.date < (ivd.most_recent_date - INTERVAL '1 year') THEN 'past'
+                                WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '1 year') 
+                                    THEN (ivd.most_recent_date - INTERVAL '1 year')
+                                WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '6 months') 
+                                    THEN (ivd.most_recent_date - INTERVAL '6 months')
+                                WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '3 months') 
+                                    THEN (ivd.most_recent_date - INTERVAL '3 months')
+                                WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '1 month') 
+                                    THEN (ivd.most_recent_date - INTERVAL '1 month')
+                                ELSE ivd.earliest_date
+                            END as comparison_date,
+                            CASE 
+                                WHEN ii.date <= CASE 
+                                    WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '1 year') 
+                                        THEN (ivd.most_recent_date - INTERVAL '1 year')
+                                    WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '6 months') 
+                                        THEN (ivd.most_recent_date - INTERVAL '6 months')
+                                    WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '3 months') 
+                                        THEN (ivd.most_recent_date - INTERVAL '3 months')
+                                    WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '1 month') 
+                                        THEN (ivd.most_recent_date - INTERVAL '1 month')
+                                    ELSE ivd.earliest_date
+                                END THEN 'past'
                                 ELSE 'recent'
                             END as period_type,
                             ROW_NUMBER() OVER (
                                 PARTITION BY ii.item, ii.vendor,
-                                             CASE 
-                                     WHEN ii.date < (ivd.most_recent_date - INTERVAL '1 year') 
-                                     THEN 'past'
-                                     ELSE 'recent'
-                                 END
+                                         CASE 
+                                             WHEN ii.date <= CASE 
+                                                 WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '1 year') 
+                                                     THEN (ivd.most_recent_date - INTERVAL '1 year')
+                                                 WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '6 months') 
+                                                     THEN (ivd.most_recent_date - INTERVAL '6 months')
+                                                 WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '3 months') 
+                                                     THEN (ivd.most_recent_date - INTERVAL '3 months')
+                                                 WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '1 month') 
+                                                     THEN (ivd.most_recent_date - INTERVAL '1 month')
+                                                 ELSE ivd.earliest_date
+                                             END THEN 'past'
+                                             ELSE 'recent'
+                                         END
                                  ORDER BY 
                                  CASE 
-                                     WHEN ii.date < (ivd.most_recent_date - INTERVAL '1 year') 
-                                     THEN ABS(EXTRACT(EPOCH FROM (ii.date::timestamp - 
-                                         (ivd.most_recent_date - INTERVAL '1 year')::timestamp)))
+                                     WHEN ii.date <= CASE 
+                                         WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '1 year') 
+                                             THEN (ivd.most_recent_date - INTERVAL '1 year')
+                                         WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '6 months') 
+                                             THEN (ivd.most_recent_date - INTERVAL '6 months')
+                                         WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '3 months') 
+                                             THEN (ivd.most_recent_date - INTERVAL '3 months')
+                                         WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '1 month') 
+                                             THEN (ivd.most_recent_date - INTERVAL '1 month')
+                                         ELSE ivd.earliest_date
+                                     END THEN -EXTRACT(EPOCH FROM ii.date::timestamp)
                                      ELSE EXTRACT(EPOCH FROM (ivd.most_recent_date::timestamp - ii.date::timestamp))
                                  END
                             ) as row_num
@@ -1641,7 +1686,7 @@ class InvoiceItemController:
                             item,
                             vendor,
                             MAX(CASE WHEN period_type = 'past' AND row_num = 1 THEN cost END) as baseline_price,
-                            MAX(CASE WHEN period_type = 'recent' AND row_num = 1 THEN cost END) as current_price
+                            MAX(CASE WHEN period_type = 'recent' THEN cost END) as peak_price
                         FROM item_price_data
                         GROUP BY item, vendor
                     )
@@ -1649,11 +1694,11 @@ class InvoiceItemController:
                         item,
                         vendor,
                         baseline_price,
-                        current_price,
+                        peak_price,
                         CASE 
-                            WHEN baseline_price IS NULL OR current_price IS NULL THEN NULL
+                            WHEN baseline_price IS NULL OR peak_price IS NULL THEN NULL
                             WHEN baseline_price = 0 THEN NULL
-                            ELSE ROUND(((current_price - baseline_price) / baseline_price * 100)::numeric, 1)
+                            ELSE ROUND(((peak_price - baseline_price) / baseline_price * 100)::numeric, 1)
                         END as percentage_increase
                     FROM price_comparison
                 """)
@@ -1713,18 +1758,18 @@ class InvoiceItemController:
                         SELECT 
                             item,
                             MAX(CASE WHEN period_type = 'past' AND row_num = 1 THEN cost END) as baseline_price,
-                            MAX(CASE WHEN period_type = 'recent' AND row_num = 1 THEN cost END) as current_price
+                            MAX(CASE WHEN period_type = 'recent' THEN cost END) as peak_price
                         FROM item_price_data
                         GROUP BY item
                     )
                     SELECT 
                         item,
                         baseline_price,
-                        current_price,
+                        peak_price,
                         CASE 
-                            WHEN baseline_price IS NULL OR current_price IS NULL THEN NULL
+                            WHEN baseline_price IS NULL OR peak_price IS NULL THEN NULL
                             WHEN baseline_price = 0 THEN NULL
-                            ELSE ROUND(((current_price - baseline_price) / baseline_price * 100)::numeric, 1)
+                            ELSE ROUND(((peak_price - baseline_price) / baseline_price * 100)::numeric, 1)
                         END as percentage_increase
                     FROM price_comparison
                 """)
@@ -1738,7 +1783,7 @@ class InvoiceItemController:
             if item_vendor_pairs:
                 # Process supplier-specific results
                 for row in query_result:
-                    item, vendor, baseline_price, current_price, percentage_increase = row
+                    item, vendor, baseline_price, peak_price, percentage_increase = row
                     
                     if percentage_increase is not None:
                         if percentage_increase > 0:
@@ -1755,7 +1800,7 @@ class InvoiceItemController:
             else:
                 # Process original results (backward compatibility)
                 for row in query_result:
-                    item, baseline_price, current_price, percentage_increase = row
+                    item, baseline_price, peak_price, percentage_increase = row
                     
                     if percentage_increase is not None:
                         if percentage_increase > 0:
@@ -1771,7 +1816,12 @@ class InvoiceItemController:
                     result.append((item_number, percentage_increase))
 
             processing_time = time.time() - start_time
-            logger.info(f"Price increase calculation completed in {processing_time:.2f}s for {len(item_numbers)} items")
+            
+            # Log appropriate message based on input type
+            if item_vendor_pairs:
+                logger.info(f"Price increase calculation completed in {processing_time:.2f}s for {len(item_vendor_pairs)} item-vendor pairs")
+            else:
+                logger.info(f"Price increase calculation completed in {processing_time:.2f}s for {len(item_numbers or [])} items")
             
             return result
 
