@@ -1609,7 +1609,7 @@ class InvoiceItemController:
                         END as period_type,
                         ROW_NUMBER() OVER (
                             PARTITION BY ii.item, 
-                                                         CASE 
+                                         CASE 
                                  WHEN ii.date < (id.most_recent_date - INTERVAL '1 year') 
                                  THEN 'past'
                                  ELSE 'recent'
@@ -1617,9 +1617,9 @@ class InvoiceItemController:
                              ORDER BY 
                              CASE 
                                  WHEN ii.date < (id.most_recent_date - INTERVAL '1 year') 
-                                 THEN ABS(EXTRACT(EPOCH FROM (ii.date - 
-                                     (id.most_recent_date - INTERVAL '1 year'))))
-                                 ELSE ii.date DESC
+                                 THEN ABS(EXTRACT(EPOCH FROM (ii.date::timestamp - 
+                                     (id.most_recent_date - INTERVAL '1 year')::timestamp)))
+                                 ELSE EXTRACT(EPOCH FROM (id.most_recent_date::timestamp - ii.date::timestamp))
                              END
                         ) as row_num
                     FROM invoice_items ii
