@@ -1552,7 +1552,7 @@ class InvoiceItemController:
             "average_cost": sanitize_float(average_cost)
         }
 
-    def calculate_price_increase(self, item_numbers):
+    def calculate_price_increase(self, item_numbers, item_vendor_pairs=None):
         """
         OPTIMIZED: Calculate percentage price increase by comparing the most recent 
         price with the price from 1 year before the most recent purchase date.
@@ -1564,9 +1564,11 @@ class InvoiceItemController:
         - Processes items in batches to reduce memory usage
         - Eliminates redundant database queries
         - Uses database-level filtering instead of Python loops
+        - SUPPLIER-SPECIFIC: Compares prices within the same supplier only
 
         Args:
-            item_numbers: List containing item_numbers
+            item_numbers: List containing item_numbers (for backward compatibility)
+            item_vendor_pairs: List of tuples [(item, vendor), ...] for supplier-specific comparison
 
         Returns:
             List of tuples with item numbers and their percentage increases, preserving original order
@@ -1585,88 +1587,188 @@ class InvoiceItemController:
                    f"items (total: {len(item_numbers)})")
 
         try:
-            # Use efficient SQL query with window functions for better performance
-            price_increase_query = text("""
-                WITH item_dates AS (
-                    SELECT DISTINCT 
-                        item,
-                        MAX(date) OVER (PARTITION BY item) as most_recent_date
-                    FROM invoice_items 
-                    WHERE item = ANY(:items)
-                    AND cost IS NOT NULL 
-                    AND cost > 0
-                ),
-                item_price_data AS (
-                    SELECT DISTINCT
-                        ii.item,
-                        ii.date,
-                        ii.cost,
-                        id.most_recent_date,
-                        (id.most_recent_date - INTERVAL '1 year') as target_date,
-                        CASE 
-                            WHEN ii.date < (id.most_recent_date - INTERVAL '1 year') THEN 'past'
-                            ELSE 'recent'
-                        END as period_type,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY ii.item, 
-                                         CASE 
-                                 WHEN ii.date < (id.most_recent_date - INTERVAL '1 year') 
-                                 THEN 'past'
-                                 ELSE 'recent'
-                             END
-                             ORDER BY 
-                             CASE 
-                                 WHEN ii.date < (id.most_recent_date - INTERVAL '1 year') 
-                                 THEN ABS(EXTRACT(EPOCH FROM (ii.date::timestamp - 
-                                     (id.most_recent_date - INTERVAL '1 year')::timestamp)))
-                                 ELSE EXTRACT(EPOCH FROM (id.most_recent_date::timestamp - ii.date::timestamp))
-                             END
-                        ) as row_num
-                    FROM invoice_items ii
-                    JOIN item_dates id ON ii.item = id.item
-                    WHERE ii.cost IS NOT NULL 
-                    AND ii.cost > 0
-                ),
-                price_comparison AS (
+            # Determine if we should use supplier-specific comparison
+            if item_vendor_pairs:
+                # Use supplier-specific SQL query
+                price_increase_query = text("""
+                    WITH item_vendor_pairs_table AS (
+                        SELECT unnest(:items) as item, unnest(:vendors) as vendor
+                    ),
+                    item_vendor_dates AS (
+                        SELECT DISTINCT 
+                            ii.item,
+                            ii.vendor,
+                            MAX(ii.date) OVER (PARTITION BY ii.item, ii.vendor) as most_recent_date
+                        FROM invoice_items ii
+                        JOIN item_vendor_pairs_table ivp ON ii.item = ivp.item AND ii.vendor = ivp.vendor
+                        WHERE ii.cost IS NOT NULL 
+                        AND ii.cost > 0
+                    ),
+                    item_price_data AS (
+                        SELECT DISTINCT
+                            ii.item,
+                            ii.vendor,
+                            ii.date,
+                            ii.cost,
+                            ivd.most_recent_date,
+                            (ivd.most_recent_date - INTERVAL '1 year') as target_date,
+                            CASE 
+                                WHEN ii.date < (ivd.most_recent_date - INTERVAL '1 year') THEN 'past'
+                                ELSE 'recent'
+                            END as period_type,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY ii.item, ii.vendor,
+                                             CASE 
+                                     WHEN ii.date < (ivd.most_recent_date - INTERVAL '1 year') 
+                                     THEN 'past'
+                                     ELSE 'recent'
+                                 END
+                                 ORDER BY 
+                                 CASE 
+                                     WHEN ii.date < (ivd.most_recent_date - INTERVAL '1 year') 
+                                     THEN ABS(EXTRACT(EPOCH FROM (ii.date::timestamp - 
+                                         (ivd.most_recent_date - INTERVAL '1 year')::timestamp)))
+                                     ELSE EXTRACT(EPOCH FROM (ivd.most_recent_date::timestamp - ii.date::timestamp))
+                                 END
+                            ) as row_num
+                        FROM invoice_items ii
+                        JOIN item_vendor_dates ivd ON ii.item = ivd.item AND ii.vendor = ivd.vendor
+                        WHERE ii.cost IS NOT NULL 
+                        AND ii.cost > 0
+                    ),
+                    price_comparison AS (
+                        SELECT 
+                            item,
+                            vendor,
+                            MAX(CASE WHEN period_type = 'past' AND row_num = 1 THEN cost END) as baseline_price,
+                            MAX(CASE WHEN period_type = 'recent' AND row_num = 1 THEN cost END) as current_price
+                        FROM item_price_data
+                        GROUP BY item, vendor
+                    )
                     SELECT 
                         item,
-                        MAX(CASE WHEN period_type = 'past' AND row_num = 1 THEN cost END) as baseline_price,
-                        MAX(CASE WHEN period_type = 'recent' AND row_num = 1 THEN cost END) as current_price
-                    FROM item_price_data
-                    GROUP BY item
-                )
-                SELECT 
-                    item,
-                    baseline_price,
-                    current_price,
-                    CASE 
-                        WHEN baseline_price IS NULL OR current_price IS NULL THEN NULL
-                        WHEN baseline_price = 0 THEN NULL
-                        ELSE ROUND(((current_price - baseline_price) / baseline_price * 100)::numeric, 1)
-                    END as percentage_increase
-                FROM price_comparison
-            """)
+                        vendor,
+                        baseline_price,
+                        current_price,
+                        CASE 
+                            WHEN baseline_price IS NULL OR current_price IS NULL THEN NULL
+                            WHEN baseline_price = 0 THEN NULL
+                            ELSE ROUND(((current_price - baseline_price) / baseline_price * 100)::numeric, 1)
+                        END as percentage_increase
+                    FROM price_comparison
+                """)
+                
+                # Execute with separate item and vendor lists
+                items_list = [pair[0] for pair in item_vendor_pairs]
+                vendors_list = [pair[1] for pair in item_vendor_pairs]
+                query_result = self.db.execute(price_increase_query, {
+                    "items": items_list, 
+                    "vendors": vendors_list
+                }).fetchall()
+                
+            else:
+                # Use original SQL query (backward compatibility)
+                price_increase_query = text("""
+                    WITH item_dates AS (
+                        SELECT DISTINCT 
+                            item,
+                            MAX(date) OVER (PARTITION BY item) as most_recent_date
+                        FROM invoice_items 
+                        WHERE item = ANY(:items)
+                        AND cost IS NOT NULL 
+                        AND cost > 0
+                    ),
+                    item_price_data AS (
+                        SELECT DISTINCT
+                            ii.item,
+                            ii.date,
+                            ii.cost,
+                            id.most_recent_date,
+                            (id.most_recent_date - INTERVAL '1 year') as target_date,
+                            CASE 
+                                WHEN ii.date < (id.most_recent_date - INTERVAL '1 year') THEN 'past'
+                                ELSE 'recent'
+                            END as period_type,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY ii.item, 
+                                             CASE 
+                                     WHEN ii.date < (id.most_recent_date - INTERVAL '1 year') 
+                                     THEN 'past'
+                                     ELSE 'recent'
+                                 END
+                                 ORDER BY 
+                                 CASE 
+                                     WHEN ii.date < (id.most_recent_date - INTERVAL '1 year') 
+                                     THEN ABS(EXTRACT(EPOCH FROM (ii.date::timestamp - 
+                                         (id.most_recent_date - INTERVAL '1 year')::timestamp)))
+                                     ELSE EXTRACT(EPOCH FROM (id.most_recent_date::timestamp - ii.date::timestamp))
+                                 END
+                            ) as row_num
+                        FROM invoice_items ii
+                        JOIN item_dates id ON ii.item = id.item
+                        WHERE ii.cost IS NOT NULL 
+                        AND ii.cost > 0
+                    ),
+                    price_comparison AS (
+                        SELECT 
+                            item,
+                            MAX(CASE WHEN period_type = 'past' AND row_num = 1 THEN cost END) as baseline_price,
+                            MAX(CASE WHEN period_type = 'recent' AND row_num = 1 THEN cost END) as current_price
+                        FROM item_price_data
+                        GROUP BY item
+                    )
+                    SELECT 
+                        item,
+                        baseline_price,
+                        current_price,
+                        CASE 
+                            WHEN baseline_price IS NULL OR current_price IS NULL THEN NULL
+                            WHEN baseline_price = 0 THEN NULL
+                            ELSE ROUND(((current_price - baseline_price) / baseline_price * 100)::numeric, 1)
+                        END as percentage_increase
+                    FROM price_comparison
+                """)
+                
+                # Execute query with item list
+                query_result = self.db.execute(price_increase_query, {"items": unique_items}).fetchall()
 
-            # Execute query with item list
-            query_result = self.db.execute(price_increase_query, {"items": unique_items}).fetchall()
-            
             # Create lookup dictionary for O(1) access
             price_lookup = {}
-            for row in query_result:
-                item, baseline_price, current_price, percentage_increase = row
-                
-                if percentage_increase is not None:
-                    if percentage_increase > 0:
-                        price_lookup[item] = f"{percentage_increase}%"
+            
+            if item_vendor_pairs:
+                # Process supplier-specific results
+                for row in query_result:
+                    item, vendor, baseline_price, current_price, percentage_increase = row
+                    
+                    if percentage_increase is not None:
+                        if percentage_increase > 0:
+                            price_lookup[(item, vendor)] = f"{percentage_increase}%"
+                        else:
+                            price_lookup[(item, vendor)] = "0.0%"
                     else:
-                        price_lookup[item] = "0.0%"
-                else:
-                    price_lookup[item] = "N/A"
+                        price_lookup[(item, vendor)] = "N/A"
 
-            # Process results in original order (preserving duplicates)
-            for item_number in item_numbers:
-                percentage_increase = price_lookup.get(item_number, "N/A")
-                result.append((item_number, percentage_increase))
+                # Process results in original order (preserving duplicates)
+                for item_vendor_pair in item_vendor_pairs:
+                    percentage_increase = price_lookup.get(item_vendor_pair, "N/A")
+                    result.append((item_vendor_pair[0], percentage_increase))  # Return just the item code
+            else:
+                # Process original results (backward compatibility)
+                for row in query_result:
+                    item, baseline_price, current_price, percentage_increase = row
+                    
+                    if percentage_increase is not None:
+                        if percentage_increase > 0:
+                            price_lookup[item] = f"{percentage_increase}%"
+                        else:
+                            price_lookup[item] = "0.0%"
+                    else:
+                        price_lookup[item] = "N/A"
+
+                # Process results in original order (preserving duplicates)
+                for item_number in item_numbers:
+                    percentage_increase = price_lookup.get(item_number, "N/A")
+                    result.append((item_number, percentage_increase))
 
             processing_time = time.time() - start_time
             logger.info(f"Price increase calculation completed in {processing_time:.2f}s for {len(item_numbers)} items")

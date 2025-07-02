@@ -386,24 +386,28 @@ def get_price_difference(request: FilterRequest, db: Session = Depends(get_db),
         filtered_data = InvoiceItemController(db).apply_filters(request, page, size)
         controller = InvoiceItemController(db)
         
-        # Extract item codes and clean suffixes for database search
+        # Extract item codes and vendor info for supplier-specific price comparison
         item_id_pairs = []
-        invoice_items = []
+        item_vendor_pairs = []
         
         for invoice_item in filtered_data["items"]:
             # The item from apply_filters has suffix for display
             suffixed_item = invoice_item.item
             # Remove suffix to get original database item code for search
             original_item = controller._remove_suffix_from_item_code(suffixed_item)
+            vendor = invoice_item.vendor
             
             item_id_pairs.append((suffixed_item, invoice_item.id))  # Keep suffixed for response
-            invoice_items.append(original_item)  # Use original for database search
+            item_vendor_pairs.append((original_item, vendor))  # Use for supplier-specific comparison
 
-        if not invoice_items:
+        if not item_vendor_pairs:
             result = []
         else:
-            # Calculate price increase with optimized method
-            price_increase = controller.calculate_price_increase(item_numbers=invoice_items)
+            # Calculate price increase with supplier-specific method
+            price_increase = controller.calculate_price_increase(
+                item_numbers=None, 
+                item_vendor_pairs=item_vendor_pairs
+            )
 
             result = []
             for i, (item, percentage) in enumerate(price_increase):
