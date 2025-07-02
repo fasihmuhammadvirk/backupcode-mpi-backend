@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -12,7 +12,7 @@ import os
 import gc
 from fastapi.middleware.gzip import GZipMiddleware
 import uvicorn
-import asyncio
+from datetime import datetime, time
 
 # Setup logging first, before any other imports
 from mpi_backend.config.logging_config import setup_logging
@@ -33,18 +33,94 @@ from mpi_backend.api.routes import sync_mappings
 from mpi_backend.api.routes import price_comparison
 from mpi_backend.api.routes import statements
 
-from mpi_backend.database.controllers.GoogleSheetSyncController import GoogleSheetSyncController
-from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
+from mpi_backend.database.controllers.GoogleSheetSyncController import (
+    GoogleSheetSyncController
+)
+from mpi_backend.database.controllers.ItemsMappingController import (
+    ItemsMappingController
+)
 from mpi_backend.database import engine
 from sqlalchemy import text
 from mpi_backend.config import LOG_LEVEL
 from mpi_backend.utils.invoice_downaloder import email_download_background_task
-from mpi_backend.utils.statement_downloader import statement_download_background_task
+from mpi_backend.utils.statement_downloader import (
+    statement_download_background_task
+)
 
 # Import priority control utilities
 from mpi_backend.utils.quickbooks_priority import set_scheduler_instance
 
 UTC_TZ = pytz.utc
+PKT_TZ = pytz.timezone('Asia/Karachi')  # Pakistan Standard Time (UTC+5)
+
+# Mapping control variables
+MAPPINGS_ENABLED = os.getenv("ENABLE_MAPPINGS", "true").lower() == "true"
+MAPPINGS_EXCLUSION_ENABLED = os.getenv(
+    "ENABLE_MAPPING_EXCLUSION", "true"
+).lower() == "true"
+
+
+def is_pakistan_business_hours():
+    """
+    Check if current time is during Pakistan business hours (12 PM - 6 PM PKT).
+    
+    Returns:
+        bool: True if during business hours (12 PM - 6 PM PKT)
+    """
+    if not MAPPINGS_EXCLUSION_ENABLED:
+        return False
+        
+    pkt_now = datetime.now(PKT_TZ)
+    current_time = pkt_now.time()
+    
+    # Business hours: 12:00 PM to 6:00 PM (12:00 - 18:00)
+    business_start = time(12, 0)  # 12:00 PM
+    business_end = time(18, 0)    # 6:00 PM
+    
+    return business_start <= current_time <= business_end
+
+
+def should_skip_mapping_task(task_name: str):
+    """
+    Determine if a mapping task should be skipped based on current conditions.
+    
+    Args:
+        task_name: Name of the task for logging
+        
+    Returns:
+        bool: True if task should be skipped
+    """
+    if not MAPPINGS_ENABLED:
+        logger.info(f"{task_name} skipped - mappings are disabled globally")
+        return True
+        
+    if is_pakistan_business_hours():
+        logger.info(
+            f"{task_name} skipped - Pakistan business hours (12 PM - 6 PM PKT)"
+        )
+        return True
+        
+    return False
+
+
+def safe_mapping_wrapper(task_func, task_name: str):
+    """
+    Wrapper function for mapping tasks with business hours checking.
+    
+    Args:
+        task_func: The actual task function to execute
+        task_name: Name of the task for logging
+    """
+    if should_skip_mapping_task(task_name):
+        return
+        
+    try:
+        logger.info(f"Starting {task_name}")
+        result = task_func()
+        logger.info(f"{task_name} completed: {result}")
+    except Exception as e:
+        logger.error(f"{task_name} failed: {str(e)}")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -53,6 +129,12 @@ async def lifespan(app: FastAPI):
     logger.info("MPI Backend starting up")
     logger.info("Timeout configuration active")
     logger.info("Background tasks initializing")
+    
+    # Log mapping configuration
+    logger.info(f"Mappings enabled: {MAPPINGS_ENABLED}")
+    logger.info(
+        f"Mapping exclusion during business hours: {MAPPINGS_EXCLUSION_ENABLED}"
+    )
     
     scheduler = BackgroundScheduler()
     
@@ -82,7 +164,7 @@ async def lifespan(app: FastAPI):
         misfire_grace_time=1800
     )
     
-    # Optimized Google Sheets sync
+    # Google Sheets sync - keep original schedule (8 hours)
     scheduler.add_job(
         GoogleSheetSyncController.execute_sync_task,
         "interval",
@@ -94,16 +176,40 @@ async def lifespan(app: FastAPI):
         misfire_grace_time=1800
     )
     
-    # Daily mapping updates
-    scheduler.add_job(
-        ItemsMappingController.execute_update_all_mappings_task,
-        CronTrigger(hour=3, minute=0, timezone=UTC_TZ),
-        id="update_all_mappings_daily",
-        replace_existing=True,
-        max_instances=1,
-        name="Daily Mapping Update Task",
-        misfire_grace_time=3600
-    )
+    # NEW: All mappings update - once daily between 5-10 AM PKT
+    # Schedule at 5 AM, 6 AM, 7 AM, 8 AM, 9 AM PKT
+    # (converted to UTC: 12 AM, 1 AM, 2 AM, 3 AM, 4 AM UTC)
+    for hour_pkt in [5, 6, 7, 8, 9]:  # 5 AM to 9 AM PKT
+        hour_utc = (hour_pkt - 5) % 24  # Convert PKT to UTC (PKT = UTC+5)
+        scheduler.add_job(
+            lambda: safe_mapping_wrapper(
+                ItemsMappingController.execute_update_all_mappings_task,
+                "All Mappings Update"
+            ),
+            CronTrigger(hour=hour_utc, minute=0, timezone=UTC_TZ),
+            id=f"update_all_mappings_{hour_pkt}am_pkt",
+            replace_existing=True,
+            max_instances=1,
+            name=f"All Mappings Update Task ({hour_pkt} AM PKT)",
+            misfire_grace_time=3600
+        )
+    
+    # NEW: UIDI/No Match mappings update - every 8 hours with business hours exclusion
+    # Schedule at 12 AM, 8 AM, 4 PM UTC (which is 5 AM, 1 PM, 9 PM PKT)
+    # This avoids the 12 PM - 6 PM PKT business hours
+    for hour_utc, hour_pkt_desc in [(0, "5 AM"), (8, "1 PM"), (16, "9 PM")]:
+        scheduler.add_job(
+            lambda: safe_mapping_wrapper(
+                lambda: GoogleSheetSyncController.execute_sync_task(operation='update_no_match_uidi'),
+                "UIDI Mappings Update"
+            ),
+            CronTrigger(hour=hour_utc, minute=0, timezone=UTC_TZ),
+            id=f"update_uidi_mappings_{hour_utc}h_utc",
+            replace_existing=True,
+            max_instances=1,
+            name=f"UIDI Mappings Update Task ({hour_pkt_desc} PKT)",
+            misfire_grace_time=1800
+        )
 
     # Simplified memory cleanup
     def memory_cleanup_task():
