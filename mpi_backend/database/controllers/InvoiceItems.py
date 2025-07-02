@@ -1554,10 +1554,10 @@ class InvoiceItemController:
 
     def calculate_price_increase(self, item_numbers):
         """
-        Calculate percentage price increase by comparing the highest price within the last year 
-        with the price from ~1 year ago.
-        Shows price increase even if current price has dropped from the peak.
-        Optimized for minimal latency.
+        Calculate percentage price increase by comparing the most recent price 
+        with the price from 1 year before the most recent purchase date.
+        Uses each item's most recent purchase date as reference point.
+        Shows increase if price went up anytime within that item's 1-year window.
         Preserves duplicates and maintains original order of item numbers.
 
         Args:
@@ -1566,8 +1566,6 @@ class InvoiceItemController:
         Returns:
             List of tuples with item numbers and their percentage increases, preserving original order
         """
-        current_date = datetime.now()
-        target_date = current_date - timedelta(days=365)  # Date 1 year ago
         result = []
 
         if not item_numbers:  # No items to process
@@ -1586,7 +1584,7 @@ class InvoiceItemController:
 
         # Process each item number in the original order- to preserve duplicates
         for item_number in item_numbers:
-            percentage_increase = "∞%"  # Default value
+            percentage_increase = "N/A"  # Default value
 
             if item_number in grouped_items:
                 items = grouped_items[item_number]
@@ -1594,63 +1592,80 @@ class InvoiceItemController:
                     # Sort by date descending (most recent first)
                     items.sort(key=lambda x: x.date, reverse=True)
 
-                    # Find items purchased before target date (1 year ago) for baseline price
+                    # Use the most recent purchase date as reference point (not today's date)
+                    most_recent_date = items[0].date
+                    target_date = most_recent_date - timedelta(days=365)  # 1 year before most recent purchase
+
+                    # Find items purchased before target date (1 year ago from most recent) for baseline price
                     past_items = []
-                    # Find items purchased within the last year for peak price tracking
+                    # Find items purchased within the last year from most recent purchase date
                     recent_items = []
                     
                     for item in items:
                         # Safely compare dates by ensuring both are datetime objects
                         item_date = item.date
-                        compare_date = target_date
 
                         # Convert date to datetime if needed
                         if isinstance(item_date, date) and not isinstance(item_date, datetime):
                             item_date = datetime.combine(item_date, datetime.min.time())
 
-                        if isinstance(compare_date, date) and not isinstance(compare_date, datetime):
-                            compare_date = datetime.combine(compare_date, datetime.min.time())
+                        if isinstance(target_date, date) and not isinstance(target_date, datetime):
+                            target_date = datetime.combine(target_date, datetime.min.time())
 
-                        if item_date < compare_date:
+                        if item_date < target_date:
                             past_items.append(item)
                         else:
-                            # Items within the last year
+                            # Items within the last year from most recent purchase
                             recent_items.append(item)
 
                     if past_items and recent_items:
                         # Find the item with date closest to target date (1 year ago baseline)
                         def date_difference(item):
                             item_date = item.date
-                            compare_date = target_date
 
                             # Convert date to datetime if needed
                             if isinstance(item_date, date) and not isinstance(item_date, datetime):
                                 item_date = datetime.combine(item_date, datetime.min.time())
 
-                            if isinstance(compare_date, date) and not isinstance(compare_date, datetime):
-                                compare_date = datetime.combine(compare_date, datetime.min.time())
+                            if isinstance(target_date, date) and not isinstance(target_date, datetime):
+                                target_date_dt = datetime.combine(target_date, datetime.min.time())
+                            else:
+                                target_date_dt = target_date
 
                             # Return absolute difference in seconds
-                            return abs((item_date - compare_date).total_seconds())
+                            return abs((item_date - target_date_dt).total_seconds())
 
                         past_item = min(past_items, key=date_difference)
-                        previous_price = past_item.cost
+                        baseline_price = past_item.cost
 
-                        # Find the highest price within the last year (peak price)
-                        valid_recent_costs = [item.cost for item in recent_items if item.cost is not None and item.cost > 0]
+                        # Get the most recent price within the 1-year window
+                        valid_recent_items = [item for item in recent_items if item.cost is not None and item.cost > 0]
                         
-                        if not valid_recent_costs:
+                        if not valid_recent_items:
                             # No valid recent prices, skip this item
                             percentage_increase = "N/A"
                         else:
-                            peak_price = max(valid_recent_costs)
+                            # Use the most recent valid price
+                            current_price = valid_recent_items[0].cost
 
-                            # Calculate percentage increase using peak price vs baseline price
-                            if previous_price == 0:
+                            # Calculate percentage increase using current price vs baseline price
+                            if baseline_price is None or baseline_price == 0:
                                 percentage_increase = "∞%"
                             else:
-                                percentage_value = ((peak_price - previous_price) / previous_price) * 100
-                                percentage_increase = f"{round(percentage_value, 1)}%"
+                                percentage_value = ((current_price - baseline_price) / baseline_price) * 100
+                                
+                                # Show percentage increase (can be positive or negative)
+                                if percentage_value > 0:
+                                    percentage_increase = f"{round(percentage_value, 1)}%"
+                                else:
+                                    # Price has decreased, show 0% (or you could show negative)
+                                    percentage_increase = "0.0%"
+                    elif recent_items and not past_items:
+                        # Only recent items, no baseline to compare against
+                        percentage_increase = "N/A"
+                    elif past_items and not recent_items:
+                        # Only old items, no recent purchases
+                        percentage_increase = "N/A"
 
             result.append((item_number, percentage_increase))
 
