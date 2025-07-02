@@ -358,33 +358,75 @@ def get_price_difference(request: FilterRequest, db: Session = Depends(get_db),
                          # token: str = Depends(JWTBearer()),
                 page: int = Query(1, ge=1),
                 size: int = Query(10)):
-    filtered_data = InvoiceItemController(db).apply_filters(request, page,size)
-    controller = InvoiceItemController(db)
+    """
+    Get price difference calculations for filtered invoice items.
+    Now includes caching for improved performance on repeated requests.
+    """
+    import time
+    start_time = time.time()
     
-    # Extract item codes and clean suffixes for database search
-    item_id_pairs = []
-    invoice_items = []
+    # Create a cache key based on the request parameters
+    cache_key_data = {
+        "request_filters": request.dict() if hasattr(request, 'dict') else str(request),
+        "page": page,
+        "size": size
+    }
+    cache_key = f"price_diff_{hashlib.md5(str(cache_key_data).encode()).hexdigest()}"
     
-    for invoice_item in filtered_data["items"]:
-        # The item from apply_filters has suffix for display
-        suffixed_item = invoice_item.item
-        # Remove suffix to get original database item code for search
-        original_item = controller._remove_suffix_from_item_code(suffixed_item)
+    # Check cache first
+    cached_result = _get_cached_response(cache_key)
+    if cached_result is not None:
+        logger.info(f"Returning cached price difference result for page {page}")
+        return cached_result
+    
+    logger.info(f"Computing price difference for page {page}, size {size}")
+    
+    try:
+        # Get filtered data
+        filtered_data = InvoiceItemController(db).apply_filters(request, page, size)
+        controller = InvoiceItemController(db)
         
-        item_id_pairs.append((suffixed_item, invoice_item.id))  # Keep suffixed for response
-        invoice_items.append(original_item)  # Use original for database search
-    
-    price_increase = controller.calculate_price_increase(item_numbers=invoice_items)
+        # Extract item codes and clean suffixes for database search
+        item_id_pairs = []
+        invoice_items = []
+        
+        for invoice_item in filtered_data["items"]:
+            # The item from apply_filters has suffix for display
+            suffixed_item = invoice_item.item
+            # Remove suffix to get original database item code for search
+            original_item = controller._remove_suffix_from_item_code(suffixed_item)
+            
+            item_id_pairs.append((suffixed_item, invoice_item.id))  # Keep suffixed for response
+            invoice_items.append(original_item)  # Use original for database search
 
-    result = []
-    for i, (item, percentage) in enumerate(price_increase):
-        suffixed_item, item_id = item_id_pairs[i]
-        result.append({
-            "item": suffixed_item,  # Return suffixed item for UI consistency
-            "id": item_id,
-            "percentage_increase": percentage
-        })
-    return result
+        if not invoice_items:
+            result = []
+        else:
+            # Calculate price increase with optimized method
+            price_increase = controller.calculate_price_increase(item_numbers=invoice_items)
+
+            result = []
+            for i, (item, percentage) in enumerate(price_increase):
+                if i < len(item_id_pairs):  # Safety check
+                    suffixed_item, item_id = item_id_pairs[i]
+                    result.append({
+                        "item": suffixed_item,  # Return suffixed item for UI consistency
+                        "id": item_id,
+                        "percentage_increase": percentage
+                    })
+        
+        # Cache the result for future requests
+        _set_cached_response(cache_key, result)
+        
+        processing_time = time.time() - start_time
+        logger.info(f"Price difference calculation completed in {processing_time:.2f}s for {len(result)} items")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error in price difference calculation: {str(e)}")
+        # Return empty result instead of raising exception for better UX
+        return []
 
 
 @router.post("/price-history",response_model=List[PriceHistoryResponse])

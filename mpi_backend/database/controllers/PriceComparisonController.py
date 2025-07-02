@@ -305,8 +305,8 @@ class PriceComparisonController:
             
     def get_enriched_items_with_suppliers(self, items: List[ItemInfo], page: int = 1, size: int = 10):
         """
-        Get enriched item information with both the cheapest price and supplier details.
-        This combines the functionality of get_items_prices and get_cheapest_prices_per_supplier.
+        OPTIMIZED: Get enriched item information with both the cheapest price and supplier details.
+        Uses bulk SQL queries instead of individual item processing for better performance.
         
         Args:
             items (List[ItemInfo]): List of items to get prices for
@@ -315,6 +315,141 @@ class PriceComparisonController:
             
         Returns:
             PaginatedEnrichedItemResponse: Paginated list of items with prices and supplier information
+        """
+        import time
+        start_time = time.time()
+        
+        try:
+            db = self._get_db_session()
+            
+            # Calculate pagination indices
+            start_idx = (page - 1) * size
+            end_idx = start_idx + size
+            total_items = len(items)
+            
+            # Get the items for the current page
+            paginated_items = items[start_idx:end_idx] if total_items > 0 else []
+            
+            if not paginated_items:
+                return PaginatedEnrichedItemResponse(
+                    items=[],
+                    total=total_items,
+                    page=page,
+                    size=size,
+                    pages=0
+                )
+            
+            # Extract mpi_items for bulk processing
+            mpi_items = [item.mpi_item for item in paginated_items if item.mpi_item]
+            
+            if not mpi_items:
+                return PaginatedEnrichedItemResponse(
+                    items=[],
+                    total=total_items,
+                    page=page,
+                    size=size,
+                    pages=(total_items + size - 1) // size if size > 0 else 1
+                )
+            
+            # Use optimized SQL query to get all price data at once
+            price_query = text("""
+                WITH supplier_prices AS (
+                    SELECT 
+                        ii.mpi_item,
+                        ii.vendor,
+                        s.id as supplier_id,
+                        MIN(ii.cost) as min_cost
+                    FROM invoice_items ii
+                    JOIN suppliers s ON s.supplier_name = ii.vendor
+                    WHERE ii.mpi_item = ANY(:mpi_items)
+                    AND ii.cost IS NOT NULL 
+                    AND ii.cost > 0
+                    AND ii.vendor IS NOT NULL
+                    GROUP BY ii.mpi_item, ii.vendor, s.id
+                ),
+                item_cheapest AS (
+                    SELECT 
+                        mpi_item,
+                        MIN(min_cost) as absolute_cheapest_price
+                    FROM supplier_prices
+                    GROUP BY mpi_item
+                )
+                SELECT 
+                    sp.mpi_item,
+                    sp.vendor,
+                    sp.supplier_id,
+                    sp.min_cost,
+                    ic.absolute_cheapest_price
+                FROM supplier_prices sp
+                JOIN item_cheapest ic ON sp.mpi_item = ic.mpi_item
+                ORDER BY sp.mpi_item, sp.min_cost
+            """)
+            
+            # Execute the optimized query
+            query_result = db.execute(price_query, {"mpi_items": mpi_items}).fetchall()
+            
+            # Group results by mpi_item for efficient processing
+            price_data = {}
+            for row in query_result:
+                mpi_item, vendor, supplier_id, min_cost, absolute_cheapest = row
+                
+                if mpi_item not in price_data:
+                    price_data[mpi_item] = {
+                        'absolute_cheapest_price': float(absolute_cheapest),
+                        'suppliers': []
+                    }
+                
+                price_data[mpi_item]['suppliers'].append(
+                    SupplierPriceInfo(
+                        id=supplier_id,
+                        name=vendor or "Unknown",
+                        unit_price=float(min_cost)
+                    )
+                )
+            
+            # Build the result using the pre-processed data
+            result = []
+            for item in paginated_items:
+                if item.mpi_item in price_data:
+                    data = price_data[item.mpi_item]
+                    
+                    # Sort suppliers by price (cheapest first)
+                    suppliers = sorted(data['suppliers'], key=lambda x: x.unit_price)
+                    
+                    result.append(
+                        EnrichedItemPriceResponse(
+                            id=item.id or 0,
+                            mpi_item=item.mpi_item or "",
+                            original_item=item.original_item or "",
+                            mpi_description=item.mpi_description or "",
+                            cheapest_unit_price=data['absolute_cheapest_price'],
+                            suppliers=suppliers
+                        )
+                    )
+            
+            # Calculate total pages
+            pages = (total_items + size - 1) // size if size > 0 else 1
+            
+            processing_time = time.time() - start_time
+            logger.info(f"Enriched items with suppliers processed in {processing_time:.2f}s "
+                       f"for {len(paginated_items)} items")
+            
+            return PaginatedEnrichedItemResponse(
+                items=result,
+                total=total_items,
+                page=page,
+                size=size,
+                pages=pages
+            )
+            
+        except Exception as e:
+            logger.error(f"Error in optimized enriched items with suppliers: {str(e)}", exc_info=True)
+            logger.info("Falling back to legacy method...")
+            return self._get_enriched_items_with_suppliers_legacy(items, page, size)
+    
+    def _get_enriched_items_with_suppliers_legacy(self, items: List[ItemInfo], page: int = 1, size: int = 10):
+        """
+        Legacy implementation as fallback for get_enriched_items_with_suppliers.
         """
         try:
             db = self._get_db_session()

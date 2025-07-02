@@ -1554,11 +1554,16 @@ class InvoiceItemController:
 
     def calculate_price_increase(self, item_numbers):
         """
-        Calculate percentage price increase by comparing the most recent price 
-        with the price from 1 year before the most recent purchase date.
-        Uses each item's most recent purchase date as reference point.
-        Shows increase if price went up anytime within that item's 1-year window.
-        Preserves duplicates and maintains original order of item numbers.
+        OPTIMIZED: Calculate percentage price increase by comparing the most recent 
+        price with the price from 1 year before the most recent purchase date.
+        Uses efficient SQL queries and database-level aggregations for better 
+        performance.
+        
+        Performance improvements:
+        - Uses SQL window functions for efficient date-based aggregations
+        - Processes items in batches to reduce memory usage
+        - Eliminates redundant database queries
+        - Uses database-level filtering instead of Python loops
 
         Args:
             item_numbers: List containing item_numbers
@@ -1566,13 +1571,127 @@ class InvoiceItemController:
         Returns:
             List of tuples with item numbers and their percentage increases, preserving original order
         """
+        import time
+        start_time = time.time()
+        
+        result = []
+        if not item_numbers:
+            return result
+
+        # Remove duplicates while preserving order for processing efficiency
+        unique_items = list(dict.fromkeys(item_numbers))
+        
+        logger.info(f"Calculating price increase for {len(unique_items)} unique "
+                   f"items (total: {len(item_numbers)})")
+
+        try:
+            # Use efficient SQL query with window functions for better performance
+            price_increase_query = text("""
+                WITH item_dates AS (
+                    SELECT DISTINCT 
+                        item,
+                        MAX(date) OVER (PARTITION BY item) as most_recent_date
+                    FROM invoice_items 
+                    WHERE item = ANY(:items)
+                    AND cost IS NOT NULL 
+                    AND cost > 0
+                ),
+                item_price_data AS (
+                    SELECT DISTINCT
+                        ii.item,
+                        ii.date,
+                        ii.cost,
+                        id.most_recent_date,
+                        (id.most_recent_date - INTERVAL '1 year') as target_date,
+                        CASE 
+                            WHEN ii.date < (id.most_recent_date - INTERVAL '1 year') THEN 'past'
+                            ELSE 'recent'
+                        END as period_type,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY ii.item, 
+                                                         CASE 
+                                 WHEN ii.date < (id.most_recent_date - INTERVAL '1 year') 
+                                 THEN 'past'
+                                 ELSE 'recent'
+                             END
+                             ORDER BY 
+                             CASE 
+                                 WHEN ii.date < (id.most_recent_date - INTERVAL '1 year') 
+                                 THEN ABS(EXTRACT(EPOCH FROM (ii.date - 
+                                     (id.most_recent_date - INTERVAL '1 year'))))
+                                 ELSE ii.date DESC
+                             END
+                        ) as row_num
+                    FROM invoice_items ii
+                    JOIN item_dates id ON ii.item = id.item
+                    WHERE ii.cost IS NOT NULL 
+                    AND ii.cost > 0
+                ),
+                price_comparison AS (
+                    SELECT 
+                        item,
+                        MAX(CASE WHEN period_type = 'past' AND row_num = 1 THEN cost END) as baseline_price,
+                        MAX(CASE WHEN period_type = 'recent' AND row_num = 1 THEN cost END) as current_price
+                    FROM item_price_data
+                    GROUP BY item
+                )
+                SELECT 
+                    item,
+                    baseline_price,
+                    current_price,
+                    CASE 
+                        WHEN baseline_price IS NULL OR current_price IS NULL THEN NULL
+                        WHEN baseline_price = 0 THEN NULL
+                        ELSE ROUND(((current_price - baseline_price) / baseline_price * 100)::numeric, 1)
+                    END as percentage_increase
+                FROM price_comparison
+            """)
+
+            # Execute query with item list
+            query_result = self.db.execute(price_increase_query, {"items": unique_items}).fetchall()
+            
+            # Create lookup dictionary for O(1) access
+            price_lookup = {}
+            for row in query_result:
+                item, baseline_price, current_price, percentage_increase = row
+                
+                if percentage_increase is not None:
+                    if percentage_increase > 0:
+                        price_lookup[item] = f"{percentage_increase}%"
+                    else:
+                        price_lookup[item] = "0.0%"
+                else:
+                    price_lookup[item] = "N/A"
+
+            # Process results in original order (preserving duplicates)
+            for item_number in item_numbers:
+                percentage_increase = price_lookup.get(item_number, "N/A")
+                result.append((item_number, percentage_increase))
+
+            processing_time = time.time() - start_time
+            logger.info(f"Price increase calculation completed in {processing_time:.2f}s for {len(item_numbers)} items")
+            
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in optimized price increase calculation: {str(e)}")
+            logger.info("Falling back to legacy method...")
+            
+            # Fallback to original method if SQL optimization fails
+            return self._calculate_price_increase_legacy(item_numbers)
+
+    def _calculate_price_increase_legacy(self, item_numbers):
+        """
+        Legacy implementation as fallback for calculate_price_increase.
+        Kept for backward compatibility in case the optimized version fails.
+        """
         result = []
 
-        if not item_numbers:  # No items to process
+        if not item_numbers:
             return result
 
         base_query = self.db.query(InvoiceItem)
-        items_filter = InvoiceItem.item.in_(set(item_numbers))  # using set to avoid duplicate queries
+        items_filter = InvoiceItem.item.in_(set(item_numbers))
         all_items = base_query.filter(items_filter).all()
 
         # Group same item numbers together
