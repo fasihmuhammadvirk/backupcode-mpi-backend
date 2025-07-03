@@ -34,8 +34,8 @@ from mpi_backend.api.routes import sync_mappings
 from mpi_backend.api.routes import price_comparison
 from mpi_backend.api.routes import statements
 
-from mpi_backend.database.controllers.GoogleSheetSyncController import (
-    GoogleSheetSyncController
+from mpi_backend.database.controllers.EnhancedGoogleSheetSyncController import (
+    EnhancedGoogleSheetSyncController
 )
 from mpi_backend.database.controllers.ItemsMappingController import (
     ItemsMappingController
@@ -148,7 +148,7 @@ def async_sequential_mapping_task():
             with SessionLocal() as temp_db:
                 step1_result = safe_mapping_wrapper(
                     "Google Sheets Sync + Update All Mappings",
-                    GoogleSheetSyncController.execute_sync_task,
+                    EnhancedGoogleSheetSyncController.execute_sync_task,
                     temp_db, "update_all"
                 )
             
@@ -163,7 +163,7 @@ def async_sequential_mapping_task():
             with SessionLocal() as temp_db:
                 step2_result = safe_mapping_wrapper(
                     "Google Sheets Sync + UIDI Update",
-                    GoogleSheetSyncController.execute_sync_task,
+                    EnhancedGoogleSheetSyncController.execute_sync_task,
                     temp_db, "update_no_match_uidi"
                 )
                 

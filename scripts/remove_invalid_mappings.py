@@ -29,7 +29,7 @@ from mpi_backend.database import SessionLocal
 from mpi_backend.database.models import ItemsMapping, Supplier, InvoiceItem
 from mpi_backend.utils.mapping_validators import is_temporary_mapping
 from mpi_backend.config.logging_config import setup_logging
-from mpi_backend.utils.google_sheets import GoogleSheetDataExtractor
+from mpi_backend.utils.google_sheets import EnhancedGoogleSheetDataExtractor
 from mpi_backend.config.spreadsheet_config import (
     DEFAULT_SHEET_ID, GOOGLE_API_KEY, DEFAULT_OUTPUT_FILE, SKIP_SHEETS
 )
@@ -45,7 +45,7 @@ class IntelligentMappingCleaner:
     
     def __init__(self, dry_run: bool = False):
         self.dry_run = dry_run
-        self.extractor = GoogleSheetDataExtractor(
+        self.extractor = EnhancedGoogleSheetDataExtractor(
             sheet_id=DEFAULT_SHEET_ID,
             api_key=GOOGLE_API_KEY,
             skip_sheets=SKIP_SHEETS

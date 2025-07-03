@@ -11,7 +11,7 @@ import pandas as pd
 from typing import Dict, List, Any
 from sqlalchemy.orm import Session
 
-from mpi_backend.utils.google_sheets.sheet_data_extractor import GoogleSheetDataExtractor
+from mpi_backend.utils.google_sheets.enhanced_sheet_data_extractor import EnhancedGoogleSheetDataExtractor
 from mpi_backend.utils.google_sheets.temporary_mapping_extractor import TemporaryMappingExtractor
 from mpi_backend.utils.sync_mapping.temporary_mapping_updater import TemporaryMappingUpdater
 
@@ -53,7 +53,7 @@ class TemporaryMappingSync:
         """
         try:
             # Create a minimal extractor instance just for getting sheet data
-            extractor = GoogleSheetDataExtractor(
+            extractor = EnhancedGoogleSheetDataExtractor(
                 sheet_id=sheet_id,
                 api_key=api_key,
                 skip_sheets=skip_sheets or [],

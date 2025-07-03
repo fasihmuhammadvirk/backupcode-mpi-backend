@@ -1,7 +1,7 @@
 from mpi_backend.database.controllers import SupplierController, InvoiceController, InvoiceItemController
 from mpi_backend.database.models import Invoice, InvoiceItem
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
-from mpi_backend.database.controllers import ItemsMappingController,TempItemsMappingController,UnmappedItemsController
+from mpi_backend.database.controllers import ItemsMappingController,TemporaryItemMappingController,UnmappedItemsController
 from mpi_backend.utils.invoice_convertor import convert_invoice
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.s3_utils import get_presigned_url
@@ -40,9 +40,9 @@ invoice_ids = []
 
 def process_extracted_data(converted_files, id):
 
-    db = contextmanager(get_db)
+        db = contextmanager(get_db)
 
-    temp_items = TempItemsMappingController(db).get_temp_items_mappings()
+    temp_items = TemporaryItemMappingController(db).get_temp_items_mappings()
     item_mappings = ItemsMappingController(db).get_items_mappings()
 
     for file in converted_files:

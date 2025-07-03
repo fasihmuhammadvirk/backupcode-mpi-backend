@@ -12,7 +12,7 @@ from mpi_backend.utils.item_utils import clean_supplier_suffix
 logger = logging.getLogger(__name__)
 
 from mpi_backend.database import get_db
-from mpi_backend.database.controllers.TemporaryItemMappingController import TempItemsMappingController
+from mpi_backend.database.controllers.TemporaryItemMappingController import TemporaryItemMappingController
 from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
 from mpi_backend.database.controllers.CustomerJobMappingContorller import CustomerJobMappingController
 from mpi_backend.database.controllers.Suppliers import SupplierController
@@ -61,7 +61,7 @@ def validate_invoice_data(data):
 
 
 def process_extracted_data(converted_files, failed_files):
-    temp_items = TempItemsMappingController(db).get_temp_items_mappings()
+    temp_items = TemporaryItemMappingController(db).get_temp_items_mappings()
     item_mappings = ItemsMappingController(db).get_items_mappings()
     customer_job_mappings = CustomerJobMappingController(db).get_customer_job_mappings()
 

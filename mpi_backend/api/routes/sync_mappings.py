@@ -3,10 +3,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 
 from mpi_backend.database import get_db
-from mpi_backend.database.controllers import (
-    GoogleSheetSyncController,
-    ItemsMappingController
-)
+from mpi_backend.database.controllers import EnhancedGoogleSheetSyncController
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.database.schemas import SyncMappingsResponse
 
@@ -18,7 +15,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sync", tags=["Sync Mapping"])
 
 
-
 @router.post("/mapping", response_model=SyncMappingsResponse)
 def sync_mapping(
     background_tasks: BackgroundTasks,
@@ -26,15 +22,16 @@ def sync_mapping(
     token: str = Depends(JWTBearer())
 ):
     """
-    Manually trigger synchronization of mappings from Google Sheets.
+    Manually trigger enhanced synchronization of mappings from Google Sheets.
     
     If a sync task is already running, returns a message indicating that.
-    Otherwise, starts the sync process in the background.
+    Otherwise, starts the enhanced sync process in the background.
     
     Returns:
         SyncMappingsResponse: Success status, message, and timestamp
     """
-    sync_controller = GoogleSheetSyncController(db)
+    # Use enhanced sync controller for better temporary/permanent mapping handling
+    sync_controller = EnhancedGoogleSheetSyncController(db)
     status = sync_controller.get_sync_status()
     
     if status["is_running"]:
@@ -68,8 +65,8 @@ def sync_mapping(
             timestamp=datetime.now()
         )
     
-    # Start sync in the background
-    background_tasks.add_task(GoogleSheetSyncController.execute_sync_task, db, 'sync')
+    # Start enhanced sync in the background
+    background_tasks.add_task(EnhancedGoogleSheetSyncController.execute_sync_task, db, 'sync')
     
     return SyncMappingsResponse(
         success=True,
@@ -89,7 +86,7 @@ def sync_status(
     Returns:
         dict: Current sync status including running operations and timestamps
     """
-    sync_controller = GoogleSheetSyncController(db)
+    sync_controller = EnhancedGoogleSheetSyncController(db)
     status = sync_controller.get_sync_status()
     
     # Determine detailed current operation description
@@ -153,7 +150,7 @@ def update_no_match_uidi_mappings(
     Returns:
         Dict with status and count of updated items
     """
-    sync_controller = GoogleSheetSyncController(db)
+    sync_controller = EnhancedGoogleSheetSyncController(db)
     status = sync_controller.get_sync_status()
 
     if status["is_running"]:
@@ -190,7 +187,7 @@ def update_no_match_uidi_mappings(
     try:
         # Start sync with update_no_match_uidi operation
         background_tasks.add_task(
-            GoogleSheetSyncController.execute_sync_task, 
+            EnhancedGoogleSheetSyncController.execute_sync_task, 
             db, 
             'update_no_match_uidi'
         )
@@ -228,7 +225,7 @@ def update_all_mappings(
         Dict with status message indicating the task has been started
 
     """
-    sync_controller = GoogleSheetSyncController(db)
+    sync_controller = EnhancedGoogleSheetSyncController(db)
     status = sync_controller.get_sync_status()
 
     if status["is_running"]:
@@ -265,7 +262,7 @@ def update_all_mappings(
     try:
         # Start sync with update_all operation
         background_tasks.add_task(
-            GoogleSheetSyncController.execute_sync_task,
+            EnhancedGoogleSheetSyncController.execute_sync_task,
             db,
             'update_all'
         )

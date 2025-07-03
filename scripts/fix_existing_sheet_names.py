@@ -33,7 +33,7 @@ from mpi_backend.database import SessionLocal
 from mpi_backend.database.models.ItemsMapping import ItemsMapping
 from mpi_backend.database.models.UnmappedItems import UnmappedItems
 from mpi_backend.database.models.InvoiceItems import InvoiceItem
-from mpi_backend.utils.google_sheets.sheet_data_extractor import GoogleSheetDataExtractor
+from mpi_backend.utils.google_sheets.enhanced_sheet_data_extractor import EnhancedGoogleSheetDataExtractor
 
 # Set up logging
 log_filename = f'sheet_name_fix_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
@@ -53,7 +53,7 @@ class SheetNameFixer:
     
     def __init__(self):
         """Initialize the sheet name fixer"""
-        self.extractor = GoogleSheetDataExtractor()
+        self.extractor = EnhancedGoogleSheetDataExtractor()
         self.fixed_mappings = {}  # Cache of old_name -> new_name
         self.stats = {
             'database_updates': 0,

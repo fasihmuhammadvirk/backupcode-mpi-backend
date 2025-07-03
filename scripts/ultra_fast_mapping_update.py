@@ -35,7 +35,7 @@ try:
     from sqlalchemy import text, create_engine
     from sqlalchemy.orm import sessionmaker
     from mpi_backend.database import db_context
-    from mpi_backend.database.controllers import GoogleSheetSyncController
+    from mpi_backend.database.controllers import EnhancedGoogleSheetSyncController
     from mpi_backend.config.spreadsheet_config import (
         DEFAULT_SHEET_ID, DEFAULT_OUTPUT_FILE, GOOGLE_API_KEY, 
         SKIP_SHEETS, MAPPING_CONFIG
@@ -142,7 +142,7 @@ class UltraFastMappingUpdater:
         """Complete mapping sync - updates ALL mappings in database from Google Sheets."""
         try:
             with db_context() as db:
-                sync_controller = GoogleSheetSyncController(db)
+                sync_controller = EnhancedGoogleSheetSyncController(db)
                 
                 logger.info(" Extracting ALL mappings from Google Sheets...")
                 result = sync_controller.sync_sheet_mappings(

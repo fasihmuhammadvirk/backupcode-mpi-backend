@@ -7,7 +7,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class TempItemsMappingController:
+class TemporaryItemMappingController:
     def __init__(self, db):
         self.db_context = db
 

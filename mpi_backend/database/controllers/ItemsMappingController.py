@@ -61,8 +61,8 @@ class ItemsMappingController:
             pass
         
         # Check if a sync task is already running
-        from mpi_backend.database.controllers import GoogleSheetSyncController
-        status = GoogleSheetSyncController.get_sync_status()
+        from mpi_backend.database.controllers import EnhancedGoogleSheetSyncController
+        status = EnhancedGoogleSheetSyncController.get_sync_status()
         
         if status["is_running"]:
             # Convert operation name to user-friendly format
@@ -824,8 +824,8 @@ class ItemsMappingController:
             Dict with status and count of updated items
         """
         # Check if a sync task is already running
-        from mpi_backend.database.controllers import GoogleSheetSyncController
-        status = GoogleSheetSyncController.get_sync_status()
+        from mpi_backend.database.controllers import EnhancedGoogleSheetSyncController
+        status = EnhancedGoogleSheetSyncController.get_sync_status()
         
         if status["is_running"] and status["current_operation"] != "update_all":
             # Convert operation name to user-friendly format
