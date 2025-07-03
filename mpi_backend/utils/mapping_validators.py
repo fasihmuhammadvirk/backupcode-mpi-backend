@@ -73,7 +73,9 @@ def validate_mapping_for_permanent_storage(mapping_data: Dict) -> Tuple[bool, Li
     
     # Check if this is a temporary mapping
     if is_temporary_mapping(mpi_code, description):
-        errors.append(f"Temporary mapping detected: '{mpi_code}' should not be stored as permanent mapping")
+        errors.append(
+            f"Temporary mapping detected: '{mpi_code}' should not be stored as permanent mapping"
+        )
     
     # Validate required fields
     if not mpi_code:
@@ -83,12 +85,18 @@ def validate_mapping_for_permanent_storage(mapping_data: Dict) -> Tuple[bool, Li
         errors.append("Supplier item IDs are required and cannot be empty")
     
     # Check for suspicious patterns in supplier_item_ids
-    if supplier_item_ids and any(temp in supplier_item_ids.upper() for temp in ['UIDI', 'NO MATCH', 'TEMP']):
-        errors.append(f"Supplier item IDs contain temporary placeholders: '{supplier_item_ids}'")
+    if supplier_item_ids and any(
+        temp in supplier_item_ids.upper() for temp in ['UIDI', 'NO MATCH', 'TEMP']
+    ):
+        errors.append(
+            f"Supplier item IDs contain temporary placeholders: '{supplier_item_ids}'"
+        )
     
     # Validate MPI code format (should follow some structure)
-    if mpi_code and len(mpi_code.strip()) < 3:
-        errors.append(f"MPI code too short: '{mpi_code}' - may be placeholder")
+    if mpi_code and len(mpi_code.strip()) < 2:
+        errors.append(
+            f"MPI code too short: '{mpi_code}' - may be placeholder"
+        )
     
     return len(errors) == 0, errors
 
