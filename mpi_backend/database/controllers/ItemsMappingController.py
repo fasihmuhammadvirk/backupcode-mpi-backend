@@ -600,10 +600,10 @@ class ItemsMappingController:
         Returns:
             Dict with update operation details
         """
-        from mpi_backend.database.controllers import GoogleSheetSyncController
+        from mpi_backend.database.controllers import EnhancedGoogleSheetSyncController
         
         # Check if a sync task is already running (except if it's another update_no_match_uidi)
-        status = GoogleSheetSyncController.get_sync_status()
+        status = EnhancedGoogleSheetSyncController.get_sync_status()
         if status["is_running"] and status["current_operation"] != "update_no_match_uidi":
             # Convert operation name to user-friendly format
             operation_display = {
