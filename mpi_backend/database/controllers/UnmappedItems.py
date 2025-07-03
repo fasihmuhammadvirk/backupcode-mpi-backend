@@ -2,7 +2,7 @@ from mpi_backend.database.models import UnmappedItems
 from mpi_backend.database.models.InvoiceItems import InvoiceItem
 import pandas as pd
 from mpi_backend.utils.item_utils import clean_supplier_suffix, clean_suffix
-from sqlalchemy import and_, or_, func
+from sqlalchemy import and_, or_
 from typing import Dict, Any, Optional, List
 from datetime import date
 import logging
@@ -38,7 +38,8 @@ class UnmappedItemsController:
 
     def is_item_code_present(self, item_code, supplier_id=None):
         """
-        Check if an item code is present in unmapped items with supplier-specific suffix cleaning support.
+        Check if an item code is present in unmapped items with 
+        supplier-specific suffix cleaning support.
         
         Args:
             item_code (str): Clean item code from invoice to check
@@ -59,7 +60,9 @@ class UnmappedItemsController:
                         return True
                     # Then try clean invoice vs cleaned DB item
                     elif (supplier_id and 
-                          clean_supplier_suffix(unmapped_item.supplier_item_ids, supplier_id) == item_code):
+                          clean_supplier_suffix(
+                              unmapped_item.supplier_item_ids, supplier_id
+                          ) == item_code):
                         return True
                         
                 return False
@@ -163,21 +166,11 @@ class UnmappedItemsController:
             )
         )
         
-        # Apply filters
+        # Apply filters (date and supplier filters)
         query = self._apply_common_filters(query, date_from, date_to, supplier_names)
         
-        # Apply search filter
-        if search:
-            clean_search = search.strip()
-            query = query.filter(
-                or_(
-                    func.lower(InvoiceItem.item).contains(clean_search.lower()),
-                    func.lower(InvoiceItem.item_description).contains(clean_search.lower())
-                )
-            )
-        
-        # Get unique items based on cleaned original item ID
-        return self._get_unique_items_with_pagination(db, query, page, size, order_by)
+        # Get unique items based on cleaned original item ID (without search filter first)
+        return self._get_unique_items_with_pagination(db, query, page, size, order_by, search)
 
     def _get_unmapped_items_logic(
         self,
@@ -200,21 +193,11 @@ class UnmappedItemsController:
             )
         )
         
-        # Apply filters
+        # Apply filters (date and supplier filters)
         query = self._apply_common_filters(query, date_from, date_to, supplier_names)
         
-        # Apply search filter
-        if search:
-            clean_search = search.strip()
-            query = query.filter(
-                or_(
-                    func.lower(InvoiceItem.item).contains(clean_search.lower()),
-                    func.lower(InvoiceItem.item_description).contains(clean_search.lower())
-                )
-            )
-        
-        # Get unique items based on cleaned original item ID
-        return self._get_unique_items_with_pagination(db, query, page, size, order_by)
+        # Get unique items based on cleaned original item ID (without search filter first)
+        return self._get_unique_items_with_pagination(db, query, page, size, order_by, search)
 
     def _apply_common_filters(self, query, date_from, date_to, supplier_names):
         """Apply common date and supplier filters"""
@@ -233,10 +216,10 @@ class UnmappedItemsController:
         
         return query
 
-    def _get_unique_items_with_pagination(self, db, query, page, size, order_by=None):
+    def _get_unique_items_with_pagination(self, db, query, page, size, order_by=None, search=None):
         """Get unique items based on cleaned item code with pagination and ordering"""
         
-        # Execute query to get all matching items
+        # Execute query to get all matching items (within date range and supplier filters)
         all_items = query.all()
         
         # Group by cleaned item code to get unique items (without suffixes)
@@ -254,6 +237,15 @@ class UnmappedItemsController:
         
         # Convert to list
         unique_items = list(unique_items_map.values())
+        
+        # Apply search filter AFTER deduplication (search on original_item_id that users see)
+        if search and search.strip():
+            clean_search = search.strip().lower()
+            unique_items = [
+                item for item in unique_items
+                if (clean_search in item["original_item_id"].lower() or
+                    clean_search in (item["mpi_description"] or "").lower())
+            ]
         
         # Apply ordering
         if order_by and len(order_by) > 0:
