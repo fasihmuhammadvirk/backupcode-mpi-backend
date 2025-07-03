@@ -78,14 +78,50 @@ class ItemsMappingController:
                 "message": f"Cannot start Update All Mappings: A {operation_display} operation is already running"
             }
         
-        # Create a new session for this task if needed
-        if db is None:
-            db = SessionLocal()
+        # Create a new session for this task if needed with proper error handling
+        created_new_session = False
+        try:
+            if db is None:
+                from mpi_backend.database import SessionLocal
+                db = SessionLocal()
+                created_new_session = True
+                logger.info("Created new database session for mapping update task")
+            
+            controller = cls(db)
+            logger.info("Starting update all mappings task execution")
+            result = controller.update_all_mappings()
+            
+            # Ensure we commit the session if we created it
+            if created_new_session:
+                db.commit()
+                logger.info("Database session committed successfully")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in execute_update_all_mappings_task: {str(e)}")
+            
+            # Rollback if we created the session
+            if created_new_session and db:
+                try:
+                    db.rollback()
+                    logger.info("Database session rolled back due to error")
+                except Exception as rollback_error:
+                    logger.error(f"Error during rollback: {str(rollback_error)}")
+            
+            return {
+                "status": "error",
+                "message": f"Update all mappings task failed: {str(e)}"
+            }
         
-        controller = cls(db)
-        result = controller.update_all_mappings()
-        
-        return result
+        finally:
+            # Close session if we created it
+            if created_new_session and db:
+                try:
+                    db.close()
+                    logger.info("Database session closed successfully")
+                except Exception as close_error:
+                    logger.error(f"Error closing database session: {str(close_error)}")
 
     def search_clean_item_across_suppliers(self, clean_item: str) -> Dict[str, Any]:
         """

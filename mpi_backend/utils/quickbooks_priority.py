@@ -32,8 +32,7 @@ QB_EXPORT_BATCH_SIZE = int(os.getenv("EXPORT_BATCH_SIZE", "1000"))
 BACKGROUND_JOB_IDS = [
     "email_download",
     "statement_download", 
-    "google_sheets_sync",
-    "update_all_mappings_daily"
+    "daily_mapping_tasks"  # Combined mapping tasks with Google Sheets sync
 ]
 
 

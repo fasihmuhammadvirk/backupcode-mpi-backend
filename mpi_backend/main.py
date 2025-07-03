@@ -13,6 +13,7 @@ import gc
 from fastapi.middleware.gzip import GZipMiddleware
 import uvicorn
 from datetime import datetime, time
+from concurrent.futures import ThreadPoolExecutor
 
 # Setup logging first, before any other imports
 from mpi_backend.config.logging_config import setup_logging
@@ -55,71 +56,135 @@ PKT_TZ = pytz.timezone('Asia/Karachi')  # Pakistan Standard Time (UTC+5)
 
 # Mapping control variables
 MAPPINGS_ENABLED = os.getenv("ENABLE_MAPPINGS", "true").lower() == "true"
-MAPPINGS_EXCLUSION_ENABLED = os.getenv(
-    "ENABLE_MAPPING_EXCLUSION", "true"
-).lower() == "true"
+MAPPINGS_EXCLUSION_ENABLED = os.getenv("ENABLE_MAPPINGS_EXCLUSION", "true").lower() == "true"
 
+# Thread pool for non-blocking background tasks
+_task_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="bg_task")
 
 def is_pakistan_business_hours():
     """
-    Check if current time is during Pakistan business hours (12 PM - 6 PM PKT).
+    Check if current time is within Pakistan business hours (12 PM - 6 PM PKT).
     
     Returns:
-        bool: True if during business hours (12 PM - 6 PM PKT)
+        bool: True if within business hours, False otherwise
     """
-    if not MAPPINGS_EXCLUSION_ENABLED:
-        return False
+    try:
+        # Get current time in Pakistan timezone
+        pkt_now = datetime.now(PKT_TZ)
         
-    pkt_now = datetime.now(PKT_TZ)
-    current_time = pkt_now.time()
-    
-    # Business hours: 12:00 PM to 6:00 PM (12:00 - 18:00)
-    business_start = time(12, 0)  # 12:00 PM
-    business_end = time(18, 0)    # 6:00 PM
-    
-    return business_start <= current_time <= business_end
+        # Check if it's between 12 PM (noon) and 6 PM PKT
+        business_start = time(12, 0)  # 12:00 PM
+        business_end = time(18, 0)    # 6:00 PM
+        
+        current_time = pkt_now.time()
+        is_business_hour = business_start <= current_time <= business_end
+        
+        logger.debug(f"PKT time: {pkt_now.strftime('%H:%M')} | Business hours (12PM-6PM): {is_business_hour}")
+        return is_business_hour
+        
+    except Exception as e:
+        logger.error(f"Error checking Pakistan business hours: {e}")
+        return False
 
 
 def should_skip_mapping_task(task_name: str):
     """
-    Determine if a mapping task should be skipped based on current conditions.
+    Determine if a mapping task should be skipped based on configuration and business hours.
     
     Args:
-        task_name: Name of the task for logging
+        task_name: Name of the task to check
         
     Returns:
         bool: True if task should be skipped
     """
     if not MAPPINGS_ENABLED:
-        logger.info(f"{task_name} skipped - mappings are disabled globally")
+        logger.info(f"Skipping {task_name} - mappings disabled via configuration")
         return True
         
-    if is_pakistan_business_hours():
-        logger.info(
-            f"{task_name} skipped - Pakistan business hours (12 PM - 6 PM PKT)"
-        )
+    if MAPPINGS_EXCLUSION_ENABLED and is_pakistan_business_hours():
+        logger.info(f"Skipping {task_name} - business hours exclusion active (12PM-6PM PKT)")
         return True
         
     return False
 
 
-def safe_mapping_wrapper(task_func, task_name: str):
+def async_mapping_wrapper(task_func, task_name: str):
     """
-    Wrapper function for mapping tasks with business hours checking.
+    Async wrapper function for mapping tasks with non-blocking execution.
     
     Args:
         task_func: The actual task function to execute
         task_name: Name of the task for logging
     """
-    if should_skip_mapping_task(task_name):
-        return
-        
-    try:
-        logger.info(f"Starting {task_name}")
-        result = task_func()
-        logger.info(f"{task_name} completed: {result}")
-    except Exception as e:
-        logger.error(f"{task_name} failed: {str(e)}")
+    def _execute_task():
+        if should_skip_mapping_task(task_name):
+            return {"status": "skipped", "message": f"{task_name} skipped due to configuration"}
+            
+        try:
+            logger.info(f"Starting {task_name}")
+            result = task_func()
+            logger.info(f"{task_name} completed successfully: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"{task_name} failed: {str(e)}")
+            return {"status": "error", "message": str(e)}
+    
+    # Execute in thread pool to avoid blocking the scheduler
+    future = _task_executor.submit(_execute_task)
+    logger.info(f"{task_name} submitted to background thread pool")
+    return future
+
+
+def async_sequential_mapping_task():
+    """
+    Execute mapping tasks sequentially: First update all mappings, then UIDI.
+    Both operations automatically include Google Sheets sync as the first step.
+    Runs in background thread to avoid blocking the server.
+    """
+    def _execute_sequential():
+        try:
+            logger.info("Starting sequential mapping tasks execution at 12 AM PKT")
+            
+            # Step 1: Update All Mappings (includes Google Sheets sync automatically)
+            logger.info("Step 1/2: Starting update all mappings (with Google Sheets sync)")
+            from mpi_backend.database import SessionLocal
+            with SessionLocal() as temp_db:
+                all_result = GoogleSheetSyncController(temp_db).perform_sync_task('update_all')
+                logger.info(f"Update all mappings completed: {all_result}")
+            
+            # Step 2: Update UIDI/No Match (includes Google Sheets sync automatically, only if step 1 succeeded)
+            if all_result and all_result.get("success"):
+                logger.info("Step 2/2: Starting UIDI/No Match update (with Google Sheets sync)")
+                with SessionLocal() as temp_db:
+                    uidi_result = GoogleSheetSyncController(temp_db).perform_sync_task('update_no_match_uidi')
+                    logger.info(f"UIDI update completed: {uidi_result}")
+            else:
+                logger.warning("Skipping UIDI update due to failure in update all mappings")
+                
+            logger.info("Sequential mapping tasks completed successfully")
+            
+        except Exception as e:
+            logger.error(f"Sequential mapping tasks failed: {str(e)}")
+    
+    # Execute in thread pool to avoid blocking
+    future = _task_executor.submit(_execute_sequential)
+    logger.info("Sequential mapping tasks submitted to background thread pool")
+    return future
+
+
+def async_email_download_task():
+    """
+    Async wrapper for email download task.
+    """
+    def _execute():
+        try:
+            email_download_background_task()
+        except Exception as e:
+            logger.error(f"Email download task failed: {str(e)}")
+    
+    future = _task_executor.submit(_execute)
+    logger.info("Email download task submitted to background thread pool")
+    return future
 
 
 @asynccontextmanager
@@ -141,18 +206,18 @@ async def lifespan(app: FastAPI):
     # Register scheduler for dynamic job control
     set_scheduler_instance(scheduler)
     
-    # Optimized email download with reduced concurrency
+    # Email download - every 5 minutes (non-blocking)
     scheduler.add_job(
-        email_download_background_task,
+        async_email_download_task,
         "interval",
         minutes=5,
         max_instances=1,
         id="email_download",
-        name="Email Download Task",
+        name="Email Download Task (Async)",
         misfire_grace_time=600
     )
     
-    # Optimized statement download
+    # Statement download - every 12 hours (keep original)
     scheduler.add_job(
         statement_download_background_task,
         "interval",
@@ -164,54 +229,20 @@ async def lifespan(app: FastAPI):
         misfire_grace_time=1800
     )
     
-    # Google Sheets sync - keep original schedule (8 hours)
+    # DAILY MAPPING TASKS: Run once daily at 12 AM PKT (7 PM UTC, PKT = UTC+5)
+    # Sequential execution: All mappings first (with Google Sheets sync), then UIDI (with Google Sheets sync)
+    # Note: Google Sheets sync is automatically included in both operations
     scheduler.add_job(
-        GoogleSheetSyncController.execute_sync_task,
-        "interval",
-        hours=8,
+        async_sequential_mapping_task,
+        CronTrigger(hour=19, minute=0, timezone=UTC_TZ),  # 12 AM PKT = 7 PM UTC
+        id="daily_mapping_tasks",
         replace_existing=True,
         max_instances=1,
-        id="google_sheets_sync",
-        name="Google Sheets Sync Task",
-        misfire_grace_time=1800
+        name="Daily Mapping Tasks (12 AM PKT)",
+        misfire_grace_time=3600  # 1 hour grace period
     )
-    
-    # NEW: All mappings update - once daily between 5-10 AM PKT
-    # Schedule at 5 AM, 6 AM, 7 AM, 8 AM, 9 AM PKT
-    # (converted to UTC: 12 AM, 1 AM, 2 AM, 3 AM, 4 AM UTC)
-    for hour_pkt in [5, 6, 7, 8, 9]:  # 5 AM to 9 AM PKT
-        hour_utc = (hour_pkt - 5) % 24  # Convert PKT to UTC (PKT = UTC+5)
-        scheduler.add_job(
-            lambda: safe_mapping_wrapper(
-                ItemsMappingController.execute_update_all_mappings_task,
-                "All Mappings Update"
-            ),
-            CronTrigger(hour=hour_utc, minute=0, timezone=UTC_TZ),
-            id=f"update_all_mappings_{hour_pkt}am_pkt",
-            replace_existing=True,
-            max_instances=1,
-            name=f"All Mappings Update Task ({hour_pkt} AM PKT)",
-            misfire_grace_time=3600
-        )
-    
-    # NEW: UIDI/No Match mappings update - every 8 hours with business hours exclusion
-    # Schedule at 12 AM, 8 AM, 4 PM UTC (which is 5 AM, 1 PM, 9 PM PKT)
-    # This avoids the 12 PM - 6 PM PKT business hours
-    for hour_utc, hour_pkt_desc in [(0, "5 AM"), (8, "1 PM"), (16, "9 PM")]:
-        scheduler.add_job(
-            lambda: safe_mapping_wrapper(
-                lambda: GoogleSheetSyncController.execute_sync_task(operation='update_no_match_uidi'),
-                "UIDI Mappings Update"
-            ),
-            CronTrigger(hour=hour_utc, minute=0, timezone=UTC_TZ),
-            id=f"update_uidi_mappings_{hour_utc}h_utc",
-            replace_existing=True,
-            max_instances=1,
-            name=f"UIDI Mappings Update Task ({hour_pkt_desc} PKT)",
-            misfire_grace_time=1800
-        )
 
-    # Simplified memory cleanup
+    # Memory cleanup - every 30 minutes
     def memory_cleanup_task():
         try:
             collected = gc.collect()
@@ -237,6 +268,11 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("MPI Backend shutting down")
     scheduler.shutdown()
+    
+    # Shutdown thread pool
+    _task_executor.shutdown(wait=True)
+    logger.info("Background thread pool shutdown completed")
+    
     logger.info("Background scheduler shutdown completed")
     logger.info("MPI Backend shutdown complete")
 
