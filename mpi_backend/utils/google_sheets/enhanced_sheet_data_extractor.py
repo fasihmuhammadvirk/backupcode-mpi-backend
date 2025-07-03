@@ -17,6 +17,7 @@ import pandas as pd
 import requests
 from googleapiclient.discovery import build
 from rapidfuzz import fuzz
+from io import StringIO
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -426,7 +427,7 @@ class EnhancedGoogleSheetDataExtractor:
             if response.status_code == 200:
                 # Read CSV data
                 df = pd.read_csv(
-                    pd.StringIO(response.text),
+                    StringIO(response.text),
                     header=None,
                     na_filter=False
                 )

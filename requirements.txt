@@ -28,3 +28,8 @@ apitally[fastapi]
 camelot-py
 fuzzywuzzy==0.18.0
 python-Levenshtein==0.21.1
+google-api-python-client==2.126.0
+google-auth==2.29.0
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.2.0
+rapidfuzz==3.6.2
