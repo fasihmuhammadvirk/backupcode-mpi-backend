@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, validator
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import date
 from uuid import UUID
 
@@ -100,18 +100,23 @@ class UnmappedItemResponse(BaseModel):
 class UnmappedItemsFilterRequest(BaseModel):
     """Request model for filtering unmapped items"""
     item_type: str = Field(
-        ..., description="Type of items to retrieve: 'temporary' or 'unmapped'"
+        ..., description="Type of items: 'temporary' or 'unmapped'"
     )
-    date_from: Optional[date] = Field(None, description="Start date filter")
-    date_to: Optional[date] = Field(None, description="End date filter")
+    date_from: Optional[date] = Field(
+        None, description="Start date filter (YYYY-MM-DD)"
+    )
+    date_to: Optional[date] = Field(
+        None, description="End date filter (YYYY-MM-DD)"
+    )
     supplier_names: Optional[List[str]] = Field(
         None, description="List of supplier names to filter by"
     )
     search: Optional[str] = Field(
-        None, description="Search term to filter items by item code"
+        None, description="Search term for item code or description"
     )
-    order_by: Optional[List[dict]] = Field(
-        None, description="List of order criteria with column and order fields"
+    order_by: Optional[List[Dict[str, str]]] = Field(
+        None, 
+        description="Optional ordering criteria"
     )
 
 

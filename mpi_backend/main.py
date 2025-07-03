@@ -58,8 +58,8 @@ PKT_TZ = pytz.timezone('Asia/Karachi')  # Pakistan Standard Time (UTC+5)
 MAPPINGS_ENABLED = os.getenv("ENABLE_MAPPINGS", "true").lower() == "true"
 MAPPINGS_EXCLUSION_ENABLED = os.getenv("ENABLE_MAPPINGS_EXCLUSION", "true").lower() == "true"
 
-# Thread pool for non-blocking background tasks
-_task_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="bg_task")
+# Thread pool for non-blocking background tasks (only for mapping tasks)
+_task_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="mapping_task")
 
 def is_pakistan_business_hours():
     """
@@ -69,70 +69,67 @@ def is_pakistan_business_hours():
         bool: True if within business hours, False otherwise
     """
     try:
-        # Get current time in Pakistan timezone
         pkt_now = datetime.now(PKT_TZ)
-        
-        # Check if it's between 12 PM (noon) and 6 PM PKT
-        business_start = time(12, 0)  # 12:00 PM
-        business_end = time(18, 0)    # 6:00 PM
-        
-        current_time = pkt_now.time()
-        is_business_hour = business_start <= current_time <= business_end
-        
-        logger.debug(f"PKT time: {pkt_now.strftime('%H:%M')} | Business hours (12PM-6PM): {is_business_hour}")
-        return is_business_hour
-        
+        current_hour = pkt_now.hour
+        # Business hours: 12 PM (noon) to 6 PM PKT
+        return 12 <= current_hour < 18
     except Exception as e:
-        logger.error(f"Error checking Pakistan business hours: {e}")
+        logger.error(f"Error checking business hours: {e}")
         return False
 
 
-def should_skip_mapping_task(task_name: str):
+def safe_mapping_wrapper(operation_name, operation_func, *args, **kwargs):
     """
-    Determine if a mapping task should be skipped based on configuration and business hours.
+    NEW: Enhanced mapping wrapper with proper priority controls and business hours awareness
     
     Args:
-        task_name: Name of the task to check
+        operation_name (str): Name of the operation for logging
+        operation_func (callable): Function to execute
+        *args, **kwargs: Arguments to pass to the function
         
     Returns:
-        bool: True if task should be skipped
+        Result of the operation or None if skipped/failed
     """
-    if not MAPPINGS_ENABLED:
-        logger.info(f"Skipping {task_name} - mappings disabled via configuration")
-        return True
-        
-    if MAPPINGS_EXCLUSION_ENABLED and is_pakistan_business_hours():
-        logger.info(f"Skipping {task_name} - business hours exclusion active (12PM-6PM PKT)")
-        return True
-        
-    return False
-
-
-def async_mapping_wrapper(task_func, task_name: str):
-    """
-    Async wrapper function for mapping tasks with non-blocking execution.
-    
-    Args:
-        task_func: The actual task function to execute
-        task_name: Name of the task for logging
-    """
-    def _execute_task():
-        if should_skip_mapping_task(task_name):
-            return {"status": "skipped", "message": f"{task_name} skipped due to configuration"}
-            
+    try:
+        # ABSOLUTE PRIORITY: Check if migrate-all operation is active
         try:
-            logger.info(f"Starting {task_name}")
-            result = task_func()
-            logger.info(f"{task_name} completed successfully: {result}")
-            return result
-        except Exception as e:
-            logger.error(f"{task_name} failed: {str(e)}")
-            return {"status": "error", "message": str(e)}
-    
-    # Execute in thread pool to avoid blocking the scheduler
-    future = _task_executor.submit(_execute_task)
-    logger.info(f"{task_name} submitted to background thread pool")
-    return future
+            from mpi_backend.utils.quickbooks_priority import is_migrate_all_active
+            if is_migrate_all_active():
+                logger.info(f"{operation_name} paused - MIGRATE-ALL has absolute priority")
+                return None
+        except ImportError:
+            # If function not available, continue normally
+            pass
+        
+        # Check if mappings are globally disabled
+        if not MAPPINGS_ENABLED:
+            logger.info(f"{operation_name} skipped - mappings globally disabled")
+            return None
+        
+        # NEW: Business hours exclusion for mapping operations
+        if MAPPINGS_EXCLUSION_ENABLED and is_pakistan_business_hours():
+            logger.info(f"{operation_name} skipped - within Pakistan business hours (12 PM - 6 PM PKT)")
+            return None
+        
+        # FALLBACK: Check if any QuickBooks export is active
+        try:
+            from mpi_backend.utils.quickbooks_priority import is_qb_export_active
+            if is_qb_export_active():
+                logger.info(f"{operation_name} paused - QuickBooks priority export in progress")
+                return None
+        except ImportError:
+            # If function not available, continue normally
+            pass
+        
+        # Execute the operation
+        logger.info(f"Starting {operation_name}")
+        result = operation_func(*args, **kwargs)
+        logger.info(f"Completed {operation_name} successfully")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error in {operation_name}: {str(e)}")
+        return None
 
 
 def async_sequential_mapping_task():
@@ -149,41 +146,40 @@ def async_sequential_mapping_task():
             logger.info("Step 1/2: Starting update all mappings (with Google Sheets sync)")
             from mpi_backend.database import SessionLocal
             with SessionLocal() as temp_db:
-                all_result = GoogleSheetSyncController(temp_db).perform_sync_task('update_all')
-                logger.info(f"Update all mappings completed: {all_result}")
+                step1_result = safe_mapping_wrapper(
+                    "Google Sheets Sync + Update All Mappings",
+                    GoogleSheetSyncController.execute_sync_task,
+                    temp_db, "update_all"
+                )
             
-            # Step 2: Update UIDI/No Match (includes Google Sheets sync automatically, only if step 1 succeeded)
-            if all_result and all_result.get("success"):
-                logger.info("Step 2/2: Starting UIDI/No Match update (with Google Sheets sync)")
-                with SessionLocal() as temp_db:
-                    uidi_result = GoogleSheetSyncController(temp_db).perform_sync_task('update_no_match_uidi')
-                    logger.info(f"UIDI update completed: {uidi_result}")
-            else:
-                logger.warning("Skipping UIDI update due to failure in update all mappings")
+            if step1_result is None:
+                logger.warning("Step 1 failed or was skipped, aborting Step 2")
+                return
                 
-            logger.info("Sequential mapping tasks completed successfully")
+            logger.info("Step 1 completed successfully")
+            
+            # Step 2: UIDI Update (includes Google Sheets sync automatically)
+            logger.info("Step 2/2: Starting UIDI update (with Google Sheets sync)")
+            with SessionLocal() as temp_db:
+                step2_result = safe_mapping_wrapper(
+                    "Google Sheets Sync + UIDI Update",
+                    GoogleSheetSyncController.execute_sync_task,
+                    temp_db, "update_no_match_uidi"
+                )
+                
+            if step2_result is None:
+                logger.warning("Step 2 failed or was skipped")
+            else:
+                logger.info("Step 2 completed successfully")
+                
+            logger.info("Sequential mapping tasks execution completed")
             
         except Exception as e:
-            logger.error(f"Sequential mapping tasks failed: {str(e)}")
+            logger.error(f"Sequential mapping task failed: {str(e)}")
     
-    # Execute in thread pool to avoid blocking
+    # Submit to thread pool for non-blocking execution
     future = _task_executor.submit(_execute_sequential)
-    logger.info("Sequential mapping tasks submitted to background thread pool")
-    return future
-
-
-def async_email_download_task():
-    """
-    Async wrapper for email download task.
-    """
-    def _execute():
-        try:
-            email_download_background_task()
-        except Exception as e:
-            logger.error(f"Email download task failed: {str(e)}")
-    
-    future = _task_executor.submit(_execute)
-    logger.info("Email download task submitted to background thread pool")
+    logger.info("Sequential mapping task submitted to background thread pool")
     return future
 
 
@@ -206,14 +202,14 @@ async def lifespan(app: FastAPI):
     # Register scheduler for dynamic job control
     set_scheduler_instance(scheduler)
     
-    # Email download - every 5 minutes (non-blocking)
+    # Email download - every 5 minutes (REVERTED: use original function)
     scheduler.add_job(
-        async_email_download_task,
+        email_download_background_task,  # FIXED: Back to original working function
         "interval",
         minutes=5,
         max_instances=1,
         id="email_download",
-        name="Email Download Task (Async)",
+        name="Email Download Task",
         misfire_grace_time=600
     )
     

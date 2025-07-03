@@ -579,7 +579,7 @@ def get_unmapped_items(
     - **date_to** (`str`, optional): End date filter (YYYY-MM-DD)
     - **supplier_names** (`List[str]`, optional): List of supplier names to filter by
     - **search** (`str`, optional): Search term for item code or description
-    - **order_by** (`List[dict]`, optional): List of ordering criteria, e.g. `[{"column": "original_item_id", "order": "asc"}]`
+    - **order_by** (`List[dict]`, optional): List of ordering criteria, e.g. `[{"column": "original_item_id", "order": "asc"}]`. If not provided, defaults to ascending order by `original_item_id`.
 
     **Query Parameters:**
 
@@ -640,6 +640,7 @@ def get_unmapped_items(
     - Search is case-insensitive and matches both item code and description
     - Ordering supports multiple columns; default is ascending by `original_item_id`
     - Only unique items are returned in the response
+    - If `order_by` is not provided, items are sorted by `original_item_id` in ascending order
     """
     try:
         # Validate item_type
@@ -649,17 +650,23 @@ def get_unmapped_items(
                 detail="item_type must be either 'temporary' or 'unmapped'"
             )
         
+        # Provide default ordering if order_by is None or empty
+        order_by = request.order_by
+        if not order_by:
+            # Default ordering: ascending by original_item_id
+            order_by = [{"column": "original_item_id", "order": "asc"}]
+        
         # Initialize controller
         controller = UnmappedItemsController(db)
         
-        # Get filtered items
+        # Get filtered items with guaranteed ordering
         result = controller.get_unmapped_items(
             item_type=request.item_type,
             date_from=request.date_from,
             date_to=request.date_to,
             supplier_names=request.supplier_names,
             search=request.search,
-            order_by=request.order_by,
+            order_by=order_by,  # Pass the validated order_by
             page=page,
             size=size
         )
