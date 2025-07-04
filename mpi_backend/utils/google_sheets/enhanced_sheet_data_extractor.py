@@ -116,10 +116,10 @@ class EnhancedGoogleSheetDataExtractor:
         # Set batch size for processing
         self.batch_size = batch_size
         
-        # Set default skip_sheets if None is provided
+        # Set default skip_sheets - REMOVED "(AC, ITEMS WITHOUT TEMPORARY GROUP NAME)" 
+        # as it contains important unmapped items
         self.skip_sheets = skip_sheets or [
-            "(AB, ALL SYSTEMS)", 
-            "(AC, ITEMS WITHOUT TEMPORARY GROUP NAME)"
+            "(AB, ALL SYSTEMS)"  # Only skip the summary sheet
         ]
         
         # Set fuzzy matching threshold
@@ -198,47 +198,27 @@ class EnhancedGoogleSheetDataExtractor:
 
     def _extract_clean_sheet_name(self, sheet_title: str) -> str:
         """
-        Extract a clean sheet name for classification.
+        Extract clean sheet name for classification.
         
         Args:
-            sheet_title: Raw sheet title from Google Sheets
+            sheet_title: Original sheet title
             
         Returns:
-            Clean sheet name suitable for classification
+            Clean sheet name
         """
         # Remove common prefixes and suffixes
         clean_name = sheet_title.strip()
         
-        # Remove common prefixes
-        prefixes_to_remove = [
-            "Sheet", "Tab", "Page", "List", "Data", "Items", "Products"
-        ]
+        # Remove parentheses and their contents
+        clean_name = re.sub(r'\([^)]*\)', '', clean_name)
         
-        for prefix in prefixes_to_remove:
-            if clean_name.lower().startswith(prefix.lower()):
-                clean_name = clean_name[len(prefix):].strip()
-        
-        # Remove common suffixes
-        suffixes_to_remove = [
-            "List", "Data", "Items", "Products", "Catalog", "Inventory"
-        ]
-        
-        for suffix in suffixes_to_remove:
-            if clean_name.lower().endswith(suffix.lower()):
-                clean_name = clean_name[:-len(suffix)].strip()
-        
-        # Remove special characters and normalize
-        clean_name = re.sub(r'[^\w\s-]', '', clean_name)
+        # Remove extra spaces and clean up
         clean_name = re.sub(r'\s+', ' ', clean_name).strip()
-        
-        # If we end up with nothing meaningful, use the original
-        if not clean_name or len(clean_name) < 2:
-            clean_name = sheet_title.strip()
         
         return clean_name
 
     def get_sheet_list(self) -> List[Dict[str, Any]]:
-        """Get list of sheets in the Google Sheet."""
+        """Get list of all sheets in the Google Spreadsheet."""
         try:
             return self._get_sheet_list_via_api()
         except Exception as e:
@@ -246,7 +226,7 @@ class EnhancedGoogleSheetDataExtractor:
             return self._get_fallback_sheet_list()
 
     def _get_sheet_list_via_api(self) -> List[Dict[str, Any]]:
-        """Get sheet list via Google Sheets API."""
+        """Get sheet list using Google Sheets API."""
         try:
             service = build('sheets', 'v4', developerKey=self.api_key)
             spreadsheet = service.spreadsheets().get(
@@ -258,113 +238,113 @@ class EnhancedGoogleSheetDataExtractor:
                 sheet_props = sheet.get('properties', {})
                 sheets.append({
                     'title': sheet_props.get('title', ''),
-                    'gid': str(sheet_props.get('sheetId', ''))
+                    'gid': sheet_props.get('sheetId', '')
                 })
             
             return sheets
         except Exception as e:
-            logger.error(f"Failed to get sheet list via API: {e}")
+            logger.error(f"Error getting sheet list via API: {e}")
             raise
 
     def _get_fallback_sheet_list(self) -> List[Dict[str, Any]]:
         """Fallback method to get sheet list."""
-        # This would be a simplified fallback - in practice, you might
-        # have a cached list or alternative method
+        # This is a simplified fallback - in practice, you might want to
+        # implement a more robust fallback mechanism
         return []
 
-    def match_supplier(self, col_name: str) -> Tuple[str, int, float]:
+    def detect_sheet_structure(self, df: pd.DataFrame, sheet_title: str) -> Dict[str, Any]:
         """
-        Match a column name to a supplier using fuzzy matching.
+        Detect the structure of a sheet to understand how to extract data.
         
         Args:
-            col_name: Column name to match
+            df: DataFrame containing sheet data
+            sheet_title: Title of the sheet
             
         Returns:
-            Tuple of (supplier_name, supplier_id, confidence_score)
+            Dictionary with detected structure information
         """
-        col_name_lower = col_name.lower()
-        best_match = None
-        best_score = 0
+        structure = {
+            "item_code_column": None,
+            "description_column": None,
+            "category_column": None,
+            "supplier_columns": [],
+            "sheet_type": "unknown",
+            "has_headers": False
+        }
         
-        for supplier, info in self.supplier_mapping.items():
-            for term in info["key_terms"]:
-                score = fuzz.ratio(col_name_lower, term)
-                if score > best_score and score >= self.fuzzy_threshold:
-                    best_score = score
-                    best_match = supplier
+        if df.empty or len(df.columns) == 0:
+            return structure
         
-        if best_match:
-            return best_match, self.supplier_ids[best_match], best_score
-        else:
-            return "Unknown", 0, 0
-
-    def detect_supplier_columns(
-        self, 
-        df_head: pd.DataFrame,
-        df_full: pd.DataFrame
-    ) -> Dict[str, List[int]]:
-        """
-        Detect supplier columns in the DataFrame.
+        # Analyze first few rows to understand structure
+        sample_rows = df.head(10)
         
-        Args:
-            df_head: First few rows of the DataFrame
-            df_full: Full DataFrame
-            
-        Returns:
-            Dictionary mapping supplier names to column indices
-        """
-        supplier_columns = {}
+        # Check if this is the "ITEMS WITHOUT TEMPORARY GROUP NAME" sheet
+        if "ITEMS WITHOUT TEMPORARY GROUP NAME" in sheet_title:
+            structure["sheet_type"] = "unmapped_items"
+            structure["item_code_column"] = 1  # Column 1 contains item codes
+            structure["description_column"] = 2  # Column 2 contains descriptions
+            structure["category_column"] = 0  # Column 0 contains categories
+            return structure
         
-        for col_idx, col_name in enumerate(df_head.columns):
-            supplier_name, supplier_id, confidence = self.match_supplier(str(col_name))
-            
-            if confidence >= self.fuzzy_threshold and supplier_id > 0:
-                # Validate that this column actually contains supplier data
-                if self._validate_first_two_rows_have_supplier_data(df_full, col_idx):
-                    if supplier_name not in supplier_columns:
-                        supplier_columns[supplier_name] = []
-                    supplier_columns[supplier_name].append(col_idx)
+        # For other sheets, analyze the structure
+        # Look for item codes in columns (typically columns 1, 2, or 3)
+        for col_idx in range(min(5, len(df.columns))):
+            col_data = sample_rows.iloc[:, col_idx].dropna()
+            if len(col_data) > 0:
+                # Check if this column contains item codes
+                item_code_indicators = 0
+                for val in col_data.head(5):
+                    val_str = str(val).strip()
+                    if (val_str and 
+                        len(val_str) >= 3 and 
+                        not val_str.lower() in ['nan', 'item', 'code', 'description', 'supplier', 'category'] and
+                        any(c.isdigit() for c in val_str)):
+                        item_code_indicators += 1
+                
+                if item_code_indicators >= 3:  # At least 3 values look like item codes
+                    if structure["item_code_column"] is None:
+                        structure["item_code_column"] = col_idx
+                    elif structure["description_column"] is None:
+                        structure["description_column"] = col_idx
+                
+                # Check if this column contains categories (first column often does)
+                if col_idx == 0:
+                    category_indicators = 0
+                    for val in col_data.head(5):
+                        val_str = str(val).strip().lower()
+                        if val_str in ['tools', 'finishings', 'valves', 'pipe joining material', 'brass', 'copper']:
+                            category_indicators += 1
                     
-                    logger.debug(
-                        f"Detected supplier column: {col_name} -> {supplier_name} "
-                        f"(confidence: {confidence})"
-                    )
+                    if category_indicators >= 2:
+                        structure["category_column"] = col_idx
         
-        return supplier_columns
-
-    def _validate_first_two_rows_have_supplier_data(
-        self, 
-        df_full: pd.DataFrame, 
-        col_idx: int
-    ) -> bool:
-        """
-        Validate that a column contains actual supplier data in the first few rows.
+        # If we couldn't detect item code column, assume it's column 1
+        if structure["item_code_column"] is None:
+            structure["item_code_column"] = 1
         
-        Args:
-            df_full: Full DataFrame
-            col_idx: Column index to validate
-            
-        Returns:
-            True if column contains valid supplier data
-        """
-        if col_idx >= len(df_full.columns):
-            return False
+        # If we couldn't detect description column, assume it's column 2
+        if structure["description_column"] is None:
+            structure["description_column"] = 2
         
-        # Check first few rows for actual data
-        for row_idx in range(min(5, len(df_full))):
-            try:
-                cell_value = df_full.iloc[row_idx, col_idx]
-                if pd.notna(cell_value):
-                    cell_str = str(cell_value).strip()
-                    if (cell_str and 
-                        len(cell_str) >= 2 and 
-                        not any(term in cell_str.lower() for term in 
-                               ["item", "code", "description", "supplier", "header"])):
-                        return True
-            except (IndexError, KeyError):
-                continue
+        # Detect supplier columns (columns that contain supplier item codes)
+        for col_idx in range(len(df.columns)):
+            if col_idx not in [structure["item_code_column"], structure["description_column"], structure["category_column"]]:
+                col_data = sample_rows.iloc[:, col_idx].dropna()
+                if len(col_data) > 0:
+                    # Check if this column contains supplier item codes
+                    supplier_indicators = 0
+                    for val in col_data.head(5):
+                        val_str = str(val).strip()
+                        if (val_str and 
+                            len(val_str) >= 3 and 
+                            not val_str.lower() in ['nan', 'item', 'code', 'description', 'supplier'] and
+                            any(c.isdigit() for c in val_str)):
+                            supplier_indicators += 1
+                    
+                    if supplier_indicators >= 2:
+                        structure["supplier_columns"].append(col_idx)
         
-        return False
+        return structure
 
     def process_sheet(self, sheet_title: str, gid: str) -> List[Dict[str, Any]]:
         """
@@ -392,16 +372,16 @@ class EnhancedGoogleSheetDataExtractor:
                 logger.debug(f"Sheet is empty: {sheet_title}")
                 return []
             
-            # Detect supplier columns
-            supplier_columns = self.detect_supplier_columns(df.head(), df)
+            # Detect sheet structure
+            structure = self.detect_sheet_structure(df, sheet_title)
             
-            if not supplier_columns:
-                logger.debug(f"No supplier columns detected in sheet: {sheet_title}")
+            if structure["item_code_column"] is None:
+                logger.debug(f"Could not detect item code column in sheet: {sheet_title}")
                 return []
             
             # Process the sheet data
-            extracted_items = self._process_dataframe_chunk(
-                df, supplier_columns, sheet_title, 0
+            extracted_items = self._process_dataframe_with_structure(
+                df, structure, sheet_title
             )
             
             logger.info(
@@ -440,21 +420,19 @@ class EnhancedGoogleSheetDataExtractor:
             logger.error(f"Error getting sheet data: {e}")
             return None
 
-    def _process_dataframe_chunk(
+    def _process_dataframe_with_structure(
         self, 
         df: pd.DataFrame,
-        supplier_columns: Dict[str, List[int]],
-        sheet_title: str,
-        start_row: int
+        structure: Dict[str, Any],
+        sheet_title: str
     ) -> List[Dict[str, Any]]:
         """
-        Process a chunk of DataFrame data and extract mappings.
+        Process DataFrame using detected structure.
         
         Args:
             df: DataFrame to process
-            supplier_columns: Dictionary mapping suppliers to column indices
+            structure: Detected sheet structure
             sheet_title: Name of the sheet
-            start_row: Starting row index
             
         Returns:
             List of extracted mappings
@@ -462,162 +440,192 @@ class EnhancedGoogleSheetDataExtractor:
         extracted_items = []
         
         # Process each row
-        for row_idx in range(start_row, len(df)):
+        for row_idx in range(len(df)):
             try:
                 row = df.iloc[row_idx]
                 actual_row = row_idx + 1  # 1-based row number
                 
-                # Extract MPI code and description from first few columns
-                mpi_code = ""
+                # Extract data based on detected structure
+                item_code = ""
                 description = ""
-                size = ""
+                category = ""
                 
-                # Try to find MPI code in column 1 (most common location)
-                if len(row) > 1:
-                    mpi_code_val = row.iloc[1]
-                    if not pd.isna(mpi_code_val):
-                        mpi_code = str(mpi_code_val).strip()
-                        
-                        # Get description from column 2
-                        if len(row) > 2:
-                            desc_val = row.iloc[2]
-                            if not pd.isna(desc_val):
-                                description = str(desc_val).strip()
-                        
-                        # Get size from column 3
-                        if len(row) > 3:
-                            size_val = row.iloc[3]
-                            if not pd.isna(size_val):
-                                size = str(size_val).strip()
+                # Extract item code
+                if structure["item_code_column"] is not None:
+                    item_code_val = row.iloc[structure["item_code_column"]]
+                    if not pd.isna(item_code_val):
+                        item_code = str(item_code_val).strip()
                 
-                # Fallback: If no MPI code in column 1, check column 0
-                if not mpi_code and len(row) > 0:
-                    mpi_code_val = row.iloc[0]
-                    if not pd.isna(mpi_code_val):
-                        mpi_code_str = str(mpi_code_val).strip()
-                        # Check if this looks like an MPI code
-                        if (mpi_code_str and len(mpi_code_str) > 2 and 
-                            not mpi_code_str.lower() in ['item code', 'mpi', 'code', 'item', 'description']):
-                            mpi_code = mpi_code_str
-                            
-                            # Shift description and size columns
-                            if len(row) > 1:
-                                desc_val = row.iloc[1]
-                                if not pd.isna(desc_val):
-                                    description = str(desc_val).strip()
-                            if len(row) > 2:
-                                size_val = row.iloc[2]
-                                if not pd.isna(size_val):
-                                    size = str(size_val).strip()
+                # Extract description
+                if structure["description_column"] is not None:
+                    desc_val = row.iloc[structure["description_column"]]
+                    if not pd.isna(desc_val):
+                        description = str(desc_val).strip()
                 
-                # Skip row if no MPI code found
-                if not mpi_code:
+                # Extract category
+                if structure["category_column"] is not None:
+                    cat_val = row.iloc[structure["category_column"]]
+                    if not pd.isna(cat_val):
+                        category = str(cat_val).strip()
+                
+                # Skip row if no item code found
+                if not item_code:
                     continue
                     
                 # Skip header rows
-                header_terms = ["item code", "mpi", "code", "item", "description", "size", "supplier"]
-                mpi_lower = mpi_code.lower()
+                header_terms = ["item code", "mpi", "code", "item", "description", "size", "supplier", "category"]
+                item_lower = item_code.lower()
                 
-                if any(term in mpi_lower for term in header_terms) or (
+                if any(term in item_lower for term in header_terms) or (
                     description and any(
                         term in description.lower() for term in header_terms
                     )
                 ):
-                    logger.debug(f"Skipping header row {actual_row}: {mpi_code}")
+                    logger.debug(f"Skipping header row {actual_row}: {item_code}")
                     continue
                 
-                # Create a combined description with size
-                combined_description = description or ""
-                if size:
-                    combined_description = f"{size} {combined_description}"
-                combined_description = combined_description.strip()
+                # Determine supplier based on sheet name and category
+                supplier = self._determine_supplier_from_sheet(sheet_title, category)
+                
+                if not supplier:
+                    continue
                 
                 # Process supplier columns for this row
-                for supplier, col_indices in supplier_columns.items():
-                    for col_idx in col_indices:
-                        if col_idx >= len(row):
-                            continue
-                            
-                        cell_value = row.iloc[col_idx]
+                for col_idx in structure["supplier_columns"]:
+                    if col_idx >= len(row):
+                        continue
                         
-                        if pd.isna(cell_value):
-                            continue
+                    cell_value = row.iloc[col_idx]
+                    
+                    if pd.isna(cell_value):
+                        continue
+                    
+                    # Convert to string and clean
+                    supplier_value = str(cell_value).strip()
+                    
+                    # Skip empty cells
+                    if not supplier_value:
+                        continue
+                    
+                    # Skip cells that are just whitespace or special characters
+                    if not re.search(r'[A-Za-z0-9]', supplier_value):
+                        continue
+                    
+                    # Clean the supplier_item_ids by removing suffix patterns
+                    cleaned_value = self._clean_supplier_item_id(
+                        supplier_value, supplier
+                    )
+                    
+                    # Skip if cleaned value is empty
+                    if not cleaned_value:
+                        continue
+                    
+                    # Skip if the supplier ID field contains header-like text
+                    if any(term in cleaned_value.lower() for term in 
+                          ["supplier", "item", "id", "code", "description"]):
+                        continue
+                    
+                    # Additional validation: Skip values that are too short
+                    if len(cleaned_value) < 2:
+                        continue
+                    
+                    # Get the original column name
+                    supplier_column_name = str(df.columns[col_idx]) if col_idx < len(df.columns) else f"Column_{col_idx}"
+                    
+                    # Extract clean sheet name for classification
+                    clean_sheet_name = self._extract_clean_sheet_name(sheet_title)
+                    
+                    # Create item mapping with enhanced data
+                    item_mapping = {
+                        "mpi_code": item_code,
+                        "description": description,
+                        "category": category,
+                        "supplier_name": supplier,
+                        "supplier_id": self.supplier_ids.get(supplier, 0),
+                        "supplier_item_ids": cleaned_value,
+                        "google_sheet_name": clean_sheet_name,
+                        "row_index": actual_row,
+                        "supplier_column_name": supplier_column_name,
+                        "original_supplier_value": supplier_value,
+                        "sheet_type": structure["sheet_type"]
+                    }
+                    
+                    # Validate and categorize the mapping
+                    validated_mapping = self._validate_and_categorize_mapping(item_mapping)
+                    
+                    if validated_mapping:
+                        extracted_items.append(validated_mapping)
                         
-                        # Convert to string and clean
-                        supplier_value = str(cell_value).strip()
-                        
-                        # Skip empty cells
-                        if not supplier_value:
-                            continue
-                        
-                        # Skip cells that are just whitespace or special characters
-                        if not re.search(r'[A-Za-z0-9]', supplier_value):
-                            continue
-                        
-                        # Clean the supplier_item_ids by removing suffix patterns
-                        cleaned_value = self._clean_supplier_item_id(
-                            supplier_value, supplier
-                        )
-                        
-                        # Skip if cleaned value is empty
-                        if not cleaned_value:
-                            continue
-                        
-                        # Skip if the supplier ID field contains header-like text
-                        if any(term in cleaned_value.lower() for term in 
-                              ["supplier", "item", "id", "code", "description"]):
-                            continue
-                        
-                        # Additional validation: Skip values that are too short
-                        if len(cleaned_value) < 2:
-                            continue
-                        
-                        # Get the original column name
-                        supplier_column_name = str(df.columns[col_idx]) if col_idx < len(df.columns) else f"Column_{col_idx}"
-                        
-                        # Extract clean sheet name for classification
-                        clean_sheet_name = self._extract_clean_sheet_name(sheet_title)
-                        
-                        # Create item mapping with enhanced data
-                        item_mapping = {
-                            "mpi_code": mpi_code,
-                            "description": combined_description,
-                            "size": size if size else "",
-                            "supplier_name": supplier,
-                            "supplier_id": self.supplier_ids[supplier],
-                            "supplier_item_ids": cleaned_value,
-                            "google_sheet_name": clean_sheet_name,
-                            "row_index": actual_row,
-                            "supplier_column_name": supplier_column_name,
-                            "original_supplier_value": supplier_value
-                        }
-                        
-                        # Validate and categorize the mapping
-                        validated_mapping = self._validate_and_categorize_mapping(item_mapping)
-                        
-                        if validated_mapping:
-                            extracted_items.append(validated_mapping)
-                            
-                            # Update statistics
-                            self.extraction_stats["total_extracted"] += 1
-                            if validated_mapping.get("mapping_type") == "permanent":
-                                self.extraction_stats["permanent_mappings"] += 1
-                            elif validated_mapping.get("mapping_type") == "temporary":
-                                self.extraction_stats["temporary_mappings"] += 1
-                            else:
-                                self.extraction_stats["invalid_mappings"] += 1
-                        
-                        logger.debug(
-                            f"Extracted mapping: MPI={mpi_code}, Supplier={supplier}, "
-                            f"Original={supplier_value}, Cleaned={cleaned_value}, "
-                            f"Type={validated_mapping.get('mapping_type', 'unknown') if validated_mapping else 'invalid'}"
-                        )
+                        # Update statistics
+                        self.extraction_stats["total_extracted"] += 1
+                        if validated_mapping.get("mapping_type") == "permanent":
+                            self.extraction_stats["permanent_mappings"] += 1
+                        elif validated_mapping.get("mapping_type") == "temporary":
+                            self.extraction_stats["temporary_mappings"] += 1
+                        else:
+                            self.extraction_stats["invalid_mappings"] += 1
+                    
+                    logger.debug(
+                        f"Extracted mapping: MPI={item_code}, Supplier={supplier}, "
+                        f"Original={supplier_value}, Cleaned={cleaned_value}, "
+                        f"Type={validated_mapping.get('mapping_type', 'unknown') if validated_mapping else 'invalid'}"
+                    )
             
             except Exception as e:
                 logger.error(f"Error processing row {row_idx} in sheet {sheet_title}: {str(e)}")
                 continue
         
         return extracted_items
+
+    def _determine_supplier_from_sheet(self, sheet_title: str, category: str) -> str:
+        """
+        Determine supplier based on sheet title and category.
+        
+        Args:
+            sheet_title: Title of the sheet
+            category: Category from the sheet
+            
+        Returns:
+            Supplier name
+        """
+        # For the unmapped items sheet, items are typically from BMW
+        if "ITEMS WITHOUT TEMPORARY GROUP NAME" in sheet_title:
+            return "BMW Plumbing Supplies"
+        
+        # For other sheets, try to determine supplier based on sheet name
+        sheet_lower = sheet_title.lower()
+        
+        if "bmw" in sheet_lower:
+            return "BMW Plumbing Supplies"
+        elif "world wide" in sheet_lower or "wwp" in sheet_lower:
+            return "World Wide Plumbing"
+        elif "y&s" in sheet_lower or "y & s" in sheet_lower:
+            return "Y & S Plumbing Supply"
+        elif "flow mark" in sheet_lower:
+            return "Flow Mark Plumbing Supply"
+        elif "gotham" in sheet_lower:
+            return "Gotham Plumbing Supply"
+        elif "supreme" in sheet_lower:
+            return "Supreme Plumbing Supply"
+        elif "pyramid" in sheet_lower:
+            return "Pyramid Plumbing"
+        elif "park" in sheet_lower:
+            return "Park Plumbing Supply"
+        elif "lion" in sheet_lower:
+            return "Lion Hvac Supplies"
+        elif "af supply" in sheet_lower:
+            return "AF Supply"
+        elif "plumbing exchange" in sheet_lower:
+            return "Plumbing Exchange"
+        elif "abc opus" in sheet_lower:
+            return "ABC Opus Services"
+        elif "fw webb" in sheet_lower:
+            return "FW Webb Plumbing Supply"
+        elif "bruce ferguson" in sheet_lower:
+            return "Bruce Ferguson"
+        
+        # Default to BMW for most sheets
+        return "BMW Plumbing Supplies"
 
     def _clean_supplier_item_id(self, supplier_value: str, supplier: str) -> str:
         """
@@ -632,13 +640,12 @@ class EnhancedGoogleSheetDataExtractor:
         """
         cleaned_value = supplier_value
         
-        # Remove common BMW suffix patterns (but preserve the base item code)
-        if supplier == "BMW Plumbing Supplies":
-            # Remove dash followed by single letter at end
-            cleaned_value = re.sub(r'-[BWYSGFPA]$', '', cleaned_value)
-        else:
-            # For other suppliers, remove space-dash-letter patterns
-            cleaned_value = re.sub(r'\s*-\s*[BWYSGFPA](\s|$)', '', cleaned_value)
+        # Remove common suffix patterns for all suppliers
+        # Remove dash followed by single letter at end (e.g., -B, -Y, -W, etc.)
+        cleaned_value = re.sub(r'-[BWYSGFPA]$', '', cleaned_value)
+        
+        # Remove space-dash-letter patterns
+        cleaned_value = re.sub(r'\s*-\s*[BWYSGFPA](\s|$)', '', cleaned_value)
         
         # Remove any extra spaces
         cleaned_value = cleaned_value.strip()
@@ -653,145 +660,140 @@ class EnhancedGoogleSheetDataExtractor:
             mapping_data: Raw mapping data
             
         Returns:
-            Validated mapping with type information, or None if invalid
+            Validated and categorized mapping or None if invalid
         """
         try:
             # Clean the mapping data
             cleaned_data = clean_mapping_data(mapping_data)
             
-            # Check if this is a temporary mapping
-            if is_temporary_mapping(cleaned_data.get("mpi_code"), cleaned_data.get("description")):
-                # This is a temporary mapping
-                return {
-                    **cleaned_data,
-                    "mapping_type": "temporary",
-                    "validation_status": "valid_temporary"
-                }
+            if not cleaned_data:
+                return None
             
-            # Validate for permanent storage
-            is_valid, validation_errors = validate_mapping_for_permanent_storage(cleaned_data)
+            # Extract key fields for validation
+            mpi_code = cleaned_data.get('mpi_code', '')
+            description = cleaned_data.get('description', '')
             
+            # Determine if this should be a temporary mapping
+            if should_use_temporary_storage(mpi_code, description):
+                cleaned_data["mapping_type"] = "temporary"
+                return cleaned_data
+            
+            # Check if this is a valid permanent mapping
+            is_valid, errors = validate_mapping_for_permanent_storage(cleaned_data)
             if is_valid:
-                # This is a valid permanent mapping
-                return {
-                    **cleaned_data,
-                    "mapping_type": "permanent",
-                    "validation_status": "valid_permanent"
-                }
-            else:
-                # This is an invalid mapping
-                logger.warning(
-                    f"Invalid mapping detected: {cleaned_data.get('mpi_code')} - {validation_errors}"
-                )
-                return {
-                    **cleaned_data,
-                    "mapping_type": "invalid",
-                    "validation_status": "invalid",
-                    "validation_errors": validation_errors
-                }
-                
+                cleaned_data["mapping_type"] = "permanent"
+                return cleaned_data
+            
+            # If not valid for permanent storage, make it temporary
+            cleaned_data["mapping_type"] = "temporary"
+            return cleaned_data
+            
         except Exception as e:
             logger.error(f"Error validating mapping: {e}")
             return None
 
     def process_all_sheets(self) -> Dict[str, Any]:
         """
-        Process all sheets in the Google Sheet with enhanced validation.
+        Process all sheets in the Google Spreadsheet.
         
         Returns:
             Dictionary with extraction results and statistics
         """
-        logger.info(f"Processing Google Sheet: {self.sheet_id}")
+        logger.info("Starting enhanced Google Sheets data extraction...")
         
-        # Get list of sheets
-        sheets = self.get_sheet_list()
-        
-        if not sheets:
-            logger.warning("No sheets found")
-            return {
-                "success": False,
-                "message": "No sheets found",
-                "statistics": self.extraction_stats
-            }
-        
-        logger.info(f"Found {len(sheets)} sheets")
-        
-        # Reset tracking variables
-        self.all_items = []
-        self.skipped_sheets = []
-        self.empty_sheets = []
-        self.extraction_stats = {
-            "total_extracted": 0,
-            "permanent_mappings": 0,
-            "temporary_mappings": 0,
-            "invalid_mappings": 0,
-            "sheets_processed": 0
-        }
-        
-        # Process each sheet
-        for sheet in sheets:
-            try:
-                sheet_items = self.process_sheet(
-                    sheet_title=sheet['title'],
-                    gid=sheet['gid']
-                )
-                self.all_items.extend(sheet_items)
+        try:
+            # Get list of all sheets
+            sheets = self.get_sheet_list()
+            
+            if not sheets:
+                logger.error("No sheets found in the spreadsheet")
+                return {
+                    "success": False,
+                    "error": "No sheets found",
+                    "stats": self.extraction_stats
+                }
+            
+            logger.info(f"Found {len(sheets)} sheets to process")
+            
+            # Process each sheet
+            for sheet in sheets:
+                sheet_title = sheet.get('title', '')
+                gid = sheet.get('gid', '')
+                
+                if not sheet_title or not gid:
+                    continue
+                
+                logger.info(f"Processing sheet: {sheet_title}")
+                
+                # Process the sheet
+                extracted_items = self.process_sheet(sheet_title, gid)
+                
+                # Add extracted items to the main list
+                self.all_items.extend(extracted_items)
+                
+                # Update statistics
                 self.extraction_stats["sheets_processed"] += 1
                 
-                # Short pause to avoid overwhelming the API
-                time.sleep(0.1)
-            except Exception as e:
-                logger.error(f"Error processing sheet {sheet['title']}: {str(e)}")
-        
-        # Categorize items by type
-        permanent_items = [item for item in self.all_items if item.get("mapping_type") == "permanent"]
-        temporary_items = [item for item in self.all_items if item.get("mapping_type") == "temporary"]
-        invalid_items = [item for item in self.all_items if item.get("mapping_type") == "invalid"]
-        
-        # Save extracted data to output file
-        output_data = {
-            "permanent_mappings": permanent_items,
-            "temporary_mappings": temporary_items,
-            "invalid_mappings": invalid_items,
-            "statistics": self.extraction_stats,
-            "extraction_timestamp": time.time()
-        }
-        
-        with open(self.output_file, 'w') as f:
-            json.dump(output_data, f, indent=2)
-        
-        logger.info(
-            f"Extraction complete. Processed {self.extraction_stats['sheets_processed']} sheets, "
-            f"extracted {self.extraction_stats['total_extracted']} items. "
-            f"Permanent: {self.extraction_stats['permanent_mappings']}, "
-            f"Temporary: {self.extraction_stats['temporary_mappings']}, "
-            f"Invalid: {self.extraction_stats['invalid_mappings']}. "
-            f"Output saved to {self.output_file}"
-        )
-        
-        # Log skipped and empty sheets
-        if self.skipped_sheets:
-            logger.info(
-                f"Skipped {len(self.skipped_sheets)} sheets: {self.skipped_sheets}"
-            )
-        if self.empty_sheets:
-            logger.info(
-                f"Empty sheets: {len(self.empty_sheets)} sheets: {self.empty_sheets}"
-            )
-        
-        return {
-            "success": True,
-            "message": "Extraction completed successfully",
-            "statistics": self.extraction_stats,
-            "permanent_mappings": permanent_items,
-            "temporary_mappings": temporary_items,
-            "invalid_mappings": invalid_items,
-            "skipped_sheets": self.skipped_sheets,
-            "empty_sheets": self.empty_sheets
-        }
+                logger.info(f"Extracted {len(extracted_items)} items from {sheet_title}")
+            
+            # Save results to file
+            self._save_results()
+            
+            # Log final statistics
+            logger.info("Extraction completed successfully!")
+            logger.info(f"Total items extracted: {self.extraction_stats['total_extracted']}")
+            logger.info(f"Permanent mappings: {self.extraction_stats['permanent_mappings']}")
+            logger.info(f"Temporary mappings: {self.extraction_stats['temporary_mappings']}")
+            logger.info(f"Sheets processed: {self.extraction_stats['sheets_processed']}")
+            logger.info(f"Sheets skipped: {len(self.skipped_sheets)}")
+            logger.info(f"Empty sheets: {len(self.empty_sheets)}")
+            
+            return {
+                "success": True,
+                "total_items": len(self.all_items),
+                "stats": self.extraction_stats,
+                "skipped_sheets": self.skipped_sheets,
+                "empty_sheets": self.empty_sheets
+            }
+            
+        except Exception as e:
+            logger.error(f"Error during extraction: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "stats": self.extraction_stats
+            }
+
+    def _save_results(self):
+        """Save extracted results to the output file."""
+        try:
+            # Create output directory if it doesn't exist
+            output_dir = os.path.dirname(self.output_file)
+            if output_dir and not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+            
+            # Save all items to JSON file
+            with open(self.output_file, 'w', encoding='utf-8') as f:
+                json.dump(self.all_items, f, indent=2, ensure_ascii=False, default=str)
+            
+            logger.info(f"Results saved to: {self.output_file}")
+            
+        except Exception as e:
+            logger.error(f"Error saving results: {e}")
 
 
 def extract_all_data_enhanced():
-    """Extract all data from the Google Sheet using enhanced extractor."""
+    """
+    Main function to extract all data from Google Sheets using the enhanced extractor.
+    
+    Returns:
+        Dictionary with extraction results
+    """
     extractor = EnhancedGoogleSheetDataExtractor()
-    return extractor.process_all_sheets() 
+    return extractor.process_all_sheets()
+
+
+if __name__ == "__main__":
+    # Run the extraction
+    results = extract_all_data_enhanced()
+    print(json.dumps(results, indent=2)) 
