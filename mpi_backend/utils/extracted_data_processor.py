@@ -170,19 +170,20 @@ def search_replace(row, temp_items, item_mappings):
 
     # SECOND: If no permanent mapping found, check temporary mappings
     # First try exact match with clean invoice item
-    temp_match = temp_items[temp_items['original_item_number'] == original_item]
+    temp_match = temp_items[temp_items['original_item'] == original_item]
     
     # If no exact match and we have supplier_id, clean the DB data and compare with clean invoice item
     if temp_match.empty and supplier_id:
         temp_match = temp_items[
-            temp_items['original_item_number'].apply(lambda x: clean_supplier_suffix(x, supplier_id)) == original_item
+            temp_items['original_item'].apply(lambda x: clean_supplier_suffix(x, supplier_id)) == original_item
         ]
     
     if not temp_match.empty:
-        temp_mpi_code = temp_match.iloc[0]['temporary_item_number']
+        # For temporary mappings, use the original_item as the temp MPI code
+        temp_mpi_code = temp_match.iloc[0]['original_item']
         row['MpiItem'] = temp_mpi_code  # This is the temporary mpi_code
-        row['MpiDescription'] = temp_match.iloc[0]['description']
-        row['Sheet Name'] = ''
+        row['MpiDescription'] = temp_match.iloc[0]['original_description']
+        row['Sheet Name'] = temp_match.iloc[0]['sheet_name']
         logger.info(f"Applied temporary mapping: {original_item} -> {temp_mpi_code}")
         return row
 
