@@ -647,7 +647,7 @@ class StatementDownloader:
             try:
                 file_key = f"statements/{Path(file_path).name}"
                 upload_file(file_path, file_key, is_invoice=True)
-                logger.info(f"Uploaded to S3: {file_key}")
+                logger.info(f"Uploaded to S3: {file_key}.pdf")
             except Exception as s3_error:
                 logger.warning(
                     f"S3 upload failed for {file_path}: {str(s3_error)}"

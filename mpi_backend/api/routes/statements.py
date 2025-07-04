@@ -301,28 +301,19 @@ def download_statement_pdf(
             )
         
         # Generate presigned URL for statement PDF
-        # Statements are stored with key pattern: statements/{filename}
+        # Statements are stored with key pattern: statements/{filename}.pdf (due to is_invoice=True)
         s3_key = f"statements/{pdf_filename}"
         
         try:
-            # Force inline viewing in the URL response, regardless of how file was uploaded
-            s3_client = boto3.client(
-                's3',
-                aws_access_key_id=AWS_SERVER_PUBLIC_KEY,
-                aws_secret_access_key=AWS_SERVER_SECRET_KEY,
-                region_name=REGION
+            # Use the utility function which now includes inline content disposition
+            presigned_url = get_presigned_url(
+                file_key=s3_key,
+                expiration_time=180,
+                is_invoice=True
             )
             
-            presigned_url = s3_client.generate_presigned_url(
-                'get_object',
-                Params={
-                    'Bucket': BUCKET_NAME,
-                    'Key': s3_key,
-                    'ResponseContentDisposition': 'inline',
-                    'ResponseContentType': 'application/pdf'
-                },
-                ExpiresIn=180
-            )
+            if not presigned_url:
+                raise Exception("Failed to generate presigned URL")
         except Exception as e:
             logger.error(
                 f"Error generating presigned URL for {s3_key}: {str(e)}"

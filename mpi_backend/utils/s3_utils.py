@@ -56,7 +56,12 @@ def get_presigned_url(file_key, expiration_time=180, is_invoice=True) -> Optiona
             key = str(file_key) + '.pdf'
             presigned_url = s3_client.generate_presigned_url(
                 'get_object',
-                Params={'Bucket': BUCKET_NAME, 'Key': key},
+                Params={
+                    'Bucket': BUCKET_NAME, 
+                    'Key': key,
+                    'ResponseContentDisposition': 'inline',
+                    'ResponseContentType': 'application/pdf'
+                },
                 ExpiresIn=expiration_time  # set to expire after 10 minutes
             )
         else:

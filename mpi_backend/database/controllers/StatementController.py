@@ -500,7 +500,7 @@ class StatementController:
                 'pagination': {
                     'current_page': page,
                     'page_size': page_size,
-                    'total_results': len(invoice_data),  # Actual results after status filter
+                    'total_results': total_count,  # Use total count before status filtering
                     'total_pages': total_pages,
                     'has_next': page < total_pages,
                     'has_previous': page > 1
@@ -610,6 +610,7 @@ class StatementController:
                 }
             
             # Generate S3 key for statement PDF
+            # Statements are stored with .pdf extension due to is_invoice=True
             s3_key = f"statements/{pdf_filename}"
             
             try:
@@ -617,7 +618,7 @@ class StatementController:
                 statement_url = get_presigned_url(
                     file_key=s3_key,
                     expiration_time=300,  # 5 minutes
-                    is_invoice=False
+                    is_invoice=True
                 )
             except Exception as e:
                 logger.error(f"Failed to get presigned URL for {s3_key}: {str(e)}")
