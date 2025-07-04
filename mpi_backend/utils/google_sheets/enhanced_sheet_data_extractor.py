@@ -33,15 +33,31 @@ logger = logging.getLogger(__name__)
 class EnhancedGoogleSheetDataExtractor:
     """Enhanced extractor for Google Sheets with intelligent mapping detection."""
     
-    def __init__(self):
-        """Initialize the enhanced extractor."""
-        self.api_key = GOOGLE_API_KEY
-        self.sheet_id = DEFAULT_SHEET_ID
+    def __init__(
+        self,
+        sheet_id: str = None,
+        api_key: str = None,
+        output_file: str = None,
+        skip_sheets: list = None,
+        batch_size: int = 100,
+        fuzzy_threshold: int = 75
+    ):
+        """Initialize the enhanced extractor with optional configuration."""
+        self.api_key = api_key or GOOGLE_API_KEY
+        self.sheet_id = sheet_id or DEFAULT_SHEET_ID
+        self.output_file = output_file
+        self.skip_sheets = skip_sheets or []
+        self.batch_size = batch_size
+        self.fuzzy_threshold = fuzzy_threshold
         self.service = None
         
         # Compile regex patterns for efficiency
-        self.suffix_pattern = re.compile(r'-[BWYS]$', re.IGNORECASE)
-        self.supplier_pattern = re.compile(r'\(([^)]+)\)', re.IGNORECASE)
+        self.suffix_pattern = re.compile(
+            r'-[BWYS]$', re.IGNORECASE
+        )
+        self.supplier_pattern = re.compile(
+            r'\(([^)]+)\)', re.IGNORECASE
+        )
         
         # Invalid sheet patterns
         self.invalid_sheet_patterns = {
@@ -52,10 +68,22 @@ class EnhancedGoogleSheetDataExtractor:
         
         # Column name variations for normalization
         self.column_variations = {
-            'original_item': ['original item', 'orig item', 'original_item', 'item code', 'supplier item'],
-            'mapped_item': ['mapped item', 'mpi code', 'mapped_item', 'mpi item', 'target item'],
-            'description': ['description', 'desc', 'item description', 'product description'],
-            'notes': ['notes', 'comments', 'note', 'comment', 'remarks']
+            'original_item': [
+                'original item', 'orig item', 'original_item',
+                'item code', 'supplier item'
+            ],
+            'mapped_item': [
+                'mapped item', 'mpi code', 'mapped_item',
+                'mpi item', 'target item'
+            ],
+            'description': [
+                'description', 'desc', 'item description',
+                'product description'
+            ],
+            'notes': [
+                'notes', 'comments', 'note', 'comment',
+                'remarks'
+            ]
         }
         
     def _initialize_service(self):
@@ -260,7 +288,7 @@ class EnhancedGoogleSheetDataExtractor:
                     return df.columns[i]
         
         return None
-    
+                
     def _extract_mapping_from_sheet(self, sheet_name: str, gid: str) -> List[Dict[str, Any]]:
         """
         Extract mapping data from a specific sheet.
@@ -301,9 +329,11 @@ class EnhancedGoogleSheetDataExtractor:
             description_col = self._find_column_by_variations(df, 'description')
             notes_col = self._find_column_by_variations(df, 'notes')
             
-            logger.info(f"Processing sheet '{sheet_name}' - Found columns: "
-                       f"original={original_col}, mapped={mapped_col}, "
-                       f"description={description_col}, notes={notes_col}")
+            logger.info(
+                f"Processing sheet '{sheet_name}' - Found columns: "
+                f"original={original_col}, mapped={mapped_col}, "
+                f"description={description_col}, notes={notes_col}"
+            )
             
             # Process each row
             valid_items = 0
@@ -330,14 +360,14 @@ class EnhancedGoogleSheetDataExtractor:
                     # Skip if both original and mapped are empty
                     if not original_item and not mapped_item:
                         continue
-                    
+                            
                     # Clean original item code
                     original_item_cleaned = self._clean_item_code(original_item)
-                    
+                        
                     # Skip if cleaned original item is empty
                     if not original_item_cleaned:
                         continue
-                    
+                        
                     # Determine if this is a temporary mapping
                     is_temporary = "temporary" in sheet_name.lower() or "temp" in sheet_name.lower()
                     
@@ -357,9 +387,12 @@ class EnhancedGoogleSheetDataExtractor:
                     
                     # Validate mapping (original != mapped if both exist)
                     if original_item_cleaned and mapped_item and original_item_cleaned.lower() == mapped_item.lower():
-                        logger.warning(f"Skipping self-mapping in {sheet_name} row {idx + 1}: {original_item_cleaned}")
+                        logger.warning(
+                            f"Skipping self-mapping in {sheet_name} row {idx + 1}: "
+                            f"{original_item_cleaned}"
+                        )
                         continue
-                    
+                        
                     extracted_items.append(mapping_item)
                     valid_items += 1
                     
@@ -367,13 +400,16 @@ class EnhancedGoogleSheetDataExtractor:
                     logger.warning(f"Error processing row {idx + 1} in sheet {sheet_name}: {e}")
                     continue
             
-            logger.info(f"Extracted {valid_items} valid mappings from sheet: {sheet_name}")
-            
+            logger.info(
+                f"Extracted {valid_items} valid mappings from sheet: {sheet_name}"
+            )
         except Exception as e:
-            logger.error(f"Error extracting data from sheet {sheet_name}: {e}")
+            logger.error(
+                f"Error extracting data from sheet {sheet_name}: {e}"
+            )
         
         return extracted_items
-    
+
     def get_sheet_list(self) -> List[Dict[str, str]]:
         """Get list of all sheets in the spreadsheet."""
         self._initialize_service()
@@ -391,20 +427,22 @@ class EnhancedGoogleSheetDataExtractor:
                     'gid': str(properties.get('sheetId', ''))
                 })
             
-            logger.info(f"Found {len(sheets)} sheets in spreadsheet")
+            logger.info(
+                f"Found {len(sheets)} sheets in spreadsheet"
+            )
             return sheets
-            
+                
         except Exception as e:
             logger.error(f"Error getting sheet list: {e}")
             return []
-    
+
     def process_all_mapping_sheets(self, dry_run: bool = False) -> Dict[str, Any]:
         """
         Process all mapping sheets from the spreadsheet.
         
         Args:
             dry_run: If True, shows what would be extracted without committing
-            
+        
         Returns:
             Dictionary with extraction results
         """
@@ -491,7 +529,9 @@ class EnhancedGoogleSheetDataExtractor:
                 os.makedirs(os.path.dirname(output_file), exist_ok=True)
                 with open(output_file, 'w', encoding='utf-8') as f:
                     json.dump(all_mappings, f, indent=2, ensure_ascii=False, default=str)
-                logger.info(f"Results saved to: {output_file}")
+                logger.info(
+                    f"Results saved to: {output_file}"
+                )
             except Exception as e:
                 logger.error(f"Error saving results: {e}")
                 stats['errors'].append({'error': f'Failed to save results: {e}'})
@@ -548,7 +588,7 @@ def extract_all_data_enhanced():
         Dictionary with extraction results
     """
     extractor = EnhancedGoogleSheetDataExtractor()
-    return extractor.process_all_sheets()
+    return extractor.process_all_sheets() 
 
 
 if __name__ == "__main__":
