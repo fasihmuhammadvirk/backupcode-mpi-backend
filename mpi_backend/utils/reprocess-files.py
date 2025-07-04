@@ -98,18 +98,18 @@ def search_replace(row, temp_items, item_mappings):
     
     # Searching in temp_items (temporary_item_mappings table)
     # First try exact match with clean invoice item
-    temp_match = temp_items[temp_items['original_item'] == original_item]
+    temp_match = temp_items[temp_items['original_item_number'] == original_item]
     
     # If no exact match and we have supplier_id, clean the DB data and compare with clean invoice item
     if temp_match.empty and supplier_id:
         temp_match = temp_items[
-            temp_items['original_item'].apply(lambda x: clean_supplier_suffix(x, supplier_id)) == original_item
+            temp_items['original_item_number'].apply(lambda x: clean_supplier_suffix(x, supplier_id)) == original_item
         ]
     
     if not temp_match.empty:
-        row['MpiItem'] = temp_match.iloc[0]['original_item']  # This is the temp mpi_code
-        row['MpiDescription'] = temp_match.iloc[0]['original_description']
-        row['Sheet Name'] = temp_match.iloc[0]['sheet_name']
+        row['MpiItem'] = temp_match.iloc[0]['temporary_item_number']  # This is the mpi_code
+        row['MpiDescription'] = temp_match.iloc[0]['description']
+        row['Sheet Name'] = ''
         return row
 
     # Searching in item_mappings (supplier_item_mappings table)
