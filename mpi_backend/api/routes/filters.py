@@ -983,8 +983,9 @@ def export_selected_unmapped_items(
         cleaned_item_ids = [clean_suffix(item_id) for item_id in item_ids]
         
         # Get all unmapped items first (we'll filter by cleaned item_ids)
+        # Use "unmapped" to get all items regardless of sheet_name status
         all_items_result = controller.get_unmapped_items(
-            item_type="unmapped",  # Get all types for selected items
+            item_type="unmapped",  # Get all unmapped items regardless of sheet_name
             date_from=None,
             date_to=None,
             supplier_names=None,

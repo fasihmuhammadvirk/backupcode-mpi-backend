@@ -327,9 +327,14 @@ class UnmappedItemsController:
             total_pages = (total_count + size - 1) // size if size > 0 else 1
         
         # Apply pagination
-        start_index = (page - 1) * size
-        end_index = start_index + size
-        paginated_items = unique_items[start_index:end_index]
+        if size > 0:
+            # Normal pagination
+            start_index = (page - 1) * size
+            end_index = start_index + size
+            paginated_items = unique_items[start_index:end_index]
+        else:
+            # size=0 means get all items (used by export endpoints)
+            paginated_items = unique_items
         
         return {
             "items": paginated_items,
