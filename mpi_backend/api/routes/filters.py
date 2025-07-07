@@ -795,6 +795,28 @@ def export_all_unmapped_items(
                 detail="item_type must be either 'temporary', 'unmapped', or 'no_temporary'"
             )
         
+        # Convert string dates to date objects
+        date_from_obj = None
+        date_to_obj = None
+        
+        if date_from:
+            try:
+                date_from_obj = datetime.strptime(date_from, "%Y-%m-%d").date()
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="date_from must be in YYYY-MM-DD format"
+                )
+        
+        if date_to:
+            try:
+                date_to_obj = datetime.strptime(date_to, "%Y-%m-%d").date()
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="date_to must be in YYYY-MM-DD format"
+                )
+        
         # Provide default ordering if order_by is None or empty
         if not order_by:
             # Default ordering: descending by amount (highest amounts first)
@@ -806,8 +828,8 @@ def export_all_unmapped_items(
         # Get items with optional filters
         result = controller.get_unmapped_items(
             item_type=item_type,
-            date_from=date_from,
-            date_to=date_to,
+            date_from=date_from_obj,  # Pass converted date object
+            date_to=date_to_obj,      # Pass converted date object
             supplier_names=supplier_names,
             search=None,  # No search filter for export-all
             order_by=order_by,
