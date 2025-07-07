@@ -132,6 +132,68 @@ def safe_mapping_wrapper(operation_name, operation_func, *args, **kwargs):
         return None
 
 
+def scheduled_uidi_no_match_update():
+    """
+    Scheduled task to update UIDI and NO Match items at 6 PM Pakistan time.
+    Runs every day at 6 PM PKT.
+    """
+    def _execute_uidi_update():
+        try:
+            logger.info("Starting scheduled UIDI/NO Match update at 6 PM PKT")
+            
+            from mpi_backend.database import SessionLocal
+            with SessionLocal() as temp_db:
+                result = safe_mapping_wrapper(
+                    "Scheduled UIDI/NO Match Update (6 PM PKT)",
+                    EnhancedGoogleSheetSyncController.execute_sync_task,
+                    temp_db, "update_no_match_uidi"
+                )
+                
+            if result is None:
+                logger.warning("Scheduled UIDI/NO Match update was skipped")
+            else:
+                logger.info("Scheduled UIDI/NO Match update completed successfully")
+                
+        except Exception as e:
+            logger.error(f"Scheduled UIDI/NO Match update failed: {str(e)}")
+    
+    # Submit to thread pool for non-blocking execution
+    future = _task_executor.submit(_execute_uidi_update)
+    logger.info("Scheduled UIDI/NO Match update submitted to background thread pool")
+    return future
+
+
+def scheduled_all_mappings_update():
+    """
+    Scheduled task to update all mappings.
+    Runs every 48 hours at 1 AM PKT (every other day).
+    """
+    def _execute_all_update():
+        try:
+            logger.info("Starting scheduled All Mappings update at 1 AM PKT (48-hour interval)")
+            
+            from mpi_backend.database import SessionLocal
+            with SessionLocal() as temp_db:
+                result = safe_mapping_wrapper(
+                    "Scheduled All Mappings Update (1 AM PKT)",
+                    EnhancedGoogleSheetSyncController.execute_sync_task,
+                    temp_db, "update_all"
+                )
+                
+            if result is None:
+                logger.warning("Scheduled All Mappings update was skipped")
+            else:
+                logger.info("Scheduled All Mappings update completed successfully")
+                
+        except Exception as e:
+            logger.error(f"Scheduled All Mappings update failed: {str(e)}")
+    
+    # Submit to thread pool for non-blocking execution
+    future = _task_executor.submit(_execute_all_update)
+    logger.info("Scheduled All Mappings update submitted to background thread pool")
+    return future
+
+
 def async_sequential_mapping_task():
     """
     Execute mapping tasks sequentially: First update all mappings, then UIDI.
@@ -225,18 +287,43 @@ async def lifespan(app: FastAPI):
         misfire_grace_time=1800
     )
     
-    # DAILY MAPPING TASKS: Run once daily at 12 AM PKT (7 PM UTC, PKT = UTC+5)
-    # Sequential execution: All mappings first (with Google Sheets sync), then UIDI (with Google Sheets sync)
-    # Note: Google Sheets sync is automatically included in both operations
+    # SCHEDULED MAPPING TASKS: Daily at specific times
+    
+    # 1. UIDI and NO Match Update: Every day at 6 PM PKT (1 PM UTC, PKT = UTC+5)
     scheduler.add_job(
-        async_sequential_mapping_task,
-        CronTrigger(hour=19, minute=0, timezone=UTC_TZ),  # 12 AM PKT = 7 PM UTC
-        id="daily_mapping_tasks",
+        scheduled_uidi_no_match_update,
+        CronTrigger(hour=13, minute=0, timezone=UTC_TZ),  # 6 PM PKT = 1 PM UTC
+        id="daily_uidi_no_match_update",
         replace_existing=True,
         max_instances=1,
-        name="Daily Mapping Tasks (12 AM PKT)",
+        name="Daily UIDI/NO Match Update (6 PM PKT)",
         misfire_grace_time=3600  # 1 hour grace period
     )
+    
+    # 2. All Mappings Update: Every 48 hours at 1 AM PKT (8 PM UTC previous day, PKT = UTC+5)
+    scheduler.add_job(
+        scheduled_all_mappings_update,
+        CronTrigger(hour=20, minute=0, timezone=UTC_TZ, day="*/2"),  # 1 AM PKT = 8 PM UTC (previous day), every 2 days
+        id="all_mappings_update_48h_1am",
+        replace_existing=True,
+        max_instances=1,
+        name="All Mappings Update (Every 48 Hours at 1 AM PKT)",
+        misfire_grace_time=3600  # 1 hour grace period
+    )
+    
+    # LEGACY: DAILY MAPPING TASKS: Run once daily at 12 AM PKT (7 PM UTC, PKT = UTC+5)
+    # Sequential execution: All mappings first (with Google Sheets sync), then UIDI (with Google Sheets sync)
+    # Note: Google Sheets sync is automatically included in both operations
+    # DISABLED: Replaced by individual scheduled tasks above
+    # scheduler.add_job(
+    #     async_sequential_mapping_task,
+    #     CronTrigger(hour=19, minute=0, timezone=UTC_TZ),  # 12 AM PKT = 7 PM UTC
+    #     id="daily_mapping_tasks",
+    #     replace_existing=True,
+    #     max_instances=1,
+    #     name="Daily Mapping Tasks (12 AM PKT)",
+    #     misfire_grace_time=3600  # 1 hour grace period
+    # )
 
     # Memory cleanup - every 30 minutes
     def memory_cleanup_task():
@@ -257,6 +344,9 @@ async def lifespan(app: FastAPI):
 
     scheduler.start()
     logger.info("Background tasks scheduler started successfully")
+    logger.info("Scheduled mapping tasks configured:")
+    logger.info("  • UIDI/NO Match Update: Daily at 6 PM PKT (1 PM UTC)")
+    logger.info("  • All Mappings Update: Every 48 hours at 1 AM PKT (every other day)")
     logger.info("MPI Backend started successfully")
     
     yield
