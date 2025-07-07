@@ -435,22 +435,12 @@ class StatementController:
                 )
             
             # For statement invoices only (Processed/Failed) - execute query
-            # Get total count before pagination
-            total_count = query.count()
+            # First, get all results to determine status and apply filtering
+            all_results = query.all()
             
-            # Order by invoice date (most recent first) BEFORE pagination
-            query = query.order_by(PlumbingInvoice.invoice_date.desc())
-            
-            # Apply pagination
-            offset = (page - 1) * page_size
-            query = query.offset(offset).limit(page_size)
-            
-            # Execute query
-            results = query.all()
-            
-            # Process results and apply status filter if needed
-            invoice_data = []
-            for plumbing_invoice, plumbing_statement, plumbing_supplier in results:
+            # Process results and apply status filter
+            filtered_results = []
+            for plumbing_invoice, plumbing_statement, plumbing_supplier in all_results:
                 # ALWAYS determine reconciliation status by checking system
                 match_result = self.check_invoice_exists_in_system(
                     plumbing_invoice.invoice_number,
@@ -465,6 +455,34 @@ class StatementController:
                         continue
                     elif status.lower() == "failed" and match_result['matched']:
                         continue
+                
+                filtered_results.append({
+                    'plumbing_invoice': plumbing_invoice,
+                    'plumbing_statement': plumbing_statement,
+                    'plumbing_supplier': plumbing_supplier,
+                    'status': reconciliation_status
+                })
+            
+            # Sort by invoice date (most recent first)
+            filtered_results.sort(
+                key=lambda x: x['plumbing_invoice'].invoice_date if x['plumbing_invoice'].invoice_date else datetime.min,
+                reverse=True
+            )
+            
+            # Get total count after status filtering
+            total_count = len(filtered_results)
+            
+            # Apply pagination
+            offset = (page - 1) * page_size
+            paginated_results = filtered_results[offset:offset + page_size]
+            
+            # Convert to final format
+            invoice_data = []
+            for result in paginated_results:
+                plumbing_invoice = result['plumbing_invoice']
+                plumbing_statement = result['plumbing_statement']
+                plumbing_supplier = result['plumbing_supplier']
+                reconciliation_status = result['status']
                 
                 invoice_data.append({
                     'invoice_number': plumbing_invoice.invoice_number,
