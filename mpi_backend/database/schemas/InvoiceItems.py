@@ -88,8 +88,10 @@ class ToggleVisibilityRequest(BaseModel):
 class UnmappedItemResponse(BaseModel):
     """Response model for individual unmapped item"""
     original_item_id: str
-    mpi_item_id: Optional[str]
-    mpi_description: Optional[str]
+    original_description: Optional[str]
+    cost: Optional[float]
+    amount: Optional[float]  # Calculated as cost * quantity
+    quantity: Optional[int]
     sheet_name: Optional[str]
     supplier: Optional[str]
 
@@ -100,7 +102,7 @@ class UnmappedItemResponse(BaseModel):
 class UnmappedItemsFilterRequest(BaseModel):
     """Request model for filtering unmapped items"""
     item_type: str = Field(
-        ..., description="Type of items: 'temporary' or 'unmapped'"
+        ..., description="Type of items: 'temporary', 'unmapped', or 'no_temporary'"
     )
     date_from: Optional[date] = Field(
         None, description="Start date filter (YYYY-MM-DD)"

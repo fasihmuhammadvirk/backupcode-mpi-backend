@@ -1,7 +1,9 @@
 from mpi_backend.database.models import UnmappedItems
 from mpi_backend.database.models.InvoiceItems import InvoiceItem
 import pandas as pd
-from mpi_backend.utils.item_utils import clean_supplier_suffix, clean_suffix
+from mpi_backend.utils.item_utils import (
+    clean_supplier_suffix, clean_suffix
+)
 from sqlalchemy import and_, or_
 from typing import Dict, Any, Optional, List
 from datetime import date
@@ -46,7 +48,8 @@ class UnmappedItemsController:
             supplier_id (int, optional): Supplier ID for targeted suffix cleaning
             
         Returns:
-            bool: True if item is present (with or without suffix), False otherwise
+            bool: True if item is present (with or without suffix), 
+                  False otherwise
         """
         try:
             with self.db_context() as db:
@@ -61,7 +64,8 @@ class UnmappedItemsController:
                     # Then try clean invoice vs cleaned DB item
                     elif (supplier_id and 
                           clean_supplier_suffix(
-                              unmapped_item.supplier_item_ids, supplier_id
+                              unmapped_item.supplier_item_ids, 
+                              supplier_id
                           ) == item_code):
                         return True
                         
@@ -135,9 +139,11 @@ class UnmappedItemsController:
         if item_type == "temporary":
             return self._get_temporary_items(db, date_from, date_to, supplier_names, search, order_by, page, size)
         elif item_type == "unmapped":
+            return self._get_all_unmapped_items(db, date_from, date_to, supplier_names, search, order_by, page, size)
+        elif item_type == "no_temporary":
             return self._get_unmapped_items_logic(db, date_from, date_to, supplier_names, search, order_by, page, size)
         else:
-            raise ValueError(f"Invalid item_type: {item_type}. Must be 'temporary' or 'unmapped'")
+            raise ValueError(f"Invalid item_type: {item_type}. Must be 'temporary', 'unmapped', or 'no_temporary'")
 
     def _get_temporary_items(
         self,
@@ -163,6 +169,35 @@ class UnmappedItemsController:
                     InvoiceItem.mpi_description == 'No Match',
                     InvoiceItem.mpi_description.like('UIDI%')
                 )
+            )
+        )
+        
+        # Apply filters (date and supplier filters)
+        query = self._apply_common_filters(query, date_from, date_to, supplier_names)
+        
+        # Get unique items based on cleaned original item ID (without search filter first)
+        return self._get_unique_items_with_pagination(db, query, page, size, order_by, search)
+
+    def _get_all_unmapped_items(
+        self,
+        db,
+        date_from: Optional[date],
+        date_to: Optional[date],
+        supplier_names: Optional[List[str]],
+        search: Optional[str],
+        order_by: Optional[List[dict]],
+        page: int,
+        size: int
+    ) -> Dict[str, Any]:
+        """Get ALL items with No Match or UIDI regardless of sheet_name"""
+        
+        # Base query for all unmapped items (No Match or UIDI)
+        query = db.query(InvoiceItem).filter(
+            or_(
+                InvoiceItem.mpi_item == 'No Match',
+                InvoiceItem.mpi_item.like('UIDI%'),
+                InvoiceItem.mpi_description == 'No Match',
+                InvoiceItem.mpi_description.like('UIDI%')
             )
         )
         
@@ -217,22 +252,40 @@ class UnmappedItemsController:
         return query
 
     def _get_unique_items_with_pagination(self, db, query, page, size, order_by=None, search=None):
-        """Get unique items based on cleaned item code with pagination and ordering"""
+        """Get unique items per supplier with supplier suffixes for distinction"""
         
         # Execute query to get all matching items (within date range and supplier filters)
         all_items = query.all()
         
-        # Group by cleaned item code to get unique items (without suffixes)
+        # Group by supplier + cleaned item code to get unique items per supplier
         unique_items_map = {}
         for item in all_items:
+            # Clean the item code (remove any existing suffixes first)
             cleaned_item = clean_suffix(item.item or "")
-            if cleaned_item and cleaned_item not in unique_items_map:
-                unique_items_map[cleaned_item] = {
-                    "original_item_id": cleaned_item,  # Return cleaned version without suffix
-                    "mpi_item_id": item.mpi_item or "",
-                    "mpi_description": item.mpi_description or "",
+            if not cleaned_item:
+                continue
+                
+            # Create a unique key combining supplier and cleaned item
+            supplier = item.vendor or ""
+            unique_key = f"{supplier}|{cleaned_item}"
+            
+            if unique_key not in unique_items_map:
+                # Add supplier suffix to the item code for display
+                item_with_suffix = self._add_supplier_suffix(cleaned_item, supplier)
+                
+                # Calculate amount based on cost and quantity
+                cost = item.cost or 0.0
+                quantity = item.qty or 0
+                amount = round(cost * quantity, 3)
+                
+                unique_items_map[unique_key] = {
+                    "original_item_id": item_with_suffix,  # Return with supplier suffix
+                    "original_description": item.description or "",
+                    "cost": cost,
+                    "amount": amount,  # Calculated as cost * quantity
+                    "quantity": quantity,
                     "sheet_name": item.sheet_name or "",
-                    "supplier": item.vendor or ""
+                    "supplier": supplier
                 }
         
         # Convert to list
@@ -250,8 +303,8 @@ class UnmappedItemsController:
         # Apply ordering
         if order_by and len(order_by) > 0:
             for order_item in reversed(order_by):  # Apply in reverse to handle multiple sorts
-                column = order_item.get("column", "original_item_id")
-                order = order_item.get("order", "asc")
+                column = order_item.get("column", "amount")
+                order = order_item.get("order", "desc")
                 reverse = (order.lower() == "desc")
                 
                 # Map column names to actual fields
@@ -259,12 +312,12 @@ class UnmappedItemsController:
                 if column == "id":
                     sort_key = "original_item_id"
                 elif column == "date":
-                    sort_key = "original_item_id"  # Default fallback
+                    sort_key = "amount"  # Default fallback
                 
-                unique_items.sort(key=lambda x: x.get(sort_key, ""), reverse=reverse)
+                unique_items.sort(key=lambda x: x.get(sort_key, 0), reverse=reverse)
         else:
-            # Default sort by original_item_id
-            unique_items.sort(key=lambda x: x["original_item_id"])
+            # Default sort by amount in descending order (highest amounts first)
+            unique_items.sort(key=lambda x: x.get("amount", 0), reverse=True)
         
         # Calculate pagination
         total_count = len(unique_items)
@@ -285,3 +338,102 @@ class UnmappedItemsController:
             "size": size,
             "pages": total_pages
         }
+
+    def _add_supplier_suffix(self, item_code: str, supplier_name: str) -> str:
+        """
+        Add supplier-specific suffix to item code for display purposes.
+        
+        Args:
+            item_code (str): Clean item code without suffix
+            supplier_name (str): Supplier name to determine appropriate suffix
+            
+        Returns:
+            str: Item code with suffix appended (e.g., "ABC123-B")
+        """
+        if not item_code or not supplier_name:
+            return item_code
+        
+        # Clean whitespace from item code
+        clean_item = str(item_code).strip()
+        if not clean_item:
+            return clean_item
+        
+        # Exclude tax and administrative items from getting suffixes
+        excluded_items = [
+            "tax", "freight", "shipping", "handling", "subtotal", "total"
+        ]
+        if (clean_item.startswith("10 Materials") or 
+                clean_item.lower() in excluded_items):
+            return clean_item
+        
+        # Clean whitespace from supplier name
+        clean_supplier_name = supplier_name.strip()
+        
+        # Get suffix for supplier name
+        suffix = self._get_supplier_suffix(clean_supplier_name)
+        if not suffix:
+            return clean_item
+        
+        # Remove ALL existing suffixes first (including double suffixes)
+        all_suffixes = self._get_all_suffixes()
+        
+        # Keep removing suffixes until none are found
+        while True:
+            found_suffix = False
+            for existing_suffix in all_suffixes:
+                if existing_suffix and clean_item.endswith(f"-{existing_suffix}"):
+                    clean_item = clean_item[:-len(f"-{existing_suffix}")]
+                    found_suffix = True
+                    break
+            if not found_suffix:
+                break
+        
+        # Add the correct suffix
+        return f"{clean_item}-{suffix}"
+
+    def _get_supplier_suffix(self, supplier_name: str) -> Optional[str]:
+        """
+        Get the suffix letter for a specific supplier name.
+        
+        Args:
+            supplier_name (str): Supplier name
+            
+        Returns:
+            Optional[str]: Suffix letter or None if no suffix
+        """
+        supplier_suffix_map = {
+            "BMW Plumbing Supplies": "B",
+            "World Wide Plumbing": "W",
+            "Y & S Plumbing Supply": "Y",
+            "Supreme Plumbing Supply": "S",
+            "Pyramid Plumbing": "P",
+            "ABC Opus Services": "A",
+            "Park Plumbing Supply": "P",
+            "Gotham Plumbing Supply": "G",
+            "FW Webb Plumbing Supply": "F",
+            "Flow Mark Plumbing Supply": "F",
+            "Plumbing Exchange": None,  # No suffix
+            "AF Supply": "A",
+            "Lion Hvac Supplies": None,  # No suffix
+            "Bruce Ferguson": "F",
+        }
+        
+        # Check for exact match first
+        if supplier_name in supplier_suffix_map:
+            return supplier_suffix_map[supplier_name]
+        
+        # Check for partial matches (in case supplier name has variations)
+        for known_supplier, suffix in supplier_suffix_map.items():
+            if known_supplier in supplier_name or supplier_name in known_supplier:
+                return suffix
+        
+        return None
+
+    def _get_all_suffixes(self) -> List[str]:
+        """
+        Get all known supplier suffixes.
+        
+        Returns:
+            List[str]: List of all known suffix letters
+        """
+        return ["B", "W", "Y", "S", "P", "A", "G", "F"]
