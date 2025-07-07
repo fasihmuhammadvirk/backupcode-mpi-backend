@@ -467,3 +467,45 @@ def convert_items_to_dataframe_batch(db_session, ids, columns=None, order_by=Non
         return final_df
     else:
         return pd.DataFrame()
+
+
+def convert_unmapped_items_to_dataframe(items):
+    """
+    Convert unmapped items to DataFrame for Excel export.
+    
+    Args:
+        items: List of unmapped item dictionaries from UnmappedItemsController
+        
+    Returns:
+        DataFrame ready for Excel export
+    """
+    if not items:
+        return pd.DataFrame()
+    
+    # Define column mapping for unmapped items
+    columns_mapping = {
+        'original_item_id': 'Original Item ID',
+        'original_description': 'Original Description',
+        'cost': 'Cost',
+        'amount': 'Amount',
+        'quantity': 'Quantity',
+        'sheet_name': 'Sheet Name',
+        'supplier': 'Supplier'
+    }
+    
+    # Convert items to DataFrame
+    df = pd.DataFrame(items)
+    
+    # Rename columns for display
+    available_columns = [col for col in columns_mapping.keys() if col in df.columns]
+    df = df[available_columns].rename(columns=columns_mapping)
+    
+    # Format numeric columns
+    if 'Cost' in df.columns:
+        df['Cost'] = pd.to_numeric(df['Cost'], errors='coerce')
+    if 'Amount' in df.columns:
+        df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce')
+    if 'Quantity' in df.columns:
+        df['Quantity'] = pd.to_numeric(df['Quantity'], errors='coerce')
+    
+    return df

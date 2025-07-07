@@ -17,16 +17,16 @@ from mpi_backend.database.schemas.InvoiceItems import (
 )
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.pdf_to_excel.formatting_util import (
-    export_price_history_to_excel
+    export_price_history_to_excel, save_final_data
 )
 from mpi_backend.utils.s3_utils import upload_file, get_presigned_url
+from mpi_backend.utils.export_utils import convert_unmapped_items_to_dataframe
+from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 import os
 import logging
 import time
 from functools import lru_cache
 import hashlib
-import json
-import gzip
 from datetime import datetime, date
 from sqlalchemy.sql import text
 
@@ -568,18 +568,19 @@ def get_unmapped_items(
     Retrieve unique unmapped or temporary items with advanced filtering, search, and ordering.
 
     **Summary:**
-        Returns a paginated, de-duplicated list of invoice items that are either unmapped or temporarily mapped, with support for search and flexible ordering. Items are grouped by cleaned item code (suffixes like -W, -B, -Y, -S, -F are removed).
+        Returns a paginated, de-duplicated list of invoice items based on the specified filter type, with support for search and flexible ordering. Items are grouped by supplier + cleaned item code, with supplier suffixes added for distinction (e.g., ABC-B for BMW, ABC-F for Flow Mark).
 
     **Request Body:**
 
     - **item_type** (`str`, required):
         - "temporary": Items with `sheet_name` and either `mpi_item_id` or `mpi_description` is "No Match" or starts with "UIDI"
-        - "unmapped": Items with `sheet_name` null or empty
+        - "unmapped": ALL items with either `mpi_item_id` or `mpi_description` is "No Match" or starts with "UIDI" (regardless of sheet_name)
+        - "no_temporary": Items with NO `sheet_name` and either `mpi_item_id` or `mpi_description` is "No Match" or starts with "UIDI"
     - **date_from** (`str`, optional): Start date filter (YYYY-MM-DD)
     - **date_to** (`str`, optional): End date filter (YYYY-MM-DD)
     - **supplier_names** (`List[str]`, optional): List of supplier names to filter by
     - **search** (`str`, optional): Search term for item code or description
-    - **order_by** (`List[dict]`, optional): List of ordering criteria, e.g. `[{"column": "original_item_id", "order": "asc"}]`. If not provided, defaults to ascending order by `original_item_id`.
+    - **order_by** (`List[dict]`, optional): List of ordering criteria, e.g. `[{"column": "amount", "order": "desc"}]`. If not provided, defaults to descending order by `amount` (highest amounts first).
 
     **Query Parameters:**
 
@@ -590,13 +591,13 @@ def get_unmapped_items(
 
     ```json
     {
-      "item_type": "temporary",
+      "item_type": "unmapped",
       "date_from": "2024-01-01",
       "date_to": "2024-12-31",
       "supplier_names": ["BMW Plumbing Supplies"],
       "search": "006-ST4",
       "order_by": [
-        {"column": "original_item_id", "order": "desc"},
+        {"column": "amount", "order": "desc"},
         {"column": "supplier", "order": "asc"}
       ]
     }
@@ -608,9 +609,11 @@ def get_unmapped_items(
     {
       "items": [
         {
-          "original_item_id": "006-ST4",
-          "mpi_item_id": "No Match",
-          "mpi_description": "No Match",
+          "original_item_id": "006-ST4-B",
+          "original_description": "Pipe Fitting 3/4 inch",
+          "cost": 15.50,
+          "amount": 155.00,
+          "quantity": 10,
           "sheet_name": "Sheet X",
           "supplier": "BMW Plumbing Supplies"
         }
@@ -624,10 +627,12 @@ def get_unmapped_items(
 
     **Response Fields:**
 
-    - **items** (`List[object]`): List of unique unmapped/temporary items (suffixes removed)
-        - **original_item_id** (`str`): Cleaned item code (e.g., "ABC-123")
-        - **mpi_item_id** (`str`): MPI item code or "No Match"/"UIDI" for temporary items
-        - **mpi_description** (`str`): MPI description or "No Match"
+    - **items** (`List[object]`): List of unique items per supplier based on filter type
+        - **original_item_id** (`str`): Item code with supplier suffix (e.g., "ABC-123-B")
+        - **original_description** (`str`): Original item description
+        - **cost** (`float`): Unit cost of the item
+        - **amount** (`float`): Total amount calculated as cost × quantity (rounded to 3 decimal places)
+        - **quantity** (`int`): Quantity of the item
         - **sheet_name** (`str`): Google sheet name (null/empty for unmapped)
         - **supplier** (`str`): Supplier/vendor name
     - **total_count** (`int`): Total number of unique items found
@@ -635,26 +640,33 @@ def get_unmapped_items(
     - **size** (`int`): Number of items per page
     - **pages** (`int`): Total number of pages
 
+    **Filter Type Details:**
+    - **temporary**: Items with sheet_name AND (No Match or UIDI) - for items being processed
+    - **unmapped**: ALL items with (No Match or UIDI) regardless of sheet_name - comprehensive view
+    - **no_temporary**: Items with NO sheet_name AND (No Match or UIDI) - truly unmapped items
+
     **Notes:**
-    - Items are grouped by cleaned item code (suffixes like -W, -B, -Y, -S, -F are removed)
+    - Items are grouped by supplier + cleaned item code (same item from different suppliers are treated as separate items)
+    - Supplier suffixes are added to distinguish items: -B (BMW), -F (Flow Mark), -W (World Wide), etc.
     - Search is case-insensitive and matches both item code and description
-    - Ordering supports multiple columns; default is ascending by `original_item_id`
-    - Only unique items are returned in the response
-    - If `order_by` is not provided, items are sorted by `original_item_id` in ascending order
+    - Ordering supports multiple columns; default is descending by `amount` (highest amounts first)
+    - Only unique items per supplier are returned in the response
+    - Amount is calculated as cost × quantity for each item (rounded to 3 decimal places)
+    - If `order_by` is not provided, items are sorted by `amount` in descending order
     """
     try:
         # Validate item_type
-        if request.item_type not in ["temporary", "unmapped"]:
+        if request.item_type not in ["temporary", "unmapped", "no_temporary"]:
             raise HTTPException(
                 status_code=400,
-                detail="item_type must be either 'temporary' or 'unmapped'"
+                detail="item_type must be either 'temporary', 'unmapped', or 'no_temporary'"
             )
         
         # Provide default ordering if order_by is None or empty
         order_by = request.order_by
         if not order_by:
-            # Default ordering: ascending by original_item_id
-            order_by = [{"column": "original_item_id", "order": "asc"}]
+            # Default ordering: descending by amount (highest amounts first)
+            order_by = [{"column": "amount", "order": "desc"}]
         
         # Initialize controller
         controller = UnmappedItemsController(db)
@@ -686,5 +698,357 @@ def get_unmapped_items(
         raise HTTPException(
             status_code=500,
             detail="Internal server error while retrieving unmapped items"
+        )
+
+
+
+@router.post("/unmapped-items/export-all")
+def export_all_unmapped_items(
+    item_type: str = Body(..., description="Type of items: 'temporary', 'unmapped', or 'no_temporary'"),
+    date_from: Optional[str] = Body(None, description="Start date filter (YYYY-MM-DD)"),
+    date_to: Optional[str] = Body(None, description="End date filter (YYYY-MM-DD)"),
+    supplier_names: Optional[List[str]] = Body(None, description="List of supplier names to filter by"),
+    excluded_items: Optional[List[str]] = Body(None, description="List of item IDs to exclude from export"),
+    order_by: Optional[List[Dict[str, str]]] = Body(None, description="Optional ordering criteria"),
+    db: Session = Depends(get_db),
+    token: str = Depends(JWTBearer())
+):
+    """
+    Export unmapped items to Excel file with optional filters and exclusions, return S3 download URL.
+    
+    **Summary:**
+        Exports unmapped items of the specified type to an Excel file and uploads it to S3.
+        Supports optional date range, supplier filtering, and item exclusions.
+        Returns a presigned URL for downloading the file.
+        
+    **Request Body:**
+        - **item_type** (`str`, required): 'temporary', 'unmapped', or 'no_temporary'
+        - **date_from** (`str`, optional): Start date filter (YYYY-MM-DD)
+        - **date_to** (`str`, optional): End date filter (YYYY-MM-DD)
+        - **supplier_names** (`List[str]`, optional): List of supplier names to filter by
+        - **excluded_items** (`List[str]`, optional): List of item IDs to exclude from export
+        - **order_by** (`List[dict]`, optional): Ordering criteria, e.g. `[{"column": "amount", "order": "desc"}]`
+        
+    **Response:**
+        - **download_url** (`str`): Presigned S3 URL for downloading the Excel file
+        
+    **Excel File Contents:**
+        The Excel file will contain the following columns:
+        - Original Item ID (with supplier suffix)
+        - Original Description
+        - Cost
+        - Amount (calculated as cost × quantity)
+        - Quantity
+        - Sheet Name
+        - Supplier
+        
+    **Request Examples:**
+    
+    1. Export ALL unmapped items (no filters):
+    ```json
+    {
+      "item_type": "unmapped"
+    }
+    ```
+    
+    2. Export with date range and supplier filter:
+    ```json
+    {
+      "item_type": "unmapped",
+      "date_from": "2024-01-01",
+      "date_to": "2024-12-31",
+      "supplier_names": ["BMW Plumbing Supplies"]
+    }
+    ```
+    
+    3. Export with exclusions:
+    ```json
+    {
+      "item_type": "unmapped",
+      "excluded_items": ["ABC123-B", "XYZ789-F"],
+      "order_by": [{"column": "amount", "order": "desc"}]
+    }
+    ```
+    
+    **Response Example:**
+    ```json
+    {
+      "download_url": "https://s3.amazonaws.com/bucket/Exports/unmapped_items_2024-12-19_14-30-25.xlsx?AWSAccessKeyId=..."
+    }
+    ```
+    
+    **Notes:**
+    - If no filters are provided, exports ALL items of the specified type
+    - Date range and supplier filters are optional
+    - Excluded items are removed from the final export
+    - Default ordering is descending by amount if no order_by is provided
+    - Filename includes timestamp for uniqueness
+    """
+    try:
+        import time
+        start_time = time.time()
+        
+        # Validate item_type
+        if item_type not in ["temporary", "unmapped", "no_temporary"]:
+            raise HTTPException(
+                status_code=400,
+                detail="item_type must be either 'temporary', 'unmapped', or 'no_temporary'"
+            )
+        
+        # Provide default ordering if order_by is None or empty
+        if not order_by:
+            # Default ordering: descending by amount (highest amounts first)
+            order_by = [{"column": "amount", "order": "desc"}]
+        
+        # Initialize controller
+        controller = UnmappedItemsController(db)
+        
+        # Get items with optional filters
+        result = controller.get_unmapped_items(
+            item_type=item_type,
+            date_from=date_from,
+            date_to=date_to,
+            supplier_names=supplier_names,
+            search=None,  # No search filter for export-all
+            order_by=order_by,
+            page=1,
+            size=0  # Get all items
+        )
+        
+        if not result['items']:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No {item_type} items found matching the criteria"
+            )
+        
+        # Apply excluded items filter if provided
+        if excluded_items:
+            original_count = len(result['items'])
+            result['items'] = [
+                item for item in result['items'] 
+                if item['original_item_id'] not in excluded_items
+            ]
+            excluded_count = original_count - len(result['items'])
+            logger.info(f"Excluded {excluded_count} items from export")
+        
+        if not result['items']:
+            raise HTTPException(
+                status_code=404, 
+                detail="No items remaining after applying exclusions"
+            )
+        
+        # Convert to DataFrame
+        items_df = convert_unmapped_items_to_dataframe(result['items'])
+        
+        if items_df.empty:
+            raise HTTPException(
+                status_code=404, 
+                detail="No data found for export"
+            )
+        
+        # Prepare file paths
+        upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/Exports/'
+        filename = f'unmapped_items_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.xlsx'
+        file_path = f'{upload_folder}{filename}'
+        
+        if not os.path.exists(upload_folder):
+            os.makedirs(upload_folder)
+        
+        # Save to Excel
+        save_final_data(final_df=items_df, supplier='', output_path=file_path)
+        
+        processing_time = time.time() - start_time
+        logger.info(
+            f"Unmapped items export completed in {processing_time:.2f} seconds "
+            f"for {len(items_df)} items"
+        )
+        
+        # Upload to S3 and get download URL
+        upload_file(file_path, file_key=f'Exports/{filename}', is_invoice=False)
+        download_url = get_presigned_url(
+            file_key=f'Exports/{filename}', 
+            is_invoice=False
+        )
+        
+        return {"download_url": download_url}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Export unmapped items error: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Export failed: {str(e)}"
+        )
+
+@router.post("/unmapped-items/export-selected")
+def export_selected_unmapped_items(
+    item_ids: List[str] = Body(..., description="List of item IDs to export"),
+    order_by: Optional[List[Dict[str, str]]] = Body(None, description="Optional ordering criteria"),
+    db: Session = Depends(get_db),
+    token: str = Depends(JWTBearer())
+):
+    """
+    Export specific unmapped items by their IDs to Excel file and return S3 download URL.
+    
+    **Summary:**
+        Exports specific unmapped items identified by their item IDs to an Excel file and uploads it to S3.
+        The system removes suffixes when searching for items, then includes them in the Excel output.
+        Returns a presigned URL for downloading the file.
+        
+    **Request Body:**
+        - **item_ids** (`List[str]`, required): List of item IDs to export (e.g., ["ABC123-B", "XYZ789-F"])
+        - **order_by** (`List[dict]`, optional): Ordering criteria, e.g. `[{"column": "amount", "order": "desc"}]`
+        
+    **Response:**
+        - **download_url** (`str`): Presigned S3 URL for downloading the Excel file
+        
+    **Excel File Contents:**
+        The Excel file will contain the following columns:
+        - Original Item ID (with supplier suffix)
+        - Original Description
+        - Cost
+        - Amount (calculated as cost × quantity)
+        - Quantity
+        - Sheet Name
+        - Supplier
+        
+    **Request Example:**
+    ```json
+    {
+      "item_ids": ["ABC123-B", "XYZ789-F", "DEF456-G"],
+      "order_by": [{"column": "amount", "order": "desc"}]
+    }
+    ```
+    
+    **Response Example:**
+    ```json
+    {
+      "download_url": "https://s3.amazonaws.com/bucket/Exports/selected_unmapped_items_2024-12-19_14-30-25.xlsx?AWSAccessKeyId=..."
+    }
+    ```
+    
+    **Notes:**
+    - Item IDs should include supplier suffixes (e.g., "ABC123-B" for BMW items)
+    - The system will remove suffixes when searching for items, then add them back for the Excel output
+    - Only items that exist in the unmapped items list will be exported
+    - If some item IDs are not found, a warning will be logged but the export will proceed with found items
+    - Ordering supports multiple columns; default is descending by `amount` (highest amounts first)
+    - Amount is calculated as cost × quantity for each item (rounded to 3 decimal places)
+    """
+    try:
+        import time
+        start_time = time.time()
+        
+        if not item_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="item_ids list cannot be empty"
+            )
+        
+        # Provide default ordering if order_by is None or empty
+        if not order_by:
+            # Default ordering: descending by amount (highest amounts first)
+            order_by = [{"column": "amount", "order": "desc"}]
+        
+        # Initialize controller
+        controller = UnmappedItemsController(db)
+        
+        # Import suffix cleaning function
+        from mpi_backend.utils.item_utils import clean_suffix
+        
+        # Clean the item IDs by removing suffixes for searching
+        cleaned_item_ids = [clean_suffix(item_id) for item_id in item_ids]
+        
+        # Get all unmapped items first (we'll filter by cleaned item_ids)
+        all_items_result = controller.get_unmapped_items(
+            item_type="unmapped",  # Get all types for selected items
+            date_from=None,
+            date_to=None,
+            supplier_names=None,
+            search=None,
+            order_by=order_by,
+            page=1,
+            size=0  # Get all items
+        )
+        
+        if not all_items_result['items']:
+            raise HTTPException(
+                status_code=404, 
+                detail="No unmapped items found in the system"
+            )
+        
+        # Filter to only include requested item_ids (comparing cleaned versions)
+        selected_items = []
+        found_cleaned_ids = set()
+        
+        for item in all_items_result['items']:
+            # Clean the item's original_item_id for comparison
+            cleaned_item_id = clean_suffix(item['original_item_id'])
+            
+            # Check if this cleaned item ID matches any of our requested cleaned IDs
+            if cleaned_item_id in cleaned_item_ids:
+                selected_items.append(item)
+                found_cleaned_ids.add(cleaned_item_id)
+        
+        if not selected_items:
+            raise HTTPException(
+                status_code=404, 
+                detail="None of the specified item IDs were found"
+            )
+        
+        # Log how many items were found vs requested
+        found_count = len(selected_items)
+        requested_count = len(item_ids)
+        if found_count < requested_count:
+            missing_items = [item_id for item_id in item_ids 
+                           if clean_suffix(item_id) not in found_cleaned_ids]
+            logger.warning(
+                f"Only {found_count} out of {requested_count} requested items were found. "
+                f"Missing items: {missing_items}"
+            )
+        
+        # Convert to DataFrame
+        items_df = convert_unmapped_items_to_dataframe(selected_items)
+        
+        if items_df.empty:
+            raise HTTPException(
+                status_code=404, 
+                detail="No data found for export"
+            )
+        
+        # Prepare file paths
+        upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/Exports/'
+        filename = f'selected_unmapped_items_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.xlsx'
+        file_path = f'{upload_folder}{filename}'
+        
+        if not os.path.exists(upload_folder):
+            os.makedirs(upload_folder)
+        
+        # Save to Excel
+        save_final_data(final_df=items_df, supplier='', output_path=file_path)
+        
+        processing_time = time.time() - start_time
+        logger.info(
+            f"Selected unmapped items export completed in {processing_time:.2f} seconds "
+            f"for {len(items_df)} items"
+        )
+        
+        # Upload to S3 and get download URL
+        upload_file(file_path, file_key=f'Exports/{filename}', is_invoice=False)
+        download_url = get_presigned_url(
+            file_key=f'Exports/{filename}', 
+            is_invoice=False
+        )
+        
+        return {"download_url": download_url}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Export selected unmapped items error: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Export failed: {str(e)}"
         )
 
