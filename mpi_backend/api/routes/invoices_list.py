@@ -213,8 +213,9 @@ async def upload_and_process_invoice(
 
 
 def reprocess_invoice_background_task(invoice_id: str, invoice_filename: str, supplier: str):
-    """Background task to reprocess invoice"""
+    """Background task to reprocess invoice with improved session handling"""
     temp_file_path = None
+    db = None
     try:
         logger.info(f"Starting background reprocessing for invoice {invoice_id}")
 
@@ -234,7 +235,7 @@ def reprocess_invoice_background_task(invoice_id: str, invoice_filename: str, su
             # Create temporary directory for processing
             upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{supplier}'
             os.makedirs(upload_folder, exist_ok=True)
-            temp_file_path = os.path.join(upload_folder, invoice_filename)
+            temp_file_path = os.path.normpath(os.path.join(upload_folder, invoice_filename))
 
             # Download with timeout
             try:
@@ -266,9 +267,20 @@ def reprocess_invoice_background_task(invoice_id: str, invoice_filename: str, su
             converted_files, failed_files = convert_single_invoice(temp_file_path, supplier)
             logger.info(f"Reprocessing conversion completed. Success: {len(converted_files)}, Failed: {len(failed_files)}")
 
-            # Process extracted data
-            process_extracted_data(converted_files, failed_files)
-            logger.info(f"Reprocessing data processing completed for invoice {invoice_id}")
+            # Process extracted data with the same session
+            from mpi_backend.utils.extracted_data_processor import process_extracted_data
+            try:
+                process_extracted_data(converted_files, failed_files)
+                logger.info(f"Reprocessing data processing completed for invoice {invoice_id}")
+            except Exception as e:
+                logger.error(f"Error in process_extracted_data for invoice {invoice_id}: {str(e)}")
+                # Clean up and re-raise
+                if temp_file_path and os.path.exists(temp_file_path):
+                    try:
+                        os.remove(temp_file_path)
+                    except OSError:
+                        pass
+                raise
 
             # Clean up temporary files
             if os.path.exists(upload_folder):
@@ -282,9 +294,23 @@ def reprocess_invoice_background_task(invoice_id: str, invoice_filename: str, su
 
             logger.info(f"Background reprocessing completed successfully for invoice {invoice_id}")
 
+        except Exception as e:
+            logger.error(f"Error during reprocessing for invoice {invoice_id}: {str(e)}")
+            # Rollback any database changes
+            if db:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+            raise
+
         finally:
             # Close database session
-            db.close()
+            if db:
+                try:
+                    db.close()
+                except Exception:
+                    pass
 
     except Exception as e:
         logger.error(f"Background reprocessing failed for invoice {invoice_id}: {str(e)}")
@@ -300,10 +326,11 @@ def reprocess_invoice_background_task(invoice_id: str, invoice_filename: str, su
 async def process_again(
     invoice_id: str, 
     background_tasks: BackgroundTasks,
+    sync: bool = Query(False, description="Process synchronously for immediate feedback"),
     db: Session = Depends(get_db),
     token: str = Depends(JWTBearer())
 ):
-    """Reprocess invoice with background processing to prevent timeouts"""
+    """Reprocess invoice with background or synchronous processing"""
     
     try:
         # Validate invoice exists
@@ -324,22 +351,100 @@ async def process_again(
             logger.error(f"Error fetching supplier for invoice {invoice_id}: {str(e)}")
             raise HTTPException(status_code=500, detail="Error fetching supplier information")
 
-        # Add background task for reprocessing
-        background_tasks.add_task(
-            reprocess_invoice_background_task,
-            invoice_id,
-            invoice.filename,
-            supplier
-        )
-        
-        return {
-            "status": "success",
-            "message": f"Invoice '{invoice.filename}' queued for reprocessing",
-            "invoice_id": invoice_id,
-            "filename": invoice.filename,
-            "supplier": supplier,
-            "processing": "background"
-        }
+        if sync:
+            # Synchronous processing for immediate feedback
+            temp_file_path = None
+            try:
+                logger.info(f"Starting synchronous reprocessing for invoice {invoice_id}")
+
+                # Download invoice from S3
+                invoice_url = get_presigned_url(file_key=f'{supplier}/{invoice_id}')
+                if not invoice_url:
+                    raise HTTPException(status_code=500, detail="Could not get download URL for invoice")
+
+                # Create temporary directory for processing
+                upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{supplier}'
+                os.makedirs(upload_folder, exist_ok=True)
+                temp_file_path = os.path.normpath(os.path.join(upload_folder, invoice.filename))
+
+                # Download with timeout
+                try:
+                    response = requests.get(invoice_url, timeout=30)
+                    response.raise_for_status()
+                    with open(temp_file_path, 'wb') as file:
+                        file.write(response.content)
+                    logger.info(f"Downloaded invoice {invoice_id} from S3 ({len(response.content)} bytes)")
+                except requests.RequestException as e:
+                    raise HTTPException(status_code=500, detail=f"Failed to download invoice: {str(e)}")
+
+                # Delete existing invoice data
+                try:
+                    InvoiceItemController(db).delete_invoice_items(invoice_id, db)
+                    InvoiceController(db).delete_invoice(invoice_id, db)
+                    logger.info(f"Deleted existing data for invoice {invoice_id}")
+                except Exception as e:
+                    raise HTTPException(status_code=500, detail=f"Failed to delete existing data: {str(e)}")
+
+                # Convert and process the invoice
+                from mpi_backend.utils.invoice_convertor import convert_single_invoice
+                converted_files, failed_files = convert_single_invoice(temp_file_path, supplier)
+                if failed_files:
+                    raise HTTPException(status_code=500, detail=f"Failed to convert invoice: {failed_files}")
+
+                # Process extracted data
+                from mpi_backend.utils.extracted_data_processor import process_extracted_data
+                try:
+                    process_extracted_data(converted_files, failed_files)
+                except Exception as e:
+                    raise HTTPException(status_code=500, detail=f"Failed to process invoice data: {str(e)}")
+
+                # Clean up temporary files
+                if os.path.exists(upload_folder):
+                    for filename in os.listdir(upload_folder):
+                        file_to_remove = os.path.join(upload_folder, filename)
+                        try:
+                            os.remove(file_to_remove)
+                        except OSError as e:
+                            logger.warning(f"Could not remove file {file_to_remove}: {e}")
+
+                logger.info(f"Synchronous reprocessing completed successfully for invoice {invoice_id}")
+                
+                return {
+                    "status": "success",
+                    "message": f"Invoice '{invoice.filename}' reprocessed successfully",
+                    "invoice_id": invoice_id,
+                    "filename": invoice.filename,
+                    "supplier": supplier,
+                    "processing": "synchronous"
+                }
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Synchronous reprocessing failed for invoice {invoice_id}: {str(e)}")
+                if temp_file_path and os.path.exists(temp_file_path):
+                    try:
+                        os.remove(temp_file_path)
+                    except OSError:
+                        pass
+                raise HTTPException(status_code=500, detail=f"Reprocessing failed: {str(e)}")
+        else:
+            # Asynchronous background processing (original behavior)
+            background_tasks.add_task(
+                reprocess_invoice_background_task,
+                invoice_id,
+                invoice.filename,
+                supplier
+            )
+            
+            return {
+                "status": "success",
+                "message": f"Invoice '{invoice.filename}' queued for reprocessing",
+                "invoice_id": invoice_id,
+                "filename": invoice.filename,
+                "supplier": supplier,
+                "processing": "background"
+            }
 
     except HTTPException:
         raise

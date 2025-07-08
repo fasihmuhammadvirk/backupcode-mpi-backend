@@ -642,94 +642,97 @@ class StatementExtractor:
             return 0.0
     
     def save_to_database(self):
-        """Save extracted data to database"""
+        """Save extracted data to database, preventing duplicate statements and invoices"""
         try:
             if not self.db_session:
                 logger.error("No database session available")
                 return False
-            
             if self.combined_data is None or self.combined_data.empty:
                 logger.warning("No data to save to database")
                 return False
-            
             logger.info("Saving extracted statement data to database")
-            
+
             # Get or create supplier
             supplier_name = self.detect_supplier()
             if not supplier_name:
                 logger.error("Could not detect supplier")
                 return False
-            
             supplier = self.db_session.query(PlumbingSupplier).filter(
                 PlumbingSupplier.name == supplier_name
             ).first()
-            
             if not supplier:
                 logger.error(f"Supplier {supplier_name} not found in database")
                 return False
-            
-            # Create statement record
-            total_amount = self.get_total_amount()
-            total_invoices = (
-                len(self.combined_data) 
-                if not self.combined_data.empty else 0
-            )
-            
+
             # Get statement date from metadata or use first invoice date
             statement_date = self.metadata.get('statement_date')
             if not statement_date and not self.combined_data.empty:
                 first_date = self.combined_data['Invoice Date'].iloc[0]
                 if pd.notna(first_date):
                     statement_date = first_date
-            
             if not statement_date:
                 statement_date = datetime.now().date()
-            
-            # Get account number from metadata
             account_number = self.metadata.get('account_number', '')
-            
-            self.statement_obj = PlumbingStatement(
-                supplier_id=supplier.id,
-                statement_date=statement_date,
-                account_number=account_number,
-                total_amount=total_amount,
-                total_invoices=total_invoices,
-                pdf_filename=Path(self.pdf_filename).name
-            )
-            
-            self.db_session.add(self.statement_obj)
-            self.db_session.flush()  # Get the statement ID
-            
-            # Create invoice records
+
+            # Check for existing statement (prevent duplicate)
+            existing_statement = self.db_session.query(PlumbingStatement).filter(
+                PlumbingStatement.supplier_id == supplier.id,
+                PlumbingStatement.statement_date == statement_date
+            ).first()
+            if existing_statement:
+                logger.info(f"Statement already exists for supplier {supplier_name} on {statement_date}, using existing statement.")
+                self.statement_obj = existing_statement
+            else:
+                total_amount = self.get_total_amount()
+                total_invoices = (
+                    len(self.combined_data)
+                    if not self.combined_data.empty else 0
+                )
+                self.statement_obj = PlumbingStatement(
+                    supplier_id=supplier.id,
+                    statement_date=statement_date,
+                    account_number=account_number,
+                    total_amount=total_amount,
+                    total_invoices=total_invoices,
+                    pdf_filename=Path(self.pdf_filename).name
+                )
+                self.db_session.add(self.statement_obj)
+                self.db_session.flush()  # Get the statement ID
+
+            # Create invoice records, skipping duplicates
             invoices_created = 0
             for _, row in self.combined_data.iterrows():
-                if (pd.notna(row['Invoice Number']) and 
-                        str(row['Invoice Number']).strip()):
-                    po_value = None
-                    if pd.notna(row.get('Customer PO')):
-                        po_value = str(row.get('Customer PO', '')).strip()
-                    
-                    invoice = PlumbingInvoice(
-                        statement_id=self.statement_obj.id,
-                        invoice_number=str(row['Invoice Number']).strip(),
-                        invoice_date=row.get('Invoice Date'),
-                        customer_po=po_value,
-                        original_amount=row.get('Original Inv Amount'),
-                        payment_date=row.get('Payment Date'),
-                        amount_paid=row.get('Amount Paid'),
-                        balance=row.get('Invoice Balance')
-                    )
-                    self.db_session.add(invoice)
-                    invoices_created += 1
-            
-            # Commit all changes
+                invoice_number = str(row['Invoice Number']).strip() if pd.notna(row['Invoice Number']) else None
+                if not invoice_number:
+                    continue
+                # Check for existing invoice for this statement and invoice number
+                existing_invoice = self.db_session.query(PlumbingInvoice).filter(
+                    PlumbingInvoice.statement_id == self.statement_obj.id,
+                    PlumbingInvoice.invoice_number == invoice_number
+                ).first()
+                if existing_invoice:
+                    logger.info(f"Invoice {invoice_number} already exists for statement {self.statement_obj.id}, skipping.")
+                    continue
+                po_value = None
+                if pd.notna(row.get('Customer PO')):
+                    po_value = str(row.get('Customer PO', '')).strip()
+                invoice = PlumbingInvoice(
+                    statement_id=self.statement_obj.id,
+                    invoice_number=invoice_number,
+                    invoice_date=row.get('Invoice Date'),
+                    customer_po=po_value,
+                    original_amount=row.get('Original Inv Amount'),
+                    payment_date=row.get('Payment Date'),
+                    amount_paid=row.get('Amount Paid'),
+                    balance=row.get('Invoice Balance')
+                )
+                self.db_session.add(invoice)
+                invoices_created += 1
             self.db_session.commit()
-            
             logger.info(
-                f"Successfully saved {invoices_created} invoices to database"
+                f"Successfully saved {invoices_created} new invoices to database (duplicates skipped)"
             )
             return True
-            
         except Exception as e:
             logger.error(f"Error saving to database: {str(e)}")
             if self.db_session:
