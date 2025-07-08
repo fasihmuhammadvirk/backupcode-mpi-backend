@@ -97,8 +97,11 @@ def process_invoice_background_task(file_path: str, supplier: str, original_file
     try:
         logger.info(f"Starting background processing for {original_filename}")
         
-        # Convert invoice
-        converted_files, failed_files = convert_invoice(supplier)
+        # Import the single file converter
+        from mpi_backend.utils.invoice_convertor import convert_single_invoice
+        
+        # Convert the single uploaded invoice
+        converted_files, failed_files = convert_single_invoice(file_path, supplier)
         logger.info(f"Conversion completed. Success: {len(converted_files)}, Failed: {len(failed_files)}")
         
         # Process extracted data
@@ -259,8 +262,11 @@ def reprocess_invoice_background_task(invoice_id: str, invoice_filename: str, su
                 logger.error(f"Error deleting existing invoice data {invoice_id}: {str(e)}")
                 return
             
-            # Process the invoice
-            converted_files, failed_files = convert_invoice(supplier)
+            # Import the single file converter
+            from mpi_backend.utils.invoice_convertor import convert_single_invoice
+            
+            # Process the single invoice
+            converted_files, failed_files = convert_single_invoice(temp_file_path, supplier)
             logger.info(f"Reprocessing conversion completed. Success: {len(converted_files)}, Failed: {len(failed_files)}")
             
             # Process extracted data

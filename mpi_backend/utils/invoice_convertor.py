@@ -13,8 +13,107 @@ from mpi_backend.utils.pdf_to_excel.cleaning_util import get_files_from_folder
 from mpi_backend.utils.pdf_to_excel.abc_opus_services_utils import process_invoice
 
 
+def convert_single_invoice(file_path, supplier):
+    """
+    Convert a single uploaded invoice file.
+    
+    Args:
+        file_path: Full path to the specific PDF file to process
+        supplier: Supplier name for the invoice
+    
+    Returns:
+        tuple: (converted_files, failed_files)
+    """
+    logger.info(f"Converting single invoice: {file_path} for supplier: {supplier}")
+    
+    converted_paths = []
+    failed_files = []
+    
+    try:
+        # Check if file exists
+        if not os.path.exists(file_path):
+            logger.error(f"File does not exist: {file_path}")
+            failed_files.append(file_path)
+            return converted_paths, failed_files
+        
+        # Check if it's a PDF
+        if not file_path.lower().endswith(('.pdf', '.PDF')):
+            logger.error(f"File is not a PDF: {file_path}")
+            failed_files.append(file_path)
+            return converted_paths, failed_files
+        
+        # Process the single file
+        output, failed = convert_single_file(file_path, supplier)
+        
+        if failed:
+            failed_files.extend(failed)
+        if output:
+            converted_paths.extend(output)
+            
+        logger.info(f"Single invoice conversion completed. Success: {len(converted_paths)}, Failed: {len(failed_files)}")
+        return converted_paths, failed_files
+        
+    except Exception as e:
+        logger.error(f"Error in convert_single_invoice: {str(e)}")
+        failed_files.append(file_path)
+        return [], failed_files
+
+
+def convert_single_file(file_path, supplier):
+    """
+    Convert a single PDF file to Excel.
+    
+    Args:
+        file_path: Path to the PDF file
+        supplier: Supplier name
+        
+    Returns:
+        tuple: (converted_files, failed_files)
+    """
+    converted_paths = []
+    failed_files = []
+    
+    try:
+        filename = os.path.basename(file_path)
+        logger.info(f"Processing single file: {filename}")
+        
+        # Generate output path
+        output_path = file_path.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
+        
+        # Handle ABC Opus Services special case
+        if supplier == 'ABC Opus Services':
+            process_invoice(file_path, output_path)
+            logger.info(f"ABC Opus: Downloaded at -> {output_path}")
+            logger.warning(f"Skipping ABC Opus file for Processing")
+            return [file_path], []
+        
+        # Process the file using the main extraction logic
+        split_filepaths = extract_data(file_path, output_path, supplier)
+        converted_paths.append(file_path)
+        
+        # Handle split invoices if any
+        if split_filepaths:
+            for split_file_path in split_filepaths:
+                split_output_path = split_file_path.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
+                extract_data(split_file_path, split_output_path, supplier)
+                converted_paths.append(split_file_path)
+                
+        logger.info(f"Successfully processed file: {filename}")
+        return converted_paths, failed_files
+        
+    except Exception as e:
+        logger.error(f"Error processing file {file_path}: {str(e)}")
+        failed_files.append(file_path)
+        return [], failed_files
+
+
 def convert_invoice(base_folder):
-    logger.info("Convert to Excel Background Task Triggered ...")
+    """
+    LEGACY FUNCTION: Convert all invoices in a folder structure.
+    This is used for email downloads and batch processing.
+    For single file uploads, use convert_single_invoice() instead.
+    """
+    logger.info("Convert to Excel Background Task Triggered (BATCH MODE)...")
 
     if os.path.isdir(f'{INVOICE_DOWNLOAD_FOLDER}/{base_folder}/no_supplier'):  # delete no_supplier directory
         shutil.rmtree(f'{INVOICE_DOWNLOAD_FOLDER}/{base_folder}/no_supplier', ignore_errors=True)
