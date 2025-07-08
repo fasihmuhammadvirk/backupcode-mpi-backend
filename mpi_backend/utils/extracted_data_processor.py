@@ -143,13 +143,15 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings, 
         })
 
         # Create invoice record initially with PROCESSING status
-        invoice_record = InvoiceController(db).insert_invoice(
-            extracted_data['Date'][0], 
-            file.rsplit('/')[-1],
-            supplier_id, 
-            'PROCESSING',
-            file
+        invoice_obj = Invoice(
+            date=extracted_data['Date'][0],
+            filename=file.rsplit('/')[-1],
+            supplier_id=supplier_id,
+            status='PROCESSING',
+            storage_path=file,
+            is_exported='Pending'
         )
+        invoice_record = InvoiceController(db).add_invoice(invoice_obj)
 
         # Validate and update status
         if validate_invoice_data(extracted_data):
@@ -186,13 +188,15 @@ def process_failed_file(file, db):
             logger.info(f"Failed file {file} already exists in database, skipping")
             return
             
-        invoice_record = InvoiceController(db).insert_invoice(
-            datetime.now().strftime('%m/%d/%Y'), 
-            file.rsplit('/')[-1], 
-            supplier_id, 
-            'FAILED', 
-            file
+        invoice_obj = Invoice(
+            date=datetime.now().strftime('%m/%d/%Y'),
+            filename=file.rsplit('/')[-1],
+            supplier_id=supplier_id,
+            status='FAILED',
+            storage_path=file,
+            is_exported='Pending'
         )
+        invoice_record = InvoiceController(db).add_invoice(invoice_obj)
         upload_file(file_name=file, file_key=f'{supplier_name}/{invoice_record.id}')
         logger.info(f'Processed failed file: {file}')
         
