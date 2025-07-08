@@ -317,7 +317,7 @@ def should_skip_statement_processing(
     statement_date: datetime, 
     pdf_filename: str,
     db: Session
-) -> tuple[bool, str]:
+) -> tuple:
     """
     Comprehensive check to determine if statement processing should be skipped
     Returns (should_skip, reason)
