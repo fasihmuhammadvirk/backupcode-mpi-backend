@@ -147,24 +147,26 @@ def extract_supplier_id(file_path):
 
 
 reprocessed = 0
-with db() as db:
-    for invoice in xlsx_files:
-        filename = os.path.basename(invoice)
-        matched_invoice = db.query(Invoice).filter_by(filename=filename).first()
+from mpi_backend.database import get_db
 
-        if not matched_invoice: continue
-        invoice_id = str(matched_invoice.id)
+db_gen = get_db()
+db = next(db_gen)
+for invoice in xlsx_files:
+    filename = os.path.basename(invoice)
+    matched_invoice = db.query(Invoice).filter_by(filename=filename).first()
 
+    if not matched_invoice: continue
+    invoice_id = str(matched_invoice.id)
 
-        invoice_items = InvoiceItemController(db).get_invoice_items(invoice_id=invoice_id)
+    invoice_items = InvoiceItemController(db).get_invoice_items(invoice_id=invoice_id)
 
-        if check_empty_mpi_item_and_description(invoice_items): # any one record is empty, process them again
-            InvoiceItemController(db).delete_invoice_items(invoice_id, db)  # delete previous ingested invoice items
-            contents = pd.read_excel(invoice.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
-            process_extracted_data([invoice.replace("\\", "/")], uuid.UUID(invoice_id))
+    if check_empty_mpi_item_and_description(invoice_items): # any one record is empty, process them again
+        InvoiceItemController(db).delete_invoice_items(invoice_id, db)  # delete previous ingested invoice items
+        contents = pd.read_excel(invoice.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
+        process_extracted_data([invoice.replace("\\", "/")], uuid.UUID(invoice_id))
 
-            reprocessed +=1
-            invoice_ids.append(invoice_id)
+        reprocessed +=1
+        invoice_ids.append(invoice_id)
 
 print(f'reprocessed {reprocessed} invoices.')
 print('\n')

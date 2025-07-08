@@ -131,12 +131,11 @@ def process_invoice_background_task(file_path: str, supplier: str, original_file
 @router.post("/upload")
 async def upload_and_process_invoice(
     supplier_id: int, 
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...), 
     db: Session = Depends(get_db),
     token: str = Depends(JWTBearer())
 ):
-    """Upload and process invoice with background processing to prevent timeouts"""
+    """Upload and process invoice synchronously. Only return success if file is uploaded to S3 and all DB records are saved."""
     temp_file_path = None
     try:
         # Validate file type
@@ -144,64 +143,67 @@ async def upload_and_process_invoice(
             raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
 
         # Get supplier info
-        try:
-            supplier = SupplierController(db).get_supplier_by_id(supplier_id)
-            if not supplier:
-                raise HTTPException(status_code=404, detail=f"Supplier with ID {supplier_id} not found")
-        except Exception as e:
-            logger.error(f"Error fetching supplier {supplier_id}: {str(e)}")
-            raise HTTPException(status_code=500, detail="Error fetching supplier information")
+        supplier = SupplierController(db).get_supplier_by_id(supplier_id)
+        if not supplier:
+            raise HTTPException(status_code=404, detail=f"Supplier with ID {supplier_id} not found")
 
         # Create upload directory
         upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{supplier}'
-        try:
-            os.makedirs(upload_folder, exist_ok=True)
-        except OSError as e:
-            logger.error(f"Error creating upload folder {upload_folder}: {str(e)}")
-            raise HTTPException(status_code=500, detail="Error creating upload directory")
+        os.makedirs(upload_folder, exist_ok=True)
 
-        # Save uploaded file with timeout handling
+        # Save uploaded file with size limit
         file_path = os.path.join(upload_folder, file.filename)
-        try:
-            # Read file content with size limit (e.g., 50MB)
-            max_file_size = 50 * 1024 * 1024  # 50MB
-            file_content = await file.read()
-            if len(file_content) > max_file_size:
-                raise HTTPException(status_code=413, detail="File too large. Maximum size is 50MB.")
-            # Write to disk
-            with open(file_path, "wb") as buffer:
-                buffer.write(file_content)
-            logger.info(f"File uploaded successfully: {file.filename} ({len(file_content)} bytes)")
-        except Exception as e:
-            logger.error(f"Error saving uploaded file {file.filename}: {str(e)}")
-            raise HTTPException(status_code=500, detail="Error saving uploaded file")
+        max_file_size = 50 * 1024 * 1024  # 50MB
+        file_content = await file.read()
+        if len(file_content) > max_file_size:
+            raise HTTPException(status_code=413, detail="File too large. Maximum size is 50MB.")
+        with open(file_path, "wb") as buffer:
+            buffer.write(file_content)
 
-        # Add background task for processing
-        background_tasks.add_task(
-            process_invoice_background_task,
-            file_path,
-            supplier,
-            file.filename
-        )
+        # Convert the single uploaded invoice
+        from mpi_backend.utils.invoice_convertor import convert_single_invoice
+        converted_files, failed_files = convert_single_invoice(file_path, supplier)
+        if failed_files:
+            raise HTTPException(status_code=500, detail=f"Failed to convert invoice: {failed_files}")
+
+        # Process extracted data (synchronously)
+        from mpi_backend.utils.extracted_data_processor import process_extracted_data
+        try:
+            process_extracted_data(converted_files, failed_files)
+        except Exception as e:
+            # Clean up DB and file if processing fails
+            logger.error(f"Error processing extracted data: {str(e)}")
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            raise HTTPException(status_code=500, detail=f"Failed to process invoice: {str(e)}")
+
+        # Upload to S3
+        from mpi_backend.utils.s3_utils import upload_file
+        s3_key = f'{supplier}/{file.filename}'
+        try:
+            upload_file(file_name=file_path, file_key=s3_key)
+        except Exception as e:
+            logger.error(f"Error uploading file to S3: {str(e)}")
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            raise HTTPException(status_code=500, detail=f"Failed to upload file to S3: {str(e)}")
+
+        # Clean up local file after S3 upload
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
         return {
             "status": "success",
-            "message": f"Invoice '{file.filename}' uploaded successfully and queued for processing",
+            "message": f"Invoice '{file.filename}' uploaded, processed, and saved successfully.",
             "filename": file.filename,
             "supplier": supplier,
-            "processing": "background"
+            "s3_key": s3_key
         }
 
     except HTTPException:
-        # Clean up temporary file if it exists
-        if temp_file_path and os.path.exists(temp_file_path):
-            try:
-                os.remove(temp_file_path)
-            except OSError:
-                pass
         raise
     except Exception as e:
         logger.error(f"Unexpected error in upload endpoint: {str(e)}")
-        # Clean up temporary file if it exists
         if temp_file_path and os.path.exists(temp_file_path):
             try:
                 os.remove(temp_file_path)

@@ -110,17 +110,11 @@ class UnmappedItemsController:
             Dict with items, pagination metadata
         """
         try:
-            if callable(self.db_context):
-                with self.db_context() as db:
-                    return self._get_unmapped_items_query(
-                        db, item_type, date_from, date_to, supplier_names, 
-                        search, order_by, page, size
-                    )
-            else:
-                return self._get_unmapped_items_query(
-                    self.db_context, item_type, date_from, date_to, supplier_names,
-                    search, order_by, page, size
-                )
+            db = self._get_db_session()
+            return self._get_unmapped_items_query(
+                db, item_type, date_from, date_to, supplier_names, 
+                search, order_by, page, size
+            )
         except Exception as e:
             logger.error(f"Error retrieving unmapped items: {e}")
             return {
