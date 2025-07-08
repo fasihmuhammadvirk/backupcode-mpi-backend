@@ -65,9 +65,14 @@ def get_database_session():
     return next(db_gen)
 
 
-def process_extracted_data(converted_files, failed_files):
+def process_extracted_data(converted_files, failed_files, existing_invoice_id=None):
     """Process extracted data with proper database session management"""
     logger.info(f"Starting to process {len(converted_files)} converted files and {len(failed_files)} failed files")
+    
+    # If reprocessing, log the invoice ID we're preserving
+    if existing_invoice_id:
+        logger.info(f"Reprocessing mode: Preserving invoice ID {existing_invoice_id}")
+    
     # Get a fresh database session
     db = get_database_session()
     try:
@@ -76,12 +81,16 @@ def process_extracted_data(converted_files, failed_files):
         item_mappings = ItemsMappingController(db).get_items_mappings()
         customer_job_mappings = CustomerJobMappingController(db).get_customer_job_mappings()
         logger.info(f"Loaded {len(temp_items)} temporary mappings, {len(item_mappings)} permanent mappings, {len(customer_job_mappings)} customer job mappings")
+        
         for file in converted_files:
             try:
-                process_single_file(file, temp_items, item_mappings, customer_job_mappings, db)
+                process_single_file(file, temp_items, item_mappings, customer_job_mappings, db, existing_invoice_id)
+                # Only use existing_invoice_id for the first file (in case of multiple files)
+                existing_invoice_id = None
             except Exception as e:
                 logger.error(f"Failed to process file {file}: {str(e)}")
                 failed_files.append(file)
+                
         # Process failed files
         for file in failed_files:
             try:
@@ -97,7 +106,7 @@ def process_extracted_data(converted_files, failed_files):
             db.close()
 
 
-def process_single_file(file, temp_items, item_mappings, customer_job_mappings, db):
+def process_single_file(file, temp_items, item_mappings, customer_job_mappings, db, existing_invoice_id=None):
     """Process a single converted file"""
     try:
         excel_file = file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
@@ -117,23 +126,39 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings, 
         file_path = os.path.normpath(file)
         filename = os.path.basename(file_path)
 
-        # Check if invoice already exists, delete if so
-        existing_invoice = db.query(Invoice).filter_by(filename=filename).first()
-        if existing_invoice:
-            db.query(InvoiceItem).filter_by(invoice_id=existing_invoice.id).delete()
-            db.delete(existing_invoice)
-            db.commit()
-            logger.info(f"Deleted existing invoice and items for {filename}")
+        # Check if invoice already exists, delete if so (unless we're reprocessing with specific ID)
+        if not existing_invoice_id:
+            existing_invoice = db.query(Invoice).filter_by(filename=filename).first()
+            if existing_invoice:
+                db.query(InvoiceItem).filter_by(invoice_id=existing_invoice.id).delete()
+                db.delete(existing_invoice)
+                db.commit()
+                logger.info(f"Deleted existing invoice and items for {filename}")
 
-        # Proceed to create a new invoice object and add to session
-        invoice_obj = Invoice(
-            date=extracted_data['Date'][0],
-            filename=filename,
-            supplier_id=supplier_id,
-            status='PROCESSING',
-            storage_path=file_path,
-            is_exported='Pending'
-        )
+        # Create a new invoice object and add to session
+        if existing_invoice_id:
+            # For reprocessing, use the existing invoice ID
+            invoice_obj = Invoice(
+                id=existing_invoice_id,
+                date=extracted_data['Date'][0],
+                filename=filename,
+                supplier_id=supplier_id,
+                status='PROCESSING',
+                storage_path=file_path,
+                is_exported='Pending'
+            )
+            logger.info(f"Reprocessing: Creating invoice with existing ID {existing_invoice_id}")
+        else:
+            # For new uploads, let the database generate a new ID
+            invoice_obj = Invoice(
+                date=extracted_data['Date'][0],
+                filename=filename,
+                supplier_id=supplier_id,
+                status='PROCESSING',
+                storage_path=file_path,
+                is_exported='Pending'
+            )
+            
         db.add(invoice_obj)
         db.commit()
         db.refresh(invoice_obj)
@@ -142,7 +167,7 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings, 
         invoice_id = invoice_obj.id
         invoice_record = invoice_obj
 
-        # Check if invoice already exists
+        # Check if invoice already exists (by reference number)
         if InvoiceItemController(db).invoice_exists(str(extracted_data['Ref NO'][0]), str(extracted_data['Vendor'][0])):
             logger.warning(f'Invoice with REF-NO-> {str(extracted_data["Ref NO"][0])} already processed and is being skipped!')
             return
@@ -185,7 +210,7 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings, 
                 db.commit()
             logger.warning(f'Invoice {file.rsplit("/")[-1]} marked as failed due to missing critical data')
         
-        # Upload to S3 regardless of status
+        # Upload to S3 regardless of status (using invoice_id as key)
         upload_file(file_name=file, file_key=f'{extracted_data["Vendor"][0]}/{invoice_id}')
 
         # Store invoice items regardless of status

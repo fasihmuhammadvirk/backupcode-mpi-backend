@@ -177,9 +177,32 @@ async def upload_and_process_invoice(
                 os.remove(file_path)
             raise HTTPException(status_code=500, detail=f"Failed to process invoice: {str(e)}")
 
-        # Upload to S3
+        # Get the invoice ID from the processed data for S3 upload
+        # We need to query the database to get the invoice ID that was just created
+        try:
+            from mpi_backend.database.models.invoice import Invoice
+            created_invoice = db.query(Invoice).filter_by(
+                filename=file.filename, 
+                supplier_id=supplier_id
+            ).order_by(Invoice.id.desc()).first()
+            if not created_invoice:
+                raise HTTPException(
+                    status_code=500, 
+                    detail="Failed to retrieve created invoice record"
+                )
+            invoice_id = created_invoice.id
+        except Exception as e:
+            logger.error(f"Error retrieving created invoice: {str(e)}")
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to retrieve invoice record: {str(e)}"
+            )
+
+        # Upload to S3 using invoice_id as key (consistent with reprocess)
         from mpi_backend.utils.s3_utils import upload_file
-        s3_key = f'{supplier}/{file.filename}'
+        s3_key = f'{supplier}/{invoice_id}'
         try:
             upload_file(file_name=file_path, file_key=s3_key)
         except Exception as e:
@@ -267,10 +290,10 @@ def reprocess_invoice_background_task(invoice_id: str, invoice_filename: str, su
             converted_files, failed_files = convert_single_invoice(temp_file_path, supplier)
             logger.info(f"Reprocessing conversion completed. Success: {len(converted_files)}, Failed: {len(failed_files)}")
 
-            # Process extracted data with the same session
+            # Process extracted data with the same session, preserving invoice ID
             from mpi_backend.utils.extracted_data_processor import process_extracted_data
             try:
-                process_extracted_data(converted_files, failed_files)
+                process_extracted_data(converted_files, failed_files, existing_invoice_id=invoice_id)
                 logger.info(f"Reprocessing data processing completed for invoice {invoice_id}")
             except Exception as e:
                 logger.error(f"Error in process_extracted_data for invoice {invoice_id}: {str(e)}")
@@ -391,10 +414,10 @@ async def process_again(
                 if failed_files:
                     raise HTTPException(status_code=500, detail=f"Failed to convert invoice: {failed_files}")
 
-                # Process extracted data
+                # Process extracted data with current session, preserving invoice ID
                 from mpi_backend.utils.extracted_data_processor import process_extracted_data
                 try:
-                    process_extracted_data(converted_files, failed_files)
+                    process_extracted_data(converted_files, failed_files, existing_invoice_id=invoice_id)
                 except Exception as e:
                     raise HTTPException(status_code=500, detail=f"Failed to process invoice data: {str(e)}")
 
