@@ -80,7 +80,7 @@ def is_pakistan_business_hours():
 
 def safe_mapping_wrapper(operation_name, operation_func, *args, **kwargs):
     """
-    NEW: Enhanced mapping wrapper with proper priority controls and business hours awareness
+    Enhanced mapping wrapper with business hours awareness - runs independently of QuickBooks
     
     Args:
         operation_name (str): Name of the operation for logging
@@ -91,35 +91,15 @@ def safe_mapping_wrapper(operation_name, operation_func, *args, **kwargs):
         Result of the operation or None if skipped/failed
     """
     try:
-        # ABSOLUTE PRIORITY: Check if migrate-all operation is active
-        try:
-            from mpi_backend.utils.quickbooks_priority import is_migrate_all_active
-            if is_migrate_all_active():
-                logger.info(f"{operation_name} paused - MIGRATE-ALL has absolute priority")
-                return None
-        except ImportError:
-            # If function not available, continue normally
-            pass
-        
         # Check if mappings are globally disabled
         if not MAPPINGS_ENABLED:
             logger.info(f"{operation_name} skipped - mappings globally disabled")
             return None
         
-        # NEW: Business hours exclusion for mapping operations
+        # Business hours exclusion for mapping operations
         if MAPPINGS_EXCLUSION_ENABLED and is_pakistan_business_hours():
             logger.info(f"{operation_name} skipped - within Pakistan business hours (12 PM - 6 PM PKT)")
             return None
-        
-        # FALLBACK: Check if any QuickBooks export is active
-        try:
-            from mpi_backend.utils.quickbooks_priority import is_qb_export_active
-            if is_qb_export_active():
-                logger.info(f"{operation_name} paused - QuickBooks priority export in progress")
-                return None
-        except ImportError:
-            # If function not available, continue normally
-            pass
         
         # Execute the operation
         logger.info(f"Starting {operation_name}")

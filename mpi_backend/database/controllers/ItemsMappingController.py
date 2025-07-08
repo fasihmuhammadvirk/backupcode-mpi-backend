@@ -36,7 +36,7 @@ class ItemsMappingController:
     @classmethod
     def execute_update_all_mappings_task(cls, db=None):
         """
-        ENHANCED: Execute update all mappings task with migrate-all absolute priority awareness
+        Execute update all mappings task - runs independently of other operations
         
         Args:
             db: Database session. If None, a new session is created.
@@ -44,29 +44,8 @@ class ItemsMappingController:
         Returns:
             Dict with update operation details
         """
-        # ABSOLUTE PRIORITY: Check if migrate-all operation is active
-        try:
-            from mpi_backend.utils.quickbooks_priority import is_migrate_all_active
-            if is_migrate_all_active():
-                logger.info("Mapping updates paused - MIGRATE-ALL has absolute priority")
-                return {
-                    "status": "paused",
-                    "message": "Mapping updates paused for MIGRATE-ALL priority operation"
-                }
-        except ImportError:
-            pass
-        
-        # FALLBACK: Check if any QuickBooks export is active
-        try:
-            from mpi_backend.utils.quickbooks_priority import is_qb_export_active
-            if is_qb_export_active():
-                logger.info("Mapping updates paused - QuickBooks priority export in progress")
-                return {
-                    "status": "paused",
-                    "message": "Mapping updates paused for QuickBooks priority export"
-                }
-        except ImportError:
-            pass
+        # Mapping updates run independently of all other operations
+        logger.debug("Starting mapping updates task")
         
         # Check if a sync task is already running
         from mpi_backend.database.controllers import EnhancedGoogleSheetSyncController
