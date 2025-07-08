@@ -10,27 +10,35 @@ class CustomerJobMappingController:
     def __init__(self, db):
         self.db_context = db
 
+    def _get_db_session(self):
+        """Get a database session object, whether db_context is a factory or session."""
+        # Check if it's already a session instance (has query, add, commit methods)
+        if hasattr(self.db_context, 'query') and hasattr(self.db_context, 'commit'):
+            return self.db_context
+        # Otherwise assume it's a session factory
+        return self.db_context()
+
     def get_customer_job_mappings(self):
-        with self.db_context() as db:
-            query_result = db.query(CustomerJobMapping).all()
+        db = self._get_db_session()
+        query_result = db.query(CustomerJobMapping).all()
 
-            # Process mappings to fix whitespace
-            processed_data = []
-            for item in query_result:
-                cust_job = item.customer_job
-                updated_job = item.updated_customer_job
-                
-                # Trim whitespace
-                if cust_job:
-                    cust_job = cust_job.strip()
-                if updated_job:
-                    updated_job = updated_job.strip()
+        # Process mappings to fix whitespace
+        processed_data = []
+        for item in query_result:
+            cust_job = item.customer_job
+            updated_job = item.updated_customer_job
+            
+            # Trim whitespace
+            if cust_job:
+                cust_job = cust_job.strip()
+            if updated_job:
+                updated_job = updated_job.strip()
 
-                processed_data.append((item.id, cust_job, updated_job))
-                
-            columns = ['id', 'customer_job', 'updated_customer_job']
-            customer_job_mappings = pd.DataFrame(processed_data, columns=columns)
-            return customer_job_mappings
+            processed_data.append((item.id, cust_job, updated_job))
+            
+        columns = ['id', 'customer_job', 'updated_customer_job']
+        customer_job_mappings = pd.DataFrame(processed_data, columns=columns)
+        return customer_job_mappings
 
     def update_mappings_table(self, old_customer_job, new_customer_job):
         """

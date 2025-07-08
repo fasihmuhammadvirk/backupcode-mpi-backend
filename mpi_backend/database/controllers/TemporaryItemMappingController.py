@@ -11,6 +11,14 @@ class TemporaryItemMappingController:
     def __init__(self, db):
         self.db_context = db
 
+    def _get_db_session(self) -> Session:
+        """Get a database session object, whether db_context is a factory or session."""
+        # Check if it's already a session instance (has query, add, commit methods)
+        if hasattr(self.db_context, 'query') and hasattr(self.db_context, 'commit'):
+            return self.db_context
+        # Otherwise assume it's a session factory
+        return self.db_context()
+
     def get_temp_items_mappings(self):
         """
         Get all temporary item mappings.
@@ -18,13 +26,13 @@ class TemporaryItemMappingController:
         Returns:
             DataFrame with temporary mappings
         """
-        with self.db_context() as db:
-            query_result = db.query(TempItemMapping).all()
+        db = self._get_db_session()
+        query_result = db.query(TempItemMapping).all()
 
-            data = [(item.original_item, item.original_description, item.sheet_name) for item in query_result]
-            columns = ['original_item', 'original_description', 'sheet_name']
-            temp_items_mappings = pd.DataFrame(data, columns=columns)
-            return temp_items_mappings
+        data = [(item.original_item, item.original_description, item.sheet_name) for item in query_result]
+        columns = ['original_item', 'original_description', 'sheet_name']
+        temp_items_mappings = pd.DataFrame(data, columns=columns)
+        return temp_items_mappings
 
     def get_temp_mappings_by_sheet(self, sheet_name: str) -> List[Dict[str, Any]]:
         """
@@ -36,22 +44,22 @@ class TemporaryItemMappingController:
         Returns:
             List of temporary mapping dictionaries
         """
-        with self.db_context() as db:
-            query_result = db.query(TempItemMapping).filter(
-                TempItemMapping.sheet_name == sheet_name
-            ).all()
-            
-            return [
-                {
-                    "id": item.id,
-                    "original_item": item.original_item,
-                    "original_description": item.original_description,
-                    "sheet_name": item.sheet_name,
-                    "created_at": item.created_at,
-                    "updated_at": item.updated_at
-                }
-                for item in query_result
-            ]
+        db = self._get_db_session()
+        query_result = db.query(TempItemMapping).filter(
+            TempItemMapping.sheet_name == sheet_name
+        ).all()
+        
+        return [
+            {
+                "id": item.id,
+                "original_item": item.original_item,
+                "original_description": item.original_description,
+                "sheet_name": item.sheet_name,
+                "created_at": item.created_at,
+                "updated_at": item.updated_at
+            }
+            for item in query_result
+        ]
 
     def clear_temp_mappings_by_sheet(self, sheet_name: str) -> int:
         """
@@ -63,14 +71,14 @@ class TemporaryItemMappingController:
         Returns:
             Number of mappings deleted
         """
-        with self.db_context() as db:
-            deleted_count = db.query(TempItemMapping).filter(
-                TempItemMapping.sheet_name == sheet_name
-            ).delete()
-            
-            db.commit()
-            logger.info(f"Cleared {deleted_count} temporary mappings for sheet: {sheet_name}")
-            return deleted_count
+        db = self._get_db_session()
+        deleted_count = db.query(TempItemMapping).filter(
+            TempItemMapping.sheet_name == sheet_name
+        ).delete()
+        
+        db.commit()
+        logger.info(f"Cleared {deleted_count} temporary mappings for sheet: {sheet_name}")
+        return deleted_count
 
     def get_mapping_stats(self) -> Dict[str, Any]:
         """
@@ -79,24 +87,24 @@ class TemporaryItemMappingController:
         Returns:
             Dictionary with mapping statistics
         """
-        with self.db_context() as db:
-            total_mappings = db.query(TempItemMapping).count()
-            
-            # Get unique sheet names
-            sheet_names = db.query(TempItemMapping.sheet_name).distinct().all()
-            unique_sheets = [name[0] for name in sheet_names if name[0]]
-            
-            # Get mappings per sheet
-            sheet_counts = {}
-            for sheet_name in unique_sheets:
-                count = db.query(TempItemMapping).filter(
-                    TempItemMapping.sheet_name == sheet_name
-                ).count()
-                sheet_counts[sheet_name] = count
-            
-            return {
-                "total_mappings": total_mappings,
-                "unique_sheets": len(unique_sheets),
-                "sheet_names": unique_sheets,
-                "mappings_per_sheet": sheet_counts
-            }
+        db = self._get_db_session()
+        total_mappings = db.query(TempItemMapping).count()
+        
+        # Get unique sheet names
+        sheet_names = db.query(TempItemMapping.sheet_name).distinct().all()
+        unique_sheets = [name[0] for name in sheet_names if name[0]]
+        
+        # Get mappings per sheet
+        sheet_counts = {}
+        for sheet_name in unique_sheets:
+            count = db.query(TempItemMapping).filter(
+                TempItemMapping.sheet_name == sheet_name
+            ).count()
+            sheet_counts[sheet_name] = count
+        
+        return {
+            "total_mappings": total_mappings,
+            "unique_sheets": len(unique_sheets),
+            "sheet_names": unique_sheets,
+            "mappings_per_sheet": sheet_counts
+        }

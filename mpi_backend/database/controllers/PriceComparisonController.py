@@ -26,9 +26,11 @@ class PriceComparisonController:
 
     def _get_db_session(self) -> Session:
         """Get a database session object, whether db_context is a factory or session."""
-        if callable(self.db_context):
-            return self.db_context()
-        return self.db_context
+        # Check if it's already a session instance (has query, add, commit methods)
+        if hasattr(self.db_context, 'query') and hasattr(self.db_context, 'commit'):
+            return self.db_context
+        # Otherwise assume it's a session factory
+        return self.db_context()
 
     def get_items_in_date_range(
         self, 
@@ -352,7 +354,7 @@ class PriceComparisonController:
                 )
             
             # Use optimized SQL query to get all price data at once
-            price_query = text("""
+            price_query = func.text("""
                 WITH supplier_prices AS (
                     SELECT 
                         ii.mpi_item,

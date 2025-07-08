@@ -13,7 +13,6 @@ from mpi_backend.database.controllers.invoice import InvoiceController
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
-from mpi_backend.utils.invoice_convertor import convert_invoice
 from mpi_backend.database.schemas import Invoice, PaginatedInvoiceResponse
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.s3_utils import get_presigned_url
@@ -29,7 +28,10 @@ def get_invoices(
         supplier_id: Optional[List[int]] = Query(None),
         from_date: date = Query(None),
         to_date: date = Query(None),
-        status: str = Query('all', description="Status (all, processed, unprocessed)"),
+        status: str = Query(
+            'all', 
+            description="Status (all, processed, unprocessed)"
+        ),
         job_location: str = Query(None),
         export_status: str = Query(None),
         page: int = Query(1, ge=1),
@@ -50,7 +52,7 @@ def get_invoices(
 
         return invoices
 
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=404, detail="No Records Found!")
 
 

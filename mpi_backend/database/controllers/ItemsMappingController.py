@@ -25,6 +25,14 @@ class ItemsMappingController:
     def __init__(self, db):
         self.db_context = db
 
+    def _get_db_session(self) -> Session:
+        """Get a database session object, whether db_context is a factory or session."""
+        # Check if it's already a session instance (has query, add, commit methods)
+        if hasattr(self.db_context, 'query') and hasattr(self.db_context, 'commit'):
+            return self.db_context
+        # Otherwise assume it's a session factory
+        return self.db_context()
+
     @classmethod
     def execute_update_all_mappings_task(cls, db=None):
         """
@@ -142,59 +150,58 @@ class ItemsMappingController:
         try:
             matches = []
             
-            # Check if db_context is callable (session factory) or a Session object
-            if callable(self.db_context):
-                with self.db_context() as db:
-                    # Get only valid permanent mappings from all suppliers (exclude temporary ones)
-                    all_mappings = db.query(ItemsMapping).filter(
-                        ~ItemsMapping.mpi_code.like("UIDI%"),
-                        ItemsMapping.mpi_code != "No Match",
-                        ItemsMapping.mpi_code != "No Match / UIDI",
-                        ItemsMapping.mpi_code.isnot(None),
-                        ItemsMapping.mpi_code != ""
-                    ).all()
+            # Use the new session method instead of checking callable
+            db = self._get_db_session()
+            # Get only valid permanent mappings from all suppliers (exclude temporary ones)
+            all_mappings = db.query(ItemsMapping).filter(
+                ~ItemsMapping.mpi_code.like("UIDI%"),
+                ItemsMapping.mpi_code != "No Match",
+                ItemsMapping.mpi_code != "No Match / UIDI",
+                ItemsMapping.mpi_code.isnot(None),
+                ItemsMapping.mpi_code != ""
+            ).all()
+            
+            for mapping in all_mappings:
+                # Additional validation to ensure we don't include temporary mappings
+                if is_temporary_mapping(mapping.mpi_code, mapping.description):
+                    logger.warning(f"Skipping temporary mapping in search: {mapping.mpi_code}")
+                    continue
+                
+                # Clean both items for comparison (strip whitespace)
+                clean_mapping_item = mapping.supplier_item_ids.strip()
+                clean_search_item = clean_item.strip()
+                
+                # First try exact match (clean item vs clean database item)
+                if clean_mapping_item == clean_search_item:
+                    matches.append({
+                        "id": mapping.id,
+                        "supplier_id": mapping.supplier_id,
+                        "supplier_item_ids": mapping.supplier_item_ids,
+                        "mpi_code": mapping.mpi_code,
+                        "description": mapping.description,
+                        "google_sheet_name": mapping.google_sheet_name,
+                        "match_type": "exact",
+                        "supplier_name": self._get_supplier_name(mapping.supplier_id)
+                    })
+                else:
+                    # Try with suffix cleaning (clean database item vs clean item)
+                    cleaned_db_item = clean_supplier_suffix(
+                        clean_mapping_item, 
+                        mapping.supplier_id
+                    )
                     
-                    for mapping in all_mappings:
-                        # Additional validation to ensure we don't include temporary mappings
-                        if is_temporary_mapping(mapping.mpi_code, mapping.description):
-                            logger.warning(f"Skipping temporary mapping in search: {mapping.mpi_code}")
-                            continue
-                        
-                        # Clean both items for comparison (strip whitespace)
-                        clean_mapping_item = mapping.supplier_item_ids.strip()
-                        clean_search_item = clean_item.strip()
-                        
-                        # First try exact match (clean item vs clean database item)
-                        if clean_mapping_item == clean_search_item:
-                            matches.append({
-                                "id": mapping.id,
-                                "supplier_id": mapping.supplier_id,
-                                "supplier_item_ids": mapping.supplier_item_ids,
-                                "mpi_code": mapping.mpi_code,
-                                "description": mapping.description,
-                                "google_sheet_name": mapping.google_sheet_name,
-                                "match_type": "exact",
-                                "supplier_name": self._get_supplier_name(mapping.supplier_id)
-                            })
-                        else:
-                            # Try with suffix cleaning (clean database item vs clean item)
-                            cleaned_db_item = clean_supplier_suffix(
-                                clean_mapping_item, 
-                                mapping.supplier_id
-                            )
-                            
-                            if cleaned_db_item == clean_search_item:
-                                matches.append({
-                                    "id": mapping.id,
-                                    "supplier_id": mapping.supplier_id,
-                                    "supplier_item_ids": mapping.supplier_item_ids,
-                                    "cleaned_supplier_item_ids": cleaned_db_item,
-                                    "mpi_code": mapping.mpi_code,
-                                    "description": mapping.description,
-                                    "google_sheet_name": mapping.google_sheet_name,
-                                    "match_type": "cleaned",
-                                    "supplier_name": self._get_supplier_name(mapping.supplier_id)
-                                })
+                    if cleaned_db_item == clean_search_item:
+                        matches.append({
+                            "id": mapping.id,
+                            "supplier_id": mapping.supplier_id,
+                            "supplier_item_ids": mapping.supplier_item_ids,
+                            "cleaned_supplier_item_ids": cleaned_db_item,
+                            "mpi_code": mapping.mpi_code,
+                            "description": mapping.description,
+                            "google_sheet_name": mapping.google_sheet_name,
+                            "match_type": "cleaned",
+                            "supplier_name": self._get_supplier_name(mapping.supplier_id)
+                        })
             else:
                 # Direct session object
                 db = self.db_context
@@ -274,16 +281,9 @@ class ItemsMappingController:
         """
         try:
             from mpi_backend.database.models import Supplier
-            # Check if db_context is callable (session factory) or a Session object
-            if callable(self.db_context):
-                with self.db_context() as db:
-                    supplier = db.query(Supplier).filter_by(id=supplier_id).first()
-                    return supplier.supplier_name if supplier else f"Unknown Supplier (ID: {supplier_id})"
-            else:
-                # Direct session object
-                db = self.db_context
-                supplier = db.query(Supplier).filter_by(id=supplier_id).first()
-                return supplier.supplier_name if supplier else f"Unknown Supplier (ID: {supplier_id})"
+            db = self._get_db_session()
+            supplier = db.query(Supplier).filter_by(id=supplier_id).first()
+            return supplier.supplier_name if supplier else f"Unknown Supplier (ID: {supplier_id})"
         except Exception as e:
             logger.warning(f"Could not fetch supplier name for ID {supplier_id}: {str(e)}")
             return f"Unknown Supplier (ID: {supplier_id})"
@@ -295,69 +295,36 @@ class ItemsMappingController:
         Args:
             include_temporary (bool): If False (default), excludes temporary/UIDI mappings
         """
-        # Check if db_context is callable (session factory) or a Session object
-        if callable(self.db_context):
-            with self.db_context() as db:
-                query = db.query(ItemsMapping)
-                
-                # Filter out temporary mappings unless explicitly requested
-                if not include_temporary:
-                    query = query.filter(
-                        ~ItemsMapping.mpi_code.like("UIDI%"),
-                        ItemsMapping.mpi_code != "No Match",
-                        ItemsMapping.mpi_code != "No Match / UIDI",
-                        ItemsMapping.mpi_code.isnot(None),
-                        ItemsMapping.mpi_code != ""
-                    )
-                
-                query_result = query.all()
-                
-                # Additional validation to catch any temporary mappings that slipped through
-                filtered_results = []
-                for item in query_result:
-                    if include_temporary or not is_temporary_mapping(item.mpi_code, item.description):
-                        filtered_results.append(item)
-                    else:
-                        logger.warning(f"Filtered out temporary mapping: {item.mpi_code}")
-                
-                data = [(item.google_sheet_name, item.mpi_code, item.description, 
-                         item.supplier_item_ids, item.supplier_id) 
-                        for item in filtered_results]
-                columns = ['google_sheet_name', 'mpi_code', 'description',
-                           'supplier_item_ids', 'supplier_id']
-                items_mappings = pd.DataFrame(data, columns=columns)
-                return items_mappings
-        else:
-            # Direct session object
-            query = self.db_context.query(ItemsMapping)
-            
-            # Filter out temporary mappings unless explicitly requested
-            if not include_temporary:
-                query = query.filter(
-                    ~ItemsMapping.mpi_code.like("UIDI%"),
-                    ItemsMapping.mpi_code != "No Match",
-                    ItemsMapping.mpi_code != "No Match / UIDI",
-                    ItemsMapping.mpi_code.isnot(None),
-                    ItemsMapping.mpi_code != ""
-                )
-            
-            query_result = query.all()
-            
-            # Additional validation to catch any temporary mappings that slipped through
-            filtered_results = []
-            for item in query_result:
-                if include_temporary or not is_temporary_mapping(item.mpi_code, item.description):
-                    filtered_results.append(item)
-                else:
-                    logger.warning(f"Filtered out temporary mapping: {item.mpi_code}")
-            
-            data = [(item.google_sheet_name, item.mpi_code, item.description, 
-                     item.supplier_item_ids, item.supplier_id) 
-                    for item in filtered_results]
-            columns = ['google_sheet_name', 'mpi_code', 'description',
-                       'supplier_item_ids', 'supplier_id']
-            items_mappings = pd.DataFrame(data, columns=columns)
-            return items_mappings
+        db = self._get_db_session()
+        query = db.query(ItemsMapping)
+        
+        # Filter out temporary mappings unless explicitly requested
+        if not include_temporary:
+            query = query.filter(
+                ~ItemsMapping.mpi_code.like("UIDI%"),
+                ItemsMapping.mpi_code != "No Match",
+                ItemsMapping.mpi_code != "No Match / UIDI",
+                ItemsMapping.mpi_code.isnot(None),
+                ItemsMapping.mpi_code != ""
+            )
+        
+        query_result = query.all()
+        
+        # Additional validation to catch any temporary mappings that slipped through
+        filtered_results = []
+        for item in query_result:
+            if include_temporary or not is_temporary_mapping(item.mpi_code, item.description):
+                filtered_results.append(item)
+            else:
+                logger.warning(f"Filtered out temporary mapping: {item.mpi_code}")
+        
+        data = [(item.google_sheet_name, item.mpi_code, item.description, 
+                 item.supplier_item_ids, item.supplier_id) 
+                for item in filtered_results]
+        columns = ['google_sheet_name', 'mpi_code', 'description',
+                   'supplier_item_ids', 'supplier_id']
+        items_mappings = pd.DataFrame(data, columns=columns)
+        return items_mappings
 
     def get_items_mappings_by_supplier_id(self, supplier_id: int, limit: int = 100, 
                                           offset: int = 0):
@@ -377,13 +344,8 @@ class ItemsMappingController:
                   'type', 'description', 'mpi_code', 'supplier_item_ids', and 
                   'supplier_id'.
         """
-        # Check if db_context is callable (session factory) or a Session object
-        if callable(self.db_context):
-            with self.db_context() as db:
-                return self._get_mappings_by_supplier_id(db, supplier_id, limit, offset)
-        else:
-            # Direct session object
-            return self._get_mappings_by_supplier_id(self.db_context, supplier_id, limit, offset)
+        db = self._get_db_session()
+        return self._get_mappings_by_supplier_id(db, supplier_id, limit, offset)
     
     def _get_mappings_by_supplier_id(self, db, supplier_id: int, limit: int, offset: int):
         """Helper method to get mappings by supplier ID"""
@@ -422,13 +384,8 @@ class ItemsMappingController:
         ]
 
     def get_items_mappings_by_mpi_type(self):
-        # Check if db_context is callable (session factory) or a Session object
-        if callable(self.db_context):
-            with self.db_context() as db:
-                return self._get_mappings_by_mpi_type(db)
-        else:
-            # Direct session object
-            return self._get_mappings_by_mpi_type(self.db_context)
+        db = self._get_db_session()
+        return self._get_mappings_by_mpi_type(db)
     
     def _get_mappings_by_mpi_type(self, db):
         """Helper method to get mappings by MPI type"""
@@ -467,13 +424,8 @@ class ItemsMappingController:
             supplier_id (str): The supplier ID for the mapping
             mapping_data (dict): Mapping data containing mpi_code, description, etc.
         """
-        # Check if db_context is callable (session factory) or a Session object
-        if callable(self.db_context):
-            with self.db_context() as db:
-                return self._perform_update_mapping(db, supplier_id, mapping_data)
-        else:
-            # Direct session object
-            return self._perform_update_mapping(self.db_context, supplier_id, mapping_data)
+        db = self._get_db_session()
+        return self._perform_update_mapping(db, supplier_id, mapping_data)
 
     def _perform_update_mapping(self, db, supplier_id: str, mapping_data: dict):
         try:
@@ -618,13 +570,8 @@ class ItemsMappingController:
                 "message": f"Cannot start operation: {operation_display} is already in progress"
             }
             
-        # Check if db_context is callable (session factory) or a Session object
-        if callable(self.db_context):
-            with self.db_context() as db:
-                return self._perform_uidi_update(db)
-        else:
-            # Direct session object
-            return self._perform_uidi_update(self.db_context)
+        db = self._get_db_session()
+        return self._perform_uidi_update(db)
 
     def _perform_uidi_update(self, db):
         """Helper method to perform the actual UIDI update"""
@@ -844,13 +791,8 @@ class ItemsMappingController:
         try:
             from mpi_backend.utils.item_utils import clean_supplier_suffix
             
-            # Check if db_context is callable (session factory) or a Session object
-            if callable(self.db_context):
-                with self.db_context() as db:
-                    return self._perform_all_mappings_update(db)
-            else:
-                # Direct session object
-                return self._perform_all_mappings_update(self.db_context)
+            db = self._get_db_session()
+            return self._perform_all_mappings_update(db)
                 
         except Exception as e:
             logger.error(f"Failed to update all mappings: {str(e)}")

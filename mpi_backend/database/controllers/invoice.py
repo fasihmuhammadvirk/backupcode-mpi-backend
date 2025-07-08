@@ -18,14 +18,20 @@ class InvoiceController:
     def __init__(self, db):
         self.db_context = db
 
-    def insert_invoice(self, date, filename, supplier_id, status, storage_path):
-        date = datetime.strptime(date, '%m/%d/%Y')
-        new_invoice = Invoice(date=date, filename=filename, supplier_id=supplier_id, status=status, storage_path=storage_path, is_exported='Pending')
-        with self.db_context() as db:
-            db.add(new_invoice)
-            db.commit()
-            db.refresh(new_invoice)  # to get the newly generated UUID
-        return new_invoice
+    def _get_db_session(self):
+        """Get a database session object, whether db_context is a factory or session."""
+        # Check if it's already a session instance (has query, add, commit methods)
+        if hasattr(self.db_context, 'query') and hasattr(self.db_context, 'commit'):
+            return self.db_context
+        # Otherwise assume it's a session factory
+        return self.db_context()
+
+    def add_invoice(self, invoice):
+        db = self._get_db_session()
+        db.add(invoice)
+        db.commit()
+        db.refresh(invoice)
+        return invoice
 
     def get_invoices(
             self, db,
@@ -130,7 +136,7 @@ class InvoiceController:
             invoice.status = 'PROCESSED'
             db_ref.commit()
         else:
-            with self.db_context() as db:
+            with self._get_db_session() as db:
                 invoice = db.query(Invoice).filter(Invoice.id == inserted_id).first() # source -> background task
                 invoice.status = 'PROCESSED'
                 db.commit()
@@ -145,14 +151,14 @@ class InvoiceController:
         Returns:
             bool: True if the update was successful, False otherwise.
         """
-        query = self.db_context.query(Invoice).filter(Invoice.id == invoice_id)
+        query = self._get_db_session().query(Invoice).filter(Invoice.id == invoice_id)
 
         invoice = query.first()
         if not invoice:
             return False  # Invoice not found
         query.update({"is_exported": "Sent"}, synchronize_session='fetch')
 
-        self.db_context.commit()
+        self._get_db_session().commit()
 
         return True
 
@@ -202,7 +208,7 @@ class InvoiceController:
             else:
                 processed_invoice_ids.append(invoice_id)
         
-        invoices = self.db_context.query(Invoice).filter(
+        invoices = self._get_db_session().query(Invoice).filter(
             Invoice.id.in_(processed_invoice_ids)
         ).all()
         
@@ -211,7 +217,7 @@ class InvoiceController:
 
     def is_invoice_present(self,filename):
         try:
-            with self.db_context() as db:
+            with self._get_db_session() as db:
                 invoice = db.query(Invoice).filter_by(filename=filename).first()
             if invoice:
                 return True

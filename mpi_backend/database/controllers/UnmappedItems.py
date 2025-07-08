@@ -8,6 +8,7 @@ from sqlalchemy import and_, or_
 from typing import Dict, Any, Optional, List
 from datetime import date
 import logging
+from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -16,27 +17,35 @@ class UnmappedItemsController:
     def __init__(self, db):
         self.db_context = db
 
+    def _get_db_session(self) -> Session:
+        """Get a database session object, whether db_context is a factory or session."""
+        # Check if it's already a session instance (has query, add, commit methods)
+        if hasattr(self.db_context, 'query') and hasattr(self.db_context, 'commit'):
+            return self.db_context
+        # Otherwise assume it's a session factory
+        return self.db_context()
+
     def get_items_mappings(self):
-        with self.db_context() as db:
-            query_result = db.query(UnmappedItems).all()
-            data = [(item.google_sheet_name, item.mpi_code, item.description,
-                     item.supplier_item_ids, item.supplier_id) for item in query_result]
-            columns = ['google_sheet_name', 'mpi_code', 'description',
-                       'supplier_item_ids', 'supplier_id']
-            items_mappings = pd.DataFrame(data, columns=columns)
-            return items_mappings
+        db = self._get_db_session()
+        query_result = db.query(UnmappedItems).all()
+        data = [(item.google_sheet_name, item.mpi_code, item.description,
+                 item.supplier_item_ids, item.supplier_id) for item in query_result]
+        columns = ['google_sheet_name', 'mpi_code', 'description',
+                   'supplier_item_ids', 'supplier_id']
+        items_mappings = pd.DataFrame(data, columns=columns)
+        return items_mappings
 
     def insert_unmapped_item(self, item_code, description, supplier_id):
-        with self.db_context() as db:
-            new_item = UnmappedItems(
-                google_sheet_name='',
-                mpi_code='',
-                description=description,
-                supplier_item_ids=item_code,
-                supplier_id=supplier_id
-            )
-            db.add(new_item)
-            db.commit()
+        db = self._get_db_session()
+        new_item = UnmappedItems(
+            google_sheet_name='',
+            mpi_code='',
+            description=description,
+            supplier_item_ids=item_code,
+            supplier_id=supplier_id
+        )
+        db.add(new_item)
+        db.commit()
 
     def is_item_code_present(self, item_code, supplier_id=None):
         """
@@ -52,25 +61,25 @@ class UnmappedItemsController:
                   False otherwise
         """
         try:
-            with self.db_context() as db:
-                # Get all unmapped items
-                all_unmapped = db.query(UnmappedItems).all()
-                
-                # Check clean invoice item against both original and cleaned DB data
-                for unmapped_item in all_unmapped:
-                    # First try exact match (clean invoice vs DB item)
-                    if unmapped_item.supplier_item_ids == item_code:
-                        return True
-                    # Then try clean invoice vs cleaned DB item
-                    elif (supplier_id and 
-                          clean_supplier_suffix(
-                              unmapped_item.supplier_item_ids, 
-                              supplier_id
-                          ) == item_code):
-                        return True
-                        
-                return False
-                
+            db = self._get_db_session()
+            # Get all unmapped items
+            all_unmapped = db.query(UnmappedItems).all()
+            
+            # Check clean invoice item against both original and cleaned DB data
+            for unmapped_item in all_unmapped:
+                # First try exact match (clean invoice vs DB item)
+                if unmapped_item.supplier_item_ids == item_code:
+                    return True
+                # Then try clean invoice vs cleaned DB item
+                elif (supplier_id and 
+                      clean_supplier_suffix(
+                          unmapped_item.supplier_item_ids, 
+                          supplier_id
+                      ) == item_code):
+                    return True
+                    
+            return False
+            
         except Exception as e:
             print(f'Unmapped item-{item_code} could not be looked up in db ->{e}')
             return False
