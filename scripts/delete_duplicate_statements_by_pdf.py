@@ -5,6 +5,10 @@ Duplicates are defined as statements with the same pdf_filename.
 Keeps one statement per pdf_filename, deletes the rest and their invoices.
 """
 
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from collections import defaultdict
 from mpi_backend.database.models.statement_models import PlumbingStatement, PlumbingInvoice
 from mpi_backend.database import get_db
