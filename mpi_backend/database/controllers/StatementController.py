@@ -1,7 +1,7 @@
 from datetime import datetime, date
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, func
 from math import ceil
 # Setup temporary directory for reprocessing
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
@@ -13,7 +13,7 @@ import logging
 from mpi_backend.database.models.statement_models import (
     PlumbingSupplier, PlumbingStatement, PlumbingInvoice
 )
-from mpi_backend.database.models.invoice import Invoice
+from mpi_backend.database.models.invoice import Invoice as SystemInvoice
 from mpi_backend.database.models.InvoiceItems import InvoiceItem
 
 logger = logging.getLogger(__name__)
@@ -343,65 +343,55 @@ class StatementController:
         page_size: int = 20
     ) -> Dict[str, Any]:
         """
-        Get statement invoice data with filters and pagination
-        
-        Args:
-            from_date: Start date filter (DD/MM/YYYY converted to date)
-            to_date: End date filter (DD/MM/YYYY converted to date)
-            supplier_names: List of supplier names/IDs or ["All"] for all suppliers
-            status: Invoice status filter (Processed/Failed)
-            page: Page number (1-based)
-            page_size: Number of items per page
-            
-        Returns:
-            Dict with invoice data and pagination metadata
+        Get statement invoice data with filters and pagination (optimized for processed/failed)
         """
         try:
             # Build base query joining all necessary tables
             query = (
-                self.db.query(PlumbingInvoice, PlumbingStatement, PlumbingSupplier)
+                self.db.query(
+                    PlumbingInvoice,
+                    PlumbingStatement,
+                    PlumbingSupplier,
+                    func.count(SystemInvoice.id).label("match_count")
+                )
                 .join(PlumbingStatement, PlumbingInvoice.statement_id == PlumbingStatement.id)
                 .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
+                .outerjoin(
+                    SystemInvoice,
+                    and_(
+                        SystemInvoice.invoice_number == PlumbingInvoice.invoice_number,
+                        SystemInvoice.supplier_id == PlumbingSupplier.id,
+                        SystemInvoice.date == PlumbingInvoice.invoice_date
+                    )
+                )
             )
-            
+
             # Apply date filters on invoice_date
             if from_date:
                 query = query.filter(PlumbingInvoice.invoice_date >= from_date)
             if to_date:
                 query = query.filter(PlumbingInvoice.invoice_date <= to_date)
-            
+
             # Apply supplier filter - support ["All"], multiple supplier IDs, or supplier names
-            # Handle supplier_id = 0 as "all suppliers"
             if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
-                # Build OR conditions for multiple suppliers
                 supplier_conditions = []
-                
                 for supplier_name in supplier_names:
-                    # Check if supplier_name is a numeric ID
                     if supplier_name.isdigit():
                         supplier_id = int(supplier_name)
-                        # Handle supplier_id = 0 as "all suppliers" - skip filtering
                         if supplier_id == 0:
-                            # If any supplier_name is "0", treat as "all suppliers"
                             supplier_conditions = []
                             break
                         else:
-                            # Filter by specific supplier ID
                             supplier_conditions.append(PlumbingSupplier.id == supplier_id)
                     else:
-                        # Filter by supplier name (partial match)
                         supplier_conditions.append(
                             PlumbingSupplier.name.ilike(f"%{supplier_name}%")
                         )
-                
-                # Apply OR condition if any suppliers specified (and not "all suppliers")
                 if supplier_conditions:
                     query = query.filter(or_(*supplier_conditions))
-            
+
             # Handle special status filters BEFORE executing query
-            # Handle "unlisted" status filter separately
             if status and status.lower() == "unlisted":
-                # Return unlisted invoices instead
                 return self.get_unlisted_invoices(
                     from_date=from_date,
                     to_date=to_date,
@@ -409,12 +399,9 @@ class StatementController:
                     page=page,
                     page_size=page_size
                 )
-            
-            # Handle "missing" status filters separately
             if status and (status.lower() == "missing" or 
                           status.lower() == "missing system" or 
                           status.lower() == "missing statement"):
-                # Return missing/invalid invoices instead
                 return self.get_missing_invalid_invoices(
                     from_date=from_date,
                     to_date=to_date,
@@ -422,10 +409,7 @@ class StatementController:
                     page=page,
                     page_size=page_size
                 )
-            
-            # Handle "all" status filter separately - combine all categories
             if status and status.lower() == "all":
-                # Return combined data from all categories
                 return self.get_all_invoices_combined(
                     from_date=from_date,
                     to_date=to_date,
@@ -433,14 +417,81 @@ class StatementController:
                     page=page,
                     page_size=page_size
                 )
-            
+
+            # Only optimize for processed/failed
+            if status and status.lower() in ["processed", "failed"]:
+                # Group by all statement invoice fields to get match count
+                query = query.group_by(
+                    PlumbingInvoice.id,
+                    PlumbingStatement.id,
+                    PlumbingSupplier.id
+                )
+                # Compute reconciliation status in SQL
+                if status.lower() == "processed":
+                    query = query.having(func.count(SystemInvoice.id) > 0)
+                elif status.lower() == "failed":
+                    query = query.having(func.count(SystemInvoice.id) == 0)
+                # Order and paginate in SQL
+                query = query.order_by(PlumbingInvoice.invoice_date.desc())
+                total_count = query.count()
+                results = query.offset((page - 1) * page_size).limit(page_size).all()
+                invoice_data = []
+                for plumbing_invoice, plumbing_statement, plumbing_supplier, match_count in results:
+                    reconciliation_status = "Processed" if match_count > 0 else "Failed"
+                    invoice_data.append({
+                        'invoice_number': plumbing_invoice.invoice_number,
+                        'invoice_date': (
+                            plumbing_invoice.invoice_date.isoformat() 
+                            if plumbing_invoice.invoice_date else None
+                        ),
+                        'customer_po': plumbing_invoice.customer_po,
+                        'statement_date': (
+                            plumbing_statement.statement_date.isoformat() 
+                            if plumbing_statement.statement_date else None
+                        ),
+                        'supplier_name': plumbing_supplier.name,
+                        'status': reconciliation_status,
+                        'original_amount': (
+                            float(plumbing_invoice.original_amount) 
+                            if plumbing_invoice.original_amount else 0.0
+                        ),
+                        'balance': (
+                            float(plumbing_invoice.balance) 
+                            if plumbing_invoice.balance else 0.0
+                        ),
+                        'statement_id': plumbing_statement.id,
+                        'invoice_id': plumbing_invoice.id
+                    })
+                total_pages = ceil(total_count / page_size) if page_size > 0 else 1
+                return {
+                    'success': True,
+                    'data': invoice_data,
+                    'pagination': {
+                        'current_page': page,
+                        'page_size': page_size,
+                        'total_results': total_count,
+                        'total_pages': total_pages,
+                        'has_next': page < total_pages,
+                        'has_previous': page > 1
+                    },
+                    'filters_applied': {
+                        'from_date': from_date.isoformat() if from_date else None,
+                        'to_date': to_date.isoformat() if to_date else None,
+                        'supplier_names': supplier_names,
+                        'status': status
+                    }
+                }
+
+            # Fallback: original logic for other statuses
+            # ... existing code ...
+
             # For statement invoices only (Processed/Failed) - execute query
             # First, get all results to determine status and apply filtering
             all_results = query.all()
             
             # Process results and apply status filter
             filtered_results = []
-            for plumbing_invoice, plumbing_statement, plumbing_supplier in all_results:
+            for plumbing_invoice, plumbing_statement, plumbing_supplier, match_count in all_results:
                 # ALWAYS determine reconciliation status by checking system
                 match_result = self.check_invoice_exists_in_system(
                     plumbing_invoice.invoice_number,
