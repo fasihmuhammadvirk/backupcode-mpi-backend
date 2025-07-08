@@ -136,7 +136,6 @@ async def upload_and_process_invoice(
 ):
     """Upload and process invoice with background processing to prevent timeouts"""
     temp_file_path = None
-    
     try:
         # Validate file type
         if not file.filename.lower().endswith('.pdf'):
@@ -165,16 +164,12 @@ async def upload_and_process_invoice(
             # Read file content with size limit (e.g., 50MB)
             max_file_size = 50 * 1024 * 1024  # 50MB
             file_content = await file.read()
-            
             if len(file_content) > max_file_size:
                 raise HTTPException(status_code=413, detail="File too large. Maximum size is 50MB.")
-            
             # Write to disk
             with open(file_path, "wb") as buffer:
                 buffer.write(file_content)
-                
             logger.info(f"File uploaded successfully: {file.filename} ({len(file_content)} bytes)")
-            
         except Exception as e:
             logger.error(f"Error saving uploaded file {file.filename}: {str(e)}")
             raise HTTPException(status_code=500, detail="Error saving uploaded file")
@@ -186,7 +181,6 @@ async def upload_and_process_invoice(
             supplier,
             file.filename
         )
-        
         return {
             "status": "success",
             "message": f"Invoice '{file.filename}' uploaded successfully and queued for processing",
@@ -217,42 +211,41 @@ async def upload_and_process_invoice(
 def reprocess_invoice_background_task(invoice_id: str, invoice_filename: str, supplier: str):
     """Background task to reprocess invoice"""
     temp_file_path = None
-    
     try:
         logger.info(f"Starting background reprocessing for invoice {invoice_id}")
-        
+
         # Get fresh database session for background task
         from mpi_backend.database import get_db
         db_gen = get_db()
         db = next(db_gen)
-        
+
         try:
             # Download invoice from S3 with timeout
             invoice_url = get_presigned_url(file_key=f'{supplier}/{invoice_id}')
-            
+
             if not invoice_url:
                 logger.error(f"Could not get presigned URL for invoice {invoice_id}")
                 return
-            
+
             # Create temporary directory for processing
             upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{supplier}'
             os.makedirs(upload_folder, exist_ok=True)
             temp_file_path = os.path.join(upload_folder, invoice_filename)
-            
+
             # Download with timeout
             try:
                 response = requests.get(invoice_url, timeout=30)  # 30 second timeout
                 response.raise_for_status()
-                
+
                 with open(temp_file_path, 'wb') as file:
                     file.write(response.content)
-                    
+
                 logger.info(f"Downloaded invoice {invoice_id} from S3 ({len(response.content)} bytes)")
-                
+
             except requests.RequestException as e:
                 logger.error(f"Error downloading invoice {invoice_id} from S3: {str(e)}")
                 return
-            
+
             # Delete existing invoice data
             try:
                 InvoiceItemController(db).delete_invoice_items(invoice_id, db)
@@ -261,18 +254,18 @@ def reprocess_invoice_background_task(invoice_id: str, invoice_filename: str, su
             except Exception as e:
                 logger.error(f"Error deleting existing invoice data {invoice_id}: {str(e)}")
                 return
-            
+
             # Import the single file converter
             from mpi_backend.utils.invoice_convertor import convert_single_invoice
-            
+
             # Process the single invoice
             converted_files, failed_files = convert_single_invoice(temp_file_path, supplier)
             logger.info(f"Reprocessing conversion completed. Success: {len(converted_files)}, Failed: {len(failed_files)}")
-            
+
             # Process extracted data
             process_extracted_data(converted_files, failed_files)
             logger.info(f"Reprocessing data processing completed for invoice {invoice_id}")
-            
+
             # Clean up temporary files
             if os.path.exists(upload_folder):
                 for filename in os.listdir(upload_folder):
@@ -282,13 +275,13 @@ def reprocess_invoice_background_task(invoice_id: str, invoice_filename: str, su
                         logger.debug(f"Cleaned up file: {file_to_remove}")
                     except OSError as e:
                         logger.warning(f"Could not remove file {file_to_remove}: {e}")
-            
+
             logger.info(f"Background reprocessing completed successfully for invoice {invoice_id}")
-            
+
         finally:
             # Close database session
             db.close()
-            
+
     except Exception as e:
         logger.error(f"Background reprocessing failed for invoice {invoice_id}: {str(e)}")
         # Clean up temporary file

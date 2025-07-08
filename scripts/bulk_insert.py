@@ -1,11 +1,11 @@
 import json
-from sqlalchemy.orm import Session
 from sqlalchemy import create_engine
 from mpi_backend.database.models import ItemsMapping
 from mpi_backend.config import SQLALCHEMY_DATABASE_URI
+from mpi_backend.database import SessionLocal
 
 engine = create_engine(SQLALCHEMY_DATABASE_URI)
-session = Session(bind=engine)
+session = SessionLocal()
 
 insertion_count = 0
 
@@ -29,6 +29,8 @@ for job in temp_items:
     insertion_count+=1
 
 session.commit()
-print(f"{insertion_count}  -> New Fully Mapped Items Inserted!")
+print(
+    f"Inserted {insertion_count} records into ItemsMapping table."
+)
 session.close()
 

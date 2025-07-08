@@ -39,34 +39,24 @@ print (f'Found {len(xlsx_files)} invoices.')
 invoice_ids = []
 
 def process_extracted_data(converted_files, id):
-
-        db = contextmanager(get_db)
-
+    db = contextmanager(get_db)
     temp_items = TemporaryItemMappingController(db).get_temp_items_mappings()
     item_mappings = ItemsMappingController(db).get_items_mappings()
-
     for file in converted_files:
         extracted_data = pd.read_excel(file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
-
-
-        if InvoiceItemController(db).invoice_exists(str(extracted_data['Ref NO'][0]),str(extracted_data['Vendor'][0])) :
+        if InvoiceItemController(db).invoice_exists(str(extracted_data['Ref NO'][0]), str(extracted_data['Vendor'][0])):
             print(f'Invoice with REF-NO-> {str(extracted_data["Ref NO"][0])} already processed and is being skipped!')
             continue
-
         extracted_data.insert(0, 'Sheet Name', '')
         extracted_data['MpiItem'] = 'No Match'
         extracted_data['MpiDescription'] = 'No Match'
         extracted_data['email_date'] = extract_email_date(file)
-
         extracted_data = extracted_data.apply(search_replace, args=(temp_items, item_mappings,), axis=1)
-
         extracted_customer_job = extracted_data['Customer Job'][0]
         extracted_data['Customer Job'] = extracted_customer_job
-
         extracted_data = extracted_data.fillna({'Qty': 0, 'Cost': 0, 'Class': '', 'Memo': '', 'Ref NO': '',
                                                 'PO #': '', 'Customer Job': '', 'Buyer': '',
                                                 'Date': datetime.today().strftime('%m/%d/%Y')})
-
         for index, row in extracted_data.iterrows():  # every item has its own record
             InvoiceItemController(db).insert_invoice_items(row, file.rsplit('/')[-1], id)
 

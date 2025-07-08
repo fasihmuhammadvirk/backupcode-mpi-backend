@@ -66,32 +66,26 @@ def get_database_session():
 def process_extracted_data(converted_files, failed_files):
     """Process extracted data with proper database session management"""
     logger.info(f"Starting to process {len(converted_files)} converted files and {len(failed_files)} failed files")
-    
     # Get a fresh database session
     db = get_database_session()
-    
     try:
         # Get mappings once at the start
         temp_items = TemporaryItemMappingController(db).get_temp_items_mappings()
         item_mappings = ItemsMappingController(db).get_items_mappings()
         customer_job_mappings = CustomerJobMappingController(db).get_customer_job_mappings()
-        
         logger.info(f"Loaded {len(temp_items)} temporary mappings, {len(item_mappings)} permanent mappings, {len(customer_job_mappings)} customer job mappings")
-
         for file in converted_files:
             try:
                 process_single_file(file, temp_items, item_mappings, customer_job_mappings, db)
             except Exception as e:
                 logger.error(f"Failed to process file {file}: {str(e)}")
                 failed_files.append(file)
-
         # Process failed files
         for file in failed_files:
             try:
                 process_failed_file(file, db)
             except Exception as e:
                 logger.error(f"Failed to process failed file {file}: {str(e)}")
-                
     except Exception as e:
         logger.error(f"Critical error in process_extracted_data: {str(e)}")
         raise
@@ -107,7 +101,6 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings, 
         excel_file = file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
         extracted_data = pd.read_excel(excel_file)
         logger.info(f"Processing file: {file} with {len(extracted_data)} items")
-        
     except FileNotFoundError:
         logger.error(f'Invoice Excel file not found: {excel_file}')
         raise
@@ -117,7 +110,7 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings, 
 
     try:
         supplier_id = SupplierController(db).get_supplier_name(extracted_data['Vendor'][0])
-        
+
         # Check if invoice already exists
         if InvoiceItemController(db).invoice_exists(str(extracted_data['Ref NO'][0]), str(extracted_data['Vendor'][0])):
             logger.warning(f'Invoice with REF-NO-> {str(extracted_data["Ref NO"][0])} already processed and is being skipped!')
@@ -167,7 +160,7 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings, 
             invoice = db.query(Invoice).filter_by(id=invoice_record.id).first()
             if invoice:
                 invoice.status = 'FAILED'
-                db.commit()
+            db.commit()
             logger.warning(f'Invoice {file.rsplit("/")[-1]} marked as failed due to missing critical data')
         
         # Upload to S3 regardless of status
@@ -176,7 +169,7 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings, 
         # Store invoice items regardless of status
         for index, row in extracted_data.iterrows():
             InvoiceItemController(db).insert_invoice_items(row, file.rsplit('/')[-1], invoice_record.id)
-            
+
         logger.info(f'Successfully processed invoice {file.rsplit("/")[-1]} with {len(extracted_data)} items')
 
     except Exception as e:

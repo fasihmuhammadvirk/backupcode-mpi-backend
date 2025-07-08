@@ -1,8 +1,6 @@
 import logging
-from sqlalchemy.orm import Session
-from sqlalchemy import create_engine
 from mpi_backend.database.models import CustomerJobMapping, InvoiceItem
-from mpi_backend.config import SQLALCHEMY_DATABASE_URI
+from mpi_backend.database import SessionLocal
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -71,8 +69,7 @@ def update_existing_invoice_items(db):
 
 def main():
     # Setup DB connection
-    engine = create_engine(SQLALCHEMY_DATABASE_URI)
-    db = Session(bind=engine)
+    db = SessionLocal()
 
     try:
         update_existing_invoice_items(db)
