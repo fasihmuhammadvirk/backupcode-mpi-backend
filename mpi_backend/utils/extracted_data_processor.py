@@ -18,7 +18,7 @@ from mpi_backend.database.controllers.Suppliers import SupplierController
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
 from mpi_backend.database.controllers.invoice import InvoiceController
 from mpi_backend.database.controllers.UnmappedItems import UnmappedItemsController
-from mpi_backend.database.models.invoice_item import InvoiceItem
+from mpi_backend.database.models.InvoiceItems import InvoiceItem
 
 
 def validate_invoice_data(data):
