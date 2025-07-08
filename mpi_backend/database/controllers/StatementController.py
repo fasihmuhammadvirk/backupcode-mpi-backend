@@ -1505,6 +1505,12 @@ class StatementController:
                     'total_pages': total_pages,
                     'has_next': page < total_pages,
                     'has_previous': page > 1
+                },
+                'filters_applied': {
+                    'from_date': from_date.isoformat() if from_date else None,
+                    'to_date': to_date.isoformat() if to_date else None,
+                    'supplier_names': supplier_names,
+                    'status': 'unlisted'
                 }
             }
             
@@ -1716,6 +1722,12 @@ class StatementController:
                     'total_pages': total_pages,
                     'has_next': page < total_pages,
                     'has_previous': page > 1
+                },
+                'filters_applied': {
+                    'from_date': from_date.isoformat() if from_date else None,
+                    'to_date': to_date.isoformat() if to_date else None,
+                    'supplier_names': supplier_names,
+                    'status': 'missing'
                 },
                 'summary': {
                     'total_missing': total_count,
