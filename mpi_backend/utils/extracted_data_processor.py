@@ -7,6 +7,7 @@ import logging
 from mpi_backend.database.models.invoice import Invoice
 from mpi_backend.utils.s3_utils import upload_file
 from mpi_backend.utils.item_utils import clean_supplier_suffix
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -112,15 +113,31 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings, 
     try:
         supplier_id = SupplierController(db).get_supplier_name(extracted_data['Vendor'][0])
 
+        # Normalize file path for Windows safety
+        file_path = os.path.normpath(file)
+        filename = os.path.basename(file_path)
+
         # Check if invoice already exists, delete if so
-        existing_invoice = db.query(Invoice).filter_by(filename=file.rsplit('/')[-1]).first()
+        existing_invoice = db.query(Invoice).filter_by(filename=filename).first()
         if existing_invoice:
-            # Delete invoice items
             db.query(InvoiceItem).filter_by(invoice_id=existing_invoice.id).delete()
-            # Delete invoice
             db.delete(existing_invoice)
             db.commit()
-            logger.info(f"Deleted existing invoice and items for {file.rsplit('/')[-1]}")
+            logger.info(f"Deleted existing invoice and items for {filename}")
+
+        # Proceed to create a new invoice object and add to session
+        invoice_obj = Invoice(
+            date=extracted_data['Date'][0],
+            filename=filename,
+            supplier_id=supplier_id,
+            status='PROCESSING',
+            storage_path=file_path,
+            is_exported='Pending'
+        )
+        db.add(invoice_obj)
+        db.commit()
+        db.refresh(invoice_obj)
+        invoice_record = invoice_obj
 
         # Check if invoice already exists
         if InvoiceItemController(db).invoice_exists(str(extracted_data['Ref NO'][0]), str(extracted_data['Vendor'][0])):
@@ -153,17 +170,6 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings, 
             'Date': datetime.today().strftime('%m/%d/%Y')
         })
 
-        # Create invoice record initially with PROCESSING status
-        invoice_obj = Invoice(
-            date=extracted_data['Date'][0],
-            filename=file.rsplit('/')[-1],
-            supplier_id=supplier_id,
-            status='PROCESSING',
-            storage_path=file,
-            is_exported='Pending'
-        )
-        invoice_record = InvoiceController(db).add_invoice(invoice_obj)
-
         # Validate and update status
         if validate_invoice_data(extracted_data):
             InvoiceController(db).set_status_to_processed(invoice_record.id)
@@ -186,7 +192,13 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings, 
         logger.info(f'Successfully processed invoice {file.rsplit("/")[-1]} with {len(extracted_data)} items')
 
     except Exception as e:
-        logger.error(f'Error processing file {file}: {str(e)}')
+        db.rollback()
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+        logger.error(f"Error processing file {file_path}: {str(e)}")
         raise
 
 
