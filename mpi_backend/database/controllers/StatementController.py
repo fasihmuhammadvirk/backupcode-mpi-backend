@@ -18,6 +18,10 @@ from mpi_backend.database.models.InvoiceItems import InvoiceItem
 
 logger = logging.getLogger(__name__)
 
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 
 class StatementController:
     """Controller for managing statement operations and reconciliation"""
