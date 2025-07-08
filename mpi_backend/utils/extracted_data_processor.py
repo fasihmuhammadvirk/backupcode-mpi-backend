@@ -4,7 +4,6 @@ import re
 import pandas as pd
 from datetime import datetime
 import logging
-from contextlib import contextmanager
 from mpi_backend.database.models.invoice import Invoice
 from mpi_backend.utils.s3_utils import upload_file
 from mpi_backend.utils.item_utils import clean_supplier_suffix
@@ -19,8 +18,6 @@ from mpi_backend.database.controllers.Suppliers import SupplierController
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
 from mpi_backend.database.controllers.invoice import InvoiceController
 from mpi_backend.database.controllers.UnmappedItems import UnmappedItemsController
-
-db = contextmanager(get_db)
 
 
 def validate_invoice_data(data):
@@ -60,75 +57,158 @@ def validate_invoice_data(data):
     return True
 
 
+def get_database_session():
+    """Get a fresh database session for processing"""
+    db_gen = get_db()
+    return next(db_gen)
+
+
 def process_extracted_data(converted_files, failed_files):
-    temp_items = TemporaryItemMappingController(db).get_temp_items_mappings()
-    item_mappings = ItemsMappingController(db).get_items_mappings()
-    customer_job_mappings = CustomerJobMappingController(db).get_customer_job_mappings()
+    """Process extracted data with proper database session management"""
+    logger.info(f"Starting to process {len(converted_files)} converted files and {len(failed_files)} failed files")
+    
+    # Get a fresh database session
+    db = get_database_session()
+    
+    try:
+        # Get mappings once at the start
+        temp_items = TemporaryItemMappingController(db).get_temp_items_mappings()
+        item_mappings = ItemsMappingController(db).get_items_mappings()
+        customer_job_mappings = CustomerJobMappingController(db).get_customer_job_mappings()
+        
+        logger.info(f"Loaded {len(temp_items)} temporary mappings, {len(item_mappings)} permanent mappings, {len(customer_job_mappings)} customer job mappings")
 
-    for file in converted_files:
-        try:
-            extracted_data = pd.read_excel(file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
-        except FileNotFoundError:
-            logger.error(f'Invoice ->{file} does not exists')
-            failed_files.append(file)  # Add to failed files if Excel not found
-            continue
+        for file in converted_files:
+            try:
+                process_single_file(file, temp_items, item_mappings, customer_job_mappings, db)
+            except Exception as e:
+                logger.error(f"Failed to process file {file}: {str(e)}")
+                failed_files.append(file)
 
+        # Process failed files
+        for file in failed_files:
+            try:
+                process_failed_file(file, db)
+            except Exception as e:
+                logger.error(f"Failed to process failed file {file}: {str(e)}")
+                
+    except Exception as e:
+        logger.error(f"Critical error in process_extracted_data: {str(e)}")
+        raise
+    finally:
+        # Close database session
+        if db:
+            db.close()
+
+
+def process_single_file(file, temp_items, item_mappings, customer_job_mappings, db):
+    """Process a single converted file"""
+    try:
+        excel_file = file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
+        extracted_data = pd.read_excel(excel_file)
+        logger.info(f"Processing file: {file} with {len(extracted_data)} items")
+        
+    except FileNotFoundError:
+        logger.error(f'Invoice Excel file not found: {excel_file}')
+        raise
+    except Exception as e:
+        logger.error(f'Error reading Excel file {excel_file}: {str(e)}')
+        raise
+
+    try:
         supplier_id = SupplierController(db).get_supplier_name(extracted_data['Vendor'][0])
-
-        if InvoiceItemController(db).invoice_exists(str(extracted_data['Ref NO'][0]),str(extracted_data['Vendor'][0])) :
+        
+        # Check if invoice already exists
+        if InvoiceItemController(db).invoice_exists(str(extracted_data['Ref NO'][0]), str(extracted_data['Vendor'][0])):
             logger.warning(f'Invoice with REF-NO-> {str(extracted_data["Ref NO"][0])} already processed and is being skipped!')
-            continue
+            return
 
+        # Add required columns
         extracted_data.insert(0, 'Sheet Name', '')
         extracted_data['MpiItem'] = 'No Match'
         extracted_data['MpiDescription'] = 'No Match'
         extracted_data['email_date'] = extract_email_date(file)
 
-        extracted_data = extracted_data.apply(search_replace, args=(temp_items, item_mappings,), axis=1)
+        # Apply mappings
+        extracted_data = extracted_data.apply(
+            search_replace, 
+            args=(temp_items, item_mappings, db), 
+            axis=1
+        )
 
+        # Update customer job
         extracted_customer_job = extracted_data['Customer Job'][0]
-        extracted_data['Customer Job'] = get_updated_customer_job(extracted_customer_job, customer_job_mappings)
+        extracted_data['Customer Job'] = get_updated_customer_job(
+            extracted_customer_job, customer_job_mappings
+        )
 
-        extracted_data = extracted_data.fillna({'Qty': 0, 'Cost': 0, 'Class': '', 'Memo': '', 'Ref NO': '',
-                                                'PO #': '', 'Customer Job': '', 'Buyer': '',
-                                                'Date': datetime.today().strftime('%m/%d/%Y')})
+        # Fill NaN values
+        extracted_data = extracted_data.fillna({
+            'Qty': 0, 'Cost': 0, 'Class': '', 'Memo': '', 'Ref NO': '',
+            'PO #': '', 'Customer Job': '', 'Buyer': '',
+            'Date': datetime.today().strftime('%m/%d/%Y')
+        })
 
         # Create invoice record initially with PROCESSING status
-        invoice_record = InvoiceController(db).insert_invoice(extracted_data['Date'][0], file.rsplit('/')[-1],
-                                                              supplier_id, 'PROCESSING',
-                                                              file)  # one record for every file in invoices table
+        invoice_record = InvoiceController(db).insert_invoice(
+            extracted_data['Date'][0], 
+            file.rsplit('/')[-1],
+            supplier_id, 
+            'PROCESSING',
+            file
+        )
 
-        # Validate the invoice has all critical fields
+        # Validate and update status
         if validate_invoice_data(extracted_data):
-            # Invoice valid - mark as processed
             InvoiceController(db).set_status_to_processed(invoice_record.id)
             logger.info(f'Invoice {file.rsplit("/")[-1]} marked as processed successfully')
         else:
-            # Invoice invalid - mark as failed
             invoice_record.status = 'FAILED'
-            with db() as session:
-                invoice = session.query(Invoice).filter_by(id=invoice_record.id).first()
-                if invoice:
-                    invoice.status = 'FAILED'
-                    session.commit()
+            invoice = db.query(Invoice).filter_by(id=invoice_record.id).first()
+            if invoice:
+                invoice.status = 'FAILED'
+                db.commit()
             logger.warning(f'Invoice {file.rsplit("/")[-1]} marked as failed due to missing critical data')
         
         # Upload to S3 regardless of status
         upload_file(file_name=file, file_key=f'{extracted_data["Vendor"][0]}/{invoice_record.id}')
 
         # Store invoice items regardless of status
-        for index, row in extracted_data.iterrows():  # every item has its own record
+        for index, row in extracted_data.iterrows():
             InvoiceItemController(db).insert_invoice_items(row, file.rsplit('/')[-1], invoice_record.id)
+            
+        logger.info(f'Successfully processed invoice {file.rsplit("/")[-1]} with {len(extracted_data)} items')
 
-    for file in failed_files:
+    except Exception as e:
+        logger.error(f'Error processing file {file}: {str(e)}')
+        raise
+
+
+def process_failed_file(file, db):
+    """Process a failed file"""
+    try:
         supplier_id, supplier_name = extract_supplier_id(file_path=file)
+        
         if InvoiceController(db).is_invoice_present(file.split("/")[-1]):
-            continue
-        invoice_record = InvoiceController(db).insert_invoice(datetime.now().strftime('%m/%d/%Y'), file.rsplit('/')[-1], supplier_id, 'FAILED', file)
+            logger.info(f"Failed file {file} already exists in database, skipping")
+            return
+            
+        invoice_record = InvoiceController(db).insert_invoice(
+            datetime.now().strftime('%m/%d/%Y'), 
+            file.rsplit('/')[-1], 
+            supplier_id, 
+            'FAILED', 
+            file
+        )
         upload_file(file_name=file, file_key=f'{supplier_name}/{invoice_record.id}')
+        logger.info(f'Processed failed file: {file}')
+        
+    except Exception as e:
+        logger.error(f'Error processing failed file {file}: {str(e)}')
+        raise
 
 
-def search_replace(row, temp_items, item_mappings):
+def search_replace(row, temp_items, item_mappings, db):
     """
     Search for item mappings with supplier-specific suffix cleaning.
     Maps original_item (supplier_item_ids) to mpi_code.
@@ -163,7 +243,7 @@ def search_replace(row, temp_items, item_mappings):
                 row['MpiDescription'] = description
                 sheet_name = mapping_match.iloc[0]['google_sheet_name']
                 row['Sheet Name'] = sheet_name
-                logger.info(f"Applied permanent mapping: {original_item} -> {mpi_code}")
+                logger.debug(f"Applied permanent mapping: {original_item} -> {mpi_code}")
                 return row
             else:
                 logger.warning(f"Found temporary mapping in permanent table, skipping: {mpi_code}")
@@ -183,12 +263,13 @@ def search_replace(row, temp_items, item_mappings):
         row['MpiItem'] = temp_mpi_code  # This is the temporary mpi_code
         row['MpiDescription'] = temp_match.iloc[0]['description']
         row['Sheet Name'] = ''
-        logger.info(f"Applied temporary mapping: {original_item} -> {temp_mpi_code}")
+        logger.debug(f"Applied temporary mapping: {original_item} -> {temp_mpi_code}")
         return row
 
     # THIRD: If no mapping found at all, add to unmapped items
     if not UnmappedItemsController(db).is_item_code_present(row['Item'], supplier_id):
-        UnmappedItemsController(db).insert_unmapped_item(row['Item'],row['Description'],supplier_id)
+        UnmappedItemsController(db).insert_unmapped_item(row['Item'], row['Description'], supplier_id)
+        logger.debug(f"Added unmapped item: {row['Item']}")
 
     # Return with default "No Match" - this will be set by the calling function
     return row

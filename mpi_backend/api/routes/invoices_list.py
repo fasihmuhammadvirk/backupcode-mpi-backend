@@ -1,26 +1,26 @@
-from fastapi import APIRouter, Depends, HTTPException, Query,UploadFile, File
+from fastapi import (
+    APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks
+)
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
-from datetime import datetime
-from fastapi_pagination import Page,paginate
+from fastapi_pagination import Page, paginate
 from datetime import date
 import os
 import requests
-from math import ceil
 from mpi_backend.database.controllers.Suppliers import SupplierController
 from mpi_backend.database.controllers.invoice import InvoiceController
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.utils.invoice_convertor import convert_invoice
-from mpi_backend.database.schemas import Invoice,PaginatedInvoiceResponse
+from mpi_backend.database.schemas import Invoice, PaginatedInvoiceResponse
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.s3_utils import get_presigned_url
 import logging
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/invoice",tags=["Invoices"])
+router = APIRouter(prefix="/invoice", tags=["Invoices"])
 
 
 @router.get("", response_model=PaginatedInvoiceResponse)
@@ -55,95 +55,294 @@ def get_invoices(
 
 
 @router.get("/all")
-def get_invoices(db: Session = Depends(get_db),token: str = Depends(JWTBearer())):
+def get_all_invoices(
+    db: Session = Depends(get_db), 
+    token: str = Depends(JWTBearer())
+):
     try:
         invoices = InvoiceController(db).get_all_invoices(db=db)
-
         return invoices
     except Exception as e:
-        logger.error(f'Error occured while fetching all invoices -> {e}')
-        raise HTTPException(status_code=500, detail="An Error occured while fetching invoices.")
+        logger.error(f'Error occurred while fetching all invoices -> {e}')
+        raise HTTPException(
+            status_code=500, 
+            detail="An Error occurred while fetching invoices."
+        )
 
 
 @router.get("/download")
-def download_invoice( db: Session = Depends(get_db), invoice_id:str = Query(None)):
+def download_invoice(
+    db: Session = Depends(get_db), 
+    invoice_id: str = Query(None)
+):
     try:
-        matched_invoice = InvoiceController(db).get_invoice_by_invoiceID(invoice_id,db)
-        supplier_name = SupplierController(db).get_supplier_by_id(matched_invoice.supplier_id)
+        invoice = InvoiceController(db).get_invoice_by_invoiceID(
+            invoice_id, db
+        )
+        supplier_name = SupplierController(db).get_supplier_by_id(
+            invoice.supplier_id
+        )
         url = get_presigned_url(file_key=f'{supplier_name}/{invoice_id}')
-    except Exception as e:
-        raise HTTPException(status_code=404, detail="Couldn't fetch requested file") # Handle 'No Key Error' on Client Side
+    except Exception:
+        raise HTTPException(
+            status_code=404, 
+            detail="Couldn't fetch requested file"
+        )
 
-    return { "link": url}
+    return {"link": url}
+
+
+def process_invoice_background_task(file_path: str, supplier: str, original_filename: str):
+    """Background task to process uploaded invoice"""
+    try:
+        logger.info(f"Starting background processing for {original_filename}")
+        
+        # Convert invoice
+        converted_files, failed_files = convert_invoice(supplier)
+        logger.info(f"Conversion completed. Success: {len(converted_files)}, Failed: {len(failed_files)}")
+        
+        # Process extracted data
+        process_extracted_data(converted_files, failed_files)
+        logger.info(f"Data processing completed for {original_filename}")
+        
+        # Clean up uploaded file
+        upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{supplier}'
+        if os.path.exists(upload_folder):
+            for filename in os.listdir(upload_folder):
+                file_to_remove = os.path.join(upload_folder, filename)
+                try:
+                    os.remove(file_to_remove)
+                    logger.debug(f"Cleaned up file: {file_to_remove}")
+                except OSError as e:
+                    logger.warning(f"Could not remove file {file_to_remove}: {e}")
+        
+        logger.info(f"Background processing completed successfully for {original_filename}")
+        
+    except Exception as e:
+        logger.error(f"Background processing failed for {original_filename}: {str(e)}")
+        # Don't raise here as this is a background task
 
 
 @router.post("/upload")
-async def upload_and_process_invoice(supplier_id : int, file: UploadFile = File(...), db: Session = Depends(get_db),
-                                     token: str = Depends(JWTBearer())):
-    if not file.filename.lower().endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
-
-    supplier= SupplierController(db).get_supplier_by_id(supplier_id)
-
-    upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{supplier}' # every supplier will have it own folder at root of storage dir
-    if not os.path.exists(upload_folder): os.makedirs(upload_folder)
-
-    with open(os.path.join(upload_folder, file.filename), "wb") as buffer:
-        buffer.write(await file.read())
-
-    converted_files, failed_files = convert_invoice(supplier)
-    process_extracted_data(converted_files, failed_files)
+async def upload_and_process_invoice(
+    supplier_id: int, 
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...), 
+    db: Session = Depends(get_db),
+    token: str = Depends(JWTBearer())
+):
+    """Upload and process invoice with background processing to prevent timeouts"""
+    temp_file_path = None
     
-    # Check if any invoices failed validation but don't change the response structure
-    for file_path in converted_files:
-        file_name = os.path.basename(file_path)
-        from mpi_backend.database.models.invoice import Invoice
-        invoice = db.query(Invoice).filter_by(filename=file_name).first()
-        if invoice and invoice.status == "FAILED":
-            logger.warning(f"Invoice {file_name} failed validation (missing ref number, amount, or date)")
+    try:
+        # Validate file type
+        if not file.filename.lower().endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
 
-    [os.remove(os.path.join(upload_folder, filename)) for filename in os.listdir(upload_folder)] # delete files after it's processed
+        # Get supplier info
+        try:
+            supplier = SupplierController(db).get_supplier_by_id(supplier_id)
+            if not supplier:
+                raise HTTPException(status_code=404, detail=f"Supplier with ID {supplier_id} not found")
+        except Exception as e:
+            logger.error(f"Error fetching supplier {supplier_id}: {str(e)}")
+            raise HTTPException(status_code=500, detail="Error fetching supplier information")
 
-    return {"status": "Uploaded Invoice processed successfully."}
+        # Create upload directory
+        upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{supplier}'
+        try:
+            os.makedirs(upload_folder, exist_ok=True)
+        except OSError as e:
+            logger.error(f"Error creating upload folder {upload_folder}: {str(e)}")
+            raise HTTPException(status_code=500, detail="Error creating upload directory")
+
+        # Save uploaded file with timeout handling
+        file_path = os.path.join(upload_folder, file.filename)
+        try:
+            # Read file content with size limit (e.g., 50MB)
+            max_file_size = 50 * 1024 * 1024  # 50MB
+            file_content = await file.read()
+            
+            if len(file_content) > max_file_size:
+                raise HTTPException(status_code=413, detail="File too large. Maximum size is 50MB.")
+            
+            # Write to disk
+            with open(file_path, "wb") as buffer:
+                buffer.write(file_content)
+                
+            logger.info(f"File uploaded successfully: {file.filename} ({len(file_content)} bytes)")
+            
+        except Exception as e:
+            logger.error(f"Error saving uploaded file {file.filename}: {str(e)}")
+            raise HTTPException(status_code=500, detail="Error saving uploaded file")
+
+        # Add background task for processing
+        background_tasks.add_task(
+            process_invoice_background_task,
+            file_path,
+            supplier,
+            file.filename
+        )
+        
+        return {
+            "status": "success",
+            "message": f"Invoice '{file.filename}' uploaded successfully and queued for processing",
+            "filename": file.filename,
+            "supplier": supplier,
+            "processing": "background"
+        }
+
+    except HTTPException:
+        # Clean up temporary file if it exists
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except OSError:
+                pass
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in upload endpoint: {str(e)}")
+        # Clean up temporary file if it exists
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except OSError:
+                pass
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+def reprocess_invoice_background_task(invoice_id: str, invoice_filename: str, supplier: str):
+    """Background task to reprocess invoice"""
+    temp_file_path = None
+    
+    try:
+        logger.info(f"Starting background reprocessing for invoice {invoice_id}")
+        
+        # Get fresh database session for background task
+        from mpi_backend.database import get_db
+        db_gen = get_db()
+        db = next(db_gen)
+        
+        try:
+            # Download invoice from S3 with timeout
+            invoice_url = get_presigned_url(file_key=f'{supplier}/{invoice_id}')
+            
+            if not invoice_url:
+                logger.error(f"Could not get presigned URL for invoice {invoice_id}")
+                return
+            
+            # Create temporary directory for processing
+            upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{supplier}'
+            os.makedirs(upload_folder, exist_ok=True)
+            temp_file_path = os.path.join(upload_folder, invoice_filename)
+            
+            # Download with timeout
+            try:
+                response = requests.get(invoice_url, timeout=30)  # 30 second timeout
+                response.raise_for_status()
+                
+                with open(temp_file_path, 'wb') as file:
+                    file.write(response.content)
+                    
+                logger.info(f"Downloaded invoice {invoice_id} from S3 ({len(response.content)} bytes)")
+                
+            except requests.RequestException as e:
+                logger.error(f"Error downloading invoice {invoice_id} from S3: {str(e)}")
+                return
+            
+            # Delete existing invoice data
+            try:
+                InvoiceItemController(db).delete_invoice_items(invoice_id, db)
+                InvoiceController(db).delete_invoice(invoice_id, db)
+                logger.info(f"Deleted existing data for invoice {invoice_id}")
+            except Exception as e:
+                logger.error(f"Error deleting existing invoice data {invoice_id}: {str(e)}")
+                return
+            
+            # Process the invoice
+            converted_files, failed_files = convert_invoice(supplier)
+            logger.info(f"Reprocessing conversion completed. Success: {len(converted_files)}, Failed: {len(failed_files)}")
+            
+            # Process extracted data
+            process_extracted_data(converted_files, failed_files)
+            logger.info(f"Reprocessing data processing completed for invoice {invoice_id}")
+            
+            # Clean up temporary files
+            if os.path.exists(upload_folder):
+                for filename in os.listdir(upload_folder):
+                    file_to_remove = os.path.join(upload_folder, filename)
+                    try:
+                        os.remove(file_to_remove)
+                        logger.debug(f"Cleaned up file: {file_to_remove}")
+                    except OSError as e:
+                        logger.warning(f"Could not remove file {file_to_remove}: {e}")
+            
+            logger.info(f"Background reprocessing completed successfully for invoice {invoice_id}")
+            
+        finally:
+            # Close database session
+            db.close()
+            
+    except Exception as e:
+        logger.error(f"Background reprocessing failed for invoice {invoice_id}: {str(e)}")
+        # Clean up temporary file
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except OSError:
+                pass
 
 
 @router.post("/process")
-async def process_again(invoice_id : str, db: Session = Depends(get_db),
-                                    token: str = Depends(JWTBearer())):
+async def process_again(
+    invoice_id: str, 
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    token: str = Depends(JWTBearer())
+):
+    """Reprocess invoice with background processing to prevent timeouts"""
+    
+    try:
+        # Validate invoice exists
+        try:
+            invoice = InvoiceController(db).get_invoice_by_invoiceID(invoice_id, db)
+            if not invoice:
+                raise HTTPException(status_code=404, detail=f"Invoice with ID {invoice_id} not found")
+        except Exception as e:
+            logger.error(f"Error fetching invoice {invoice_id}: {str(e)}")
+            raise HTTPException(status_code=500, detail="Error fetching invoice information")
 
-    invoice = InvoiceController(db).get_invoice_by_invoiceID(invoice_id,db)
-    supplier= SupplierController(db).get_supplier_by_id(invoice.supplier_id)
-    invoice_url = get_presigned_url(file_key=f'{supplier}/{invoice_id}')
+        # Get supplier info
+        try:
+            supplier = SupplierController(db).get_supplier_by_id(invoice.supplier_id)
+            if not supplier:
+                raise HTTPException(status_code=404, detail=f"Supplier for invoice {invoice_id} not found")
+        except Exception as e:
+            logger.error(f"Error fetching supplier for invoice {invoice_id}: {str(e)}")
+            raise HTTPException(status_code=500, detail="Error fetching supplier information")
 
-    upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{supplier}' # every supplier will have it own folder at root of storage dir
-    if not os.path.exists(upload_folder): os.makedirs(upload_folder)
+        # Add background task for reprocessing
+        background_tasks.add_task(
+            reprocess_invoice_background_task,
+            invoice_id,
+            invoice.filename,
+            supplier
+        )
+        
+        return {
+            "status": "success",
+            "message": f"Invoice '{invoice.filename}' queued for reprocessing",
+            "invoice_id": invoice_id,
+            "filename": invoice.filename,
+            "supplier": supplier,
+            "processing": "background"
+        }
 
-    if not invoice_url:
-        raise HTTPException(status_code=404, detail="Couldn't fetch requested Invoice")
-
-    response = requests.get(invoice_url)
-    if response.status_code == 200:
-        with open(os.path.join(upload_folder, invoice.filename), 'wb') as file:
-            file.write(response.content)
-    else:
-        raise HTTPException(status_code=response.status_code, detail=response.text)
-
-    InvoiceItemController(db).delete_invoice_items(invoice_id,db) # delete previous ingested invoice items
-    InvoiceController(db).delete_invoice(invoice_id,db)
-
-    converted_files, failed_files = convert_invoice(supplier)
-    process_extracted_data(converted_files, failed_files)
-
-    # Check if reprocessed invoice failed validation but don't change response structure
-    for file_path in converted_files:
-        file_name = os.path.basename(file_path)
-        from mpi_backend.database.models.invoice import Invoice
-        new_invoice = db.query(Invoice).filter_by(filename=file_name).first()
-        if new_invoice and new_invoice.status == "FAILED":
-            logger.warning(f"Reprocessed invoice {file_name} failed validation (missing ref number, amount, or date)")
-
-    [os.remove(os.path.join(upload_folder, filename)) for filename in os.listdir(upload_folder)] # delete files after it's processed
-    return {"status": "Invoice reprocessing successful."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in reprocess endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Reprocessing failed: {str(e)}")
 
 
 @router.get("/sort", response_model=Page[Invoice])
