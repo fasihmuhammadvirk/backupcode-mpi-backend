@@ -133,11 +133,13 @@ class InvoiceController:
     def set_status_to_processed(self, inserted_id, db_ref= None):
         if db_ref:
             invoice = db_ref.query(Invoice).filter(Invoice.id == inserted_id).first() # source -> endpoint
-            invoice.status = 'PROCESSED'
-            db_ref.commit()
+            if invoice:
+                invoice.status = 'PROCESSED'
+                db_ref.commit()
         else:
-            with self._get_db_session() as db:
-                invoice = db.query(Invoice).filter(Invoice.id == inserted_id).first() # source -> background task
+            db = self._get_db_session()
+            invoice = db.query(Invoice).filter(Invoice.id == inserted_id).first() # source -> background task
+            if invoice:
                 invoice.status = 'PROCESSED'
                 db.commit()
 
@@ -151,14 +153,15 @@ class InvoiceController:
         Returns:
             bool: True if the update was successful, False otherwise.
         """
-        query = self._get_db_session().query(Invoice).filter(Invoice.id == invoice_id)
+        db = self._get_db_session()
+        query = db.query(Invoice).filter(Invoice.id == invoice_id)
 
         invoice = query.first()
         if not invoice:
             return False  # Invoice not found
         query.update({"is_exported": "Sent"}, synchronize_session='fetch')
 
-        self._get_db_session().commit()
+        db.commit()
 
         return True
 

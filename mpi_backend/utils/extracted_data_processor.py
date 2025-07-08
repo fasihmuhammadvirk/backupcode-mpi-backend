@@ -137,6 +137,9 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings, 
         db.add(invoice_obj)
         db.commit()
         db.refresh(invoice_obj)
+        
+        # Store invoice ID in a variable to avoid session binding issues
+        invoice_id = invoice_obj.id
         invoice_record = invoice_obj
 
         # Check if invoice already exists
@@ -172,22 +175,22 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings, 
 
         # Validate and update status
         if validate_invoice_data(extracted_data):
-            InvoiceController(db).set_status_to_processed(invoice_record.id)
+            InvoiceController(db).set_status_to_processed(invoice_id)
             logger.info(f'Invoice {file.rsplit("/")[-1]} marked as processed successfully')
         else:
-            invoice_record.status = 'FAILED'
-            invoice = db.query(Invoice).filter_by(id=invoice_record.id).first()
+            # Update status using invoice_id instead of accessing the detached object
+            invoice = db.query(Invoice).filter_by(id=invoice_id).first()
             if invoice:
                 invoice.status = 'FAILED'
-            db.commit()
+                db.commit()
             logger.warning(f'Invoice {file.rsplit("/")[-1]} marked as failed due to missing critical data')
         
         # Upload to S3 regardless of status
-        upload_file(file_name=file, file_key=f'{extracted_data["Vendor"][0]}/{invoice_record.id}')
+        upload_file(file_name=file, file_key=f'{extracted_data["Vendor"][0]}/{invoice_id}')
 
         # Store invoice items regardless of status
         for index, row in extracted_data.iterrows():
-            InvoiceItemController(db).insert_invoice_items(row, file.rsplit('/')[-1], invoice_record.id)
+            InvoiceItemController(db).insert_invoice_items(row, file.rsplit('/')[-1], invoice_id)
 
         logger.info(f'Successfully processed invoice {file.rsplit("/")[-1]} with {len(extracted_data)} items')
 
@@ -220,7 +223,9 @@ def process_failed_file(file, db):
             is_exported='Pending'
         )
         invoice_record = InvoiceController(db).add_invoice(invoice_obj)
-        upload_file(file_name=file, file_key=f'{supplier_name}/{invoice_record.id}')
+        # Store invoice ID to avoid session binding issues
+        invoice_id = invoice_record.id
+        upload_file(file_name=file, file_key=f'{supplier_name}/{invoice_id}')
         logger.info(f'Processed failed file: {file}')
         
     except Exception as e:
