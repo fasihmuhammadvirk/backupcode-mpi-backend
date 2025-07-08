@@ -24,16 +24,23 @@ def upload_file(file_name, file_key, is_invoice=True):
         )
 
         if is_invoice:
+            # Smart handling of PDF extension to prevent double .pdf
+            file_key_str = str(file_key)
+            if not file_key_str.lower().endswith('.pdf'):
+                s3_key = file_key_str + '.pdf'
+            else:
+                s3_key = file_key_str
+            
             s3_client.upload_file(
                 file_name, 
                 BUCKET_NAME, 
-                str(file_key) + '.pdf',
+                s3_key,
                 ExtraArgs={
                     'ContentDisposition': 'inline',
                     'ContentType': 'application/pdf'
                 }
             )
-            logger.info(f'Invoice with Key: {file_key} Uploaded')
+            logger.info(f'Invoice with Key: {s3_key} Uploaded')
         else:
             s3_client.upload_file(file_name, BUCKET_NAME, file_key)
             logger.info(f'File with Key: {file_key} Uploaded')
@@ -53,7 +60,13 @@ def get_presigned_url(file_key, expiration_time=180, is_invoice=True) -> Optiona
         )
 
         if is_invoice:
-            key = str(file_key) + '.pdf'
+            # Smart handling of PDF extension to prevent double .pdf
+            file_key_str = str(file_key)
+            if not file_key_str.lower().endswith('.pdf'):
+                key = file_key_str + '.pdf'
+            else:
+                key = file_key_str
+            
             presigned_url = s3_client.generate_presigned_url(
                 'get_object',
                 Params={
@@ -62,7 +75,7 @@ def get_presigned_url(file_key, expiration_time=180, is_invoice=True) -> Optiona
                     'ResponseContentDisposition': 'inline',
                     'ResponseContentType': 'application/pdf'
                 },
-                ExpiresIn=expiration_time  # set to expire after 10 minutes
+                ExpiresIn=expiration_time
             )
         else:
             presigned_url = s3_client.generate_presigned_url(
@@ -72,5 +85,7 @@ def get_presigned_url(file_key, expiration_time=180, is_invoice=True) -> Optiona
             )
         return presigned_url
     except Exception as e:
-        logger.error(f"Error generating presigned URL for {file_key}: {str(e)}")
+        logger.error(
+            f"Error generating presigned URL for {file_key}: {str(e)}"
+        )
         return None
