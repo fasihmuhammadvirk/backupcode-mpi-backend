@@ -674,48 +674,98 @@ class StatementExtractor:
                 statement_date = datetime.now().date()
             account_number = self.metadata.get('account_number', '')
 
-            # Check for existing statement (prevent duplicate)
-            existing_statement = self.db_session.query(PlumbingStatement).filter(
+            # COMPREHENSIVE DUPLICATE PREVENTION
+            pdf_filename = Path(self.pdf_filename).name
+            
+            # Check 1: Existing statement by PDF filename (PRIMARY CHECK)
+            existing_by_pdf = self.db_session.query(PlumbingStatement).filter(
+                PlumbingStatement.pdf_filename == pdf_filename
+            ).first()
+            
+            if existing_by_pdf:
+                logger.info(
+                    f"Statement with PDF filename '{pdf_filename}' already exists "
+                    f"(Statement ID: {existing_by_pdf.id}). Skipping to prevent duplicate."
+                )
+                # Count existing invoices for this statement
+                existing_invoice_count = self.db_session.query(PlumbingInvoice).filter(
+                    PlumbingInvoice.statement_id == existing_by_pdf.id
+                ).count()
+                logger.info(
+                    f"Existing statement has {existing_invoice_count} invoices. "
+                    f"No new data will be processed."
+                )
+                self.statement_obj = existing_by_pdf
+                return True  # Success - statement already exists and processed
+            
+            # Check 2: Existing statement by supplier + date (SECONDARY CHECK)
+            existing_by_date = self.db_session.query(PlumbingStatement).filter(
                 PlumbingStatement.supplier_id == supplier.id,
                 PlumbingStatement.statement_date == statement_date
             ).first()
-            if existing_statement:
-                logger.info(f"Statement already exists for supplier {supplier_name} on {statement_date}, using existing statement.")
-                self.statement_obj = existing_statement
-            else:
-                total_amount = self.get_total_amount()
-                total_invoices = (
-                    len(self.combined_data)
-                    if not self.combined_data.empty else 0
+            
+            if existing_by_date:
+                logger.warning(
+                    f"Statement already exists for {supplier_name} on {statement_date} "
+                    f"(Statement ID: {existing_by_date.id}) but with different PDF filename."
                 )
-                self.statement_obj = PlumbingStatement(
-                    supplier_id=supplier.id,
-                    statement_date=statement_date,
-                    account_number=account_number,
-                    total_amount=total_amount,
-                    total_invoices=total_invoices,
-                    pdf_filename=Path(self.pdf_filename).name
+                logger.warning(
+                    f"Existing PDF: '{existing_by_date.pdf_filename}', "
+                    f"New PDF: '{pdf_filename}'"
                 )
-                self.db_session.add(self.statement_obj)
-                self.db_session.flush()  # Get the statement ID
+                logger.warning("This may indicate a duplicate or reprocessed statement.")
+                
+                # Ask if we should proceed or use existing
+                logger.info("Using existing statement to prevent date-based duplicates.")
+                self.statement_obj = existing_by_date
+                return True
+            
+            # No duplicates found - create new statement
+            logger.info(
+                f"Creating new statement for {supplier_name} on {statement_date} "
+                f"with PDF: {pdf_filename}"
+            )
+            
+            total_amount = self.get_total_amount()
+            total_invoices = (
+                len(self.combined_data)
+                if not self.combined_data.empty else 0
+            )
+            self.statement_obj = PlumbingStatement(
+                supplier_id=supplier.id,
+                statement_date=statement_date,
+                account_number=account_number,
+                total_amount=total_amount,
+                total_invoices=total_invoices,
+                pdf_filename=pdf_filename
+            )
+            self.db_session.add(self.statement_obj)
+            self.db_session.flush()  # Get the statement ID
+            logger.info(f"Created new statement with ID: {self.statement_obj.id}")
 
             # Create invoice records, skipping duplicates
             invoices_created = 0
+            invoices_skipped = 0
             for _, row in self.combined_data.iterrows():
                 invoice_number = str(row['Invoice Number']).strip() if pd.notna(row['Invoice Number']) else None
                 if not invoice_number:
                     continue
+                
                 # Check for existing invoice for this statement and invoice number
                 existing_invoice = self.db_session.query(PlumbingInvoice).filter(
                     PlumbingInvoice.statement_id == self.statement_obj.id,
                     PlumbingInvoice.invoice_number == invoice_number
                 ).first()
+                
                 if existing_invoice:
-                    logger.info(f"Invoice {invoice_number} already exists for statement {self.statement_obj.id}, skipping.")
+                    logger.debug(f"Invoice {invoice_number} already exists for statement {self.statement_obj.id}, skipping.")
+                    invoices_skipped += 1
                     continue
+                
                 po_value = None
                 if pd.notna(row.get('Customer PO')):
                     po_value = str(row.get('Customer PO', '')).strip()
+                
                 invoice = PlumbingInvoice(
                     statement_id=self.statement_obj.id,
                     invoice_number=invoice_number,
@@ -728,11 +778,22 @@ class StatementExtractor:
                 )
                 self.db_session.add(invoice)
                 invoices_created += 1
+            
             self.db_session.commit()
-            logger.info(
-                f"Successfully saved {invoices_created} new invoices to database (duplicates skipped)"
-            )
+            
+            if invoices_skipped > 0:
+                logger.info(
+                    f"Successfully saved {invoices_created} new invoices to database "
+                    f"({invoices_skipped} duplicates skipped)"
+                )
+            else:
+                logger.info(
+                    f"Successfully saved {invoices_created} new invoices to database "
+                    f"(no duplicates found)"
+                )
+            
             return True
+            
         except Exception as e:
             logger.error(f"Error saving to database: {str(e)}")
             if self.db_session:

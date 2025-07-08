@@ -295,6 +295,49 @@ def statement_already_exists(
         return False
 
 
+def pdf_filename_already_exists(pdf_filename: str, db: Session) -> bool:
+    """
+    Check if a PDF filename already exists in the database
+    This prevents duplicate processing of the same PDF file
+    """
+    try:
+        existing_statement = db.query(PlumbingStatement).filter(
+            PlumbingStatement.pdf_filename == pdf_filename
+        ).first()
+        
+        return existing_statement is not None
+        
+    except Exception as e:
+        logger.error(f"Error checking PDF filename existence: {str(e)}")
+        return False
+
+
+def should_skip_statement_processing(
+    supplier_name: str,
+    statement_date: datetime, 
+    pdf_filename: str,
+    db: Session
+) -> tuple[bool, str]:
+    """
+    Comprehensive check to determine if statement processing should be skipped
+    Returns (should_skip, reason)
+    """
+    try:
+        # Check 1: PDF filename already exists (PRIMARY CHECK)
+        if pdf_filename_already_exists(pdf_filename, db):
+            return True, f"PDF file '{pdf_filename}' already processed"
+        
+        # Check 2: Statement for supplier + date exists (SECONDARY CHECK)
+        if statement_already_exists(supplier_name, statement_date, db):
+            return True, f"Statement for {supplier_name} on {statement_date.strftime('%Y-%m')} already exists"
+        
+        return False, ""
+        
+    except Exception as e:
+        logger.error(f"Error in should_skip_statement_processing: {str(e)}")
+        return False, f"Error checking duplicates: {str(e)}"
+
+
 def download_statement_attachments(email_message, base_folder_path: Path):
     """Download statement attachments - using invoice downloader logic"""
     try:
@@ -359,17 +402,25 @@ def download_statement_attachments(email_message, base_folder_path: Path):
                         email_message.get('Subject', '')
                     )
                     
-                    # Check if statement already exists
-                    with db_context() as db:
-                        if statement_already_exists(
-                            supplier_name, statement_date, db
-                        ):
-                            logger.info(
-                                f"Statement already exists for "
-                                f"{supplier_name} - "
-                                f"{statement_date.strftime('%Y-%m')}, skipping"
+                    # Check if statement already exists using comprehensive check
+                    filename = part.get_filename()
+                    if filename:
+                        # Create the same unique filename that would be used
+                        month_year = statement_date.strftime('%Y-%m')
+                        unique_filename = (
+                            f"{supplier_name}_{month_year}_{filename}"
+                        )
+                        
+                        with db_context() as db:
+                            should_skip, skip_reason = should_skip_statement_processing(
+                                supplier_name, statement_date, unique_filename, db
                             )
-                            return []
+                            
+                            if should_skip:
+                                logger.info(
+                                    f"Skipping statement download: {skip_reason}"
+                                )
+                                continue  # Skip this attachment, continue with others
                     
                     # Path construction (similar to invoice structure)
                     try:
@@ -603,6 +654,23 @@ def process_statement_files(base_folder_path: Path):
                         f"Could not extract supplier name for {pdf_file}, "
                         f"will rely on PDF detection"
                     )
+                
+                # Check for duplicates before processing
+                with db_context() as db:
+                    # Use actual PDF filename for duplicate check
+                    should_skip, skip_reason = should_skip_statement_processing(
+                        final_supplier or "Unknown", 
+                        datetime.now(),  # Will be properly detected in extractor
+                        pdf_file.name, 
+                        db
+                    )
+                    
+                    if should_skip:
+                        logger.info(
+                            f"Skipping PDF processing: {skip_reason} "
+                            f"(File: {pdf_file.name})"
+                        )
+                        continue
                 
                 # Extract data using statement extractor with supplier name
                 with db_context() as db:

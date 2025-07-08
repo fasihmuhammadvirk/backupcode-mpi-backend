@@ -437,7 +437,7 @@ class StatementController:
                     'status': reconciliation_status
                 })
             filtered_results.sort(
-                key=lambda x: x['plumbing_invoice'].invoice_date if x['plumbing_invoice'].invoice_date else datetime.min,
+                key=lambda x: x['plumbing_invoice'].invoice_date if x['plumbing_invoice'].invoice_date else date.min,
                 reverse=True
             )
             total_count = len(filtered_results)
@@ -1268,7 +1268,7 @@ class StatementController:
                     system_query = system_query.filter(or_(*supplier_conditions))
             
             # Exclude system invoices that are already in statement data to avoid duplicates
-            statement_invoice_numbers = [result.invoice_number for result in statement_results]
+            statement_invoice_numbers = [plumbing_invoice.invoice_number for plumbing_invoice, _, _ in statement_results]
             if statement_invoice_numbers:
                 system_query = system_query.filter(
                     ~InvoiceItem.ref_no.in_(statement_invoice_numbers)
