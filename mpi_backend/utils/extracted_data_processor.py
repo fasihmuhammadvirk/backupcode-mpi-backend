@@ -18,6 +18,7 @@ from mpi_backend.database.controllers.Suppliers import SupplierController
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
 from mpi_backend.database.controllers.invoice import InvoiceController
 from mpi_backend.database.controllers.UnmappedItems import UnmappedItemsController
+from mpi_backend.database.models.invoice_item import InvoiceItem
 
 
 def validate_invoice_data(data):
@@ -110,6 +111,16 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings, 
 
     try:
         supplier_id = SupplierController(db).get_supplier_name(extracted_data['Vendor'][0])
+
+        # Check if invoice already exists, delete if so
+        existing_invoice = db.query(Invoice).filter_by(filename=file.rsplit('/')[-1]).first()
+        if existing_invoice:
+            # Delete invoice items
+            db.query(InvoiceItem).filter_by(invoice_id=existing_invoice.id).delete()
+            # Delete invoice
+            db.delete(existing_invoice)
+            db.commit()
+            logger.info(f"Deleted existing invoice and items for {file.rsplit('/')[-1]}")
 
         # Check if invoice already exists
         if InvoiceItemController(db).invoice_exists(str(extracted_data['Ref NO'][0]), str(extracted_data['Vendor'][0])):

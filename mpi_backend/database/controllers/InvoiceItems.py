@@ -672,14 +672,12 @@ class InvoiceItemController:
             date_added=row['email_date'],
             export_status="Pending"
         )
-        with self.db() as db:
-            db.add(new_item)
-            db.commit()
+        self.db.add(new_item)
+        self.db.commit()
 
     def invoice_exists(self, reference_no, vendor):
-        with self.db() as db:
-            matched_invoice = db.query(InvoiceItem).filter_by(ref_no=reference_no, vendor=vendor).first()
-            return matched_invoice is not None
+        matched_invoice = self.db.query(InvoiceItem).filter_by(ref_no=reference_no, vendor=vendor).first()
+        return matched_invoice is not None
 
     def get_invoice_items(self, invoice_id=None):
         query = self.db.query(InvoiceItem)
