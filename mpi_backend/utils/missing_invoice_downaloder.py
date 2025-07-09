@@ -208,7 +208,7 @@ def download_email_attachments(email_message, base_folder_path):
                 logger.error(f"Date parsing failed: {str(date_error)}, using current time")
                 date_time_obj = datetime.now(TIMEZONE)
 
-        # Enhanced directory structure creation
+        # Enhanced directory structure creation with fallback
         try:
             inner_dir = f'{date_time_obj.month}-{date_time_obj.day}-{date_time_obj.year}'
             supplier_path = os.path.join(base_folder_path, supplier_name)
@@ -217,8 +217,16 @@ def download_email_attachments(email_message, base_folder_path):
             Path(inner_dir_path).mkdir(parents=True, exist_ok=True)
             logger.debug(f"Created directory structure: {inner_dir_path}")
         except OSError as dir_error:
-            logger.error(f"Directory creation failed: {str(dir_error)}")
-            return False
+            logger.error(f"Directory creation failed: {str(dir_error)}, using fallback directory")
+            # Use fallback directory to continue processing
+            try:
+                fallback_path = os.path.join(base_folder_path, "fallback_directory")
+                Path(fallback_path).mkdir(parents=True, exist_ok=True)
+                inner_dir_path = fallback_path
+                logger.warning(f"Using fallback directory: {inner_dir_path}")
+            except Exception as fallback_error:
+                logger.error(f"Fallback directory creation also failed: {str(fallback_error)}, continuing without this email")
+                return attachments_downloaded > 0  # Return current progress rather than False
 
         # CRITICAL FIX: Enhanced attachment detection logic
         for part_idx, part in enumerate(email_message.walk(), 1):
@@ -350,7 +358,7 @@ def missing_email_download_background_task():
 
         except Exception as processing_error:
             logger.error(f"Email processing failed: {str(processing_error)}\n{traceback.format_exc()}")
-            raise
+            # Continue to post-processing even if email processing partially failed
 
         # Post-processing
         try:
@@ -364,11 +372,11 @@ def missing_email_download_background_task():
 
         except Exception as post_error:
             logger.error(f"Post-processing failed: {str(post_error)}\n{traceback.format_exc()}")
-            raise
+            # Log error but don't crash the entire process
 
     except Exception as main_error:
         logger.error(f"Critical error in missing invoice background task: {str(main_error)}\n{traceback.format_exc()}")
-        raise
+        # Log error but allow graceful cleanup in finally block
 
     finally:
         try:

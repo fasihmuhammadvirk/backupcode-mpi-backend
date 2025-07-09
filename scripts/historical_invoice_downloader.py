@@ -22,7 +22,8 @@ Options:
     --start-date YYYY-MM-DD    Start date (default: today)
     --end-date YYYY-MM-DD      End date (default: 2020-01-01)
     --dry-run                  Preview what would be processed
-    --batch-size INT           Number of days to process per batch (default: 30)
+    --batch-size INT           Number of days to process per batch
+                              (default: 30)
     --verbose                  Enable detailed logging
     --force                    Reprocess existing invoices
 """
@@ -34,18 +35,18 @@ import imaplib
 import email
 import email.utils
 import os
-import traceback
 import logging
 from pathlib import Path
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timedelta
-from typing import List, Tuple, Dict
+from typing import List, Tuple
 
 # Add the parent directory to the path so we can import mpi_backend
 sys.path.append(str(Path(__file__).parent.parent))
 
 from mpi_backend.config import (
-    SMTP_SERVER, INVOICE_DOWNLOAD_FOLDER, SUPPLIERS, TIMEZONE
+    SMTP_SERVER, INVOICE_DOWNLOAD_FOLDER, SUPPLIERS, TIMEZONE,
+    LOGIN_EMAIL, LOGIN_PWD
 )
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.utils.invoice_convertor import convert_invoice_for_email
@@ -53,9 +54,7 @@ from mpi_backend.utils.invoice_convertor import convert_invoice_for_email
 # Setup logging
 logger = logging.getLogger(__name__)
 
-# Use credentials from environment configuration
-from mpi_backend.config import LOGIN_EMAIL, LOGIN_PWD
-
+# Supplier emails to download invoices from
 EXCLUDED_SENDERS = [  # suppliers to download invoices from
     "info@wwps.co",
     "bmwpsupply@gmail.com",
@@ -84,7 +83,7 @@ EXCLUDED_SENDERS = [  # suppliers to download invoices from
 
 
 class HistoricalInvoiceDownloader:
-    """Comprehensive historical invoice downloader"""
+    """Historical invoice downloader with comprehensive features"""
     
     def __init__(self, start_date: datetime, end_date: datetime, 
                  dry_run: bool = False, batch_size: int = 30, 
@@ -124,67 +123,75 @@ class HistoricalInvoiceDownloader:
             ]
         )
         
-        logger.info(f"Historical Invoice Downloader initialized")
+        logger.info("Historical Invoice Downloader initialized")
         logger.info(f"Date range: {start_date.date()} to {end_date.date()}")
         logger.info(f"Total days to process: {(start_date - end_date).days}")
         logger.info(f"Dry run: {dry_run}, Batch size: {batch_size}")
 
-    def login(self):
-        """Establish IMAP connection with error handling"""
+    def login(self) -> bool:
+        """Establish IMAP connection"""
         try:
             self.mail = imaplib.IMAP4_SSL(SMTP_SERVER)
             self.mail.login(LOGIN_EMAIL, LOGIN_PWD)
             self.mail.select('inbox')
-            logger.info("Successfully connected to mailbox for historical download")
+            logger.info("Successfully connected to email server")
             return True
         except Exception as e:
-            logger.error(f"IMAP connection failed: {str(e)}")
+            logger.error(f"Failed to connect: {str(e)}")
             return False
 
     def search_emails_for_date(self, target_date: datetime) -> List[str]:
-        """Search for emails from a specific date"""
+        """Search for emails for a specific date"""
         try:
             date_str = target_date.strftime('%d-%b-%Y')
-            next_date_str = (target_date + timedelta(days=1)).strftime('%d-%b-%Y')
+            next_date = target_date + timedelta(days=1)
+            next_date_str = next_date.strftime('%d-%b-%Y')
             
-            logger.debug(f"Searching emails for {date_str}")
             search_criteria = f'(SINCE "{date_str}" BEFORE "{next_date_str}")'
             result, data = self.mail.uid('search', None, search_criteria)
-
+            
             if result != 'OK':
-                logger.error(f"Email search failed for {date_str}: {result}")
+                logger.error(f"Search failed for {date_str}: {result}")
                 return []
-
-            raw_email_ids = data[0].split()
+            
+            raw_email_ids = data[0].split() if data[0] else []
             logger.debug(f"Found {len(raw_email_ids)} emails for {date_str}")
-
-            filtered_email_ids = []
+            
+            # Filter by excluded senders
+            filtered_ids = []
             for email_id in raw_email_ids:
                 try:
-                    email_id = email_id.decode('utf-8') if isinstance(email_id, bytes) else email_id
+                    email_id = (email_id.decode('utf-8') 
+                                if isinstance(email_id, bytes) else email_id)
                     
                     # Use BODY.PEEK to avoid marking emails as read
-                    result, msg_data = self.mail.uid('fetch', email_id, '(BODY.PEEK[HEADER.FIELDS (FROM)])')
-
-                    if result != 'OK':
+                    result, msg_data = self.mail.uid(
+                        'fetch', email_id, 
+                        '(BODY.PEEK[HEADER.FIELDS (FROM)])'
+                    )
+                    
+                    if result != 'OK' or not msg_data[0]:
                         continue
-
+                    
                     raw_email = msg_data[0][1]
                     msg = email.message_from_bytes(raw_email)
-                    from_email = email.utils.parseaddr(msg.get('From', ''))[1]
-
+                    from_email = email.utils.parseaddr(
+                        msg.get('From', '')
+                    )[1]
+                    
                     if from_email in EXCLUDED_SENDERS:
-                        filtered_email_ids.append(email_id)
-
+                        filtered_ids.append(email_id)
+                        logger.debug(f"Found email from: {from_email}")
+                    
                 except Exception as e:
-                    logger.debug(f"Error processing email UID {email_id}: {str(e)}")
+                    logger.debug(f"Error filtering email {email_id}: {str(e)}")
                     continue
-
-            logger.debug(f"Found {len(filtered_email_ids)} emails from target senders for {date_str}")
-            return filtered_email_ids
-
+            
+            logger.debug(f"Filtered to {len(filtered_ids)} relevant emails")
+            return filtered_ids
+            
         except Exception as e:
-            logger.error(f"Error searching emails for {target_date.date()}: {str(e)}")
+            logger.error(f"Search error for {target_date.date()}: {str(e)}")
             return []
 
     def get_supplier(self, email_subject: str, supplier_email: str) -> str:
@@ -201,13 +208,15 @@ class HistoricalInvoiceDownloader:
                 return SUPPLIERS[1]
             elif "y&s" in subject:
                 return SUPPLIERS[2]
-            elif "invoice # i-" in subject or "supreme plumbing" in subject:
+            elif ("invoice # i-" in subject or 
+                  "supreme plumbing" in subject):
                 return SUPPLIERS[3]
             elif "pyramid plumbing invoice" in subject:
                 return SUPPLIERS[4]
             elif "abc opus services" in subject:
                 return SUPPLIERS[5]
-            elif "park plumbing & heating supply - invoices overnight" in subject:
+            elif ("park plumbing & heating supply - "
+                  "invoices overnight" in subject):
                 return SUPPLIERS[6]
             elif "webb payment receipt" in subject:
                 return SUPPLIERS[8]
@@ -219,7 +228,8 @@ class HistoricalInvoiceDownloader:
             logger.debug(f"Supplier detection failed: {str(e)}")
             return "unknown_supplier"
 
-    def download_attachment_with_retry(self, part, filepath: str, max_retries: int = 3) -> bool:
+    def download_attachment_with_retry(self, part, filepath: str, 
+                                     max_retries: int = 3) -> bool:
         """Download attachment with retry mechanism"""
         for attempt in range(max_retries):
             try:
@@ -227,19 +237,25 @@ class HistoricalInvoiceDownloader:
                 if attachment_data:
                     with open(filepath, 'wb') as f:
                         f.write(attachment_data)
-                    logger.debug(f"Downloaded attachment on attempt {attempt + 1}: {os.path.basename(filepath)}")
+                    logger.debug(f"Downloaded attachment on attempt "
+                               f"{attempt + 1}: "
+                               f"{os.path.basename(filepath)}")
                     return True
                 else:
-                    logger.warning(f"Attempt {attempt + 1}: No attachment data found")
+                    logger.warning(f"Attempt {attempt + 1}: "
+                                 "No attachment data found")
             except Exception as e:
-                logger.debug(f"Attempt {attempt + 1} failed to download {os.path.basename(filepath)}: {str(e)}")
+                logger.debug(f"Attempt {attempt + 1} failed to download "
+                           f"{os.path.basename(filepath)}: {str(e)}")
                 if attempt < max_retries - 1:
                     time.sleep(1)  # Wait 1 second before retry
                 else:
-                    logger.warning(f"All {max_retries} attempts failed for {os.path.basename(filepath)}")
+                    logger.warning(f"All {max_retries} attempts failed for "
+                                 f"{os.path.basename(filepath)}")
         return False
 
-    def download_email_attachments(self, email_message, base_folder_path: Path) -> Tuple[int, int]:
+    def download_email_attachments(self, email_message, 
+                                 base_folder_path: Path) -> Tuple[int, int]:
         """Download attachments with comprehensive error handling"""
         
         attachments_found = 0
@@ -258,16 +274,32 @@ class HistoricalInvoiceDownloader:
                 date_time_obj = datetime.now(TIMEZONE)
             else:
                 try:
-                    date_time_obj = parsedate_to_datetime(date_header).astimezone(TIMEZONE)
-                except:
+                    date_time_obj = parsedate_to_datetime(
+                        date_header
+                    ).astimezone(TIMEZONE)
+                except Exception:
                     date_time_obj = datetime.now(TIMEZONE)
 
-            # Directory structure creation
-            inner_dir = f'{date_time_obj.month}-{date_time_obj.day}-{date_time_obj.year}'
-            supplier_path = base_folder_path / supplier_name
-            supplier_path.mkdir(parents=True, exist_ok=True)
-            inner_dir_path = supplier_path / inner_dir
-            inner_dir_path.mkdir(parents=True, exist_ok=True)
+            # Directory structure creation with fallback (consistent with main downloader)
+            try:
+                inner_dir = f'{date_time_obj.month}-{date_time_obj.day}-{date_time_obj.year}'
+                supplier_path = os.path.join(base_folder_path, supplier_name)
+                Path(supplier_path).mkdir(parents=True, exist_ok=True)
+                inner_dir_path = os.path.join(supplier_path, inner_dir)
+                Path(inner_dir_path).mkdir(parents=True, exist_ok=True)
+                logger.debug(f"Created directory structure: {inner_dir_path}")
+            except OSError as dir_error:
+                logger.error(f"Directory creation failed: {str(dir_error)}, using fallback directory")
+                # Use fallback directory to continue processing
+                try:
+                    fallback_path = os.path.join(base_folder_path, "fallback_directory")
+                    Path(fallback_path).mkdir(parents=True, exist_ok=True)
+                    inner_dir_path = fallback_path
+                    logger.warning(f"Using fallback directory: {inner_dir_path}")
+                except Exception as fallback_error:
+                    logger.error(f"Fallback directory creation also failed: "
+                               f"{str(fallback_error)}, skipping this email")
+                    return attachments_found, attachments_downloaded
 
             # Enhanced attachment detection
             for part_idx, part in enumerate(email_message.walk(), 1):
@@ -278,12 +310,19 @@ class HistoricalInvoiceDownloader:
                     
                     # Enhanced attachment detection conditions
                     is_attachment = (
-                        (content_disposition and 'attachment' in content_disposition.lower()) or
-                        (content_disposition and 'inline' in content_disposition.lower() and filename) or
+                        (content_disposition and 
+                         'attachment' in content_disposition.lower()) or
+                        (content_disposition and 
+                         'inline' in content_disposition.lower() and 
+                         filename) or
                         (content_type == 'application/pdf') or
-                        (filename and filename.lower().endswith(('.pdf', '.PDF'))) or
-                        (filename and content_type.startswith('application/') and not content_type.startswith('application/pgp')) or
-                        (not part.is_multipart() and filename and len(part.get_payload(decode=False)) > 1000)
+                        (filename and 
+                         filename.lower().endswith(('.pdf', '.PDF'))) or
+                        (filename and 
+                         content_type.startswith('application/') and 
+                         not content_type.startswith('application/pgp')) or
+                        (not part.is_multipart() and filename and 
+                         len(part.get_payload(decode=False)) > 1000)
                     )
                     
                     if is_attachment:
@@ -291,7 +330,11 @@ class HistoricalInvoiceDownloader:
                         
                         if not filename:
                             if content_type == 'application/pdf':
-                                filename = f"attachment_{part_idx}_{date_time_obj.strftime('%Y%m%d_%H%M%S')}.pdf"
+                                filename = (
+                                    f"attachment_{part_idx}_"
+                                    f"{date_time_obj.strftime('%Y%m%d_%H%M%S')}"
+                                    ".pdf"
+                                )
                             else:
                                 continue
                         
@@ -300,17 +343,21 @@ class HistoricalInvoiceDownloader:
                             continue
                         
                         # Download with retry mechanism
-                        filepath = inner_dir_path / filename
+                        filepath = os.path.join(inner_dir_path, filename)
                         if not self.dry_run:
-                            if self.download_attachment_with_retry(part, str(filepath)):
+                            if self.download_attachment_with_retry(
+                                part, filepath
+                            ):
                                 attachments_downloaded += 1
                                 logger.debug(f"Downloaded: {filename}")
                         else:
                             attachments_downloaded += 1
-                            logger.info(f"[DRY RUN] Would download: {filename}")
+                            logger.info(f"[DRY RUN] Would download: "
+                                      f"{filename}")
                     
                 except Exception as part_error:
-                    logger.debug(f"Error processing part {part_idx}: {str(part_error)}")
+                    logger.debug(f"Error processing part {part_idx}: "
+                               f"{str(part_error)}")
                     continue
 
             return attachments_found, attachments_downloaded
@@ -348,10 +395,12 @@ class HistoricalInvoiceDownloader:
             total_attachments_found = 0
             total_attachments_downloaded = 0
             
-            for idx, email_id in enumerate(email_ids, 1):
+            for _, email_id in enumerate(email_ids, 1):
                 try:
                     # Use BODY.PEEK to avoid marking emails as read
-                    result, response = self.mail.uid('fetch', email_id, '(BODY.PEEK[])')
+                    result, response = self.mail.uid(
+                        'fetch', email_id, '(BODY.PEEK[])'
+                    )
                     
                     if result != 'OK' or not response or not response[0]:
                         continue
@@ -364,7 +413,9 @@ class HistoricalInvoiceDownloader:
                     email_message = email.message_from_string(raw_email)
                     
                     # Download attachments
-                    found, downloaded = self.download_email_attachments(email_message, base_folder_path)
+                    found, downloaded = self.download_email_attachments(
+                        email_message, base_folder_path
+                    )
                     total_attachments_found += found
                     total_attachments_downloaded += downloaded
                     
@@ -372,36 +423,46 @@ class HistoricalInvoiceDownloader:
                         emails_processed += 1
                     
                 except Exception as e:
-                    logger.debug(f"Error processing email {email_id}: {str(e)}")
+                    logger.debug(f"Error processing email {email_id}: "
+                               f"{str(e)}")
                     self.stats['errors'] += 1
                     continue
             
             # Update statistics
             self.stats['emails_processed'] += emails_processed
             self.stats['attachments_found'] += total_attachments_found
-            self.stats['attachments_downloaded'] += total_attachments_downloaded
+            self.stats['attachments_downloaded'] += (
+                total_attachments_downloaded
+            )
             self.stats['days_processed'] += 1
             
             # Post-processing if attachments were downloaded
             if total_attachments_downloaded > 0 and not self.dry_run:
                 try:
-                    logger.info(f"Processing {total_attachments_downloaded} invoices for {date_str}")
-                    converted_files, failed_files = convert_invoice_for_email(base_folder_path)
+                    logger.info(f"Processing {total_attachments_downloaded} "
+                              f"invoices for {date_str}")
+                    converted_files, failed_files = (
+                        convert_invoice_for_email(base_folder_path)
+                    )
                     self.stats['invoices_converted'] += len(converted_files)
                     
                     process_extracted_data(converted_files, failed_files)
                     self.stats['invoices_processed'] += len(converted_files)
                     
-                    logger.info(f"Completed processing for {date_str}: {len(converted_files)} invoices processed")
+                    logger.info(f"Completed processing for {date_str}: "
+                              f"{len(converted_files)} invoices processed")
                 except Exception as post_error:
-                    logger.error(f"Post-processing failed for {date_str}: {str(post_error)}")
+                    logger.error(f"Post-processing failed for {date_str}: "
+                               f"{str(post_error)}")
                     self.stats['errors'] += 1
             
-            logger.info(f"Date {date_str} complete: {emails_processed} emails, {total_attachments_downloaded} attachments")
+            logger.info(f"Date {date_str} complete: {emails_processed} "
+                       f"emails, {total_attachments_downloaded} attachments")
             return True
             
         except Exception as e:
-            logger.error(f"Error processing date {current_date.date()}: {str(e)}")
+            logger.error(f"Error processing date {current_date.date()}: "
+                        f"{str(e)}")
             self.stats['errors'] += 1
             return False
 
@@ -416,7 +477,8 @@ class HistoricalInvoiceDownloader:
             batch_count = 0
             
             logger.info("Starting historical invoice download")
-            logger.info(f"Processing from {self.start_date.date()} back to {self.end_date.date()}")
+            logger.info(f"Processing from {self.start_date.date()} "
+                       f"back to {self.end_date.date()}")
             
             while current_date >= self.end_date:
                 try:
@@ -439,7 +501,8 @@ class HistoricalInvoiceDownloader:
                     logger.info("Download interrupted by user")
                     break
                 except Exception as e:
-                    logger.error(f"Error processing date {current_date.date()}: {str(e)}")
+                    logger.error(f"Error processing date "
+                               f"{current_date.date()}: {str(e)}")
                     current_date -= timedelta(days=1)
                     continue
             
@@ -456,7 +519,7 @@ class HistoricalInvoiceDownloader:
                     self.mail.close()
                     self.mail.logout()
                     logger.info("Disconnected from email server")
-                except:
+                except Exception:
                     pass
 
     def print_progress_report(self, current_date: datetime):
@@ -467,12 +530,15 @@ class HistoricalInvoiceDownloader:
         
         logger.info("="*60)
         logger.info(f"PROGRESS REPORT - {current_date.date()}")
-        logger.info(f"Progress: {progress_pct:.1f}% ({days_remaining} days remaining)")
+        logger.info(f"Progress: {progress_pct:.1f}% "
+                   f"({days_remaining} days remaining)")
         logger.info(f"Days processed: {self.stats['days_processed']}")
         logger.info(f"Emails found: {self.stats['emails_found']}")
         logger.info(f"Emails processed: {self.stats['emails_processed']}")
-        logger.info(f"Attachments downloaded: {self.stats['attachments_downloaded']}")
-        logger.info(f"Invoices processed: {self.stats['invoices_processed']}")
+        logger.info(f"Attachments downloaded: "
+                   f"{self.stats['attachments_downloaded']}")
+        logger.info(f"Invoices processed: "
+                   f"{self.stats['invoices_processed']}")
         logger.info(f"Errors: {self.stats['errors']}")
         logger.info("="*60)
 
@@ -481,45 +547,66 @@ class HistoricalInvoiceDownloader:
         logger.info("="*60)
         logger.info("HISTORICAL DOWNLOAD COMPLETE")
         logger.info("="*60)
-        logger.info(f"Date range: {self.start_date.date()} to {self.end_date.date()}")
+        logger.info(f"Date range: {self.start_date.date()} to "
+                   f"{self.end_date.date()}")
         logger.info(f"Days processed: {self.stats['days_processed']}")
-        logger.info(f"Days skipped (no emails): {self.stats['skipped_days']}")
+        logger.info(f"Days skipped (no emails): "
+                   f"{self.stats['skipped_days']}")
         logger.info(f"Total emails found: {self.stats['emails_found']}")
-        logger.info(f"Emails with attachments: {self.stats['emails_processed']}")
+        logger.info(f"Emails with attachments: "
+                   f"{self.stats['emails_processed']}")
         logger.info(f"Attachments found: {self.stats['attachments_found']}")
-        logger.info(f"Attachments downloaded: {self.stats['attachments_downloaded']}")
-        logger.info(f"Invoices converted: {self.stats['invoices_converted']}")
-        logger.info(f"Invoices processed: {self.stats['invoices_processed']}")
+        logger.info(f"Attachments downloaded: "
+                   f"{self.stats['attachments_downloaded']}")
+        logger.info(f"Invoices converted: "
+                   f"{self.stats['invoices_converted']}")
+        logger.info(f"Invoices processed: "
+                   f"{self.stats['invoices_processed']}")
         logger.info(f"Errors encountered: {self.stats['errors']}")
         
-        success_rate = (self.stats['attachments_downloaded'] / max(self.stats['attachments_found'], 1)) * 100
+        success_rate = (self.stats['attachments_downloaded'] / 
+                       max(self.stats['attachments_found'], 1)) * 100
         logger.info(f"Download success rate: {success_rate:.1f}%")
         logger.info("="*60)
 
 
 def main():
     """Main function with argument parsing"""
-    parser = argparse.ArgumentParser(description='Historical Invoice Downloader')
+    parser = argparse.ArgumentParser(
+        description='Historical Invoice Downloader'
+    )
     
-    parser.add_argument('--start-date', type=str, 
-                       default=datetime.now().strftime('%Y-%m-%d'),
-                       help='Start date (YYYY-MM-DD, default: today)')
+    parser.add_argument(
+        '--start-date', type=str, 
+        default=datetime.now().strftime('%Y-%m-%d'),
+        help='Start date (YYYY-MM-DD, default: today)'
+    )
     
-    parser.add_argument('--end-date', type=str, 
-                       default='2020-01-01',
-                       help='End date (YYYY-MM-DD, default: 2020-01-01)')
+    parser.add_argument(
+        '--end-date', type=str, 
+        default='2020-01-01',
+        help='End date (YYYY-MM-DD, default: 2020-01-01)'
+    )
     
-    parser.add_argument('--dry-run', action='store_true',
-                       help='Preview what would be processed without downloading')
+    parser.add_argument(
+        '--dry-run', action='store_true',
+        help='Preview what would be processed without downloading'
+    )
     
-    parser.add_argument('--batch-size', type=int, default=30,
-                       help='Number of days to process per batch (default: 30)')
+    parser.add_argument(
+        '--batch-size', type=int, default=30,
+        help='Number of days to process per batch (default: 30)'
+    )
     
-    parser.add_argument('--verbose', action='store_true',
-                       help='Enable detailed logging')
+    parser.add_argument(
+        '--verbose', action='store_true',
+        help='Enable detailed logging'
+    )
     
-    parser.add_argument('--force', action='store_true',
-                       help='Reprocess existing invoices')
+    parser.add_argument(
+        '--force', action='store_true',
+        help='Reprocess existing invoices'
+    )
     
     args = parser.parse_args()
     
