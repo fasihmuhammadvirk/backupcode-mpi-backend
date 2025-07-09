@@ -397,13 +397,13 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     logger.info("Background tasks scheduler started successfully")
     
-    # Run missing invoice downloader on startup (async)
-    logger.info("Running missing invoice downloader on startup...")
-    try:
-        async_missing_email_download_wrapper()
-        logger.info("Startup missing invoice download submitted successfully")
-    except Exception as e:
-        logger.error(f"Startup missing invoice download failed: {str(e)}")
+    # # Run missing invoice downloader on startup (async)
+    # logger.info("Running missing invoice downloader on startup...")
+    # try:
+    #     async_missing_email_download_wrapper()
+    #     logger.info("Startup missing invoice download submitted successfully")
+    # except Exception as e:
+    #     logger.error(f"Startup missing invoice download failed: {str(e)}")
     
     logger.info("Background tasks configured with async execution:")
     logger.info("  • Email Download: Every 5 minutes (async, non-blocking)")
