@@ -64,6 +64,9 @@ MAPPINGS_EXCLUSION_ENABLED = os.getenv("ENABLE_MAPPINGS_EXCLUSION", "true").lowe
 # Thread pool for non-blocking background tasks (only for mapping tasks)
 _task_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="mapping_task")
 
+# NEW: Separate thread pool for invoice/email tasks to prevent blocking
+_email_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="email_task")
+
 def is_pakistan_business_hours():
     """
     Check if current time is within Pakistan business hours (12 PM - 6 PM PKT).
@@ -115,6 +118,60 @@ def safe_mapping_wrapper(operation_name, operation_func, *args, **kwargs):
         return None
 
 
+def async_email_download_wrapper():
+    """
+    Async wrapper for email download task to prevent blocking
+    """
+    def _execute_email_download():
+        try:
+            logger.info("Starting async email download task")
+            email_download_background_task()
+            logger.info("Email download task completed successfully")
+        except Exception as e:
+            logger.error(f"Email download task failed: {str(e)}")
+    
+    # Submit to dedicated email thread pool
+    future = _email_executor.submit(_execute_email_download)
+    logger.debug("Email download task submitted to background thread pool")
+    return future
+
+
+def async_missing_email_download_wrapper():
+    """
+    Async wrapper for missing email download task to prevent blocking
+    """
+    def _execute_missing_download():
+        try:
+            logger.info("Starting async missing email download task")
+            missing_email_download_background_task()
+            logger.info("Missing email download task completed successfully")
+        except Exception as e:
+            logger.error(f"Missing email download task failed: {str(e)}")
+    
+    # Submit to dedicated email thread pool
+    future = _email_executor.submit(_execute_missing_download)
+    logger.debug("Missing email download task submitted to background thread pool")
+    return future
+
+
+def async_statement_download_wrapper():
+    """
+    Async wrapper for statement download task to prevent blocking
+    """
+    def _execute_statement_download():
+        try:
+            logger.info("Starting async statement download task")
+            statement_download_background_task()
+            logger.info("Statement download task completed successfully")
+        except Exception as e:
+            logger.error(f"Statement download task failed: {str(e)}")
+    
+    # Submit to dedicated email thread pool
+    future = _email_executor.submit(_execute_statement_download)
+    logger.debug("Statement download task submitted to background thread pool")
+    return future
+
+
 def scheduled_uidi_no_match_update():
     """
     Scheduled task to update UIDI and NO Match items at 6 PM Pakistan time.
@@ -140,7 +197,7 @@ def scheduled_uidi_no_match_update():
         except Exception as e:
             logger.error(f"Scheduled UIDI/NO Match update failed: {str(e)}")
     
-    # Submit to thread pool for non-blocking execution
+    # Submit to mapping thread pool for non-blocking execution
     future = _task_executor.submit(_execute_uidi_update)
     logger.info("Scheduled UIDI/NO Match update submitted to background thread pool")
     return future
@@ -171,7 +228,7 @@ def scheduled_all_mappings_update():
         except Exception as e:
             logger.error(f"Scheduled All Mappings update failed: {str(e)}")
     
-    # Submit to thread pool for non-blocking execution
+    # Submit to mapping thread pool for non-blocking execution
     future = _task_executor.submit(_execute_all_update)
     logger.info("Scheduled All Mappings update submitted to background thread pool")
     return future
@@ -247,38 +304,38 @@ async def lifespan(app: FastAPI):
     # Register scheduler for dynamic job control
     set_scheduler_instance(scheduler)
     
-    # Email download - every 5 minutes (REVERTED: use original function)
+    # Email download - every 5 minutes (async wrapper for non-blocking execution)
     scheduler.add_job(
-        email_download_background_task,  # FIXED: Back to original working function
+        async_email_download_wrapper,  # NEW: Using async wrapper to prevent blocking
         "interval",
         minutes=5,
         max_instances=1,
         id="email_download",
-        name="Email Download Task",
+        name="Email Download Task (Async)",
         misfire_grace_time=600
     )
     
-    # Statement download - every 12 hours (keep original)
+    # Statement download - every 12 hours (async wrapper for non-blocking execution)
     scheduler.add_job(
-        statement_download_background_task,
+        async_statement_download_wrapper,  # NEW: Using async wrapper to prevent blocking
         "interval",
         hours=12,
         max_instances=1,
         replace_existing=True,
         id="statement_download",
-        name="Statement Download Task",
+        name="Statement Download Task (Async)",
         misfire_grace_time=1800
     )
     
-    # Missing invoice download - daily (every day, no email marking)
+    # Missing invoice download - daily (async wrapper for non-blocking execution)
     scheduler.add_job(
-        missing_email_download_background_task,
+        async_missing_email_download_wrapper,  # NEW: Using async wrapper to prevent blocking
         "interval",
         days=1,
         max_instances=1,
         replace_existing=True,
         id="missing_invoice_download",
-        name="Missing Invoice Download Task (Daily)",
+        name="Missing Invoice Download Task (Daily, Async)",
         misfire_grace_time=3600  # 1 hour grace period
     )
     
@@ -340,19 +397,22 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     logger.info("Background tasks scheduler started successfully")
     
-    # Run missing invoice downloader on startup
+    # Run missing invoice downloader on startup (async)
     logger.info("Running missing invoice downloader on startup...")
     try:
-        missing_email_download_background_task()
-        logger.info("Startup missing invoice download completed successfully")
+        async_missing_email_download_wrapper()
+        logger.info("Startup missing invoice download submitted successfully")
     except Exception as e:
         logger.error(f"Startup missing invoice download failed: {str(e)}")
     
-    logger.info("Scheduled mapping tasks configured:")
-    logger.info("  • UIDI/NO Match Update: Daily at 6 PM PKT (1 PM UTC)")
-    logger.info("  • All Mappings Update: Every 48 hours at 1 AM PKT (every other day)")
-    logger.info("  • Missing Invoice Download: Daily (and on startup)")
-    logger.info("MPI Backend started successfully")
+    logger.info("Background tasks configured with async execution:")
+    logger.info("  • Email Download: Every 5 minutes (async, non-blocking)")
+    logger.info("  • Statement Download: Every 12 hours (async, non-blocking)")
+    logger.info("  • Missing Invoice Download: Daily (async, non-blocking, and on startup)")
+    logger.info("  • UIDI/NO Match Update: Daily at 6 PM PKT (async, thread pool)")
+    logger.info("  • All Mappings Update: Every 48 hours at 1 AM PKT (async, thread pool)")
+    logger.info("  • Memory Cleanup: Every 30 minutes")
+    logger.info("MPI Backend started successfully with optimized async background tasks")
     
     yield
     
@@ -360,9 +420,10 @@ async def lifespan(app: FastAPI):
     logger.info("MPI Backend shutting down")
     scheduler.shutdown()
     
-    # Shutdown thread pool
+    # Shutdown thread pools
     _task_executor.shutdown(wait=True)
-    logger.info("Background thread pool shutdown completed")
+    _email_executor.shutdown(wait=True)
+    logger.info("Background thread pools shutdown completed")
     
     logger.info("Background scheduler shutdown completed")
     logger.info("MPI Backend shutdown complete")
