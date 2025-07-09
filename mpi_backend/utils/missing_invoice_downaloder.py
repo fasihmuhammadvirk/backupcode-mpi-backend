@@ -1,19 +1,26 @@
+import time
 import imaplib
 import email
+import email.utils
 import os
 import traceback
+import logging
 from pathlib import Path
 from email.utils import parsedate_to_datetime
-import logging
 from datetime import datetime, timedelta
 
-logger = logging.getLogger(__name__)
-
-from mpi_backend.config import SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, INVOICE_DOWNLOAD_FOLDER, SUPPLIERS, TIMEZONE
+from mpi_backend.config import (
+    SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, INVOICE_DOWNLOAD_FOLDER, 
+    SUPPLIERS, TIMEZONE
+)
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.utils.invoice_convertor import convert_invoice_for_email
 
-EXCLUDED_SENDERS = [  # suppliers whose emails are to be marked as read after downloading
+logger = logging.getLogger(__name__)
+
+
+
+EXCLUDED_SENDERS = [  # suppliers marked as read after download
     "info@wwps.co",
     "bmwpsupply@gmail.com",
     "billing@ysplumbing.com",
@@ -41,51 +48,27 @@ EXCLUDED_SENDERS = [  # suppliers whose emails are to be marked as read after do
 
 
 def login():
+    """Establish IMAP connection with error handling"""
     try:
         mail = imaplib.IMAP4_SSL(SMTP_SERVER)
         mail.login(LOGIN_EMAIL, LOGIN_PWD)
         mail.select('inbox')
-        logger.info("Successfully connected to mailbox")
+        logger.info("Successfully connected to mailbox for missing invoices")
         return mail
     except Exception as e:
         logger.error(f"IMAP connection failed: {str(e)}")
         raise
 
 
-# old code for reference
-# def search_last_2_days_emails(mail):
-#     try:
-#         date_2_days_ago = (datetime.now(TIMEZONE) - timedelta(days=1)).strftime(
-#             '%d-%b-%Y')  # get mail of previous 2 days
-#         logger.info(f"Searching for emails since {date_2_days_ago}")
-#         result, data = mail.uid('search', None, f'(SINCE "{date_2_days_ago}")')
-#         if result != 'OK':
-#             logger.error(f"Email search failed: {result}")
-#             return []
-#         raw_email_ids = data[0].split()
-#         logger.info(f"Found {len(raw_email_ids)} emails in last 2 days")
-#         return raw_email_ids
-#     except Exception as e:
-#         logger.error(f"Error in search_last_2_days_emails: {str(e)}\n{traceback.format_exc()}")
-#         return []
-#
-
-def search_emails_between_dates(mail, start_date_str="19-Feb-2025", end_date_str="22-Feb-2025"):
-    """
-    Search for emails between specific dates using IMAP search
-    (SINCE is inclusive, BEFORE is exclusive, so end_date must be +1 day)
-
-    Args:
-        mail: IMAP connection object
-        start_date_str (str): Start date in format 'DD-Mon-YYYY'
-        end_date_str (str): End date in format 'DD-Mon-YYYY' (exclusive, usually one day after actual end)
-
-    Returns:
-        List of filtered email UIDs
-    """
+def search_previous_week_emails(mail):
+    """Search for emails from the last 7 days"""
     try:
-        logger.info(f"Searching for emails from {start_date_str} to {end_date_str} (exclusive)")
-        search_criteria = f'(SINCE "{start_date_str}" BEFORE "{end_date_str}")'
+        # Search for emails from 7 days ago to yesterday
+        start_date = (datetime.now(TIMEZONE) - timedelta(days=7)).strftime('%d-%b-%Y')
+        end_date = datetime.now(TIMEZONE).strftime('%d-%b-%Y')
+        
+        logger.info(f"Searching for emails from last 7 days: {start_date} to {end_date}")
+        search_criteria = f'(SINCE "{start_date}" BEFORE "{end_date}")'
         result, data = mail.uid('search', None, search_criteria)
 
         if result != 'OK':
@@ -93,7 +76,7 @@ def search_emails_between_dates(mail, start_date_str="19-Feb-2025", end_date_str
             return []
 
         raw_email_ids = data[0].split()
-        logger.info(f"Found {len(raw_email_ids)} emails in time frame")
+        logger.info(f"Found {len(raw_email_ids)} emails in previous week")
 
         filtered_email_ids = []
         for idx, email_id in enumerate(raw_email_ids, 1):
@@ -121,62 +104,11 @@ def search_emails_between_dates(mail, start_date_str="19-Feb-2025", end_date_str
                 logger.error(f"Error processing email UID {email_id}: {str(e)}\n{traceback.format_exc()}")
                 continue
 
-        logger.info(f"Found {len(filtered_email_ids)} emails from excluded senders")
+        logger.info(f"Found {len(filtered_email_ids)} emails from excluded senders in last 7 days")
         return filtered_email_ids
 
     except Exception as e:
-        logger.error(f"Error in search_emails_between_dates: {str(e)}\n{traceback.format_exc()}")
-        return []
-
-
-def search_last_2_days_emails(mail):
-    """Search for new emails with error handling"""
-    try:
-
-        date_2_days_ago = (datetime.now(TIMEZONE) - timedelta(days=365)).strftime(
-            '%d-%b-%Y')  # get mail of previous 2 days
-        logger.info(f"Searching for emails since {date_2_days_ago}")
-        result, data = mail.uid('search', None, f'(SINCE "{date_2_days_ago}")')
-
-        if result != 'OK':
-            logger.error(f"Email search failed: {result}")
-            return []
-
-        raw_email_ids = data[0].split()
-        logger.info(f"Found {len(raw_email_ids)} emails in time frame")
-
-        filtered_email_ids = []
-        for idx, email_id in enumerate(raw_email_ids, 1):
-            try:
-                email_id = email_id.decode('utf-8') if isinstance(email_id, bytes) else email_id
-                logger.debug(f"Processing email {idx}/{len(raw_email_ids)} - UID: {email_id}")
-
-                result, msg_data = mail.uid('fetch', email_id, '(BODY.PEEK[HEADER.FIELDS (FROM)])')
-
-                if result != 'OK':
-                    logger.warning(f"Failed to fetch headers for UID {email_id}: {result}")
-                    continue
-
-                raw_email = msg_data[0][1]
-                msg = email.message_from_bytes(raw_email)
-                from_email = email.utils.parseaddr(msg.get('From', ''))[1]
-
-                if from_email in EXCLUDED_SENDERS:
-                    filtered_email_ids.append(email_id)
-                    logger.debug(f"Email UID {email_id} from excluded sender: {from_email}")
-
-                else:
-                    logger.debug(f"Email UID {email_id} from non-excluded sender: {from_email}")
-
-            except Exception as e:
-                logger.error(f"Error processing email UID {email_id}: {str(e)}\n{traceback.format_exc()}")
-                continue
-
-        logger.info(f"Found {len(filtered_email_ids)} emails from excluded senders")
-        return filtered_email_ids
-
-    except Exception as e:
-        logger.error(f"Error in search_last_2_days_emails: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"Error in search_previous_week_emails: {str(e)}\n{traceback.format_exc()}")
         return []
 
 
@@ -208,106 +140,166 @@ def get_supplier(email_subject, supplier_email) -> str:
             return SUPPLIERS[9]
         else:
             logger.warning(f"Unknown supplier for subject: {email_subject}")
-            return "no_supplier"
+            return "unknown_supplier"  # Changed to continue processing
     except Exception as e:
         logger.error(f"Supplier detection failed: {str(e)}\n{traceback.format_exc()}")
-        return "no_supplier"
+        return "unknown_supplier"  # Changed to continue processing
+
+
+def download_attachment_with_retry(part, filepath, max_retries=3):
+    """Download attachment with retry mechanism"""
+    for attempt in range(max_retries):
+        try:
+            attachment_data = part.get_payload(decode=True)
+            if attachment_data:
+                with open(filepath, 'wb') as f:
+                    f.write(attachment_data)
+                logger.info(
+                    f"Downloaded attachment on attempt {attempt + 1}: "
+                    f"{os.path.basename(filepath)}"
+                )
+                return True
+            else:
+                logger.warning(f"Attempt {attempt + 1}: No attachment data found")
+        except Exception as e:
+            logger.error(
+                f"Attempt {attempt + 1} failed to download "
+                f"{os.path.basename(filepath)}: {str(e)}"
+            )
+            if attempt < max_retries - 1:
+                time.sleep(1)  # Wait 1 second before retry
+            else:
+                logger.error(
+                    f"All {max_retries} attempts failed for "
+                    f"{os.path.basename(filepath)}"
+                )
+    return False
 
 
 def download_email_attachments(email_message, base_folder_path):
-    """Download attachments with improved error handling"""
+    """Download attachments with comprehensive error handling and retry mechanism"""
+    
+    attachments_found = 0
+    attachments_downloaded = 0
+    supplier_name = "unknown"
+    
     try:
-        supplier_name = "unknown"
-        processed_parts = 0
-        saved_attachments = 0
+        # Enhanced supplier detection with fallback
+        try:
+            logger.info(f"Processing email with Subject: '{email_message.get('Subject', 'No Subject')}'")
+            supplier_name = get_supplier(
+                email_message.get('Subject', ''),
+                email_message.get('Return-Path', '')
+            )
+            logger.info(f"Detected supplier: {supplier_name}")
+        except Exception as sup_error:
+            logger.error(f"Supplier detection failed: {str(sup_error)}")
+            supplier_name = "unknown_supplier"
 
-        for part_idx, part in enumerate(email_message.walk(), 1):
-            processed_parts += 1
+        # Date handling with comprehensive fallback
+        date_header = email_message.get('Date', '')
+        if not date_header:
+            logger.warning("No Date header in email, using current time")
+            date_time_obj = datetime.now(TIMEZONE)
+        else:
             try:
-                payload = part.get_payload()
-                payload_text = ' '.join(str(p) for p in payload) if isinstance(payload, list) else str(payload)
+                date_time_obj = parsedate_to_datetime(date_header).astimezone(TIMEZONE)
+            except Exception as date_error:
+                logger.error(f"Date parsing failed: {str(date_error)}, using current time")
+                date_time_obj = datetime.now(TIMEZONE)
 
-                if ((part.get_content_maintype() != 'multipart' and part.get('Content-Disposition') is not None) or
-                        ('customer of World Wide' in payload_text)):
+        # Enhanced directory structure creation
+        try:
+            inner_dir = f'{date_time_obj.month}-{date_time_obj.day}-{date_time_obj.year}'
+            supplier_path = os.path.join(base_folder_path, supplier_name)
+            Path(supplier_path).mkdir(parents=True, exist_ok=True)
+            inner_dir_path = os.path.join(supplier_path, inner_dir)
+            Path(inner_dir_path).mkdir(parents=True, exist_ok=True)
+            logger.debug(f"Created directory structure: {inner_dir_path}")
+        except OSError as dir_error:
+            logger.error(f"Directory creation failed: {str(dir_error)}")
+            return False
 
-                    # Supplier detection
-                    try:
-                        logger.info(f"Emailed with Subject: {email_message.get('Subject')}")
-                        supplier_name = get_supplier(
-                            email_message.get('Subject', ''),
-                            email_message.get('Return-Path', '')
-                        )
-                        if supplier_name == "no_supplier":
-                            logger.warning(f"Skipping email with undetermined supplier")
-                            return
-                    except Exception as sup_error:
-                        logger.error(f"Supplier detection failed: {str(sup_error)}")
-                        return
-
-                    # Date handling
-                    date_header = email_message.get('Date', '')
-                    if not date_header:
-                        logger.warning("No Date header in email, using current time")
-                        date_time_obj = datetime.now(TIMEZONE)
-                    else:
-                        try:
-                            date_time_obj = parsedate_to_datetime(date_header).astimezone(TIMEZONE)
-                        except Exception as date_error:
-                            logger.error(f"Date parsing failed: {str(date_error)}, using current time")
-                            date_time_obj = datetime.now(TIMEZONE)
-
-                    # Path construction
-                    try:
-                        inner_dir = f'{date_time_obj.month}-{date_time_obj.day}-{date_time_obj.year}'
-                        supplier_path = os.path.join(base_folder_path, supplier_name)
-                        Path(supplier_path).mkdir(parents=True, exist_ok=True)
-                        inner_dir_path = os.path.join(supplier_path, inner_dir)
-                        Path(inner_dir_path).mkdir(parents=True, exist_ok=True)
-                    except OSError as dir_error:
-                        logger.error(f"Directory creation failed: {str(dir_error)}")
-                        return
-
-                    # File handling
-                    filename = part.get_filename()
+        # CRITICAL FIX: Enhanced attachment detection logic
+        for part_idx, part in enumerate(email_message.walk(), 1):
+            try:
+                # Check multiple conditions for attachments
+                content_disposition = part.get('Content-Disposition', '')
+                content_type = part.get_content_type()
+                filename = part.get_filename()
+                
+                logger.debug(f"Part {part_idx}: Content-Type={content_type}, Content-Disposition={content_disposition}, Filename={filename}")
+                
+                # Enhanced attachment detection conditions
+                is_attachment = (
+                    # Standard attachment detection
+                    (content_disposition and 'attachment' in content_disposition.lower()) or
+                    # Inline attachments
+                    (content_disposition and 'inline' in content_disposition.lower() and filename) or
+                    # PDF files regardless of disposition
+                    (content_type == 'application/pdf') or
+                    # Files with PDF extension
+                    (filename and filename.lower().endswith(('.pdf', '.PDF'))) or
+                    # Binary content with filename
+                    (filename and content_type.startswith('application/') and not content_type.startswith('application/pgp')) or
+                    # Special case for multipart/mixed with binary payload
+                    (not part.is_multipart() and filename and len(part.get_payload(decode=False)) > 1000)
+                )
+                
+                if is_attachment:
+                    attachments_found += 1
+                    
                     if not filename:
-                        logger.warning(f"Attachment missing filename, skipping of {email_message.get('Subject')}")
-                        continue
-
+                        # Generate filename for unnamed attachments
+                        if content_type == 'application/pdf':
+                            filename = f"attachment_{part_idx}_{date_time_obj.strftime('%Y%m%d_%H%M%S')}.pdf"
+                        else:
+                            logger.warning(f"Attachment {part_idx} has no filename and unknown type: {content_type}")
+                            continue
+                    
+                    logger.info(f"Found attachment {attachments_found}: {filename} (Type: {content_type})")
+                    
+                    # Only process PDF files
                     if not filename.lower().endswith(('.pdf', '.PDF')):
                         logger.debug(f"Skipping non-PDF attachment: {filename}")
                         continue
-
+                    
+                    # Download with retry mechanism
                     filepath = os.path.join(inner_dir_path, filename)
-                    try:
-                        with open(filepath, 'wb') as f:
-                            f.write(part.get_payload(decode=True))
-                            saved_attachments += 1
-                            logger.info(f"Saved attachment: {filename} => {filepath}")
-                    except IOError as file_error:
-                        logger.error(f"Failed to save file {filename}: {str(file_error)}")
-                        continue
-
+                    if download_attachment_with_retry(part, filepath):
+                        attachments_downloaded += 1
+                        logger.info(f"Successfully saved: {filename} => {filepath}")
+                    else:
+                        logger.error(f"Failed to download after retries: {filename}")
+                
             except Exception as part_error:
                 logger.error(f"Error processing part {part_idx}: {str(part_error)}\n{traceback.format_exc()}")
                 continue
 
-        logger.info(f"Processed {processed_parts} MIME parts, saved {saved_attachments} attachments")
+        # Log final results
+        logger.info(f"Email processing complete - Found: {attachments_found} attachments, Downloaded: {attachments_downloaded} PDFs")
+        
+        # Return success status
+        return attachments_downloaded > 0
 
     except Exception as e:
         logger.error(f"Error in download_email_attachments: {str(e)}\n{traceback.format_exc()}")
+        return False
 
 
 def missing_email_download_background_task():
-    """Main task function with comprehensive error handling"""
+    """Daily missing invoice download task - downloads last 7 days, NO EMAIL MARKING"""
+    logger.debug("Starting daily missing invoice download task")
+    
     mail = None
     try:
         # Setup directory structure
         try:
             time_window_start = datetime.now(TIMEZONE) - timedelta(minutes=3)
-            base_folder = f"{time_window_start.strftime('%d-%b-%Y_%H-%M-%S')} - {datetime.now(TIMEZONE).strftime('%d-%b-%Y_%H-%M-%S')}"
+            base_folder = f"MISSING_{time_window_start.strftime('%d-%b-%Y_%H-%M-%S')} - {datetime.now(TIMEZONE).strftime('%d-%b-%Y_%H-%M-%S')}"
             base_folder_path = Path(INVOICE_DOWNLOAD_FOLDER) / base_folder
             base_folder_path.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Created download directory: {base_folder_path}")
+            logger.info(f"Created missing invoices download directory: {base_folder_path}")
         except Exception as dir_error:
             logger.error(f"Directory creation failed: {str(dir_error)}")
             raise
@@ -315,34 +307,46 @@ def missing_email_download_background_task():
         # Email processing
         try:
             mail = login()
-            filtered_ids = search_last_2_days_emails(mail)
-            # filtered_ids = search_emails_between_dates(mail)
+            filtered_ids = search_previous_week_emails(mail)
 
             if not filtered_ids:
-                logger.info("No new emails to process")
+                logger.info("No emails from last 7 days to process")
                 return
 
-            logger.info(f"Processing {len(filtered_ids)} emails")
+            logger.info(f"Processing {len(filtered_ids)} emails from last 7 days")
+            successfully_processed_emails = 0
+            
             for idx, e_id in enumerate(filtered_ids, 1):
                 try:
                     logger.info(f"Processing email {idx}/{len(filtered_ids)} - UID: {e_id}")
+                    # Use BODY.PEEK to avoid marking emails as read
                     result, response = mail.uid('fetch', e_id, '(BODY.PEEK[])')
-                    # result, response = mail.uid('fetch', e_id, '(RFC822)')
 
                     if result != 'OK' or not response or not response[0]:
                         logger.error(f"Failed to fetch email UID {e_id}")
                         continue
+                    
                     try:
                         raw_email = response[0][1].decode('utf-8')
                     except UnicodeDecodeError:
                         raw_email = response[0][1].decode('latin-1')
 
                     email_message = email.message_from_string(raw_email)
-                    download_email_attachments(email_message, base_folder_path)
+                    
+                    # Download attachments (no marking logic)
+                    download_success = download_email_attachments(email_message, base_folder_path)
+                    
+                    if download_success:
+                        successfully_processed_emails += 1
+                        logger.info(f"Email UID {e_id} processed successfully with attachments")
+                    else:
+                        logger.debug(f"Email UID {e_id} processed but no attachments found")
 
                 except Exception as email_error:
                     logger.error(f"Failed to process email UID {e_id}: {str(email_error)}\n{traceback.format_exc()}")
                     continue
+
+            logger.info(f"Successfully processed {successfully_processed_emails} emails with attachments from last 7 days")
 
         except Exception as processing_error:
             logger.error(f"Email processing failed: {str(processing_error)}\n{traceback.format_exc()}")
@@ -350,20 +354,20 @@ def missing_email_download_background_task():
 
         # Post-processing
         try:
-            logger.info("Starting invoice conversion")
+            logger.info("Starting missing invoice conversion")
             converted_files, failed_files = convert_invoice_for_email(base_folder_path)
-            logger.info(f"Conversion complete. Success: {len(converted_files)}, Failed: {len(failed_files)}")
+            logger.info(f"Missing invoice conversion complete. Success: {len(converted_files)}, Failed: {len(failed_files)}")
 
-            logger.info("Starting data processing")
+            logger.info("Starting missing invoice data processing")
             process_extracted_data(converted_files, failed_files)
-            logger.info("Data processing complete")
+            logger.info("Missing invoice data processing complete")
 
         except Exception as post_error:
             logger.error(f"Post-processing failed: {str(post_error)}\n{traceback.format_exc()}")
             raise
 
     except Exception as main_error:
-        logger.error(f"Critical error in background task: {str(main_error)}\n{traceback.format_exc()}")
+        logger.error(f"Critical error in missing invoice background task: {str(main_error)}\n{traceback.format_exc()}")
         raise
 
     finally:

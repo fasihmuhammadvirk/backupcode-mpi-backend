@@ -47,6 +47,9 @@ from mpi_backend.utils.invoice_downaloder import email_download_background_task
 from mpi_backend.utils.statement_downloader import (
     statement_download_background_task
 )
+from mpi_backend.utils.missing_invoice_downaloder import (
+    missing_email_download_background_task
+)
 
 # Import priority control utilities
 from mpi_backend.utils.quickbooks_priority import set_scheduler_instance
@@ -267,6 +270,18 @@ async def lifespan(app: FastAPI):
         misfire_grace_time=1800
     )
     
+    # Missing invoice download - daily (every day, no email marking)
+    scheduler.add_job(
+        missing_email_download_background_task,
+        "interval",
+        days=1,
+        max_instances=1,
+        replace_existing=True,
+        id="missing_invoice_download",
+        name="Missing Invoice Download Task (Daily)",
+        misfire_grace_time=3600  # 1 hour grace period
+    )
+    
     # SCHEDULED MAPPING TASKS: Daily at specific times
     
     # 1. UIDI and NO Match Update: Every day at 6 PM PKT (1 PM UTC, PKT = UTC+5)
@@ -324,9 +339,19 @@ async def lifespan(app: FastAPI):
 
     scheduler.start()
     logger.info("Background tasks scheduler started successfully")
+    
+    # Run missing invoice downloader on startup
+    logger.info("Running missing invoice downloader on startup...")
+    try:
+        missing_email_download_background_task()
+        logger.info("Startup missing invoice download completed successfully")
+    except Exception as e:
+        logger.error(f"Startup missing invoice download failed: {str(e)}")
+    
     logger.info("Scheduled mapping tasks configured:")
     logger.info("  • UIDI/NO Match Update: Daily at 6 PM PKT (1 PM UTC)")
     logger.info("  • All Mappings Update: Every 48 hours at 1 AM PKT (every other day)")
+    logger.info("  • Missing Invoice Download: Daily (and on startup)")
     logger.info("MPI Backend started successfully")
     
     yield

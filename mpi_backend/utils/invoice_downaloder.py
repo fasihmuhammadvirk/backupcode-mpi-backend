@@ -1,24 +1,24 @@
 import time
 import imaplib
 import email
+import email.utils
 import os
-import re
 import traceback
+import logging
 from pathlib import Path
 from email.utils import parsedate_to_datetime
-import pytz
-import email
-import logging
-
-logger = logging.getLogger(__name__)
-
-from mpi_backend.config import SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, INVOICE_DOWNLOAD_FOLDER, SUPPLIERS, TIMEZONE
 from datetime import datetime, timedelta
 
+from mpi_backend.config import (
+    SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, INVOICE_DOWNLOAD_FOLDER, 
+    SUPPLIERS, TIMEZONE
+)
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.utils.invoice_convertor import convert_invoice_for_email
 
-EXCLUDED_SENDERS = [  # suppliers whose emails are to be marked as read after downloading
+logger = logging.getLogger(__name__)
+
+EXCLUDED_SENDERS = [  # suppliers marked as read after download
     "info@wwps.co",
     "bmwpsupply@gmail.com",
     "billing@ysplumbing.com",
@@ -142,98 +142,155 @@ def get_supplier(email_subject, supplier_email) -> str:
             return SUPPLIERS[9]
         else:
             logger.warning(f"Unknown supplier for subject: {email_subject}")
-            return "no_supplier"
+            return "unknown_supplier"  # Changed from "no_supplier" to continue processing
     except Exception as e:
         logger.error(f"Supplier detection failed: {str(e)}\n{traceback.format_exc()}")
-        return "no_supplier"
+        return "unknown_supplier"  # Changed from "no_supplier" to continue processing
+
+
+def download_attachment_with_retry(part, filepath, max_retries=3):
+    """Download attachment with retry mechanism"""
+    for attempt in range(max_retries):
+        try:
+            attachment_data = part.get_payload(decode=True)
+            if attachment_data:
+                with open(filepath, 'wb') as f:
+                    f.write(attachment_data)
+                logger.info(
+                    f"Downloaded attachment on attempt {attempt + 1}: "
+                    f"{os.path.basename(filepath)}"
+                )
+                return True
+            else:
+                logger.warning(f"Attempt {attempt + 1}: No attachment data found")
+        except Exception as e:
+            logger.error(
+                f"Attempt {attempt + 1} failed to download "
+                f"{os.path.basename(filepath)}: {str(e)}"
+            )
+            if attempt < max_retries - 1:
+                time.sleep(1)  # Wait 1 second before retry
+            else:
+                logger.error(
+                    f"All {max_retries} attempts failed for "
+                    f"{os.path.basename(filepath)}"
+                )
+    return False
 
 
 def download_email_attachments(email_message, base_folder_path):
-    """Download attachments with improved error handling"""
+    """Download attachments with comprehensive error handling and retry mechanism"""
+    
+    attachments_found = 0
+    attachments_downloaded = 0
+    supplier_name = "unknown"
+    
     try:
-        supplier_name = "unknown"
-        processed_parts = 0
-        saved_attachments = 0
+        # Enhanced supplier detection with fallback
+        try:
+            logger.info(f"Processing email with Subject: '{email_message.get('Subject', 'No Subject')}'")
+            supplier_name = get_supplier(
+                email_message.get('Subject', ''),
+                email_message.get('Return-Path', '')
+            )
+            logger.info(f"Detected supplier: {supplier_name}")
+        except Exception as sup_error:
+            logger.error(f"Supplier detection failed: {str(sup_error)}")
+            supplier_name = "unknown_supplier"
 
-        for part_idx, part in enumerate(email_message.walk(), 1):
-            processed_parts += 1
+        # Date handling with comprehensive fallback
+        date_header = email_message.get('Date', '')
+        if not date_header:
+            logger.warning("No Date header in email, using current time")
+            date_time_obj = datetime.now(TIMEZONE)
+        else:
             try:
-                payload = part.get_payload()
-                payload_text = ' '.join(str(p) for p in payload) if isinstance(payload, list) else str(payload)
+                date_time_obj = parsedate_to_datetime(date_header).astimezone(TIMEZONE)
+            except Exception as date_error:
+                logger.error(f"Date parsing failed: {str(date_error)}, using current time")
+                date_time_obj = datetime.now(TIMEZONE)
 
-                if ((part.get_content_maintype() != 'multipart' and part.get('Content-Disposition') is not None) or
-                        ('customer of World Wide' in payload_text)):
+        # Enhanced directory structure creation
+        try:
+            inner_dir = f'{date_time_obj.month}-{date_time_obj.day}-{date_time_obj.year}'
+            supplier_path = os.path.join(base_folder_path, supplier_name)
+            Path(supplier_path).mkdir(parents=True, exist_ok=True)
+            inner_dir_path = os.path.join(supplier_path, inner_dir)
+            Path(inner_dir_path).mkdir(parents=True, exist_ok=True)
+            logger.debug(f"Created directory structure: {inner_dir_path}")
+        except OSError as dir_error:
+            logger.error(f"Directory creation failed: {str(dir_error)}")
+            return False
 
-                    # Supplier detection
-                    try:
-                        logger.info(f"Emailed with Subject: {email_message.get('Subject')}")
-                        supplier_name = get_supplier(
-                            email_message.get('Subject', ''),
-                            email_message.get('Return-Path', '')
-                        )
-                        if supplier_name == "no_supplier":
-                            logger.warning(f"Skipping email with undetermined supplier")
-                            return
-                    except Exception as sup_error:
-                        logger.error(f"Supplier detection failed: {str(sup_error)}")
-                        return
-
-                    # Date handling
-                    date_header = email_message.get('Date', '')
-                    if not date_header:
-                        logger.warning("No Date header in email, using current time")
-                        date_time_obj = datetime.now(TIMEZONE)
-                    else:
-                        try:
-                            date_time_obj = parsedate_to_datetime(date_header).astimezone(TIMEZONE)
-                        except Exception as date_error:
-                            logger.error(f"Date parsing failed: {str(date_error)}, using current time")
-                            date_time_obj = datetime.now(TIMEZONE)
-
-                    # Path construction
-                    try:
-                        inner_dir = f'{date_time_obj.month}-{date_time_obj.day}-{date_time_obj.year}'
-                        supplier_path = os.path.join(base_folder_path, supplier_name)
-                        Path(supplier_path).mkdir(parents=True, exist_ok=True)
-                        inner_dir_path = os.path.join(supplier_path, inner_dir)
-                        Path(inner_dir_path).mkdir(parents=True, exist_ok=True)
-                    except OSError as dir_error:
-                        logger.error(f"Directory creation failed: {str(dir_error)}")
-                        return
-
-                    # File handling
-                    filename = part.get_filename()
+        # CRITICAL FIX: Enhanced attachment detection logic
+        for part_idx, part in enumerate(email_message.walk(), 1):
+            try:
+                # Check multiple conditions for attachments
+                content_disposition = part.get('Content-Disposition', '')
+                content_type = part.get_content_type()
+                filename = part.get_filename()
+                
+                logger.debug(f"Part {part_idx}: Content-Type={content_type}, Content-Disposition={content_disposition}, Filename={filename}")
+                
+                # Enhanced attachment detection conditions
+                is_attachment = (
+                    # Standard attachment detection
+                    (content_disposition and 'attachment' in content_disposition.lower()) or
+                    # Inline attachments
+                    (content_disposition and 'inline' in content_disposition.lower() and filename) or
+                    # PDF files regardless of disposition
+                    (content_type == 'application/pdf') or
+                    # Files with PDF extension
+                    (filename and filename.lower().endswith(('.pdf', '.PDF'))) or
+                    # Binary content with filename
+                    (filename and content_type.startswith('application/') and not content_type.startswith('application/pgp')) or
+                    # Special case for multipart/mixed with binary payload
+                    (not part.is_multipart() and filename and len(part.get_payload(decode=False)) > 1000)
+                )
+                
+                if is_attachment:
+                    attachments_found += 1
+                    
                     if not filename:
-                        logger.warning(f"Attachment missing filename, skipping of {email_message.get('Subject')}")
-                        continue
-
+                        # Generate filename for unnamed attachments
+                        if content_type == 'application/pdf':
+                            filename = f"attachment_{part_idx}_{date_time_obj.strftime('%Y%m%d_%H%M%S')}.pdf"
+                        else:
+                            logger.warning(f"Attachment {part_idx} has no filename and unknown type: {content_type}")
+                            continue
+                    
+                    logger.info(f"Found attachment {attachments_found}: {filename} (Type: {content_type})")
+                    
+                    # Only process PDF files
                     if not filename.lower().endswith(('.pdf', '.PDF')):
                         logger.debug(f"Skipping non-PDF attachment: {filename}")
                         continue
-
+                    
+                    # Download with retry mechanism
                     filepath = os.path.join(inner_dir_path, filename)
-                    try:
-                        with open(filepath, 'wb') as f:
-                            f.write(part.get_payload(decode=True))
-                            saved_attachments += 1
-                            logger.info(f"Saved attachment: {filename} => {filepath}")
-                    except IOError as file_error:
-                        logger.error(f"Failed to save file {filename}: {str(file_error)}")
-                        continue
-
+                    if download_attachment_with_retry(part, filepath):
+                        attachments_downloaded += 1
+                        logger.info(f"Successfully saved: {filename} => {filepath}")
+                    else:
+                        logger.error(f"Failed to download after retries: {filename}")
+                
             except Exception as part_error:
                 logger.error(f"Error processing part {part_idx}: {str(part_error)}\n{traceback.format_exc()}")
                 continue
 
-        logger.info(f"Processed {processed_parts} MIME parts, saved {saved_attachments} attachments")
+        # Log final results
+        logger.info(f"Email processing complete - Found: {attachments_found} attachments, Downloaded: {attachments_downloaded} PDFs")
+        
+        # Return success status
+        return attachments_downloaded > 0
 
     except Exception as e:
         logger.error(f"Error in download_email_attachments: {str(e)}\n{traceback.format_exc()}")
+        return False
 
 
 def email_download_background_task():
     """Invoice download background task - runs continuously without interruption"""
-    # Invoice downloader runs independently of all other operations
     logger.debug("Starting invoice download background task")
     
     mail = None
@@ -259,43 +316,61 @@ def email_download_background_task():
                 return
 
             logger.info(f"Processing {len(filtered_ids)} emails")
+            successfully_processed_emails = []
+            
             for idx, e_id in enumerate(filtered_ids, 1):
                 try:
                     logger.info(f"Processing email {idx}/{len(filtered_ids)} - UID: {e_id}")
                     result, response = mail.uid('fetch', e_id, '(BODY.PEEK[])')
-                    # result, response = mail.uid('fetch', e_id, '(RFC822)')
 
                     if result != 'OK' or not response or not response[0]:
                         logger.error(f"Failed to fetch email UID {e_id}")
                         continue
+                    
                     try:
                         raw_email = response[0][1].decode('utf-8')
                     except UnicodeDecodeError:
                         raw_email = response[0][1].decode('latin-1')
 
                     email_message = email.message_from_string(raw_email)
-                    download_email_attachments(email_message, base_folder_path)
-
-                    # Thread handling logic
-                    try:
-                        subject = email_message['subject'].lower() if email_message['subject'] else ""
-                        sender = email.utils.parseaddr(email_message["From"])[1]  # Extract sender's email address
-                        in_reply_to = email_message["In-Reply-To"]
-                        references = email_message["References"]
-
-                        is_thread = bool(in_reply_to or references)  # Check if the email is part of a thread
-                        has_invoice_keyword = any(kw in subject for kw in ['invoice', 'invoices', 'invoice(s)'])
-                        is_excluded_sender = sender in EXCLUDED_SENDERS  # Check if the sender is in the exclusion list
-
-                        if is_excluded_sender and has_invoice_keyword:
-                            mail.uid('store', e_id, '+FLAGS', '(\Seen)')
-
-                    except Exception as flag_error:
-                        logger.error(f"Error handling read status for UID {e_id}: {str(flag_error)}")
+                    
+                    # CRITICAL FIX: Only mark as read if attachments were successfully downloaded
+                    download_success = download_email_attachments(email_message, base_folder_path)
+                    
+                    if download_success:
+                        successfully_processed_emails.append(e_id)
+                        logger.info(f"Email UID {e_id} processed successfully with attachments")
+                    else:
+                        logger.warning(f"Email UID {e_id} processed but no attachments downloaded - NOT marking as read")
 
                 except Exception as email_error:
                     logger.error(f"Failed to process email UID {e_id}: {str(email_error)}\n{traceback.format_exc()}")
                     continue
+
+            # CRITICAL FIX: Only mark emails as read after successful processing
+            logger.info(f"Marking {len(successfully_processed_emails)} successfully processed emails as read")
+            for e_id in successfully_processed_emails:
+                try:
+                    # Get email details for conditional marking
+                    result, response = mail.uid('fetch', e_id, '(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM)])')
+                    if result == 'OK' and response[0]:
+                        raw_email = response[0][1]
+                        msg = email.message_from_bytes(raw_email)
+                        subject = (msg.get('Subject', '') or '').lower()
+                        sender = email.utils.parseaddr(msg.get('From', ''))[1]
+                        
+                        # Check if should be marked as read
+                        has_invoice_keyword = any(kw in subject for kw in ['invoice', 'invoices', 'invoice(s)'])
+                        is_excluded_sender = sender in EXCLUDED_SENDERS
+                        
+                        if is_excluded_sender and has_invoice_keyword:
+                            mail.uid('store', e_id, '+FLAGS', '(\Seen)')
+                            logger.info(f"Marked email UID {e_id} as read (sender: {sender})")
+                        else:
+                            logger.debug(f"Email UID {e_id} not marked as read (sender: {sender}, has_invoice: {has_invoice_keyword})")
+                            
+                except Exception as flag_error:
+                    logger.error(f"Error marking email UID {e_id} as read: {str(flag_error)}")
 
         except Exception as processing_error:
             logger.error(f"Email processing failed: {str(processing_error)}\n{traceback.format_exc()}")
