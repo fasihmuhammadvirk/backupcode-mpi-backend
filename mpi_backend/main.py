@@ -327,17 +327,17 @@ async def lifespan(app: FastAPI):
         misfire_grace_time=1800
     )
     
-    # Missing invoice download - daily (async wrapper for non-blocking execution)
-    scheduler.add_job(
-        async_missing_email_download_wrapper,  # NEW: Using async wrapper to prevent blocking
-        "interval",
-        days=1,
-        max_instances=1,
-        replace_existing=True,
-        id="missing_invoice_download",
-        name="Missing Invoice Download Task (Daily, Async)",
-        misfire_grace_time=3600  # 1 hour grace period
-    )
+    # # Missing invoice download - daily (async wrapper for non-blocking execution)
+    # scheduler.add_job(
+    #     async_missing_email_download_wrapper,  # NEW: Using async wrapper to prevent blocking
+    #     "interval",
+    #     days=1,
+    #     max_instances=1,
+    #     replace_existing=True,
+    #     id="missing_invoice_download",
+    #     name="Missing Invoice Download Task (Daily, Async)",
+    #     misfire_grace_time=3600  # 1 hour grace period
+    # )
     
     # SCHEDULED MAPPING TASKS: Daily at specific times
     
