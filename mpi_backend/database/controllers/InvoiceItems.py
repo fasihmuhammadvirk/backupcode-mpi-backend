@@ -1683,10 +1683,19 @@ class InvoiceItemController:
                         SELECT 
                             item,
                             vendor,
-                            -- Use the lowest price within the time period as baseline
-                            MIN(cost) as baseline_price,
-                            -- Use the highest price within the time period as peak price
-                            MAX(cost) as peak_price
+                            -- Use the earliest chronological price as baseline (1 year ago)
+                            (SELECT cost FROM item_price_data ipd2 
+                             WHERE ipd2.item = item_price_data.item 
+                             AND ipd2.vendor = item_price_data.vendor 
+                             ORDER BY ipd2.date ASC LIMIT 1) as baseline_price,
+                            -- Use the highest price that occurred after the baseline
+                            (SELECT MAX(cost) FROM item_price_data ipd3
+                             WHERE ipd3.item = item_price_data.item 
+                             AND ipd3.vendor = item_price_data.vendor 
+                             AND ipd3.date >= (SELECT date FROM item_price_data ipd4
+                                              WHERE ipd4.item = item_price_data.item 
+                                              AND ipd4.vendor = item_price_data.vendor 
+                                              ORDER BY ipd4.date ASC LIMIT 1)) as peak_price
                         FROM item_price_data
                         GROUP BY item, vendor
                     )
@@ -1757,10 +1766,16 @@ class InvoiceItemController:
                     price_comparison AS (
                         SELECT 
                             item,
-                            -- Use the lowest price within the time period as baseline
-                            MIN(cost) as baseline_price,
-                            -- Use the highest price within the time period as peak price
-                            MAX(cost) as peak_price
+                            -- Use the earliest chronological price as baseline (1 year ago)
+                            (SELECT cost FROM item_price_data ipd2 
+                             WHERE ipd2.item = item_price_data.item 
+                             ORDER BY ipd2.date ASC LIMIT 1) as baseline_price,
+                            -- Use the highest price that occurred after the baseline
+                            (SELECT MAX(cost) FROM item_price_data ipd3
+                             WHERE ipd3.item = item_price_data.item 
+                             AND ipd3.date >= (SELECT date FROM item_price_data ipd4
+                                              WHERE ipd4.item = item_price_data.item 
+                                              ORDER BY ipd4.date ASC LIMIT 1)) as peak_price
                         FROM item_price_data
                         GROUP BY item
                     )
@@ -1860,11 +1875,15 @@ class InvoiceItemController:
                     valid_items = [item for item in items if item.cost is not None and item.cost > 0]
                     
                     if len(valid_items) >= 1:
-                        # Find the lowest and highest prices within the time period
-                        baseline_price = min(item.cost for item in valid_items)
-                        peak_price = max(item.cost for item in valid_items)
+                        # Sort by date to get chronological order
+                        valid_items.sort(key=lambda x: x.date)
                         
-                        # Calculate percentage increase using lowest vs highest price
+                        # Use earliest chronological price as baseline (1 year ago)
+                        baseline_price = valid_items[0].cost  # Earliest date
+                        # Use the highest price that occurred after the baseline
+                        peak_price = max(item.cost for item in valid_items)  # Highest price in period
+                        
+                        # Calculate percentage increase using baseline vs peak
                         if baseline_price is None or baseline_price == 0:
                             percentage_increase = "∞%"
                         else:
