@@ -1601,8 +1601,7 @@ class InvoiceItemController:
                         SELECT DISTINCT 
                             ii.item,
                             ii.vendor,
-                            MAX(ii.date) OVER (PARTITION BY ii.item, ii.vendor) as most_recent_date,
-                            MIN(ii.date) OVER (PARTITION BY ii.item, ii.vendor) as earliest_date
+                            MAX(ii.date) OVER (PARTITION BY ii.item, ii.vendor) as most_recent_date
                         FROM invoice_items ii
                         JOIN item_vendor_pairs_table ivp ON ii.item = ivp.item AND ii.vendor = ivp.vendor
                         WHERE ii.cost IS NOT NULL 
@@ -1614,70 +1613,13 @@ class InvoiceItemController:
                             ii.vendor,
                             ii.date,
                             ii.cost,
-                            ivd.most_recent_date,
-                            ivd.earliest_date,
-                            -- Use flexible time period: try 1 year, 6 months, 3 months, 1 month
-                            CASE 
-                                WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '1 year') 
-                                    THEN (ivd.most_recent_date - INTERVAL '1 year')
-                                WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '6 months') 
-                                    THEN (ivd.most_recent_date - INTERVAL '6 months')
-                                WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '3 months') 
-                                    THEN (ivd.most_recent_date - INTERVAL '3 months')
-                                WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '1 month') 
-                                    THEN (ivd.most_recent_date - INTERVAL '1 month')
-                                ELSE ivd.earliest_date
-                            END as comparison_date,
-                            CASE 
-                                WHEN ii.date <= CASE 
-                                    WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '1 year') 
-                                        THEN (ivd.most_recent_date - INTERVAL '1 year')
-                                    WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '6 months') 
-                                        THEN (ivd.most_recent_date - INTERVAL '6 months')
-                                    WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '3 months') 
-                                        THEN (ivd.most_recent_date - INTERVAL '3 months')
-                                    WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '1 month') 
-                                        THEN (ivd.most_recent_date - INTERVAL '1 month')
-                                    ELSE ivd.earliest_date
-                                END THEN 'past'
-                                ELSE 'recent'
-                            END as period_type,
-                            ROW_NUMBER() OVER (
-                                PARTITION BY ii.item, ii.vendor,
-                                         CASE 
-                                             WHEN ii.date <= CASE 
-                                                 WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '1 year') 
-                                                     THEN (ivd.most_recent_date - INTERVAL '1 year')
-                                                 WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '6 months') 
-                                                     THEN (ivd.most_recent_date - INTERVAL '6 months')
-                                                 WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '3 months') 
-                                                     THEN (ivd.most_recent_date - INTERVAL '3 months')
-                                                 WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '1 month') 
-                                                     THEN (ivd.most_recent_date - INTERVAL '1 month')
-                                                 ELSE ivd.earliest_date
-                                             END THEN 'past'
-                                             ELSE 'recent'
-                                         END
-                                 ORDER BY 
-                                 CASE 
-                                     WHEN ii.date <= CASE 
-                                         WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '1 year') 
-                                             THEN (ivd.most_recent_date - INTERVAL '1 year')
-                                         WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '6 months') 
-                                             THEN (ivd.most_recent_date - INTERVAL '6 months')
-                                         WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '3 months') 
-                                             THEN (ivd.most_recent_date - INTERVAL '3 months')
-                                         WHEN ivd.earliest_date < (ivd.most_recent_date - INTERVAL '1 month') 
-                                             THEN (ivd.most_recent_date - INTERVAL '1 month')
-                                         ELSE ivd.earliest_date
-                                     END THEN -EXTRACT(EPOCH FROM ii.date::timestamp)
-                                     ELSE EXTRACT(EPOCH FROM (ivd.most_recent_date::timestamp - ii.date::timestamp))
-                                 END
-                            ) as row_num
+                            ivd.most_recent_date
                         FROM invoice_items ii
                         JOIN item_vendor_dates ivd ON ii.item = ivd.item AND ii.vendor = ivd.vendor
                         WHERE ii.cost IS NOT NULL 
                         AND ii.cost > 0
+                        -- Only include records within 1 year of this specific item's most recent date
+                        AND ii.date >= (ivd.most_recent_date - INTERVAL '1 year')
                     ),
                     price_comparison AS (
                         SELECT 
@@ -1737,31 +1679,13 @@ class InvoiceItemController:
                             ii.item,
                             ii.date,
                             ii.cost,
-                            id.most_recent_date,
-                            (id.most_recent_date - INTERVAL '1 year') as target_date,
-                            CASE 
-                                WHEN ii.date < (id.most_recent_date - INTERVAL '1 year') THEN 'past'
-                                ELSE 'recent'
-                            END as period_type,
-                            ROW_NUMBER() OVER (
-                                PARTITION BY ii.item, 
-                                             CASE 
-                                     WHEN ii.date < (id.most_recent_date - INTERVAL '1 year') 
-                                     THEN 'past'
-                                     ELSE 'recent'
-                                 END
-                                 ORDER BY 
-                                 CASE 
-                                     WHEN ii.date < (id.most_recent_date - INTERVAL '1 year') 
-                                     THEN ABS(EXTRACT(EPOCH FROM (ii.date::timestamp - 
-                                         (id.most_recent_date - INTERVAL '1 year')::timestamp)))
-                                     ELSE EXTRACT(EPOCH FROM (id.most_recent_date::timestamp - ii.date::timestamp))
-                                 END
-                            ) as row_num
+                            id.most_recent_date
                         FROM invoice_items ii
                         JOIN item_dates id ON ii.item = id.item
                         WHERE ii.cost IS NOT NULL 
                         AND ii.cost > 0
+                        -- Only include records within 1 year of this specific item's most recent date
+                        AND ii.date >= (id.most_recent_date - INTERVAL '1 year')
                     ),
                     price_comparison AS (
                         SELECT 
@@ -1878,19 +1802,32 @@ class InvoiceItemController:
                         # Sort by date to get chronological order
                         valid_items.sort(key=lambda x: x.date)
                         
-                        # Use earliest chronological price as baseline (1 year ago)
-                        baseline_price = valid_items[0].cost  # Earliest date
-                        # Use the highest price that occurred after the baseline
-                        peak_price = max(item.cost for item in valid_items)  # Highest price in period
+                        # Find this item's most recent date
+                        most_recent_date = valid_items[-1].date
                         
-                        # Calculate percentage increase using baseline vs peak
-                        if baseline_price is None or baseline_price == 0:
-                            percentage_increase = "∞%"
-                        else:
-                            percentage_value = ((peak_price - baseline_price) / baseline_price) * 100
+                        # Calculate 1 year back from the most recent date
+                        one_year_back = most_recent_date - timedelta(days=365)
+                        
+                        # Filter items to only include those within the last year
+                        items_within_year = [item for item in valid_items if item.date >= one_year_back]
+                        
+                        if len(items_within_year) >= 1:
+                            # Use earliest price within the year as baseline
+                            baseline_price = items_within_year[0].cost  # Earliest in the year window
+                            # Use highest price within the year as peak
+                            peak_price = max(item.cost for item in items_within_year)  # Highest in year
                             
-                            # Show percentage increase (can be positive or negative)
-                            percentage_increase = f"{round(percentage_value, 1)}%"
+                            # Calculate percentage increase using baseline vs peak
+                            if baseline_price is None or baseline_price == 0:
+                                percentage_increase = "∞%"
+                            else:
+                                percentage_value = ((peak_price - baseline_price) / baseline_price) * 100
+                                
+                                # Show percentage increase (can be positive or negative)
+                                percentage_increase = f"{round(percentage_value, 1)}%"
+                        else:
+                            # No items within the year window
+                            percentage_increase = "N/A"
                     else:
                         # No valid items with positive cost
                         percentage_increase = "N/A"
