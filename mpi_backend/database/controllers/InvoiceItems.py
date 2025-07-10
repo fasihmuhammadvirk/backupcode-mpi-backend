@@ -1683,8 +1683,10 @@ class InvoiceItemController:
                         SELECT 
                             item,
                             vendor,
-                            MAX(CASE WHEN period_type = 'past' AND row_num = 1 THEN cost END) as baseline_price,
-                            MAX(CASE WHEN period_type = 'recent' THEN cost END) as peak_price
+                            -- Use the lowest price within the time period as baseline
+                            MIN(cost) as baseline_price,
+                            -- Use the highest price within the time period as peak price
+                            MAX(cost) as peak_price
                         FROM item_price_data
                         GROUP BY item, vendor
                     )
@@ -1755,8 +1757,10 @@ class InvoiceItemController:
                     price_comparison AS (
                         SELECT 
                             item,
-                            MAX(CASE WHEN period_type = 'past' AND row_num = 1 THEN cost END) as baseline_price,
-                            MAX(CASE WHEN period_type = 'recent' THEN cost END) as peak_price
+                            -- Use the lowest price within the time period as baseline
+                            MIN(cost) as baseline_price,
+                            -- Use the highest price within the time period as peak price
+                            MAX(cost) as peak_price
                         FROM item_price_data
                         GROUP BY item
                     )
@@ -1784,10 +1788,7 @@ class InvoiceItemController:
                     item, vendor, baseline_price, peak_price, percentage_increase = row
                     
                     if percentage_increase is not None:
-                        if percentage_increase > 0:
-                            price_lookup[(item, vendor)] = f"{percentage_increase}%"
-                        else:
-                            price_lookup[(item, vendor)] = "0.0%"
+                        price_lookup[(item, vendor)] = f"{percentage_increase}%"
                     else:
                         price_lookup[(item, vendor)] = "N/A"
 
@@ -1801,10 +1802,7 @@ class InvoiceItemController:
                     item, baseline_price, peak_price, percentage_increase = row
                     
                     if percentage_increase is not None:
-                        if percentage_increase > 0:
-                            price_lookup[item] = f"{percentage_increase}%"
-                        else:
-                            price_lookup[item] = "0.0%"
+                        price_lookup[item] = f"{percentage_increase}%"
                     else:
                         price_lookup[item] = "N/A"
 
@@ -1858,82 +1856,24 @@ class InvoiceItemController:
             if item_number in grouped_items:
                 items = grouped_items[item_number]
                 if items:
-                    # Sort by date descending (most recent first)
-                    items.sort(key=lambda x: x.date, reverse=True)
-
-                    # Use the most recent purchase date as reference point (not today's date)
-                    most_recent_date = items[0].date
-                    target_date = most_recent_date - timedelta(days=365)  # 1 year before most recent purchase
-
-                    # Find items purchased before target date (1 year ago from most recent) for baseline price
-                    past_items = []
-                    # Find items purchased within the last year from most recent purchase date
-                    recent_items = []
+                    # Filter valid items with cost > 0
+                    valid_items = [item for item in items if item.cost is not None and item.cost > 0]
                     
-                    for item in items:
-                        # Safely compare dates by ensuring both are datetime objects
-                        item_date = item.date
-
-                        # Convert date to datetime if needed
-                        if isinstance(item_date, date) and not isinstance(item_date, datetime):
-                            item_date = datetime.combine(item_date, datetime.min.time())
-
-                        if isinstance(target_date, date) and not isinstance(target_date, datetime):
-                            target_date = datetime.combine(target_date, datetime.min.time())
-
-                        if item_date < target_date:
-                            past_items.append(item)
-                        else:
-                            # Items within the last year from most recent purchase
-                            recent_items.append(item)
-
-                    if past_items and recent_items:
-                        # Find the item with date closest to target date (1 year ago baseline)
-                        def date_difference(item):
-                            item_date = item.date
-
-                            # Convert date to datetime if needed
-                            if isinstance(item_date, date) and not isinstance(item_date, datetime):
-                                item_date = datetime.combine(item_date, datetime.min.time())
-
-                            if isinstance(target_date, date) and not isinstance(target_date, datetime):
-                                target_date_dt = datetime.combine(target_date, datetime.min.time())
-                            else:
-                                target_date_dt = target_date
-
-                            # Return absolute difference in seconds
-                            return abs((item_date - target_date_dt).total_seconds())
-
-                        past_item = min(past_items, key=date_difference)
-                        baseline_price = past_item.cost
-
-                        # Get the most recent price within the 1-year window
-                        valid_recent_items = [item for item in recent_items if item.cost is not None and item.cost > 0]
+                    if len(valid_items) >= 1:
+                        # Find the lowest and highest prices within the time period
+                        baseline_price = min(item.cost for item in valid_items)
+                        peak_price = max(item.cost for item in valid_items)
                         
-                        if not valid_recent_items:
-                            # No valid recent prices, skip this item
-                            percentage_increase = "N/A"
+                        # Calculate percentage increase using lowest vs highest price
+                        if baseline_price is None or baseline_price == 0:
+                            percentage_increase = "∞%"
                         else:
-                            # Use the most recent valid price
-                            current_price = valid_recent_items[0].cost
-
-                            # Calculate percentage increase using current price vs baseline price
-                            if baseline_price is None or baseline_price == 0:
-                                percentage_increase = "∞%"
-                            else:
-                                percentage_value = ((current_price - baseline_price) / baseline_price) * 100
-                                
-                                # Show percentage increase (can be positive or negative)
-                                if percentage_value > 0:
-                                    percentage_increase = f"{round(percentage_value, 1)}%"
-                                else:
-                                    # Price has decreased, show 0% (or you could show negative)
-                                    percentage_increase = "0.0%"
-                    elif recent_items and not past_items:
-                        # Only recent items, no baseline to compare against
-                        percentage_increase = "N/A"
-                    elif past_items and not recent_items:
-                        # Only old items, no recent purchases
+                            percentage_value = ((peak_price - baseline_price) / baseline_price) * 100
+                            
+                            # Show percentage increase (can be positive or negative)
+                            percentage_increase = f"{round(percentage_value, 1)}%"
+                    else:
+                        # No valid items with positive cost
                         percentage_increase = "N/A"
 
             result.append((item_number, percentage_increase))
