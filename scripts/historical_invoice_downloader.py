@@ -54,6 +54,26 @@ from mpi_backend.utils.invoice_convertor import convert_invoice_for_email
 # Setup logging
 logger = logging.getLogger(__name__)
 
+# Create logs directory
+LOGS_DIR = Path("logs")
+LOGS_DIR.mkdir(exist_ok=True)
+
+# Setup missing emails/attachments tracker
+def log_missing_email_or_attachment(email_subject, sender, reason, date_str):
+    """Log missing emails or attachments to a separate file"""
+    missing_log_file = LOGS_DIR / f"missing_emails_attachments_{datetime.now().strftime('%Y%m%d')}.txt"
+    
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    log_entry = f"[{timestamp}] MISSING: {reason}\n"
+    log_entry += f"  Date: {date_str}\n"
+    log_entry += f"  Sender: {sender}\n"
+    log_entry += f"  Subject: {email_subject}\n"
+    log_entry += f"  Reason: {reason}\n"
+    log_entry += "-" * 80 + "\n"
+    
+    with open(missing_log_file, 'a', encoding='utf-8') as f:
+        f.write(log_entry)
+
 # Supplier emails to download invoices from
 EXCLUDED_SENDERS = [  # suppliers to download invoices from
     "info@wwps.co",
@@ -109,17 +129,15 @@ class HistoricalInvoiceDownloader:
             'skipped_days': 0
         }
         
-        # Setup logging
+        # Setup logging with dedicated historical downloader logs
         log_level = logging.DEBUG if verbose else logging.INFO
+        log_filename = LOGS_DIR / f"historical_invoice_downloader_{datetime.now().strftime('%Y%m%d')}.log"
         logging.basicConfig(
             level=log_level,
-            format='%(asctime)s - %(levelname)s - %(message)s',
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             handlers=[
                 logging.StreamHandler(),
-                logging.FileHandler(
-                    f'historical_invoice_download_'
-                    f'{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
-                )
+                logging.FileHandler(log_filename)
             ]
         )
         
@@ -261,15 +279,22 @@ class HistoricalInvoiceDownloader:
         attachments_found = 0
         attachments_downloaded = 0
         
+        # Extract email details for logging
+        email_subject = email_message.get('Subject', 'No Subject')
+        sender = email.utils.parseaddr(email_message.get('From', ''))[1]
+        date_header = email_message.get('Date', '')
+        
         try:
             # Supplier detection
             supplier_name = self.get_supplier(
-                email_message.get('Subject', ''),
+                email_subject,
                 email_message.get('Return-Path', '')
             )
+            
+            logger.info(f"Processing email with Subject: '{email_subject}'")
+            logger.info(f"Detected supplier: {supplier_name}")
 
             # Date handling
-            date_header = email_message.get('Date', '')
             if not date_header:
                 date_time_obj = datetime.now(TIMEZONE)
             else:
@@ -279,6 +304,13 @@ class HistoricalInvoiceDownloader:
                     ).astimezone(TIMEZONE)
                 except Exception:
                     date_time_obj = datetime.now(TIMEZONE)
+
+            date_str = date_time_obj.strftime('%Y-%m-%d')
+            
+            # Log detailed email information
+            logger.info(f"  {date_str} | {sender}")
+            logger.info(f"    Subject: {email_subject}")
+            logger.info(f"    Supplier: {supplier_name} | Type: {'invoice' if any(kw in email_subject.lower() for kw in ['invoice', 'invoices']) else 'other'}")
 
             # Directory structure creation with fallback (consistent with main downloader)
             try:
@@ -299,14 +331,18 @@ class HistoricalInvoiceDownloader:
                 except Exception as fallback_error:
                     logger.error(f"Fallback directory creation also failed: "
                                f"{str(fallback_error)}, skipping this email")
+                    log_missing_email_or_attachment(email_subject, sender, f"Directory creation failed: {str(fallback_error)}", date_str)
                     return attachments_found, attachments_downloaded
 
             # Enhanced attachment detection
+            attachment_details = []
             for part_idx, part in enumerate(email_message.walk(), 1):
                 try:
                     content_disposition = part.get('Content-Disposition', '')
                     content_type = part.get_content_type()
                     filename = part.get_filename()
+                    
+                    logger.debug(f"Part {part_idx}: Content-Type={content_type}, Content-Disposition={content_disposition}, Filename={filename}")
                     
                     # Enhanced attachment detection conditions
                     is_attachment = (
@@ -336,10 +372,17 @@ class HistoricalInvoiceDownloader:
                                     ".pdf"
                                 )
                             else:
+                                attachment_details.append(f"      - UNNAMED ({content_type}) - PDF: False [SKIPPED]")
                                 continue
                         
+                        is_pdf = filename.lower().endswith(('.pdf', '.PDF'))
+                        attachment_details.append(f"      - {filename} ({content_type}) - PDF: {is_pdf}")
+                        
+                        logger.info(f"Found attachment {attachments_found}: {filename} (Type: {content_type})")
+                        
                         # Only process PDF files
-                        if not filename.lower().endswith(('.pdf', '.PDF')):
+                        if not is_pdf:
+                            logger.debug(f"Skipping non-PDF attachment: {filename}")
                             continue
                         
                         # Download with retry mechanism
@@ -349,21 +392,38 @@ class HistoricalInvoiceDownloader:
                                 part, filepath
                             ):
                                 attachments_downloaded += 1
-                                logger.debug(f"Downloaded: {filename}")
+                                logger.info(f"Successfully saved: {filename} => {filepath}")
+                            else:
+                                logger.error(f"Failed to download after retries: {filename}")
+                                log_missing_email_or_attachment(email_subject, sender, f"Failed to download attachment: {filename}", date_str)
                         else:
                             attachments_downloaded += 1
                             logger.info(f"[DRY RUN] Would download: "
                                       f"{filename}")
                     
                 except Exception as part_error:
-                    logger.debug(f"Error processing part {part_idx}: "
+                    logger.error(f"Error processing part {part_idx}: "
                                f"{str(part_error)}")
                     continue
+
+            # Log attachment summary
+            if attachment_details:
+                logger.info(f"    Attachments: {attachments_found} total, {attachments_downloaded} PDFs")
+                for detail in attachment_details:
+                    logger.info(detail)
+            else:
+                logger.info(f"    Attachments: 0 total, 0 PDFs")
+                log_missing_email_or_attachment(email_subject, sender, "No attachments found in email", date_str)
+
+            # Log final results
+            logger.info(f"Email processing complete - Found: {attachments_found} attachments, Downloaded: {attachments_downloaded} PDFs")
+            logger.info("")  # Add blank line for readability
 
             return attachments_found, attachments_downloaded
 
         except Exception as e:
             logger.error(f"Error in download_email_attachments: {str(e)}")
+            log_missing_email_or_attachment(email_subject, sender, f"Email processing error: {str(e)}", date_str if 'date_str' in locals() else 'unknown')
             return 0, 0
 
     def process_date_batch(self, current_date: datetime) -> bool:
@@ -476,9 +536,14 @@ class HistoricalInvoiceDownloader:
             current_date = self.start_date
             batch_count = 0
             
-            logger.info("Starting historical invoice download")
+            logger.info("="*80)
+            logger.info("STARTING HISTORICAL INVOICE DOWNLOADER")
+            logger.info("="*80)
+            logger.info(f"Session started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             logger.info(f"Processing from {self.start_date.date()} "
                        f"back to {self.end_date.date()}")
+            logger.info(f"Dry run: {self.dry_run}")
+            logger.info("-" * 80)
             
             while current_date >= self.end_date:
                 try:

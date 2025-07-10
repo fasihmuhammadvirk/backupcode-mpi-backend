@@ -88,18 +88,20 @@ def search_replace(row, temp_items, item_mappings):
     
     # Searching in temp_items (temporary_item_mappings table)
     # First try exact match with clean invoice item
-    temp_match = temp_items[temp_items['original_item_number'] == original_item]
+    temp_match = temp_items[temp_items['original_item'] == original_item]
     
     # If no exact match and we have supplier_id, clean the DB data and compare with clean invoice item
     if temp_match.empty and supplier_id:
         temp_match = temp_items[
-            temp_items['original_item_number'].apply(lambda x: clean_supplier_suffix(x, supplier_id)) == original_item
+            temp_items['original_item'].apply(lambda x: clean_supplier_suffix(x, supplier_id)) == original_item
         ]
     
     if not temp_match.empty:
-        row['MpiItem'] = temp_match.iloc[0]['temporary_item_number']  # This is the mpi_code
-        row['MpiDescription'] = temp_match.iloc[0]['description']
-        row['Sheet Name'] = ''
+        # For temporary mappings, we assign the sheet name but keep "No Match" for the MPI item
+        # The temporary mapping system assigns items to sheets for later processing
+        row['MpiItem'] = 'No Match'  # Keep as No Match - temporary mappings don't provide MPI codes
+        row['MpiDescription'] = temp_match.iloc[0]['original_description'] or 'No Match'
+        row['Sheet Name'] = temp_match.iloc[0]['sheet_name']
         return row
 
     # Searching in item_mappings (supplier_item_mappings table)

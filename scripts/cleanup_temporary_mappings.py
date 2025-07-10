@@ -139,18 +139,18 @@ def cleanup_temporary_mappings(dry_run: bool = False, migrate_to_temp: bool = Fa
                     try:
                         # Check if already exists in temp table
                         existing_temp = db.query(TempItemMapping).filter_by(
-                            original_item_number=mapping.supplier_item_ids
+                            original_item=mapping.supplier_item_ids
                         ).first()
                         
                         if not existing_temp:
                             new_temp_mapping = TempItemMapping(
-                                original_item_number=mapping.supplier_item_ids,
-                                temporary_item_number=mapping.mpi_code,
-                                description=mapping.description or ""
+                                original_item=mapping.supplier_item_ids,
+                                original_description=mapping.description or "",
+                                sheet_name=mapping.google_sheet_name or ""
                             )
                             db.add(new_temp_mapping)
                             migrated_count += 1
-                            logger.info(f"Migrated: {mapping.supplier_item_ids} -> {mapping.mpi_code}")
+                            logger.info(f"Migrated: {mapping.supplier_item_ids} -> sheet: {mapping.google_sheet_name or 'Unknown'}")
                     except Exception as e:
                         logger.warning(f"Failed to migrate {mapping.supplier_item_ids}: {e}")
                 

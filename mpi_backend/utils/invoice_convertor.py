@@ -259,7 +259,7 @@ def convert_and_combine(all_files):
             if 'ABC Opus Services' in supplier_sub_stirng:
                 continue
 
-            failed_input_paths.append(filepath)
+            failed_input_paths.append(file_path)
 
     return all_output_paths, failed_input_paths
 

@@ -418,18 +418,32 @@ class ItemsMappingController:
                 
                 # Save to temporary storage instead
                 try:
+                    # In the new schema, temporary mappings store original_item -> sheet_name
+                    # Extract sheet name from the mapping data
+                    sheet_name = cleaned_data.get("google_sheet_name", "")
+                    if not sheet_name:
+                        # If no sheet name is provided, we'll skip creating a temporary mapping
+                        # since it's not useful without a sheet assignment
+                        logger.warning(f"No sheet name provided for temporary mapping {cleaned_data.get('supplier_item_ids')}, skipping temporary storage")
+                        return {
+                            "status": "skipped_temporary",
+                            "message": f"Temporary mapping skipped - no sheet name provided",
+                            "validation_errors": validation_errors
+                        }
+                    
                     self._save_to_temporary_storage(
                         db, 
                         cleaned_data.get("supplier_item_ids", ""),
-                        cleaned_data.get("mpi_code", ""),
+                        sheet_name,
                         int(supplier_id)
                     )
                     db.commit()
                     return {
                         "status": "redirected_to_temporary",
-                        "message": f"Temporary mapping saved to temporary storage instead of permanent mappings",
+                        "message": f"Temporary mapping saved to temporary storage for sheet assignment",
                         "validation_errors": validation_errors,
-                        "temporary_mapping_created": True
+                        "temporary_mapping_created": True,
+                        "sheet_name": sheet_name
                     }
                 except Exception as temp_error:
                     logger.error(f"Failed to save to temporary storage: {temp_error}")
@@ -495,30 +509,31 @@ class ItemsMappingController:
             logger.error(f"Failed to update mapping: {str(e)}")
             raise
 
-    def _save_to_temporary_storage(self, db: Session, original_item_number: str, 
-                                  temporary_item_number: str, supplier_id: int):
+    def _save_to_temporary_storage(self, db: Session, original_item: str, 
+                                  sheet_name: str, supplier_id: int):
         """
         Save mapping to temporary_item_mappings table instead of permanent table.
+        In the new schema, temporary mappings store original_item -> sheet_name mappings.
         """
         try:
             # Check if temporary mapping already exists
             existing_temp = db.query(TempItemMapping).filter_by(
-                original_item_number=original_item_number
+                original_item=original_item
             ).first()
             
             if existing_temp:
                 # Update existing temporary mapping
-                existing_temp.temporary_item_number = temporary_item_number
-                logger.info(f"Updated temporary mapping: {original_item_number} -> {temporary_item_number}")
+                existing_temp.sheet_name = sheet_name
+                logger.info(f"Updated temporary mapping: {original_item} -> sheet: {sheet_name}")
             else:
                 # Create new temporary mapping
                 new_temp_mapping = TempItemMapping(
-                    original_item_number=original_item_number,
-                    temporary_item_number=temporary_item_number,
-                    description=""  # We don't have description in this context
+                    original_item=original_item,
+                    original_description="",  # We don't have description in this context
+                    sheet_name=sheet_name
                 )
                 db.add(new_temp_mapping)
-                logger.info(f"Created temporary mapping: {original_item_number} -> {temporary_item_number}")
+                logger.info(f"Created temporary mapping: {original_item} -> sheet: {sheet_name}")
                 
         except Exception as e:
             logger.error(f"Error saving to temporary storage: {str(e)}")

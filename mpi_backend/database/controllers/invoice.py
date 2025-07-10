@@ -33,6 +33,51 @@ class InvoiceController:
         db.refresh(invoice)
         return invoice
 
+    def insert_invoice(self, date, filename, supplier_id, status, storage_path, 
+                       existing_invoice_id=None):
+        """
+        Insert a new invoice record (maintains compatibility with old code).
+        
+        Args:
+            date: Invoice date
+            filename: Invoice filename
+            supplier_id: Supplier ID
+            status: Invoice status
+            storage_path: File storage path
+            existing_invoice_id: Optional existing invoice ID for reprocessing
+            
+        Returns:
+            Invoice object
+        """
+        db = self._get_db_session()
+        
+        if existing_invoice_id:
+            # For reprocessing, use the existing invoice ID
+            invoice = Invoice(
+                id=existing_invoice_id,
+                date=date,
+                filename=filename,
+                supplier_id=supplier_id,
+                status=status,
+                storage_path=storage_path,
+                is_exported='Pending'
+            )
+        else:
+            # For new uploads, let the database generate a new ID
+            invoice = Invoice(
+                date=date,
+                filename=filename,
+                supplier_id=supplier_id,
+                status=status,
+                storage_path=storage_path,
+                is_exported='Pending'
+            )
+        
+        db.add(invoice)
+        db.commit()
+        db.refresh(invoice)
+        return invoice
+
     def get_invoices(
             self, db,
             supplier_ids: Optional[List[int]] = None,

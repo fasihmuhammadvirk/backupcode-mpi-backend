@@ -16,7 +16,58 @@ from mpi_backend.config import (
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.utils.invoice_convertor import convert_invoice_for_email
 
-logger = logging.getLogger(__name__)
+# Create logs directory
+LOGS_DIR = Path("logs")
+LOGS_DIR.mkdir(exist_ok=True)
+
+# Setup dedicated logger for email downloader
+def setup_downloader_logger():
+    """Setup dedicated logger for invoice downloader"""
+    log_filename = LOGS_DIR / f"invoice_downloader_{datetime.now().strftime('%Y%m%d')}.log"
+    
+    # Create logger
+    downloader_logger = logging.getLogger('invoice_downloader')
+    downloader_logger.setLevel(logging.INFO)
+    
+    # Remove existing handlers to avoid duplicates
+    downloader_logger.handlers.clear()
+    
+    # Create file handler
+    file_handler = logging.FileHandler(log_filename)
+    file_handler.setLevel(logging.INFO)
+    
+    # Create console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    
+    # Create formatter
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+    
+    # Add handlers
+    downloader_logger.addHandler(file_handler)
+    downloader_logger.addHandler(console_handler)
+    
+    return downloader_logger
+
+logger = setup_downloader_logger()
+
+# Setup missing emails/attachments tracker
+def log_missing_email_or_attachment(email_subject, sender, reason, date_str):
+    """Log missing emails or attachments to a separate file"""
+    missing_log_file = LOGS_DIR / f"missing_emails_attachments_{datetime.now().strftime('%Y%m%d')}.txt"
+    
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    log_entry = f"[{timestamp}] MISSING: {reason}\n"
+    log_entry += f"  Date: {date_str}\n"
+    log_entry += f"  Sender: {sender}\n"
+    log_entry += f"  Subject: {email_subject}\n"
+    log_entry += f"  Reason: {reason}\n"
+    log_entry += "-" * 80 + "\n"
+    
+    with open(missing_log_file, 'a', encoding='utf-8') as f:
+        f.write(log_entry)
 
 EXCLUDED_SENDERS = [  # suppliers marked as read after download
     "info@wwps.co",
@@ -185,12 +236,17 @@ def download_email_attachments(email_message, base_folder_path):
     attachments_downloaded = 0
     supplier_name = "unknown"
     
+    # Extract email details for logging
+    email_subject = email_message.get('Subject', 'No Subject')
+    sender = email.utils.parseaddr(email_message.get('From', ''))[1]
+    date_header = email_message.get('Date', '')
+    
     try:
         # Enhanced supplier detection with fallback
         try:
-            logger.info(f"Processing email with Subject: '{email_message.get('Subject', 'No Subject')}'")
+            logger.info(f"Processing email with Subject: '{email_subject}'")
             supplier_name = get_supplier(
-                email_message.get('Subject', ''),
+                email_subject,
                 email_message.get('Return-Path', '')
             )
             logger.info(f"Detected supplier: {supplier_name}")
@@ -199,7 +255,6 @@ def download_email_attachments(email_message, base_folder_path):
             supplier_name = "unknown_supplier"
 
         # Date handling with comprehensive fallback
-        date_header = email_message.get('Date', '')
         if not date_header:
             logger.warning("No Date header in email, using current time")
             date_time_obj = datetime.now(TIMEZONE)
@@ -209,6 +264,13 @@ def download_email_attachments(email_message, base_folder_path):
             except Exception as date_error:
                 logger.error(f"Date parsing failed: {str(date_error)}, using current time")
                 date_time_obj = datetime.now(TIMEZONE)
+
+        date_str = date_time_obj.strftime('%Y-%m-%d')
+        
+        # Log detailed email information
+        logger.info(f"  {date_str} | {sender}")
+        logger.info(f"    Subject: {email_subject}")
+        logger.info(f"    Supplier: {supplier_name} | Type: {'invoice' if any(kw in email_subject.lower() for kw in ['invoice', 'invoices']) else 'other'}")
 
         # Enhanced directory structure creation
         try:
@@ -220,9 +282,11 @@ def download_email_attachments(email_message, base_folder_path):
             logger.debug(f"Created directory structure: {inner_dir_path}")
         except OSError as dir_error:
             logger.error(f"Directory creation failed: {str(dir_error)}")
+            log_missing_email_or_attachment(email_subject, sender, f"Directory creation failed: {str(dir_error)}", date_str)
             return False
 
         # CRITICAL FIX: Enhanced attachment detection logic
+        attachment_details = []
         for part_idx, part in enumerate(email_message.walk(), 1):
             try:
                 # Check multiple conditions for attachments
@@ -257,12 +321,16 @@ def download_email_attachments(email_message, base_folder_path):
                             filename = f"attachment_{part_idx}_{date_time_obj.strftime('%Y%m%d_%H%M%S')}.pdf"
                         else:
                             logger.warning(f"Attachment {part_idx} has no filename and unknown type: {content_type}")
+                            attachment_details.append(f"      - UNNAMED ({content_type}) - PDF: False [SKIPPED]")
                             continue
+                    
+                    is_pdf = filename.lower().endswith(('.pdf', '.PDF'))
+                    attachment_details.append(f"      - {filename} ({content_type}) - PDF: {is_pdf}")
                     
                     logger.info(f"Found attachment {attachments_found}: {filename} (Type: {content_type})")
                     
                     # Only process PDF files
-                    if not filename.lower().endswith(('.pdf', '.PDF')):
+                    if not is_pdf:
                         logger.debug(f"Skipping non-PDF attachment: {filename}")
                         continue
                     
@@ -273,25 +341,40 @@ def download_email_attachments(email_message, base_folder_path):
                         logger.info(f"Successfully saved: {filename} => {filepath}")
                     else:
                         logger.error(f"Failed to download after retries: {filename}")
+                        log_missing_email_or_attachment(email_subject, sender, f"Failed to download attachment: {filename}", date_str)
                 
             except Exception as part_error:
                 logger.error(f"Error processing part {part_idx}: {str(part_error)}\n{traceback.format_exc()}")
                 continue
 
+        # Log attachment summary
+        if attachment_details:
+            logger.info(f"    Attachments: {attachments_found} total, {attachments_downloaded} PDFs")
+            for detail in attachment_details:
+                logger.info(detail)
+        else:
+            logger.info(f"    Attachments: 0 total, 0 PDFs")
+            log_missing_email_or_attachment(email_subject, sender, "No attachments found in email", date_str)
+
         # Log final results
         logger.info(f"Email processing complete - Found: {attachments_found} attachments, Downloaded: {attachments_downloaded} PDFs")
+        logger.info("")  # Add blank line for readability
         
         # Return success status
         return attachments_downloaded > 0
 
     except Exception as e:
         logger.error(f"Error in download_email_attachments: {str(e)}\n{traceback.format_exc()}")
+        log_missing_email_or_attachment(email_subject, sender, f"Email processing error: {str(e)}", date_str if 'date_str' in locals() else 'unknown')
         return False
 
 
 def email_download_background_task():
     """Invoice download background task - runs continuously without interruption"""
-    logger.debug("Starting invoice download background task")
+    logger.info("="*80)
+    logger.info("STARTING REGULAR INVOICE DOWNLOADER")
+    logger.info("="*80)
+    logger.info(f"Session started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     mail = None
     try:
@@ -313,9 +396,11 @@ def email_download_background_task():
 
             if not filtered_ids:
                 logger.info("No new emails to process")
+                logger.info("="*80)
                 return
 
             logger.info(f"Processing {len(filtered_ids)} emails")
+            logger.info("-" * 80)
             successfully_processed_emails = []
             
             for idx, e_id in enumerate(filtered_ids, 1):
@@ -347,6 +432,8 @@ def email_download_background_task():
                     logger.error(f"Failed to process email UID {e_id}: {str(email_error)}\n{traceback.format_exc()}")
                     continue
 
+            logger.info("-" * 80)
+            
             # CRITICAL FIX: Only mark emails as read after successful processing
             logger.info(f"Marking {len(successfully_processed_emails)} successfully processed emails as read")
             for e_id in successfully_processed_emails:
@@ -402,3 +489,7 @@ def email_download_background_task():
                 mail.logout()
         except Exception as logout_error:
             logger.error(f"Error closing connection: {str(logout_error)}")
+        
+        logger.info("="*80)
+        logger.info("REGULAR INVOICE DOWNLOADER COMPLETED")
+        logger.info("="*80)
