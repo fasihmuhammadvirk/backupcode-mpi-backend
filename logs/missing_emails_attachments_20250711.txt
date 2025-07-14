@@ -1,0 +1,894 @@
+[2025-07-11 05:23:25] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 05:23:25] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 05:46:02] MISSING: No attachments found in email
+  Date: 2025-07-07
+  Sender: billing@mpiplumbingcorp.com
+  Subject: Invoices to be reviewed
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 05:46:03] MISSING: No attachments found in email
+  Date: 2025-07-07
+  Sender: billing@mpiplumbingcorp.com
+  Subject: ORDERS ONLY WITH PO #Y....
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 06:03:11] MISSING: No attachments found in email
+  Date: 2025-07-01
+  Sender: billing@mpiplumbingcorp.com
+  Subject: To create for the current month a new credit & transfer memo sheet.
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 06:10:14] MISSING: No attachments found in email
+  Date: 2025-06-30
+  Sender: billing@mpiplumbingcorp.com
+  Subject: ORDERS ONLY WITH PO #Y....
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 12:07:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 12:12:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 12:17:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 12:22:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 12:27:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 12:32:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 12:37:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 12:42:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 12:47:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 12:52:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 12:57:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 13:02:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 13:07:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 13:12:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 13:17:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 13:22:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 13:27:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 13:32:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 13:37:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 13:42:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 13:47:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 13:52:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 13:57:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 14:02:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 14:07:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 14:12:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 14:17:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 14:22:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 14:27:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 14:32:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 14:37:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 14:42:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 14:48:07] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 14:52:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 14:57:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 15:02:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 15:07:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 15:12:57] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 15:17:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 15:22:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 15:27:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 15:32:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 15:37:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 15:42:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 15:47:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 15:52:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 15:57:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 16:03:13] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 16:08:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 16:13:08] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 16:18:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 16:23:03] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 16:28:04] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 16:33:00] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 16:38:00] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 16:43:00] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 16:47:59] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 16:52:56] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 16:58:03] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 17:02:58] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 17:08:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 17:12:58] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 17:18:00] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 17:22:58] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 17:28:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 17:32:59] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 17:37:59] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 17:43:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 17:48:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 17:53:00] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 17:57:59] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 18:03:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 18:07:58] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 18:12:58] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 18:18:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 18:23:02] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 18:27:59] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 18:33:03] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 18:37:57] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 18:42:58] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 18:48:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 18:52:59] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 18:58:00] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 19:02:57] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 19:07:58] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 19:13:00] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 19:18:03] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 19:23:02] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 19:28:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 19:33:00] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 19:38:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 19:42:58] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 19:48:03] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 19:53:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 19:58:02] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 20:02:58] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 20:08:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 20:13:07] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 20:18:00] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 20:23:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 20:28:02] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 20:32:59] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 20:38:00] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 20:42:59] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 20:48:00] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 20:53:03] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 20:58:00] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 21:02:59] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 21:08:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 21:12:59] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 21:17:58] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 21:23:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 21:28:00] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 21:33:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 21:37:59] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 21:42:58] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 21:48:00] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 21:52:58] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 21:57:58] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 22:03:03] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 22:08:02] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 22:13:02] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 22:18:02] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 22:23:00] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 22:27:59] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 22:33:00] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 22:37:59] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 22:43:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 22:48:02] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 22:53:02] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 22:57:58] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 23:03:03] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 23:08:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 23:12:59] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 23:18:02] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 23:23:02] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 23:28:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 23:33:00] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 23:37:58] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 23:42:58] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 23:48:01] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 23:53:02] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
+[2025-07-11 23:57:59] MISSING: No attachments found in email
+  Date: 2025-07-10
+  Sender: billing@sparkleening.com
+  Subject: Re: Open Balance - MPI Plumbing
+  Reason: No attachments found in email
+--------------------------------------------------------------------------------
