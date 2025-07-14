@@ -41,29 +41,114 @@ class TemporaryMappingExtractor:
 
     def detect_temporary_mapping_section(self, df: pd.DataFrame) -> Optional[int]:
         """
-        Detect the temporary mapping section in a DataFrame.
+        Detect the temporary mapping section in a DataFrame based on exact mapping sheet structure.
         
-        Criteria:
-        - Any of the first 10 rows must contain headers: 'Original Item' and 'Original Description'
+        Criteria for temporary mappings (based on analysis):
+        - First two rows (0 and 1) are empty/NaN
+        - Row 2 contains headers "Original Item" and "Original Description"
+        - Data starts from row 3 onwards
+        - Always appear as pairs of adjacent columns
         
         Args:
             df: DataFrame to check for temporary mapping section
         Returns:
             Starting row index (0-based) if temporary mapping section found, None otherwise
         """
-        max_scan_rows = min(10, len(df))
+        if len(df) < 3:
+            return None
+        
+        # Check for the exact pattern: empty rows 0-1, headers in row 2
+        try:
+            # Look for columns where first two rows are empty and row 2 has the right headers
+            for col_idx in range(len(df.columns) - 1):  # Need at least 2 adjacent columns
+                # Check current column
+                row_0_empty = pd.isna(df.iloc[0, col_idx])
+                row_1_empty = pd.isna(df.iloc[1, col_idx])
+                row_2_val = str(df.iloc[2, col_idx]).strip().lower() if pd.notna(df.iloc[2, col_idx]) else ""
+                
+                # Check next column
+                next_row_0_empty = pd.isna(df.iloc[0, col_idx + 1])
+                next_row_1_empty = pd.isna(df.iloc[1, col_idx + 1])
+                next_row_2_val = str(df.iloc[2, col_idx + 1]).strip().lower() if pd.notna(df.iloc[2, col_idx + 1]) else ""
+                
+                # Check for exact pattern
+                if (row_0_empty and row_1_empty and 
+                    ("original" in row_2_val and "item" in row_2_val) and
+                    next_row_0_empty and next_row_1_empty and
+                    ("original" in next_row_2_val and "description" in next_row_2_val)):
+                    
+                    self.logger.info(f"Temporary mapping section detected at columns {col_idx}-{col_idx+1}, row 2")
+                    return 2  # Headers are in row 2, data starts from row 3
+                    
+        except Exception as e:
+            self.logger.error(f"Error detecting temporary mapping section: {str(e)}")
+        
+        # Fallback to alternative detection methods
+        return self._detect_alternative_temporary_section(df)
+
+    def _detect_alternative_temporary_section(self, df: pd.DataFrame) -> Optional[int]:
+        """
+        Detect temporary mapping sections using alternative header patterns.
+        
+        Args:
+            df: DataFrame to check for temporary mapping section
+        Returns:
+            Starting row index (0-based) if temporary mapping section found, None otherwise
+        """
+        max_scan_rows = min(20, len(df))
+        
+        # Alternative patterns for temporary mapping headers
+        patterns = [
+            # Pattern 1: "Item" and "Description"
+            (["item", "description"], 2),
+            # Pattern 2: "Code" and "Description" 
+            (["code", "description"], 2),
+            # Pattern 3: "Original" and "Description"
+            (["original", "description"], 2),
+            # Pattern 4: Single column with "Item" or "Code"
+            (["item"], 1),
+            (["code"], 1),
+        ]
+        
         for row_idx in range(max_scan_rows):
             try:
                 row_values = [str(val).strip().lower() if not pd.isna(val) else "" for val in df.iloc[row_idx]]
-                has_original_item = any("original item" in val for val in row_values)
-                has_original_description = any("original description" in val for val in row_values)
-                if has_original_item and has_original_description:
-                    self.logger.info(f"Temporary mapping section detected starting at row {row_idx+1}")
-                    return row_idx
+                
+                for pattern, min_columns in patterns:
+                    matches = sum(1 for val in row_values if any(p in val for p in pattern))
+                    if matches >= min_columns:
+                        # Additional check: ensure this row has some data in subsequent rows
+                        if self._has_data_in_subsequent_rows(df, row_idx):
+                            self.logger.info(f"Alternative temporary mapping section detected starting at row {row_idx+1} with pattern: {pattern}")
+                            return row_idx
+                            
             except Exception as e:
-                self.logger.error(f"Error scanning row {row_idx} for header: {str(e)}")
+                self.logger.error(f"Error scanning row {row_idx} for alternative headers: {str(e)}")
                 continue
+        
         return None
+
+    def _has_data_in_subsequent_rows(self, df: pd.DataFrame, header_row: int) -> bool:
+        """
+        Check if there's actual data in the rows following the header row.
+        
+        Args:
+            df: DataFrame to check
+            header_row: Index of the header row
+            
+        Returns:
+            True if there's data in subsequent rows
+        """
+        # Check next 5 rows for any non-empty data
+        for row_idx in range(header_row + 1, min(header_row + 6, len(df))):
+            try:
+                row = df.iloc[row_idx]
+                for cell in row:
+                    if pd.notna(cell) and str(cell).strip():
+                        return True
+            except Exception:
+                continue
+        return False
 
     def clean_item_suffix(self, item: str) -> str:
         """
@@ -100,21 +185,33 @@ class TemporaryMappingExtractor:
             original_item_col = None
             original_description_col = None
             
+            # FIXED: More flexible header detection
             for i, header in enumerate(headers):
                 header_lower = header.lower()
-                if "original item" in header_lower:
+                if "original item" in header_lower or "item" in header_lower:
                     original_item_col = i
-                elif "original description" in header_lower:
+                elif "original description" in header_lower or "description" in header_lower:
                     original_description_col = i
             
-            if original_item_col is None or original_description_col is None:
-                self.logger.warning(f"Required headers not found in sheet: {sheet_name}")
+            # FIXED: If we only found one column, try to infer the other
+            if original_item_col is not None and original_description_col is None:
+                # Look for description in adjacent columns
+                for i in range(max(0, original_item_col - 2), min(len(headers), original_item_col + 3)):
+                    if i != original_item_col:
+                        header_lower = headers[i].lower()
+                        if "description" in header_lower or "desc" in header_lower:
+                            original_description_col = i
+                            break
+            
+            if original_item_col is None:
+                self.logger.warning(f"Required item header not found in sheet: {sheet_name}")
                 return []
             
             # Extract data rows (start from the row after headers)
             data_start_row = header_row_idx + 1
             extracted_mappings = []
             
+            # FIXED: Process more rows to catch all data
             for row_idx in range(data_start_row, len(df)):
                 try:
                     row_data = df.iloc[row_idx]
@@ -128,15 +225,15 @@ class TemporaryMappingExtractor:
                         # Clean suffix from original_item
                         original_item = self.clean_item_suffix(original_item)
                     
-                    if original_description_col < len(row_data):
+                    if original_description_col is not None and original_description_col < len(row_data):
                         original_description = str(row_data.iloc[original_description_col]).strip() if not pd.isna(row_data.iloc[original_description_col]) else ""
                     
-                    # Skip empty rows
-                    if not original_item and not original_description:
+                    # FIXED: More lenient validation - accept items with just item code
+                    if not original_item:
                         continue
                     
-                    # Skip if original_item is empty (required field)
-                    if not original_item:
+                    # Skip if it's clearly a header row
+                    if any(term in original_item.lower() for term in ["item", "code", "description", "header", "total"]):
                         continue
                     
                     mapping_data = {

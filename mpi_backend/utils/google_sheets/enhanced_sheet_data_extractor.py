@@ -118,8 +118,9 @@ class EnhancedGoogleSheetDataExtractor:
         
         # Set default skip_sheets if None is provided
         self.skip_sheets = skip_sheets or [
-            "(AB, ALL SYSTEMS)", 
-            "(AC, ITEMS WITHOUT TEMPORARY GROUP NAME)"
+            "(AB, ALL SYSTEMS)",
+            "(AC, ITEMS WITHOUT TEMPORARY GROUP NAME)",
+            "(Z, ADDITIONAL FEES)"
         ]
         
         # Set fuzzy matching threshold
@@ -163,14 +164,24 @@ class EnhancedGoogleSheetDataExtractor:
             # Get individual words from supplier name
             words = self._extract_meaningful_words(supplier)
             
-            # Save key terms for matching
-            info["key_terms"] = words + [acronym]
+            # Start with the full supplier name and individual words
+            key_terms = [supplier.lower()] + words + [acronym]
             
             # Add specific known variations for some suppliers
             self._add_supplier_specific_terms(supplier, info)
-                
-            # Make all terms lowercase for case-insensitive matching
-            info["key_terms"] = [term.lower() for term in info["key_terms"]]
+            key_terms.extend(info.get("additional_terms", []))
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_terms = []
+            for term in key_terms:
+                term_lower = term.lower()
+                if term_lower not in seen:
+                    seen.add(term_lower)
+                    unique_terms.append(term_lower)
+            
+            # Save key terms for matching
+            info["key_terms"] = unique_terms
             logger.debug(f"Key terms for {supplier}: {info['key_terms']}")
 
     def _create_acronym(self, text: str) -> str:
@@ -189,12 +200,17 @@ class EnhancedGoogleSheetDataExtractor:
 
     def _add_supplier_specific_terms(self, supplier: str, info: Dict[str, Any]):
         """Add supplier-specific known variations."""
+        additional_terms = []
+        
         if "BMW" in supplier:
-            info["key_terms"].extend(["bmw", "plumbing", "supplies"])
+            additional_terms.extend(["bmw", "plumbing", "supplies"])
         elif "World Wide" in supplier:
-            info["key_terms"].extend(["world", "wide", "wwp"])
+            additional_terms.extend(["world", "wide", "wwp"])
         elif "Y & S" in supplier:
-            info["key_terms"].extend(["y&s", "ys", "plumbing", "supply"])
+            additional_terms.extend(["y&s", "ys", "plumbing", "supply"])
+        
+        # Store additional terms for later use
+        info["additional_terms"] = additional_terms
 
     def _extract_clean_sheet_name(self, sheet_title: str) -> str:
         """
@@ -274,7 +290,7 @@ class EnhancedGoogleSheetDataExtractor:
 
     def match_supplier(self, col_name: str) -> Tuple[str, int, float]:
         """
-        Match a column name to a supplier using fuzzy matching.
+        Match a column name to a supplier using fuzzy matching and keyword matching.
         
         Args:
             col_name: Column name to match
@@ -287,11 +303,46 @@ class EnhancedGoogleSheetDataExtractor:
         best_score = 0
         
         for supplier, info in self.supplier_mapping.items():
+            # Check against all key terms
             for term in info["key_terms"]:
+                # Try fuzzy matching
                 score = fuzz.ratio(col_name_lower, term)
                 if score > best_score and score >= self.fuzzy_threshold:
                     best_score = score
                     best_match = supplier
+                
+                # Also try partial matching for multi-word combinations
+                if term in col_name_lower or col_name_lower in term:
+                    partial_score = 85 + (fuzz.ratio(col_name_lower, term) * 0.15)
+                    if partial_score > best_score:
+                        best_score = partial_score
+                        best_match = supplier
+            
+            # Additional check: if column contains key supplier identifiers
+            supplier_keywords = {
+                "BMW Plumbing Supplies": ["bmw"],
+                "World Wide Plumbing": ["wwps", "world wide", "www"],
+                "Y & S Plumbing Supply": ["y&s", "ys"],
+                "Supreme Plumbing Supply": ["supreme"],
+                "Pyramid Plumbing": ["pyramid"],
+                "Park Plumbing Supply": ["park"],
+                "Gotham Plumbing Supply": ["gotham"],
+                "Flow Mark Plumbing Supply": ["flow", "flowmark"],
+                "FW Webb Plumbing Supply": ["webb"],
+                "Plumbing Exchange": ["exchange"],
+                "AF Supply": ["af supply", "af"],
+                "Lion Hvac Supplies": ["lion"],
+                "ABC Opus Services": ["abc"],
+                "Bruce Ferguson": ["ferguson"]
+            }
+            
+            if supplier in supplier_keywords:
+                for keyword in supplier_keywords[supplier]:
+                    if keyword in col_name_lower:
+                        keyword_score = 90
+                        if keyword_score > best_score:
+                            best_score = keyword_score
+                            best_match = supplier
         
         if best_match:
             return best_match, self.supplier_ids[best_match], best_score
@@ -304,10 +355,15 @@ class EnhancedGoogleSheetDataExtractor:
         df_full: pd.DataFrame
     ) -> Dict[str, List[int]]:
         """
-        Detect supplier columns in the DataFrame.
+        Detect supplier columns in the DataFrame based on exact mapping sheet structure.
+        
+        Supplier columns have:
+        - Row 0: Supplier name (e.g., "WWPS", "BMW", "Y&S", "SUPREME") or empty
+        - Row 1: Specific identifier (e.g., "WWPS1", "WWPS2", "BMW1", "BMW2")
+        - Data starts from row 3
         
         Args:
-            df_head: First few rows of the DataFrame
+            df_head: First few rows of the DataFrame (not used in new logic)
             df_full: Full DataFrame
             
         Returns:
@@ -315,30 +371,116 @@ class EnhancedGoogleSheetDataExtractor:
         """
         supplier_columns = {}
         
-        for col_idx, col_name in enumerate(df_head.columns):
+        if len(df_full) < 3:
+            logger.warning("DataFrame has less than 3 rows, cannot detect supplier columns")
+            return supplier_columns
+        
+        # Check each column for supplier pattern
+        for col_idx in range(len(df_full.columns)):
+            try:
+                # Get values from first two rows
+                row_0_val = df_full.iloc[0, col_idx] if len(df_full) > 0 else None
+                row_1_val = df_full.iloc[1, col_idx] if len(df_full) > 1 else None
+                
+                # Convert to strings, handling NaN values
+                row_0_str = str(row_0_val).strip() if pd.notna(row_0_val) else ""
+                row_1_str = str(row_1_val).strip() if pd.notna(row_1_val) else ""
+                
+                # Skip if both rows are empty
+                if not row_0_str and not row_1_str:
+                    continue
+                
+                # Combine both rows for matching
+                combined = f"{row_0_str} {row_1_str}".strip()
+                
+                # Check against supplier patterns
+                supplier_name, supplier_id, confidence = self.match_supplier(combined)
+                
+                if confidence >= self.fuzzy_threshold and supplier_id > 0:
+                    # Additional validation: check if this column has actual supplier data
+                    if self._validate_supplier_column_data(df_full, col_idx):
+                        if supplier_name not in supplier_columns:
+                            supplier_columns[supplier_name] = []
+                        supplier_columns[supplier_name].append(col_idx)
+                        
+                        logger.debug(
+                            f"Detected supplier column: Col {col_idx} -> {supplier_name} "
+                            f"(Row 0: '{row_0_str}', Row 1: '{row_1_str}', confidence: {confidence})"
+                        )
+                
+            except (IndexError, KeyError) as e:
+                logger.debug(f"Error processing column {col_idx}: {e}")
+                continue
+        
+        # If no supplier columns detected with strict matching, try lenient approach
+        if not supplier_columns:
+            logger.warning("No supplier columns detected with strict matching, trying lenient approach")
+            supplier_columns = self._detect_supplier_columns_lenient(df_full)
+        
+        return supplier_columns
+
+    def _detect_supplier_columns_lenient(self, df_full: pd.DataFrame) -> Dict[str, List[int]]:
+        """
+        More lenient supplier column detection for cases where strict matching fails.
+        
+        Args:
+            df_full: Full DataFrame
+            
+        Returns:
+            Dictionary mapping supplier names to column indices
+        """
+        supplier_columns = {}
+        
+        # Lower the threshold for lenient detection
+        lenient_threshold = max(50, self.fuzzy_threshold - 25)
+        
+        for col_idx, col_name in enumerate(df_full.columns):
             supplier_name, supplier_id, confidence = self.match_supplier(str(col_name))
             
-            if confidence >= self.fuzzy_threshold and supplier_id > 0:
-                # Validate that this column actually contains supplier data
-                if self._validate_first_two_rows_have_supplier_data(df_full, col_idx):
+            if confidence >= lenient_threshold and supplier_id > 0:
+                # More lenient validation
+                if self._validate_column_has_data(df_full, col_idx):
                     if supplier_name not in supplier_columns:
                         supplier_columns[supplier_name] = []
                     supplier_columns[supplier_name].append(col_idx)
                     
                     logger.debug(
-                        f"Detected supplier column: {col_name} -> {supplier_name} "
+                        f"Lenient detection: {col_name} -> {supplier_name} "
                         f"(confidence: {confidence})"
                     )
         
         return supplier_columns
 
-    def _validate_first_two_rows_have_supplier_data(
-        self, 
-        df_full: pd.DataFrame, 
-        col_idx: int
-    ) -> bool:
+    def _validate_column_has_data(self, df_full: pd.DataFrame, col_idx: int) -> bool:
         """
-        Validate that a column contains actual supplier data in the first few rows.
+        Simple validation that a column has some data.
+        
+        Args:
+            df_full: Full DataFrame
+            col_idx: Column index to validate
+            
+        Returns:
+            True if column has any data
+        """
+        if col_idx >= len(df_full.columns):
+            return False
+        
+        # Check first 10 rows for any non-empty data
+        for row_idx in range(min(10, len(df_full))):
+            try:
+                cell_value = df_full.iloc[row_idx, col_idx]
+                if pd.notna(cell_value):
+                    cell_str = str(cell_value).strip()
+                    if cell_str and len(cell_str) >= 1:
+                        return True
+            except (IndexError, KeyError):
+                continue
+        
+        return False
+
+    def _validate_supplier_column_data(self, df_full: pd.DataFrame, col_idx: int) -> bool:
+        """
+        Validate that a supplier column contains actual supplier item data.
         
         Args:
             df_full: Full DataFrame
@@ -350,8 +492,9 @@ class EnhancedGoogleSheetDataExtractor:
         if col_idx >= len(df_full.columns):
             return False
         
-        # Check first few rows for actual data
-        for row_idx in range(min(5, len(df_full))):
+        # Check for actual supplier data starting from row 3 (where data should begin)
+        data_found = False
+        for row_idx in range(3, min(10, len(df_full))):  # Check first 7 data rows
             try:
                 cell_value = df_full.iloc[row_idx, col_idx]
                 if pd.notna(cell_value):
@@ -359,12 +502,13 @@ class EnhancedGoogleSheetDataExtractor:
                     if (cell_str and 
                         len(cell_str) >= 2 and 
                         not any(term in cell_str.lower() for term in 
-                               ["item", "code", "description", "supplier", "header"])):
-                        return True
+                               ["item", "code", "description", "supplier", "header", "original"])):
+                        data_found = True
+                        break
             except (IndexError, KeyError):
                 continue
         
-        return False
+        return data_found
 
     def process_sheet(self, sheet_title: str, gid: str) -> List[Dict[str, Any]]:
         """
@@ -392,12 +536,16 @@ class EnhancedGoogleSheetDataExtractor:
                 logger.debug(f"Sheet is empty: {sheet_title}")
                 return []
             
+            # FIXED: Log sheet dimensions for debugging
+            logger.info(f"Processing sheet '{sheet_title}': {len(df)} rows, {len(df.columns)} columns")
+            
             # Detect supplier columns
             supplier_columns = self.detect_supplier_columns(df.head(), df)
             
             if not supplier_columns:
-                logger.debug(f"No supplier columns detected in sheet: {sheet_title}")
-                return []
+                logger.warning(f"No supplier columns detected in sheet: {sheet_title}")
+                # FIXED: Try to extract any data even without supplier columns
+                return self._extract_generic_mappings(df, sheet_title)
             
             # Process the sheet data
             extracted_items = self._process_dataframe_chunk(
@@ -413,6 +561,67 @@ class EnhancedGoogleSheetDataExtractor:
         except Exception as e:
             logger.error(f"Error processing sheet {sheet_title}: {str(e)}")
             return []
+
+    def _extract_generic_mappings(self, df: pd.DataFrame, sheet_title: str) -> List[Dict[str, Any]]:
+        """
+        Extract generic mappings when no supplier columns are detected.
+        
+        Args:
+            df: DataFrame to process
+            sheet_title: Name of the sheet
+            
+        Returns:
+            List of extracted mappings
+        """
+        extracted_items = []
+        
+        # Try to extract any meaningful data from the sheet
+        for row_idx in range(len(df)):
+            try:
+                row = df.iloc[row_idx]
+                
+                # Look for any non-empty cells that might be item codes
+                for col_idx in range(min(5, len(row))):  # Check first 5 columns
+                    cell_value = row.iloc[col_idx]
+                    if pd.notna(cell_value):
+                        cell_str = str(cell_value).strip()
+                        if (cell_str and len(cell_str) >= 3 and 
+                            not any(term in cell_str.lower() for term in 
+                                   ["item", "code", "description", "supplier", "header", "total"])):
+                            
+                            # Create a generic mapping
+                            item_mapping = {
+                                "mpi_code": cell_str,
+                                "description": "",
+                                "size": "",
+                                "supplier_name": "Unknown",
+                                "supplier_id": 0,
+                                "supplier_item_ids": cell_str,
+                                "google_sheet_name": self._extract_clean_sheet_name(sheet_title),
+                                "row_index": row_idx + 1,
+                                "supplier_column_name": f"Column_{col_idx}",
+                                "original_supplier_value": cell_str
+                            }
+                            
+                            # Validate and categorize the mapping
+                            validated_mapping = self._validate_and_categorize_mapping(item_mapping)
+                            
+                            if validated_mapping:
+                                extracted_items.append(validated_mapping)
+                                self.extraction_stats["total_extracted"] += 1
+                                if is_temporary_mapping(validated_mapping.get("mpi_code"), validated_mapping.get("description")):
+                                    self.extraction_stats["temporary_mappings"] += 1
+                                else:
+                                    self.extraction_stats["invalid_mappings"] += 1
+                            
+                            break  # Only extract one item per row
+                
+            except Exception as e:
+                logger.error(f"Error processing row {row_idx} in generic extraction: {str(e)}")
+                continue
+        
+        logger.info(f"Extracted {len(extracted_items)} generic items from sheet: {sheet_title}")
+        return extracted_items
 
     def _get_sheet_dataframe(self, gid: str) -> Optional[pd.DataFrame]:
         """Get DataFrame from Google Sheet."""
@@ -461,8 +670,10 @@ class EnhancedGoogleSheetDataExtractor:
         """
         extracted_items = []
         
-        # Process each row
-        for row_idx in range(start_row, len(df)):
+        # Process data rows starting from row 3 (based on mapping sheet structure)
+        # Rows 0-1: Supplier headers, Row 2: Additional headers, Data starts from row 3
+        actual_start_row = max(3, start_row)
+        for row_idx in range(actual_start_row, len(df)):
             try:
                 row = df.iloc[row_idx]
                 actual_row = row_idx + 1  # 1-based row number
@@ -472,57 +683,17 @@ class EnhancedGoogleSheetDataExtractor:
                 description = ""
                 size = ""
                 
-                # Try to find MPI code in column 1 (most common location)
-                if len(row) > 1:
-                    mpi_code_val = row.iloc[1]
-                    if not pd.isna(mpi_code_val):
-                        mpi_code = str(mpi_code_val).strip()
-                        
-                        # Get description from column 2
-                        if len(row) > 2:
-                            desc_val = row.iloc[2]
-                            if not pd.isna(desc_val):
-                                description = str(desc_val).strip()
-                        
-                        # Get size from column 3
-                        if len(row) > 3:
-                            size_val = row.iloc[3]
-                            if not pd.isna(size_val):
-                                size = str(size_val).strip()
-                
-                # Fallback: If no MPI code in column 1, check column 0
-                if not mpi_code and len(row) > 0:
-                    mpi_code_val = row.iloc[0]
-                    if not pd.isna(mpi_code_val):
-                        mpi_code_str = str(mpi_code_val).strip()
-                        # Check if this looks like an MPI code
-                        if (mpi_code_str and len(mpi_code_str) > 2 and 
-                            not mpi_code_str.lower() in ['item code', 'mpi', 'code', 'item', 'description']):
-                            mpi_code = mpi_code_str
-                            
-                            # Shift description and size columns
-                            if len(row) > 1:
-                                desc_val = row.iloc[1]
-                                if not pd.isna(desc_val):
-                                    description = str(desc_val).strip()
-                            if len(row) > 2:
-                                size_val = row.iloc[2]
-                                if not pd.isna(size_val):
-                                    size = str(size_val).strip()
+                # FIXED: More flexible MPI code detection
+                mpi_code = self._extract_mpi_code(row)
+                description = self._extract_description(row)
+                size = self._extract_size(row)
                 
                 # Skip row if no MPI code found
                 if not mpi_code:
                     continue
                     
                 # Skip header rows
-                header_terms = ["item code", "mpi", "code", "item", "description", "size", "supplier"]
-                mpi_lower = mpi_code.lower()
-                
-                if any(term in mpi_lower for term in header_terms) or (
-                    description and any(
-                        term in description.lower() for term in header_terms
-                    )
-                ):
+                if self._is_header_row(mpi_code, description):
                     logger.debug(f"Skipping header row {actual_row}: {mpi_code}")
                     continue
                 
@@ -598,19 +769,21 @@ class EnhancedGoogleSheetDataExtractor:
                         if validated_mapping:
                             extracted_items.append(validated_mapping)
                             
-                            # Update statistics
+                            # Update statistics based on validation
                             self.extraction_stats["total_extracted"] += 1
-                            if validated_mapping.get("mapping_type") == "permanent":
-                                self.extraction_stats["permanent_mappings"] += 1
-                            elif validated_mapping.get("mapping_type") == "temporary":
+                            if is_temporary_mapping(validated_mapping.get("mpi_code"), validated_mapping.get("description")):
                                 self.extraction_stats["temporary_mappings"] += 1
                             else:
-                                self.extraction_stats["invalid_mappings"] += 1
+                                is_valid, validation_errors = validate_mapping_for_permanent_storage(validated_mapping)
+                                if is_valid:
+                                    self.extraction_stats["permanent_mappings"] += 1
+                                else:
+                                    self.extraction_stats["invalid_mappings"] += 1
                         
                         logger.debug(
                             f"Extracted mapping: MPI={mpi_code}, Supplier={supplier}, "
                             f"Original={supplier_value}, Cleaned={cleaned_value}, "
-                            f"Type={validated_mapping.get('mapping_type', 'unknown') if validated_mapping else 'invalid'}"
+                            f"Type={'temporary' if is_temporary_mapping(validated_mapping.get('mpi_code'), validated_mapping.get('description')) else ('permanent' if validate_mapping_for_permanent_storage(validated_mapping)[0] else 'invalid') if validated_mapping else 'invalid'}"
                         )
             
             except Exception as e:
@@ -618,6 +791,102 @@ class EnhancedGoogleSheetDataExtractor:
                 continue
         
         return extracted_items
+
+    def _extract_mpi_code(self, row) -> str:
+        """
+        Extract MPI code from a row based on exact mapping sheet structure.
+        
+        Based on analysis:
+        - MPI codes are in column 1 (index 1)
+        - Column 1 has headers "MPI" (row 0) and "Item Code" (row 1)
+        - Data starts from row 3
+        """
+        # Primary location: column 1 (where MPI codes are located)
+        if len(row) > 1:
+            mpi_code_val = row.iloc[1]
+            if not pd.isna(mpi_code_val):
+                mpi_code = str(mpi_code_val).strip()
+                # Ensure it's not a header and has reasonable length
+                if (mpi_code and len(mpi_code) >= 2 and 
+                    mpi_code.lower() not in ['mpi', 'item code', 'item', 'code', 'description']):
+                    return mpi_code
+        
+        # Fallback: check column 0 if column 1 is empty
+        if len(row) > 0:
+            mpi_code_val = row.iloc[0]
+            if not pd.isna(mpi_code_val):
+                mpi_code_str = str(mpi_code_val).strip()
+                # Check if this looks like an MPI code (not a header)
+                if (mpi_code_str and len(mpi_code_str) >= 2 and 
+                    mpi_code_str.lower() not in ['tab name', 'sheet name', 'nan', 'none']):
+                    return mpi_code_str
+        
+        # No fallback to supplier columns - return empty if MPI columns are empty
+        return ""
+
+    def _extract_description(self, row) -> str:
+        """
+        Extract description from a row based on exact mapping sheet structure.
+        
+        Based on analysis:
+        - Descriptions are in column 2 (index 2)
+        - Column 2 has header "DESCRIPTION" (row 1)
+        - Data starts from row 3
+        """
+        # Primary location: column 2 (where descriptions are located)
+        if len(row) > 2:
+            desc_val = row.iloc[2]
+            if not pd.isna(desc_val):
+                description = str(desc_val).strip()
+                if (description and len(description) > 1 and 
+                    description.lower() not in ['description', 'desc', 'item', 'code']):
+                    return description
+        
+        # Fallback: check column 3 if column 2 is empty
+        if len(row) > 3:
+            desc_val = row.iloc[3]
+            if not pd.isna(desc_val):
+                description = str(desc_val).strip()
+                if (description and len(description) > 1 and 
+                    description.lower() not in ['description', 'desc', 'item', 'code', 'size']):
+                    return description
+        
+        # No fallback to supplier columns - return empty if description columns are empty
+        return ""
+
+    def _extract_size(self, row) -> str:
+        """Extract size from a row."""
+        # Try column 3 first
+        if len(row) > 3:
+            size_val = row.iloc[3]
+            if not pd.isna(size_val):
+                size_str = str(size_val).strip()
+                if size_str and size_str.lower() not in ['size', 'dimension', 'measurement']:
+                    return size_str
+        
+        # Try column 2 if no size in column 3
+        if len(row) > 2:
+            size_val = row.iloc[2]
+            if not pd.isna(size_val):
+                size_str = str(size_val).strip()
+                if size_str and size_str.lower() not in ['size', 'dimension', 'measurement', 'description']:
+                    return size_str
+        
+        # No fallback to supplier columns - return empty if size columns are empty
+        return ""
+
+    def _is_header_row(self, mpi_code: str, description: str) -> bool:
+        """Check if a row is a header row."""
+        header_terms = ["item code", "mpi", "code", "item", "description", "size", "supplier"]
+        mpi_lower = mpi_code.lower()
+        
+        if any(term in mpi_lower for term in header_terms):
+            return True
+        
+        if description and any(term in description.lower() for term in header_terms):
+            return True
+        
+        return False
 
     def _clean_supplier_item_id(self, supplier_value: str, supplier: str) -> str:
         """
@@ -653,7 +922,7 @@ class EnhancedGoogleSheetDataExtractor:
             mapping_data: Raw mapping data
             
         Returns:
-            Validated mapping with type information, or None if invalid
+            Validated mapping with original structure, or None if invalid
         """
         try:
             # Clean the mapping data
@@ -661,34 +930,21 @@ class EnhancedGoogleSheetDataExtractor:
             
             # Check if this is a temporary mapping
             if is_temporary_mapping(cleaned_data.get("mpi_code"), cleaned_data.get("description")):
-                # This is a temporary mapping
-                return {
-                    **cleaned_data,
-                    "mapping_type": "temporary",
-                    "validation_status": "valid_temporary"
-                }
+                # This is a temporary mapping - return original structure
+                return cleaned_data
             
             # Validate for permanent storage
             is_valid, validation_errors = validate_mapping_for_permanent_storage(cleaned_data)
             
             if is_valid:
-                # This is a valid permanent mapping
-                return {
-                    **cleaned_data,
-                    "mapping_type": "permanent",
-                    "validation_status": "valid_permanent"
-                }
+                # This is a valid permanent mapping - return original structure
+                return cleaned_data
             else:
-                # This is an invalid mapping
+                # This is an invalid mapping - return original structure for consistency
                 logger.warning(
                     f"Invalid mapping detected: {cleaned_data.get('mpi_code')} - {validation_errors}"
                 )
-                return {
-                    **cleaned_data,
-                    "mapping_type": "invalid",
-                    "validation_status": "invalid",
-                    "validation_errors": validation_errors
-                }
+                return cleaned_data
                 
         except Exception as e:
             logger.error(f"Error validating mapping: {e}")
@@ -744,9 +1000,20 @@ class EnhancedGoogleSheetDataExtractor:
                 logger.error(f"Error processing sheet {sheet['title']}: {str(e)}")
         
         # Categorize items by type
-        permanent_items = [item for item in self.all_items if item.get("mapping_type") == "permanent"]
-        temporary_items = [item for item in self.all_items if item.get("mapping_type") == "temporary"]
-        invalid_items = [item for item in self.all_items if item.get("mapping_type") == "invalid"]
+        permanent_items = []
+        temporary_items = []
+        invalid_items = []
+        
+        for item in self.all_items:
+            # Determine mapping type using validation functions
+            if is_temporary_mapping(item.get("mpi_code"), item.get("description")):
+                temporary_items.append(item)
+            else:
+                is_valid, validation_errors = validate_mapping_for_permanent_storage(item)
+                if is_valid:
+                    permanent_items.append(item)
+                else:
+                    invalid_items.append(item)
         
         # Save extracted data to output file
         output_data = {
