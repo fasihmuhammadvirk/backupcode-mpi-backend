@@ -6,7 +6,7 @@ Historical Invoice Download Runner
 Simple runner script for common historical download scenarios.
 
 Usage Examples:
-    # Download all invoices from last 5 years (default)
+    # Download all invoices from 2020 till today (default)
     python scripts/run_historical_download.py
     
     # Download from specific date range
@@ -67,7 +67,7 @@ def main():
     args = parser.parse_args()
     
     # Determine date range
-    end_date = datetime(2020, 1, 1)  # Default: back to 2020
+    end_date = datetime(2020, 1, 1)  # Default: back to 2020 (downloads from 2020 till today)
     start_date = datetime.now()      # Default: today
     
     if args.start and args.end:
@@ -98,8 +98,8 @@ def main():
         print(f"Downloading invoices from last {args.days} day(s)")
         
     else:
-        # Default: last 5 years
-        print("Using default: downloading invoices from last 5 years")
+        # Default: from 2020 till today
+        print("Using default: downloading invoices from 2020 till today")
     
     if start_date <= end_date:
         print("Error: Start date must be after end date")

@@ -3,11 +3,11 @@
 Historical Invoice Downloader - Comprehensive 5-Year Recovery
 ============================================================
 
-This script downloads and processes ALL missing invoices from the last 5 years.
-It starts from the current date and works backwards day by day until 2020.
+This script downloads and processes ALL missing invoices from 2020 till today.
+It starts from the current date and works backwards day by day until 2020-01-01.
 
 Features:
-- Downloads invoices from current date back to 2020-01-01
+- Downloads invoices from current date back to 2020-01-01 (2020 till today)
 - Day-by-day processing to ensure comprehensive coverage
 - Enhanced attachment detection and retry mechanism
 - Comprehensive error handling and progress tracking
@@ -650,7 +650,7 @@ def main():
     parser.add_argument(
         '--end-date', type=str, 
         default='2020-01-01',
-        help='End date (YYYY-MM-DD, default: 2020-01-01)'
+        help='End date (YYYY-MM-DD, default: 2020-01-01 - downloads from 2020 till today)'
     )
     
     parser.add_argument(

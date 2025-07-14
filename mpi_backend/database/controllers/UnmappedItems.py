@@ -259,13 +259,16 @@ class UnmappedItemsController:
         
         # Execute query to get all matching items (within date range and supplier filters)
         all_items = query.all()
+        logger.info(f"Retrieved {len(all_items)} raw items for deduplication")
         
         # Group by supplier + cleaned item code to get unique items per supplier
         unique_items_map = {}
+        skipped_items = 0
         for item in all_items:
             # Clean the item code (remove any existing suffixes first)
             cleaned_item = clean_suffix(item.item or "")
             if not cleaned_item:
+                skipped_items += 1
                 continue
                 
             # Create a unique key combining supplier and cleaned item
@@ -276,10 +279,14 @@ class UnmappedItemsController:
                 # Add supplier suffix to the item code for display
                 item_with_suffix = self._add_supplier_suffix(cleaned_item, supplier)
                 
-                # Calculate amount based on cost and quantity
-                cost = item.cost or 0.0
-                quantity = item.qty or 0
+                # Calculate amount based on cost and quantity with validation
+                cost = float(item.cost or 0.0)
+                quantity = int(item.qty or 0)
                 amount = round(cost * quantity, 3)
+                
+                # Validate amount calculation
+                if cost < 0 or quantity < 0:
+                    logger.warning(f"Negative values found for item {cleaned_item}: cost={cost}, quantity={quantity}")
                 
                 unique_items_map[unique_key] = {
                     "original_item_id": item_with_suffix,  # Return with supplier suffix
@@ -290,17 +297,21 @@ class UnmappedItemsController:
                     "sheet_name": item.sheet_name or "",
                     "supplier": supplier
                 }
+            else:
+                # Log if we find duplicate items (this shouldn't happen with the current logic)
+                logger.debug(f"Duplicate item found but not added: {unique_key}")
         
         # Convert to list
         unique_items = list(unique_items_map.values())
+        logger.info(f"Deduplication complete: {len(unique_items)} unique items (skipped {skipped_items} empty items)")
         
-        # Apply search filter AFTER deduplication (search on original_item_id that users see)
+        # Apply search filter AFTER deduplication (search on original_item_id and description that users see)
         if search and search.strip():
             clean_search = search.strip().lower()
             unique_items = [
                 item for item in unique_items
                 if (clean_search in item["original_item_id"].lower() or
-                    clean_search in (item["mpi_description"] or "").lower())
+                    clean_search in (item["original_description"] or "").lower())
             ]
         
         # Apply ordering
@@ -338,6 +349,12 @@ class UnmappedItemsController:
         else:
             # size=0 means get all items (used by export endpoints)
             paginated_items = unique_items
+        
+        # Calculate total amount for verification
+        total_amount = sum(item.get('amount', 0) for item in paginated_items)
+        
+        # Log summary for debugging
+        logger.info(f"Pagination result: {len(paginated_items)} items, total amount: ${total_amount:,.2f}")
         
         return {
             "items": paginated_items,
