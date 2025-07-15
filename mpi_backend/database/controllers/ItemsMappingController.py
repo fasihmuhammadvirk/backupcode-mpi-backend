@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from mpi_backend.utils.quickbooks_priority import is_qb_export_active
 from mpi_backend.utils.export_utils import extract_supplier_id
 from mpi_backend.database import SessionLocal
-from mpi_backend.utils.item_utils import clean_supplier_suffix
+# Removed clean_supplier_suffix import - no longer needed with suffix standardization
 from mpi_backend.utils.mapping_validators import (
     validate_mapping_for_permanent_storage, 
     should_use_temporary_storage,
@@ -162,25 +162,8 @@ class ItemsMappingController:
                         "match_type": "exact",
                         "supplier_name": self._get_supplier_name(mapping.supplier_id)
                     })
-                else:
-                    # Try with suffix cleaning (clean database item vs clean item)
-                    cleaned_db_item = clean_supplier_suffix(
-                        clean_mapping_item, 
-                        mapping.supplier_id
-                    )
-                    
-                    if cleaned_db_item == clean_search_item:
-                        matches.append({
-                            "id": mapping.id,
-                            "supplier_id": mapping.supplier_id,
-                            "supplier_item_ids": mapping.supplier_item_ids,
-                            "cleaned_supplier_item_ids": cleaned_db_item,
-                            "mpi_code": mapping.mpi_code,
-                            "description": mapping.description,
-                            "google_sheet_name": mapping.google_sheet_name,
-                            "match_type": "cleaned",
-                            "supplier_name": self._get_supplier_name(mapping.supplier_id)
-                        })
+                # With suffix standardization, we only do exact matches
+                # No more suffix cleaning needed
             else:
                 # Direct session object
                 db = self.db_context
@@ -215,25 +198,8 @@ class ItemsMappingController:
                             "match_type": "exact",
                             "supplier_name": self._get_supplier_name(mapping.supplier_id)
                         })
-                    else:
-                        # Try with suffix cleaning (clean database item vs clean item)
-                        cleaned_db_item = clean_supplier_suffix(
-                            clean_mapping_item, 
-                            mapping.supplier_id
-                        )
-                        
-                        if cleaned_db_item == clean_search_item:
-                            matches.append({
-                                "id": mapping.id,
-                                "supplier_id": mapping.supplier_id,
-                                "supplier_item_ids": mapping.supplier_item_ids,
-                                "cleaned_supplier_item_ids": cleaned_db_item,
-                                "mpi_code": mapping.mpi_code,
-                                "description": mapping.description,
-                                "google_sheet_name": mapping.google_sheet_name,
-                                "match_type": "cleaned",
-                                "supplier_name": self._get_supplier_name(mapping.supplier_id)
-                            })
+                    # With suffix standardization, we only do exact matches
+                    # No more suffix cleaning needed
             
             total_matches = len(matches)
             
@@ -697,42 +663,22 @@ class ItemsMappingController:
                             logger.info(f"Item update (exact): {clean_invoice_item} | {old_status} -> {mapping.mpi_code}")
                         break
                     
-                    # Try with enhanced suffix cleaning for BMW and other suppliers
-                    if supplier_id:
-                        from mpi_backend.utils.item_utils import clean_supplier_suffix
+                    # With suffix standardization, we only do exact matches
+                    # No need for suffix cleaning anymore
+                    if clean_invoice_item == clean_mapping_item:
+                        old_status = item.mpi_item or "Empty"
+                        item.mpi_item = mapping.mpi_code
+                        item.mpi_description = mapping.description
+                        item.sheet_name = mapping.google_sheet_name or ""
+                        updated_count += 1
+                        matched = True
                         
-                        # Apply suffix cleaning to the mapping item
-                        cleaned_mapping_item = clean_supplier_suffix(clean_mapping_item, supplier_id)
-                        
-                        # Also try cleaning the invoice item (in case it has suffixes)
-                        cleaned_invoice_item = clean_supplier_suffix(clean_invoice_item, supplier_id)
-                        
-                        # Try multiple combinations for better matching
-                        match_combinations = [
-                            (clean_invoice_item, cleaned_mapping_item),  # Original invoice vs cleaned mapping
-                            (cleaned_invoice_item, clean_mapping_item),  # Cleaned invoice vs original mapping
-                            (cleaned_invoice_item, cleaned_mapping_item)  # Both cleaned
-                        ]
-                        
-                        for inv_item, map_item in match_combinations:
-                            if inv_item == map_item and inv_item:  # Ensure not empty
-                                old_status = item.mpi_item or "Empty"
-                                item.mpi_item = mapping.mpi_code
-                                item.mpi_description = mapping.description
-                                item.sheet_name = mapping.google_sheet_name or ""
-                                updated_count += 1
-                                matched = True
-                                
-                                if old_status.startswith("UIDI"):
-                                    logger.info(f"UIDI override (cleaned): {clean_invoice_item} ({inv_item}) == {clean_mapping_item} ({map_item}) | {old_status} -> {mapping.mpi_code}")
-                                elif old_status == "No Match":
-                                    logger.info(f"No Match override (cleaned): {clean_invoice_item} ({inv_item}) == {clean_mapping_item} ({map_item}) | No Match -> {mapping.mpi_code}")
-                                else:
-                                    logger.info(f"Item update (cleaned): {clean_invoice_item} ({inv_item}) == {clean_mapping_item} ({map_item}) | {old_status} -> {mapping.mpi_code}")
-                                break
-                        
-                        if matched:
-                            break
+                        if old_status.startswith("UIDI"):
+                            logger.info(f"UIDI override: {clean_invoice_item} == {clean_mapping_item} | {old_status} -> {mapping.mpi_code}")
+                        elif old_status == "No Match":
+                            logger.info(f"No Match override: {clean_invoice_item} == {clean_mapping_item} | No Match -> {mapping.mpi_code}")
+                        else:
+                            logger.info(f"Item update: {clean_invoice_item} == {clean_mapping_item} | {old_status} -> {mapping.mpi_code}")
                 
                 # Log when no match is found for debugging
                 if not matched:
@@ -807,7 +753,7 @@ class ItemsMappingController:
             }
             
         try:
-            from mpi_backend.utils.item_utils import clean_supplier_suffix
+            # With suffix standardization, we use direct item code comparisons
             
             db = self._get_db_session()
             return self._perform_all_mappings_update(db)
@@ -822,7 +768,7 @@ class ItemsMappingController:
     def _perform_all_mappings_update(self, db):
         """Helper method to perform the actual all mappings update"""
         try:
-            from mpi_backend.utils.item_utils import clean_supplier_suffix
+            # With suffix standardization, we use direct item code comparisons
             
             # Fetch ALL mappings from supplier table - this should apply everything in the mapping table
             # Note: We include ALL mappings because "Update All" means apply whatever is in the mapping table
@@ -880,21 +826,17 @@ class ItemsMappingController:
                         InvoiceItem.vendor.contains(supplier.supplier_name)
                     ).all()
                     
-                    # Find matches using cleaned mapping data vs clean invoice items
+                    # Find matches using direct comparison (no suffix cleaning needed)
                     matching_items = []
                     # Strip whitespace from mapping item
                     clean_mapping_item = mapping.supplier_item_ids.strip()
-                    cleaned_mapping_item = clean_supplier_suffix(clean_mapping_item, mapping.supplier_id)
                     
                     for invoice_item in all_supplier_items:
                         # Clean the invoice item by stripping whitespace
                         clean_invoice_item = invoice_item.item.strip()
                         
-                        # First try exact match (clean invoice vs clean mapping)
+                        # With suffix standardization, we only do exact matches
                         if clean_invoice_item == clean_mapping_item:
-                            matching_items.append(invoice_item)
-                        # Then try clean invoice vs cleaned mapping (suffix removed)
-                        elif clean_invoice_item == cleaned_mapping_item:
                             matching_items.append(invoice_item)
                     
                     if not matching_items:
@@ -984,21 +926,17 @@ class ItemsMappingController:
             matching_items = []
             # Strip whitespace from mapping item
             clean_mapping_item = item_number.strip()
-            cleaned_mapping_item = clean_supplier_suffix(clean_mapping_item, supplier_id)
             
             for invoice_item in all_invoice_items:
                 # Clean the invoice item by stripping whitespace
                 clean_invoice_item = invoice_item.item.strip()
                 
-                # First try exact match (clean invoice vs clean mapping)
+                # With suffix standardization, we only do exact matches
                 if clean_invoice_item == clean_mapping_item:
-                    matching_items.append(invoice_item)
-                # Then try clean invoice vs cleaned mapping (suffix removed)
-                elif clean_invoice_item == cleaned_mapping_item:
                     matching_items.append(invoice_item)
             
             if not matching_items:
-                logger.info(f"No matching invoice items found for {item_number} (cleaned: {cleaned_mapping_item})")
+                logger.info(f"No matching invoice items found for {item_number}")
                 return
                 
             # Update all matching items, prioritizing UIDI items for override

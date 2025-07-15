@@ -391,14 +391,12 @@ def get_price_difference(request: FilterRequest, db: Session = Depends(get_db),
         item_vendor_pairs = []
         
         for invoice_item in filtered_data["items"]:
-            # The item from apply_filters has suffix for display
-            suffixed_item = invoice_item.item
-            # Remove suffix to get original database item code for search
-            original_item = controller._remove_suffix_from_item_code(suffixed_item)
+            # With suffix standardization, use the item as stored in database
+            item = invoice_item.item
             vendor = invoice_item.vendor
             
-            item_id_pairs.append((suffixed_item, invoice_item.id))  # Keep suffixed for response
-            item_vendor_pairs.append((original_item, vendor))  # Use for supplier-specific comparison
+            item_id_pairs.append((item, invoice_item.id))  # Use item as stored
+            item_vendor_pairs.append((item, vendor))  # Use for supplier-specific comparison
 
         if not item_vendor_pairs:
             result = []
@@ -412,9 +410,9 @@ def get_price_difference(request: FilterRequest, db: Session = Depends(get_db),
             result = []
             for i, (item, percentage) in enumerate(price_increase):
                 if i < len(item_id_pairs):  # Safety check
-                    suffixed_item, item_id = item_id_pairs[i]
+                    item_code, item_id = item_id_pairs[i]
                     result.append({
-                        "item": suffixed_item,  # Return suffixed item for UI consistency
+                        "item": item_code,  # Return item as stored in database
                         "id": item_id,
                         "percentage_increase": percentage
                     })
@@ -568,7 +566,7 @@ def get_unmapped_items(
     Retrieve unique unmapped or temporary items with advanced filtering, search, and ordering.
 
     **Summary:**
-        Returns a paginated, de-duplicated list of invoice items based on the specified filter type, with support for search and flexible ordering. Items are grouped by supplier + cleaned item code, with supplier suffixes added for distinction (e.g., ABC-B for BMW, ABC-F for Flow Mark).
+        Returns a paginated, de-duplicated list of invoice items based on the specified filter type, with support for search and flexible ordering. Items are grouped by supplier + item code, with full item codes including supplier suffixes for distinction (e.g., ABC-B for BMW, ABC-F for Flow Mark).
 
     **Request Body:**
 
@@ -647,7 +645,7 @@ def get_unmapped_items(
 
     **Notes:**
     - Items are grouped by supplier + cleaned item code (same item from different suppliers are treated as separate items)
-    - Supplier suffixes are added to distinguish items: -B (BMW), -F (Flow Mark), -W (World Wide), etc.
+            - Full item codes with supplier suffixes are used to distinguish items: -B (BMW), -F (Flow Mark), -W (World Wide), etc.
     - Search is case-insensitive and matches both item code and description
     - Ordering supports multiple columns; default is descending by `amount` (highest amounts first)
     - Only unique items per supplier are returned in the response
@@ -915,7 +913,7 @@ def export_selected_unmapped_items(
     
     **Summary:**
         Exports specific unmapped items identified by their item IDs to an Excel file and uploads it to S3.
-        The system removes suffixes when searching for items, then includes them in the Excel output.
+        The system uses full item codes with suffixes for both searching and Excel output.
         Returns a presigned URL for downloading the file.
         
     **Request Body:**
@@ -952,7 +950,7 @@ def export_selected_unmapped_items(
     
     **Notes:**
     - Item IDs should include supplier suffixes (e.g., "ABC123-B" for BMW items)
-    - The system will remove suffixes when searching for items, then add them back for the Excel output
+            - The system uses full item codes with suffixes for both searching and Excel output
     - Only items that exist in the unmapped items list will be exported
     - If some item IDs are not found, a warning will be logged but the export will proceed with found items
     - Ordering supports multiple columns; default is descending by `amount` (highest amounts first)
@@ -976,11 +974,9 @@ def export_selected_unmapped_items(
         # Initialize controller
         controller = UnmappedItemsController(db)
         
-        # Import suffix cleaning function
-        from mpi_backend.utils.item_utils import clean_suffix
-        
-        # Clean the item IDs by removing suffixes for searching
-        cleaned_item_ids = [clean_suffix(item_id) for item_id in item_ids]
+        # With suffix standardization, we use full item codes for searching
+        # No suffix cleaning needed
+        cleaned_item_ids = item_ids
         
         # Get all unmapped items first (we'll filter by cleaned item_ids)
         # Use "unmapped" to get all items regardless of sheet_name status
@@ -1006,10 +1002,11 @@ def export_selected_unmapped_items(
         found_cleaned_ids = set()
         
         for item in all_items_result['items']:
-            # Clean the item's original_item_id for comparison
-            cleaned_item_id = clean_suffix(item['original_item_id'])
+            # With suffix standardization, we use full item codes for comparison
+            # No suffix cleaning needed
+            cleaned_item_id = item['original_item_id']
             
-            # Check if this cleaned item ID matches any of our requested cleaned IDs
+            # Check if this item ID matches any of our requested IDs
             if cleaned_item_id in cleaned_item_ids:
                 selected_items.append(item)
                 found_cleaned_ids.add(cleaned_item_id)
@@ -1025,7 +1022,7 @@ def export_selected_unmapped_items(
         requested_count = len(item_ids)
         if found_count < requested_count:
             missing_items = [item_id for item_id in item_ids 
-                           if clean_suffix(item_id) not in found_cleaned_ids]
+                           if item_id not in found_cleaned_ids]
             logger.warning(
                 f"Only {found_count} out of {requested_count} requested items were found. "
                 f"Missing items: {missing_items}"

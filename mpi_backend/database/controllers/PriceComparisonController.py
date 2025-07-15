@@ -82,7 +82,7 @@ class PriceComparisonController:
                 ItemInfo(
                     id=item.id,  # Use the database item ID
                     mpi_item=item.mpi_item,
-                    original_item=item.item_code_with_suffix,  # Use suffixed version
+                    original_item=item.item,  # Use full item code
                     mpi_description=item.mpi_description
                 )
                 for item in items
@@ -219,7 +219,7 @@ class PriceComparisonController:
                 ItemInfo(
                     id=item.id,  # Use the database item ID
                     mpi_item=item.mpi_item or '',
-                    original_item=item.item_code_with_suffix or '',  # Use suffixed version
+                    original_item=item.item or '',  # Use full item code
                     mpi_description=item.mpi_description or ''
                 )
                 for item in items
@@ -608,7 +608,7 @@ class PriceComparisonController:
                 ItemInfo(
                     id=item.id,  # Use the database item ID
                     mpi_item=item.mpi_item or '',
-                    original_item=item.item_code_with_suffix or '',  # Use suffixed version
+                    original_item=item.item or '',  # Use full item code
                     mpi_description=item.mpi_description or ''
                 )
                 for item in items

@@ -19,7 +19,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mpi_backend.database import db_context
 from mpi_backend.database.models import InvoiceItem, ItemsMapping
 from mpi_backend.utils.mapping_validators import is_temporary_mapping
-from mpi_backend.utils.item_utils import clean_supplier_suffix
+# Removed clean_supplier_suffix import - no longer needed with suffix standardization
 
 # Configure logging
 logging.basicConfig(
@@ -104,11 +104,12 @@ def update_uidi_items():
                     # Extract supplier_id from the invoice item's supplier/vendor
                     supplier_id, _ = extract_supplier_id(item.vendor)
                     
-                    # Clean both items for comparison (strip whitespace and apply suffix cleaning)
+                    # With suffix standardization, we only do exact matches
+                    # No suffix cleaning needed - items are stored with full suffixes
                     clean_invoice_item = str(item.item).strip()
                     clean_mapping_item = supplier_item_ids.strip()
                     
-                    # First try exact match
+                    # Exact match only
                     if clean_invoice_item == clean_mapping_item:
                         old_status = item.mpi_item or "Empty"
                         item.mpi_item = mapping.mpi_code
@@ -118,19 +119,6 @@ def update_uidi_items():
                         matched = True
                         logger.info(f"Updated: {clean_invoice_item} | {old_status} -> {mapping.mpi_code}")
                         break
-                    
-                    # If no exact match, try with suffix cleaning
-                    if supplier_id:
-                        cleaned_mapping_item = clean_supplier_suffix(clean_mapping_item, supplier_id)
-                        if clean_invoice_item == cleaned_mapping_item:
-                            old_status = item.mpi_item or "Empty"
-                            item.mpi_item = mapping.mpi_code
-                            item.mpi_description = mapping.description
-                            item.sheet_name = mapping.google_sheet_name or ""
-                            updated_count += 1
-                            matched = True
-                            logger.info(f"Updated (with suffix cleaning): {clean_invoice_item} == {cleaned_mapping_item} | {old_status} -> {mapping.mpi_code}")
-                            break
                 
                 # If no match found, preserve the UIDI status (don't change to No Match)
                 
