@@ -78,6 +78,7 @@ class EnhancedGoogleSheetDataExtractor:
             "permanent_mappings": 0,
             "temporary_mappings": 0,
             "invalid_mappings": 0,
+            "temporary_items": 0,
             "sheets_processed": 0
         }
 
@@ -128,6 +129,7 @@ class EnhancedGoogleSheetDataExtractor:
     def _setup_supplier_mapping(self):
         """Set up supplier mappings and extract key terms for matching."""
         # Define suppliers with their IDs and base names for matching
+        # Updated to match actual database IDs
         self.supplier_mapping = {
             "BMW Plumbing Supplies": {"id": 1},
             "World Wide Plumbing": {"id": 2},
@@ -139,10 +141,10 @@ class EnhancedGoogleSheetDataExtractor:
             "Gotham Plumbing Supply": {"id": 8},
             "FW Webb Plumbing Supply": {"id": 9},
             "Flow Mark Plumbing Supply": {"id": 10},
-            "Plumbing Exchange": {"id": 11},
-            "AF Supply": {"id": 12},
-            "Lion Hvac Supplies": {"id": 13},
-            "Bruce Ferguson": {"id": 14}
+            "Plumbing Exchange": {"id": 14},  # Updated from 11
+            "AF Supply": {"id": 15},          # Updated from 12
+            "Lion Hvac Supplies": {"id": 16}, # Updated from 13
+            "Bruce Ferguson": {"id": 17}      # Updated from 14
         }
         
         # Extract key terms from each supplier name for matching
@@ -282,13 +284,39 @@ class EnhancedGoogleSheetDataExtractor:
         Returns:
             Tuple of (supplier_name, supplier_id, confidence_score)
         """
-        col_name_lower = col_name.lower()
+        if not col_name or pd.isna(col_name):
+            return "Unknown", 0, 0
+        
+        col_name_str = str(col_name).strip()
+        if not col_name_str:
+            return "Unknown", 0, 0
+        
+        col_name_lower = col_name_str.lower()
         best_match = None
         best_score = 0
         
+        # Try exact matches first
+        for supplier, info in self.supplier_mapping.items():
+            if col_name_lower == supplier.lower():
+                return supplier, self.supplier_ids[supplier], 100.0
+        
+        # Enhanced fuzzy matching for common patterns like "BMW 1", "WWPS 2", etc.
+        import re
+        base_name_match = re.match(r'^([A-Za-z&]+)\s*\d*$', col_name_str)
+        if base_name_match:
+            base_name = base_name_match.group(1).strip()
+            for supplier, info in self.supplier_mapping.items():
+                # Check if base name matches supplier name or codes
+                supplier_base = re.sub(r'\s+', '', supplier.upper())
+                base_upper = re.sub(r'\s+', '', base_name.upper())
+                
+                if supplier_base.startswith(base_upper) or base_upper.startswith(supplier_base):
+                    return supplier, self.supplier_ids[supplier], 95.0
+        
+        # Try fuzzy matching with key terms
         for supplier, info in self.supplier_mapping.items():
             for term in info["key_terms"]:
-                score = fuzz.ratio(col_name_lower, term)
+                score = fuzz.ratio(col_name_lower, term.lower())
                 if score > best_score and score >= self.fuzzy_threshold:
                     best_score = score
                     best_match = supplier
@@ -304,7 +332,7 @@ class EnhancedGoogleSheetDataExtractor:
         df_full: pd.DataFrame
     ) -> Dict[str, List[int]]:
         """
-        Detect supplier columns in the DataFrame.
+        Detect supplier columns using the Zero Skipped Items Approach.
         
         Args:
             df_head: First few rows of the DataFrame
@@ -315,22 +343,119 @@ class EnhancedGoogleSheetDataExtractor:
         """
         supplier_columns = {}
         
-        for col_idx, col_name in enumerate(df_head.columns):
-            supplier_name, supplier_id, confidence = self.match_supplier(str(col_name))
-            
-            if confidence >= self.fuzzy_threshold and supplier_id > 0:
-                # Validate that this column actually contains supplier data
-                if self._validate_first_two_rows_have_supplier_data(df_full, col_idx):
+        # Step 1: Determine number of rows to process using Column B (index 1)
+        total_valid_rows = self._count_valid_rows_in_column_b(df_full)
+        if total_valid_rows == 0:
+            logger.warning("Column B has no valid rows, skipping sheet")
+            return supplier_columns
+        
+        logger.info(f"Column B has {total_valid_rows} valid rows to process")
+        
+        # Step 2: Start scanning from Column E (index 4) onward
+        for col_idx in range(4, len(df_full.columns)):
+            try:
+                # Step 3: Column Validation - Check Row 1 and Row 2
+                row1_value = df_full.iloc[0, col_idx] if col_idx < len(df_full.columns) else None
+                row2_value = df_full.iloc[1, col_idx] if col_idx < len(df_full.columns) else None
+                
+                # Check if both Row 1 and Row 2 are empty (potential temporary items block)
+                row1_empty = pd.isna(row1_value) or str(row1_value).strip() == ""
+                row2_empty = pd.isna(row2_value) or str(row2_value).strip() == ""
+                
+                if row1_empty and row2_empty:
+                    # Check if Row 3 contains "Original Item" header to confirm this is the temporary items block
+                    if len(df_full) > 2:
+                        row3_value = df_full.iloc[2, col_idx] if col_idx < len(df_full.columns) else None
+                        row3_str = str(row3_value).strip().lower() if pd.notna(row3_value) else ""
+                        
+                        if "original item" in row3_str:
+                            logger.info(f"Found temporary items block at column {col_idx} (confirmed by 'Original Item' header), stopping supplier column detection")
+                            break  # Early exit - confirmed temporary items block
+                        else:
+                            logger.debug(f"Column {col_idx} has empty Row 1 & 2 but no 'Original Item' header, continuing to scan")
+                    else:
+                        logger.debug(f"Column {col_idx} has empty Row 1 & 2 but not enough rows to check header, continuing to scan")
+                
+                # Step 4: Use single row for supplier identifier (Row 1 if available, otherwise Row 2)
+                supplier_identifier = self._get_single_row_supplier_identifier(row1_value, row2_value)
+                
+                if not supplier_identifier:
+                    logger.debug(f"Column {col_idx} has no valid supplier identifier in Row 1 or Row 2, skipping")
+                    continue
+                
+                # Step 5: Fuzzy match to SUPPLIER_MAPPING
+                supplier_name, supplier_id, confidence = self.match_supplier(supplier_identifier)
+                
+                if confidence >= self.fuzzy_threshold and supplier_id > 0:
                     if supplier_name not in supplier_columns:
                         supplier_columns[supplier_name] = []
                     supplier_columns[supplier_name].append(col_idx)
                     
-                    logger.debug(
-                        f"Detected supplier column: {col_name} -> {supplier_name} "
+                    logger.info(
+                        f"Detected supplier column {col_idx}: '{supplier_identifier}' -> {supplier_name} "
                         f"(confidence: {confidence})"
                     )
+                else:
+                    logger.warning(
+                        f"No supplier match found for column {col_idx}: '{supplier_identifier}' "
+                        f"(confidence: {confidence})"
+                    )
+                    
+            except Exception as e:
+                logger.error(f"Error processing column {col_idx}: {str(e)}")
+                continue
         
         return supplier_columns
+
+    def _count_valid_rows_in_column_b(self, df: pd.DataFrame) -> int:
+        """
+        Count all non-empty rows in Column B (index 1) from Row 4 down.
+        
+        Args:
+            df: Full DataFrame
+            
+        Returns:
+            Number of valid rows in Column B
+        """
+        if len(df.columns) < 2:
+            return 0
+        
+        valid_count = 0
+        # Start from Row 4 (index 3) down
+        for row_idx in range(3, len(df)):
+            try:
+                cell_value = df.iloc[row_idx, 1]  # Column B (index 1)
+                if pd.notna(cell_value) and str(cell_value).strip():
+                    valid_count += 1
+            except (IndexError, KeyError):
+                continue
+        
+        return valid_count
+
+    def _get_single_row_supplier_identifier(self, row1_value, row2_value) -> str:
+        """
+        Get supplier identifier from a single row (Row 1 if available, otherwise Row 2).
+        
+        Args:
+            row1_value: Value from Row 1
+            row2_value: Value from Row 2
+            
+        Returns:
+            Supplier identifier string from the best available row
+        """
+        row1_str = str(row1_value).strip() if pd.notna(row1_value) else ""
+        row2_str = str(row2_value).strip() if pd.notna(row2_value) else ""
+        
+        # If Row 1 has data, use it
+        if row1_str:
+            return row1_str
+        
+        # If Row 1 is empty but Row 2 has data, use Row 2
+        if not row1_str and row2_str:
+            return row2_str
+        
+        # If both are empty, return empty (column will be skipped)
+        return ""
 
     def _validate_first_two_rows_have_supplier_data(
         self, 
@@ -399,16 +524,26 @@ class EnhancedGoogleSheetDataExtractor:
                 logger.debug(f"No supplier columns detected in sheet: {sheet_title}")
                 return []
             
-            # Process the sheet data
+            # Process the sheet data for mapped items (start from Row 4, index 3)
             extracted_items = self._process_dataframe_chunk(
-                df, supplier_columns, sheet_title, 0
+                df, supplier_columns, sheet_title, 3
             )
+            
+            # Extract temporary items
+            temporary_items = self.extract_temporary_items(df, sheet_title)
+            
+            # Update statistics for temporary items
+            self.extraction_stats["temporary_items"] += len(temporary_items)
+            
+            # Combine both types of items
+            all_items = extracted_items + temporary_items
             
             logger.info(
-                f"Extracted {len(extracted_items)} items from sheet: {sheet_title}"
+                f"Extracted {len(extracted_items)} mapped items and {len(temporary_items)} temporary items "
+                f"from sheet: {sheet_title}"
             )
             
-            return extracted_items
+            return all_items
             
         except Exception as e:
             logger.error(f"Error processing sheet {sheet_title}: {str(e)}")
@@ -448,49 +583,61 @@ class EnhancedGoogleSheetDataExtractor:
         start_row: int
     ) -> List[Dict[str, Any]]:
         """
-        Process a chunk of DataFrame data and extract mappings.
+        Process a chunk of DataFrame data and extract mappings using Zero Skipped Items Approach.
         
         Args:
             df: DataFrame to process
             supplier_columns: Dictionary mapping suppliers to column indices
             sheet_title: Name of the sheet
-            start_row: Starting row index
+            start_row: Starting row index (should be 3 for Row 4)
             
         Returns:
             List of extracted mappings
         """
         extracted_items = []
         
-        # Process each row
-        for row_idx in range(start_row, len(df)):
+        # Determine the total number of rows to process using Column B
+        total_valid_rows = self._count_valid_rows_in_column_b(df)
+        if total_valid_rows == 0:
+            logger.warning(f"No valid rows found in Column B for sheet {sheet_title}")
+            return extracted_items
+        
+        # Calculate the end row (Row 4 + total_valid_rows)
+        end_row = min(start_row + total_valid_rows, len(df))
+        
+        logger.info(f"Processing rows {start_row + 1} to {end_row} for sheet {sheet_title}")
+        
+        # Process each row from Row 4 to the calculated end
+        for row_idx in range(start_row, end_row):
             try:
                 row = df.iloc[row_idx]
                 actual_row = row_idx + 1  # 1-based row number
                 
-                # Extract MPI code and description from first few columns
+                # Extract MPI code and description from fixed columns (B, C, D)
                 mpi_code = ""
                 description = ""
                 size = ""
                 
-                # Try to find MPI code in column 1 (most common location)
+                # Fixed column mapping: B=1, C=2, D=3 (0-based indexing)
+                # Column B (index 1) = mpi_code
                 if len(row) > 1:
                     mpi_code_val = row.iloc[1]
                     if not pd.isna(mpi_code_val):
                         mpi_code = str(mpi_code_val).strip()
-                        
-                        # Get description from column 2
-                        if len(row) > 2:
-                            desc_val = row.iloc[2]
-                            if not pd.isna(desc_val):
-                                description = str(desc_val).strip()
-                        
-                        # Get size from column 3
-                        if len(row) > 3:
-                            size_val = row.iloc[3]
-                            if not pd.isna(size_val):
-                                size = str(size_val).strip()
                 
-                # Fallback: If no MPI code in column 1, check column 0
+                # Column C (index 2) = description
+                if len(row) > 2:
+                    desc_val = row.iloc[2]
+                    if not pd.isna(desc_val):
+                        description = str(desc_val).strip()
+                
+                # Column D (index 3) = size
+                if len(row) > 3:
+                    size_val = row.iloc[3]
+                    if not pd.isna(size_val):
+                        size = str(size_val).strip()
+                
+                # Fallback: If no MPI code in column B, check column A (index 0)
                 if not mpi_code and len(row) > 0:
                     mpi_code_val = row.iloc[0]
                     if not pd.isna(mpi_code_val):
@@ -510,8 +657,9 @@ class EnhancedGoogleSheetDataExtractor:
                                 if not pd.isna(size_val):
                                     size = str(size_val).strip()
                 
-                # Skip row if no MPI code found
+                # Skip row if no MPI code found in Column B
                 if not mpi_code:
+                    logger.debug(f"Skipping row {actual_row} - no MPI code in Column B")
                     continue
                     
                 # Skip header rows
@@ -585,7 +733,7 @@ class EnhancedGoogleSheetDataExtractor:
                             "size": size if size else "",
                             "supplier_name": supplier,
                             "supplier_id": self.supplier_ids[supplier],
-                            "supplier_item_ids": cleaned_value,
+                            "supplier_item_ids": cleaned_value,  # Use plural form for consistency
                             "google_sheet_name": clean_sheet_name,
                             "row_index": actual_row,
                             "supplier_column_name": supplier_column_name,
@@ -618,6 +766,185 @@ class EnhancedGoogleSheetDataExtractor:
                 continue
         
         return extracted_items
+
+    def extract_temporary_items(self, df: pd.DataFrame, sheet_title: str) -> List[Dict[str, Any]]:
+        """
+        Extract temporary items from the "Original Item" block.
+        
+        Args:
+            df: DataFrame containing the sheet data
+            sheet_title: Name of the sheet
+            
+        Returns:
+            List of extracted temporary items
+        """
+        temporary_items = []
+        
+        # Enhanced temporary item block detection
+        # Look for columns where both Row 1 and Row 2 are empty AND Row 3 contains "Original Item"
+        temp_block_start_col = None
+        
+        for col_idx in range(4, len(df.columns)):  # Start from Column E
+            try:
+                row1_value = df.iloc[0, col_idx] if col_idx < len(df.columns) else None
+                row2_value = df.iloc[1, col_idx] if col_idx < len(df.columns) else None
+                
+                row1_empty = pd.isna(row1_value) or str(row1_value).strip() == ""
+                row2_empty = pd.isna(row2_value) or str(row2_value).strip() == ""
+                
+                if row1_empty and row2_empty:
+                    # Check if Row 3 contains "Original Item" header to confirm this is the temporary items block
+                    if len(df) > 2:
+                        row3_value = df.iloc[2, col_idx] if col_idx < len(df.columns) else None
+                        row3_str = str(row3_value).strip().lower() if pd.notna(row3_value) else ""
+                        
+                        if "original item" in row3_str:
+                            temp_block_start_col = col_idx
+                            logger.info(f"Found temporary items block starting at column {col_idx} in sheet {sheet_title} (confirmed by 'Original Item' header)")
+                            break
+                        else:
+                            logger.debug(f"Column {col_idx} has empty Row 1 & 2 but no 'Original Item' header, continuing to scan")
+                    else:
+                        logger.debug(f"Column {col_idx} has empty Row 1 & 2 but not enough rows to check header, continuing to scan")
+            except Exception as e:
+                logger.error(f"Error checking column {col_idx} for temporary block: {str(e)}")
+                continue
+        
+        if temp_block_start_col is None:
+            logger.debug(f"No temporary items block found in sheet {sheet_title}")
+            return temporary_items
+        
+        # Search for temporary item block pattern in the temporary section
+        # Look for 2 empty rows followed by headers like "Original Item", "Original Description", etc.
+        for row_idx in range(len(df) - 3):  # Need at least 3 rows to check pattern
+            try:
+                # Check if current row and next row are empty
+                current_row = df.iloc[row_idx]
+                next_row = df.iloc[row_idx + 1]
+                
+                # Check if both rows are essentially empty
+                current_empty = all(pd.isna(val) or str(val).strip() == "" for val in current_row)
+                next_empty = all(pd.isna(val) or str(val).strip() == "" for val in next_row)
+                
+                if current_empty and next_empty:
+                    # Check if the third row contains temporary item headers
+                    header_row = df.iloc[row_idx + 2]
+                    header_values = [str(val).strip().lower() if not pd.isna(val) else "" for val in header_row]
+                    
+                    # Look for required headers
+                    has_original_item = any("original item" in val for val in header_values)
+                    has_original_description = any("original description" in val for val in header_values)
+                    
+                    if has_original_item and has_original_description:
+                        logger.info(f"Found temporary item block in sheet {sheet_title} starting at row {row_idx + 3}")
+                        
+                        # Find column indices for headers
+                        original_item_col = None
+                        original_description_col = None
+                        quantity_col = None
+                        unit_cost_col = None
+                        total_amount_col = None
+                        
+                        for col_idx, header_val in enumerate(header_values):
+                            if "original item" in header_val:
+                                original_item_col = col_idx
+                            elif "original description" in header_val:
+                                original_description_col = col_idx
+                            elif "total qty" in header_val or "quantity" in header_val:
+                                quantity_col = col_idx
+                            elif "unit cost" in header_val:
+                                unit_cost_col = col_idx
+                            elif "total amount" in header_val:
+                                total_amount_col = col_idx
+                        
+                        # Extract data rows starting from row 4 (index row_idx + 3)
+                        data_start_row = row_idx + 3
+                        
+                        for data_row_idx in range(data_start_row, len(df)):
+                            try:
+                                data_row = df.iloc[data_row_idx]
+                                
+                                # Extract original item (required field)
+                                original_item = ""
+                                if original_item_col is not None and original_item_col < len(data_row):
+                                    item_val = data_row.iloc[original_item_col]
+                                    if not pd.isna(item_val):
+                                        original_item = str(item_val).strip()
+                                
+                                # Skip if no original item
+                                if not original_item:
+                                    continue
+                                
+                                # Extract other fields
+                                original_description = ""
+                                if original_description_col is not None and original_description_col < len(data_row):
+                                    desc_val = data_row.iloc[original_description_col]
+                                    if not pd.isna(desc_val):
+                                        original_description = str(desc_val).strip()
+                                
+                                quantity = 1  # Default value
+                                if quantity_col is not None and quantity_col < len(data_row):
+                                    qty_val = data_row.iloc[quantity_col]
+                                    if not pd.isna(qty_val):
+                                        try:
+                                            quantity = float(qty_val)
+                                        except (ValueError, TypeError):
+                                            quantity = 1
+                                
+                                unit_cost = 0.0  # Default value
+                                if unit_cost_col is not None and unit_cost_col < len(data_row):
+                                    cost_val = data_row.iloc[unit_cost_col]
+                                    if not pd.isna(cost_val):
+                                        try:
+                                            unit_cost = float(cost_val)
+                                        except (ValueError, TypeError):
+                                            unit_cost = 0.0
+                                
+                                total_amount = unit_cost * quantity  # Calculate if not provided
+                                if total_amount_col is not None and total_amount_col < len(data_row):
+                                    amount_val = data_row.iloc[total_amount_col]
+                                    if not pd.isna(amount_val):
+                                        try:
+                                            total_amount = float(amount_val)
+                                        except (ValueError, TypeError):
+                                            total_amount = unit_cost * quantity
+                                
+                                # Clean the original item by removing suffixes
+                                cleaned_original_item = self._clean_supplier_item_id(original_item, "Unknown")
+                                
+                                # Create temporary item entry
+                                temp_item = {
+                                    "supplier_item_id": cleaned_original_item,
+                                    "description": original_description,
+                                    "quantity": quantity,
+                                    "unit_cost": unit_cost,
+                                    "total_amount": total_amount,
+                                    "google_sheet_name": self._extract_clean_sheet_name(sheet_title),
+                                    "row_index": data_row_idx + 1,  # 1-based row number
+                                    "type": "temporary",
+                                    "original_supplier_value": original_item
+                                }
+                                
+                                temporary_items.append(temp_item)
+                                
+                                logger.debug(
+                                    f"Extracted temporary item: {cleaned_original_item} -> {original_description} "
+                                    f"(row {data_row_idx + 1})"
+                                )
+                                
+                            except Exception as e:
+                                logger.error(f"Error extracting temporary item row {data_row_idx}: {str(e)}")
+                                continue
+                        
+                        # Break after finding the first temporary item block
+                        break
+                        
+            except Exception as e:
+                logger.error(f"Error checking for temporary item block at row {row_idx}: {str(e)}")
+                continue
+        
+        logger.info(f"Extracted {len(temporary_items)} temporary items from sheet {sheet_title}")
+        return temporary_items
 
     def _clean_supplier_item_id(self, supplier_value: str, supplier: str) -> str:
         """
@@ -725,6 +1052,7 @@ class EnhancedGoogleSheetDataExtractor:
             "permanent_mappings": 0,
             "temporary_mappings": 0,
             "invalid_mappings": 0,
+            "temporary_items": 0,
             "sheets_processed": 0
         }
         
@@ -765,6 +1093,7 @@ class EnhancedGoogleSheetDataExtractor:
             f"extracted {self.extraction_stats['total_extracted']} items. "
             f"Permanent: {self.extraction_stats['permanent_mappings']}, "
             f"Temporary: {self.extraction_stats['temporary_mappings']}, "
+            f"Temporary Items: {self.extraction_stats['temporary_items']}, "
             f"Invalid: {self.extraction_stats['invalid_mappings']}. "
             f"Output saved to {self.output_file}"
         )
