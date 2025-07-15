@@ -33,7 +33,7 @@ from mpi_backend.utils.google_sheets import EnhancedGoogleSheetDataExtractor
 from mpi_backend.config.spreadsheet_config import (
     DEFAULT_SHEET_ID, GOOGLE_API_KEY, DEFAULT_OUTPUT_FILE, SKIP_SHEETS
 )
-from mpi_backend.utils.item_utils import clean_supplier_suffix
+# Removed clean_supplier_suffix import - no longer needed with suffix standardization
 
 # Setup logging using existing app configuration
 setup_logging()
@@ -208,15 +208,9 @@ class IntelligentMappingCleaner:
             if mapping_supplier_id != supplier_id:
                 continue
             
-            # Try exact match first
+            # With suffix standardization, we only do exact matches
+            # No suffix cleaning needed - items are stored with full suffixes
             if clean_item == supplier_item_id.strip():
-                return True
-            
-            # Try with suffix cleaning
-            clean_supplier_item = clean_supplier_suffix(
-                supplier_item_id.strip(), supplier_id
-            )
-            if clean_item == clean_supplier_item:
                 return True
         
         return False
