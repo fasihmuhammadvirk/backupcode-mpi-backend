@@ -126,8 +126,8 @@ class TemporaryMappingExtractor:
                     
                     if original_item_col < len(row_data):
                         original_item = str(row_data.iloc[original_item_col]).strip() if not pd.isna(row_data.iloc[original_item_col]) else ""
-                        # Clean suffix from original_item
-                        original_item = self.clean_item_suffix(original_item)
+                        # With suffix standardization, preserve the original item form
+                        # No suffix cleaning needed - items are stored with full suffixes
                     
                     if original_description_col < len(row_data):
                         original_description = str(row_data.iloc[original_description_col]).strip() if not pd.isna(row_data.iloc[original_description_col]) else ""

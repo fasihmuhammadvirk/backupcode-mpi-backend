@@ -8,7 +8,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 
 # Configure logging
 logging.basicConfig(
@@ -86,7 +86,7 @@ def fix_temp_item_mapping_format(data: Any) -> List[Dict[str, Any]]:
         logger.error(f"temp-item-mapping.json should be a list, got {type(data)}")
         return []
 
-def update_suffixes_in_item_mapping(items: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
+def update_suffixes_in_item_mapping(items: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], int]:
     """Update suffixes in item-mapping.json items."""
     updated_count = 0
     updated_items = []
@@ -118,7 +118,7 @@ def update_suffixes_in_item_mapping(items: List[Dict[str, Any]]) -> Tuple[List[D
     
     return updated_items, updated_count
 
-def update_suffixes_in_temp_item_mapping(items: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
+def update_suffixes_in_temp_item_mapping(items: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], int]:
     """Update suffixes in temp-item-mapping.json items."""
     updated_count = 0
     updated_items = []
@@ -175,7 +175,7 @@ def update_suffixes_in_temp_item_mapping(items: List[Dict[str, Any]]) -> Tuple[L
     
     return updated_items, updated_count
 
-def process_json_file(file_path: str, is_item_mapping: bool = True) -> Tuple[bool, int]:
+def process_json_file(file_path: str, is_item_mapping: bool = True) -> tuple[bool, int]:
     """Process a JSON file to fix format and update suffixes."""
     try:
         logger.info(f"Processing {file_path}...")

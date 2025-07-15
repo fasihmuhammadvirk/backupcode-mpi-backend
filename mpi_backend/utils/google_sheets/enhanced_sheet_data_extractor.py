@@ -702,10 +702,9 @@ class EnhancedGoogleSheetDataExtractor:
                         if not re.search(r'[A-Za-z0-9]', supplier_value):
                             continue
                         
-                        # Clean the supplier_item_ids by removing suffix patterns
-                        cleaned_value = self._clean_supplier_item_id(
-                            supplier_value, supplier
-                        )
+                        # With suffix standardization, we preserve the full item codes
+                        # No suffix cleaning needed - items are stored with full suffixes
+                        cleaned_value = supplier_value.strip()
                         
                         # Skip if cleaned value is empty
                         if not cleaned_value:
@@ -909,8 +908,8 @@ class EnhancedGoogleSheetDataExtractor:
                                         except (ValueError, TypeError):
                                             total_amount = unit_cost * quantity
                                 
-                                # Clean the original item by removing suffixes
-                                cleaned_original_item = self._clean_supplier_item_id(original_item, "Unknown")
+                                # With suffix standardization, preserve the original item form
+                                cleaned_original_item = original_item.strip()
                                 
                                 # Create temporary item entry
                                 temp_item = {
@@ -948,29 +947,18 @@ class EnhancedGoogleSheetDataExtractor:
 
     def _clean_supplier_item_id(self, supplier_value: str, supplier: str) -> str:
         """
-        Clean supplier item ID by removing suffix patterns.
+        With suffix standardization, we preserve the full item codes.
+        This method is kept for backward compatibility but no longer removes suffixes.
         
         Args:
             supplier_value: Raw supplier item value
             supplier: Supplier name
             
         Returns:
-            Cleaned supplier item ID
+            Item value with full suffixes preserved
         """
-        cleaned_value = supplier_value
-        
-        # Remove common BMW suffix patterns (but preserve the base item code)
-        if supplier == "BMW Plumbing Supplies":
-            # Remove dash followed by single letter at end
-            cleaned_value = re.sub(r'-[BWYSGFPA]$', '', cleaned_value)
-        else:
-            # For other suppliers, remove space-dash-letter patterns
-            cleaned_value = re.sub(r'\s*-\s*[BWYSGFPA](\s|$)', '', cleaned_value)
-        
-        # Remove any extra spaces
-        cleaned_value = cleaned_value.strip()
-        
-        return cleaned_value
+        # With suffix standardization, return the item as-is
+        return supplier_value.strip()
 
     def _validate_and_categorize_mapping(self, mapping_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
