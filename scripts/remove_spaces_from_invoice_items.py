@@ -29,31 +29,38 @@ logger = logging.getLogger(__name__)
 def clean_item_code(item_code):
     """
     Clean item codes by removing spaces around hyphens and other common patterns.
+    Also removes invalid information like numbers in the middle of item codes.
     
     Examples:
     - "BVC114 -F" -> "BVC114-F"
     - "ABC123 - XYZ" -> "ABC123-XYZ"
     - "ITEM 456 - 789" -> "ITEM456-789"
     - "PART A - B" -> "PART A-B"
+    - "PFS453 2389-F" -> "PFS453-F"
+    - "ABC123 456 XYZ-F" -> "ABC123 XYZ-F"
     """
     if not item_code or not isinstance(item_code, str):
         return item_code
     
     # Remove spaces around hyphens
     cleaned = re.sub(r'\s*-\s*', '-', item_code)
-    
     # Remove spaces around forward slashes
     cleaned = re.sub(r'\s*/\s*', '/', cleaned)
-    
     # Remove spaces around backslashes
     cleaned = re.sub(r'\s*\\\s*', r'\\', cleaned)
-    
     # Remove multiple consecutive spaces
     cleaned = re.sub(r'\s+', ' ', cleaned)
-    
-    # Trim leading and trailing spaces
     cleaned = cleaned.strip()
-    
+
+    # Remove any numbers (with or without spaces) that are between the main code and the suffix
+    # e.g., 'PFS453 2389-F' -> 'PFS453-F', 'ABC123 456 XYZ-F' -> 'ABC123 XYZ-F'
+    # This will remove any group of digits surrounded by spaces, before a hyphen and suffix
+    cleaned = re.sub(r' (\d+)(?=-[A-Za-z])', '', cleaned)
+    # Also remove numbers at the end if not part of the suffix
+    cleaned = re.sub(r' (\d+)$', '', cleaned)
+    # Remove numbers between words, e.g., 'ABC123 456 XYZ-F' -> 'ABC123 XYZ-F'
+    cleaned = re.sub(r' (\d+) ', ' ', cleaned)
+
     return cleaned
 
 
@@ -70,10 +77,14 @@ def remove_spaces_from_invoice_items():
         
         # Get all invoice items that need cleaning
         # We'll look for items that contain spaces around hyphens, slashes, etc.
+        # Also look for items with potential invalid numbers in the middle
         items_to_clean = db.query(InvoiceItem).filter(
             InvoiceItem.item.isnot(None),
             InvoiceItem.item != '',
-            InvoiceItem.item.like('%-%')  # Contains hyphens
+            (
+                InvoiceItem.item.like('%-%') |  # Contains hyphens
+                InvoiceItem.item.like('% %')   # Contains spaces (potential invalid numbers)
+            )
         ).all()
         
         logger.info(f"Found {len(items_to_clean)} items to potentially clean")
@@ -137,7 +148,10 @@ def preview_changes():
         items_to_preview = db.query(InvoiceItem).filter(
             InvoiceItem.item.isnot(None),
             InvoiceItem.item != '',
-            InvoiceItem.item.like('%-%')  # Contains hyphens
+            (
+                InvoiceItem.item.like('%-%') |  # Contains hyphens
+                InvoiceItem.item.like('% %')   # Contains spaces (potential invalid numbers)
+            )
         ).limit(20).all()
         
         logger.info(f"Previewing changes for {len(items_to_preview)} sample items:")
