@@ -448,13 +448,11 @@ class InvoiceItemController:
                 
             column = getattr(InvoiceItem, column_name)
             
-            # Special handling for 'item' column - convert suffixed values back to original values
+            # Special handling for 'item' column - with suffix standardization, use values as-is
             if column_name == "item":
-                original_values = []
-                for value in values:
-                    original_value = self._remove_suffix_from_item_code(value)
-                    original_values.append(original_value)
-                values = original_values
+                # With suffix standardization, we use the full item codes as stored
+                # No need to remove suffixes anymore
+                pass
             
             # Optimize large IN clauses
             if len(values) > 1000:
@@ -541,12 +539,12 @@ class InvoiceItemController:
         # Execute query and get results
         items = query.all()
         
-        # Process results for display (add suffix logic)
+        # Process results for display
         invoices_items = []
         for item in items:
             item_dict = item.__dict__.copy()
-            # Replace the item field with the suffixed version for display
-            item_dict['item'] = item.item_code_with_suffix
+            # Use the full item code as stored in database
+            item_dict['item'] = item.item
             invoices_items.append(InvoiceItemsResponse(**item_dict))
         
         # Calculate pagination metadata
@@ -568,94 +566,21 @@ class InvoiceItemController:
             "has_prev": has_prev
         }
 
-    def _calculate_item_with_suffix(self, item, vendor):
-        """
-        Calculate item code with suffix based on vendor.
-        Replicates the logic from InvoiceItem.item_code_with_suffix property.
-        """
-        if not item:
-            return item
-        
-        # Import here to avoid circular imports
-        from mpi_backend.database.models.InvoiceItems import InvoiceItem
-        
-        # Exclude tax and administrative items from getting suffixes
-        item_str = str(item).strip()
-        excluded_items = [
-            "tax", "freight", "shipping", "handling", "subtotal", "total"
-        ]
-        if (item_str.startswith("10 Materials") or 
-                item_str.lower() in excluded_items):
-            return item
-        
-        # Get suffix for the supplier
-        suffix = ""
-        if vendor:
-            # Check for exact supplier name matches and partial matches
-            for supplier_name, supplier_suffix in InvoiceItem.SUPPLIER_SUFFIX_MAP.items():
-                if supplier_name in vendor:
-                    suffix = supplier_suffix
-                    break
-        
-        if not suffix:
-            return item
-        
-        # Remove ALL existing suffixes first (including double suffixes)
-        all_suffixes = set(InvoiceItem.SUPPLIER_SUFFIX_MAP.values())
-        all_suffixes.discard("")  # Remove empty suffix
-        
-        clean_item = item_str
-        # Keep removing suffixes until none are found
-        while True:
-            found_suffix = False
-            for existing_suffix in all_suffixes:
-                if existing_suffix and clean_item.endswith(existing_suffix):
-                    clean_item = clean_item[:-len(existing_suffix)]
-                    found_suffix = True
-                    break
-            if not found_suffix:
-                break
-        
-        # Return item code with suffix
-        return f"{clean_item}{suffix}"
 
-    def _remove_suffix_from_item_code(self, item_code_with_suffix):
-        """
-        Remove supplier suffix from item code to get original database value.
-        This is used when filtering by suffixed values selected from dropdowns.
-        
-        Args:
-            item_code_with_suffix: Item code that may have a suffix (e.g., "ABC123-B")
-            
-        Returns:
-            str: Original item code without suffix (e.g., "ABC123")
-        """
-        if not item_code_with_suffix:
-            return item_code_with_suffix
-        
-        # Get all possible suffixes from the model
-        from mpi_backend.database.models.InvoiceItems import InvoiceItem
-        all_suffixes = set(InvoiceItem.SUPPLIER_SUFFIX_MAP.values())
-        all_suffixes.discard("")  # Remove empty suffix
-        
-        # Check if the item code ends with any known suffix
-        for suffix in all_suffixes:
-            if item_code_with_suffix.endswith(suffix):
-                # Remove the suffix to get original item code
-                original_code = item_code_with_suffix[:-len(suffix)]
-                return original_code
-        
-        # If no suffix found, return as-is (might be an item without suffix)
-        return item_code_with_suffix
+
+
 
     def insert_invoice_items(self, row, filename, invoice_id):
+        # Add proper suffix to item code based on vendor
+        item_with_suffix = self._add_suffix_to_item(row['Item'], row['Vendor'])
+        
         new_item = InvoiceItem(
             filename=filename,
             sheet_name=row['Sheet Name'],
             invoice_id=invoice_id,
             mpi_item=row['MpiItem'],
             mpi_description=row['MpiDescription'],
-            item=row['Item'],
+            item=item_with_suffix,  # Use item with proper suffix
             description=row['Description'],
             qty=row['Qty'],
             cost=row['Cost'],
@@ -692,8 +617,8 @@ class InvoiceItemController:
         invoices_items = []
         for item in items:
             item_dict = item.__dict__.copy()
-            # Replace the item field with the suffixed version for display
-            item_dict['item'] = item.item_code_with_suffix
+            # Use the full item code as stored in database
+            item_dict['item'] = item.item
             invoices_items.append(InvoiceItemsResponse(**item_dict))
 
         return invoices_items
@@ -727,8 +652,8 @@ class InvoiceItemController:
         invoices_items = []
         for item in items:
             item_dict = item.__dict__.copy()
-            # Replace the item field with the suffixed version for display
-            item_dict['item'] = item.item_code_with_suffix
+            # Use the full item code as stored in database
+            item_dict['item'] = item.item
             invoices_items.append(InvoiceItemsResponse(**item_dict))
 
         return {
@@ -773,8 +698,8 @@ class InvoiceItemController:
         invoices_items = []
         for item in items:
             item_dict = item.__dict__.copy()
-            # Replace the item field with the suffixed version for display
-            item_dict['item'] = item.item_code_with_suffix
+            # Use the full item code as stored in database
+            item_dict['item'] = item.item
             invoices_items.append(InvoiceItemsResponse(**item_dict))
         return invoices_items
 
@@ -981,8 +906,8 @@ class InvoiceItemController:
             invoices_items = []
             for item in hidden_items:
                 item_dict = item.__dict__.copy()
-                # Replace the item field with the suffixed version for display
-                item_dict['item'] = item.item_code_with_suffix
+                # Use the full item code as stored in database
+                item_dict['item'] = item.item
                 invoices_items.append(InvoiceItemsResponse(**item_dict))
             return invoices_items
         except Exception as e:
@@ -1121,8 +1046,8 @@ class InvoiceItemController:
         invoices_items = []
         for item in invoice_items:
             item_dict = item.__dict__.copy()
-            # Replace the item field with the suffixed version for display
-            item_dict['item'] = item.item_code_with_suffix
+            # Use the full item code as stored in database
+            item_dict['item'] = item.item
             invoices_items.append(InvoiceItemsResponse(**item_dict))
         return invoices_items
 
@@ -1179,13 +1104,11 @@ class InvoiceItemController:
                 if not batch_results:
                     break
                     
-                # Process batch to get suffixed items
+                # Process batch to get items (with suffix standardization, use items as-is)
                 for item, vendor in batch_results:
                     if item:
-                        # Use the suffix calculation logic directly
-                        suffixed_item = self._calculate_item_with_suffix(item, vendor)
-                        if suffixed_item:
-                            all_suffixed_items.add(suffixed_item)
+                        # With suffix standardization, use the item as stored in database
+                        all_suffixed_items.add(item)
                 
                 offset += batch_size
                 
@@ -1319,41 +1242,14 @@ class InvoiceItemController:
             original_item = request.item_number.strip()
             original_vendor = request.vendor.strip()
             
-            # Handle potential suffix issues - create multiple search variations
-            from mpi_backend.utils.item_utils import clean_supplier_suffix
+            # With suffix standardization, use direct item matching
+            # No need for suffix variations anymore
             
-            # Prepare item code variations for search
-            item_variations = [original_item]
-            
-            # Add cleaned version (without suffix)
-            cleaned_item = clean_supplier_suffix(original_item)
-            if cleaned_item != original_item:
-                item_variations.append(cleaned_item)
-            
-            # Add common suffix variations for this vendor
-            from mpi_backend.database.models.Suppliers import Supplier
-            vendor_query = self.db.query(Supplier).filter(
-                Supplier.supplier_name.ilike(f"%{original_vendor}%")
-            ).first()
-            
-            if vendor_query:
-                from mpi_backend.utils.item_utils import get_supplier_suffix
-                suffix = get_supplier_suffix(vendor_query.id)
-                if suffix:
-                    # Add suffixed version if it doesn't already exist
-                    suffixed_item = f"{cleaned_item}-{suffix}"
-                    if suffixed_item not in item_variations:
-                        item_variations.append(suffixed_item)
-            
-            logger.info(f"Searching for item variations: {item_variations}")
-            
-            # Build query with multiple item code variations
+            # Build query with direct item matching
             query = self.db.query(InvoiceItem)
             
-            # More flexible item matching - search for any of the variations
-            item_filter = or_(*[InvoiceItem.item.ilike(item_var) 
-                               for item_var in item_variations])
-            query = query.filter(item_filter)
+            # Direct item matching - search for the exact item code
+            query = query.filter(InvoiceItem.item.ilike(f"%{original_item}%"))
             
             # More flexible vendor matching - case insensitive and partial
             vendor_filter = or_(
@@ -1395,7 +1291,7 @@ class InvoiceItemController:
                     func.count().label('count')
                 ).filter(
                     or_(
-                        InvoiceItem.item.ilike(f"%{cleaned_item}%"),
+                        InvoiceItem.item.ilike(f"%{original_item}%"),
                         InvoiceItem.vendor.ilike(f"%{original_vendor}%")
                     )
                 ).group_by(InvoiceItem.item, InvoiceItem.vendor).limit(5).all()
@@ -2019,3 +1915,128 @@ class InvoiceItemController:
         )
         
         return query
+    
+    def _add_suffix_to_item(self, item_code: str, vendor: str) -> str:
+        """
+        Add the correct suffix to an item code based on vendor information.
+        
+        Args:
+            item_code: The original item code from the invoice
+            vendor: The vendor/supplier name
+            
+        Returns:
+            Item code with proper suffix added
+        """
+        if not item_code or not vendor:
+            return item_code
+        
+        # Extract supplier ID from vendor name
+        supplier_id, _ = self._extract_supplier_id(vendor)
+        if not supplier_id:
+            return item_code
+        
+        # Get suffix for this supplier
+        suffix = self._get_supplier_suffix(supplier_id)
+        if not suffix:
+            return item_code
+        
+        # Check if item should be skipped from suffix processing
+        if self._should_skip_item(item_code):
+            return item_code
+        
+        # Clean any existing suffixes first
+        clean_item = self._clean_existing_suffixes(item_code)
+        
+        # Add the correct suffix
+        return f"{clean_item}-{suffix}"
+    
+    def _extract_supplier_id(self, vendor_name: str) -> tuple:
+        """Extract supplier ID and name from vendor string."""
+        if not vendor_name:
+            return None, None
+        
+        # Supplier name to ID mapping
+        supplier_mapping = {
+            "BMW Plumbing Supplies": 1,
+            "World Wide Plumbing": 2,
+            "Y & S Plumbing Supply": 3,
+            "Supreme Plumbing Supply": 4,
+            "Pyramid Plumbing": 5,
+            "ABC Opus Services": 6,
+            "Park Plumbing Supply": 7,
+            "Gotham Plumbing Supply": 8,
+            "FW Webb Plumbing Supply": 9,
+            "Flow Mark Plumbing Supply": 10,
+            "Plumbing Exchange": 11,
+            "AF Supply": 12,
+            "Lion Hvac Supplies": 13,
+            "Bruce Ferguson": 14
+        }
+        
+        for supplier_name, supplier_id in supplier_mapping.items():
+            if supplier_name.lower() in vendor_name.lower():
+                return supplier_id, supplier_name
+        
+        return None, None
+    
+    def _get_supplier_suffix(self, supplier_id: int) -> str:
+        """Get suffix for a supplier ID."""
+        suffix_map = {
+            1: 'B',   # BMW Plumbing Supplies
+            2: 'W',   # World Wide Plumbing  
+            3: 'Y',   # Y & S Plumbing Supply
+            4: 'S',   # Supreme Plumbing Supply
+            5: 'P',   # Pyramid Plumbing
+            6: 'A',   # ABC Opus Services
+            7: 'P',   # Park Plumbing Supply (same as Pyramid)
+            8: 'G',   # Gotham Plumbing Supply
+            9: 'F',   # FW Webb Plumbing Supply
+            10: 'F',  # Flow Mark Plumbing Supply (same as FW Webb)
+            11: None, # Plumbing Exchange (no specific suffix)
+            12: 'A',  # AF Supply (same as ABC Opus)
+            13: None, # Lion Hvac Supplies (no specific suffix)
+            14: 'F',  # Bruce Ferguson
+        }
+        return suffix_map.get(supplier_id)
+    
+    def _should_skip_item(self, item_code: str) -> bool:
+        """Check if item should be skipped from suffix processing."""
+        if not item_code:
+            return True
+        
+        item_str = str(item_code).strip()
+        
+        # Exclude tax and administrative items from getting suffixes
+        excluded_items = [
+            "tax", "freight", "shipping", "handling", "subtotal", "total"
+        ]
+        
+        if (item_str.lower().startswith("tax") or
+                item_str.startswith("10 Materials") or 
+                item_str.lower() in excluded_items):
+            return True
+        
+        return False
+    
+    def _clean_existing_suffixes(self, item_code: str) -> str:
+        """Remove all existing suffixes from item code."""
+        if not item_code:
+            return item_code
+        
+        clean_item = str(item_code).strip()
+        
+        # Remove ALL existing suffixes first (including double suffixes)
+        all_suffixes = ['B', 'W', 'Y', 'S', 'P', 'A', 'G', 'F']
+        
+        # Keep removing suffixes until none are found
+        while True:
+            found_suffix = False
+            for existing_suffix in all_suffixes:
+                if clean_item.endswith(f"-{existing_suffix}"):
+                    clean_item = clean_item[:-len(f"-{existing_suffix}")]
+                    found_suffix = True
+                    break
+            if not found_suffix:
+                break
+        
+        return clean_item

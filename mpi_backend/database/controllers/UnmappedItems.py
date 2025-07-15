@@ -2,7 +2,7 @@ from mpi_backend.database.models import UnmappedItems
 from mpi_backend.database.models.InvoiceItems import InvoiceItem
 import pandas as pd
 from mpi_backend.utils.item_utils import (
-    clean_supplier_suffix, clean_suffix
+    extract_supplier_id
 )
 from sqlalchemy import and_, or_
 from typing import Dict, Any, Optional, List
@@ -49,33 +49,23 @@ class UnmappedItemsController:
 
     def is_item_code_present(self, item_code, supplier_id=None):
         """
-        Check if an item code is present in unmapped items with 
-        supplier-specific suffix cleaning support.
+        Check if an item code is present in unmapped items.
         
         Args:
-            item_code (str): Clean item code from invoice to check
-            supplier_id (int, optional): Supplier ID for targeted suffix cleaning
+            item_code (str): Item code to check
+            supplier_id (int, optional): Supplier ID (not used for suffix cleaning)
             
         Returns:
-            bool: True if item is present (with or without suffix), 
-                  False otherwise
+            bool: True if item is present, False otherwise
         """
         try:
             db = self._get_db_session()
             # Get all unmapped items
             all_unmapped = db.query(UnmappedItems).all()
             
-            # Check clean invoice item against both original and cleaned DB data
+            # Check for exact match only
             for unmapped_item in all_unmapped:
-                # First try exact match (clean invoice vs DB item)
                 if unmapped_item.supplier_item_ids == item_code:
-                    return True
-                # Then try clean invoice vs cleaned DB item
-                elif (supplier_id and 
-                      clean_supplier_suffix(
-                          unmapped_item.supplier_item_ids, 
-                          supplier_id
-                      ) == item_code):
                     return True
                     
             return False
@@ -265,20 +255,17 @@ class UnmappedItemsController:
         unique_items_map = {}
         skipped_items = 0
         for item in all_items:
-            # Clean the item code (remove any existing suffixes first)
-            cleaned_item = clean_suffix(item.item or "")
-            if not cleaned_item:
+            # Use the full item code as stored in database
+            item_code = item.item or ""
+            if not item_code:
                 skipped_items += 1
                 continue
                 
-            # Create a unique key combining supplier and cleaned item
+            # Create a unique key combining supplier and item code
             supplier = item.vendor or ""
-            unique_key = f"{supplier}|{cleaned_item}"
+            unique_key = f"{supplier}|{item_code}"
             
             if unique_key not in unique_items_map:
-                # Add supplier suffix to the item code for display
-                item_with_suffix = self._add_supplier_suffix(cleaned_item, supplier)
-                
                 # Calculate amount based on cost and quantity with validation
                 cost = float(item.cost or 0.0)
                 quantity = int(item.qty or 0)
@@ -286,10 +273,10 @@ class UnmappedItemsController:
                 
                 # Validate amount calculation
                 if cost < 0 or quantity < 0:
-                    logger.warning(f"Negative values found for item {cleaned_item}: cost={cost}, quantity={quantity}")
+                    logger.warning(f"Negative values found for item {item_code}: cost={cost}, quantity={quantity}")
                 
                 unique_items_map[unique_key] = {
-                    "original_item_id": item_with_suffix,  # Return with supplier suffix
+                    "original_item_id": item_code,  # Use full item code as stored
                     "original_description": item.description or "",
                     "cost": cost,
                     "amount": amount,  # Calculated as cost * quantity
@@ -364,101 +351,4 @@ class UnmappedItemsController:
             "pages": total_pages
         }
 
-    def _add_supplier_suffix(self, item_code: str, supplier_name: str) -> str:
-        """
-        Add supplier-specific suffix to item code for display purposes.
-        
-        Args:
-            item_code (str): Clean item code without suffix
-            supplier_name (str): Supplier name to determine appropriate suffix
-            
-        Returns:
-            str: Item code with suffix appended (e.g., "ABC123-B")
-        """
-        if not item_code or not supplier_name:
-            return item_code
-        
-        # Clean whitespace from item code
-        clean_item = str(item_code).strip()
-        if not clean_item:
-            return clean_item
-        
-        # Exclude tax and administrative items from getting suffixes
-        excluded_items = [
-            "tax", "freight", "shipping", "handling", "subtotal", "total"
-        ]
-        if (clean_item.startswith("10 Materials") or 
-                clean_item.lower() in excluded_items):
-            return clean_item
-        
-        # Clean whitespace from supplier name
-        clean_supplier_name = supplier_name.strip()
-        
-        # Get suffix for supplier name
-        suffix = self._get_supplier_suffix(clean_supplier_name)
-        if not suffix:
-            return clean_item
-        
-        # Remove ALL existing suffixes first (including double suffixes)
-        all_suffixes = self._get_all_suffixes()
-        
-        # Keep removing suffixes until none are found
-        while True:
-            found_suffix = False
-            for existing_suffix in all_suffixes:
-                if existing_suffix and clean_item.endswith(f"-{existing_suffix}"):
-                    clean_item = clean_item[:-len(f"-{existing_suffix}")]
-                    found_suffix = True
-                    break
-            if not found_suffix:
-                break
-        
-        # Add the correct suffix
-        return f"{clean_item}-{suffix}"
 
-    def _get_supplier_suffix(self, supplier_name: str) -> Optional[str]:
-        """
-        Get the suffix letter for a specific supplier name.
-        
-        Args:
-            supplier_name (str): Supplier name
-            
-        Returns:
-            Optional[str]: Suffix letter or None if no suffix
-        """
-        supplier_suffix_map = {
-            "BMW Plumbing Supplies": "B",
-            "World Wide Plumbing": "W",
-            "Y & S Plumbing Supply": "Y",
-            "Supreme Plumbing Supply": "S",
-            "Pyramid Plumbing": "P",
-            "ABC Opus Services": "A",
-            "Park Plumbing Supply": "P",
-            "Gotham Plumbing Supply": "G",
-            "FW Webb Plumbing Supply": "F",
-            "Flow Mark Plumbing Supply": "F",
-            "Plumbing Exchange": None,  # No suffix
-            "AF Supply": "A",
-            "Lion Hvac Supplies": None,  # No suffix
-            "Bruce Ferguson": "F",
-        }
-        
-        # Check for exact match first
-        if supplier_name in supplier_suffix_map:
-            return supplier_suffix_map[supplier_name]
-        
-        # Check for partial matches (in case supplier name has variations)
-        for known_supplier, suffix in supplier_suffix_map.items():
-            if known_supplier in supplier_name or supplier_name in known_supplier:
-                return suffix
-        
-        return None
-
-    def _get_all_suffixes(self) -> List[str]:
-        """
-        Get all known supplier suffixes.
-        
-        Returns:
-            List[str]: List of all known suffix letters
-        """
-        return ["B", "W", "Y", "S", "P", "A", "G", "F"]
