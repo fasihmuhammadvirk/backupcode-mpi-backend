@@ -46,7 +46,7 @@ def clean_item_code(item_code):
     cleaned = re.sub(r'\s*/\s*', '/', cleaned)
     
     # Remove spaces around backslashes
-    cleaned = re.sub(r'\s*\\\s*', '\\', cleaned)
+    cleaned = re.sub(r'\s*\\\s*', r'\\', cleaned)
     
     # Remove multiple consecutive spaces
     cleaned = re.sub(r'\s+', ' ', cleaned)
@@ -73,11 +73,7 @@ def remove_spaces_from_invoice_items():
         items_to_clean = db.query(InvoiceItem).filter(
             InvoiceItem.item.isnot(None),
             InvoiceItem.item != '',
-            (
-                InvoiceItem.item.like('%-%') |  # Contains hyphens
-                InvoiceItem.item.like('%/%') |  # Contains forward slashes
-                InvoiceItem.item.like('%\\%')   # Contains backslashes
-            )
+            InvoiceItem.item.like('%-%')  # Contains hyphens
         ).all()
         
         logger.info(f"Found {len(items_to_clean)} items to potentially clean")
@@ -141,11 +137,7 @@ def preview_changes():
         items_to_preview = db.query(InvoiceItem).filter(
             InvoiceItem.item.isnot(None),
             InvoiceItem.item != '',
-            (
-                InvoiceItem.item.like('%-%') |  # Contains hyphens
-                InvoiceItem.item.like('%/%') |  # Contains forward slashes
-                InvoiceItem.item.like('%\\%')   # Contains backslashes
-            )
+            InvoiceItem.item.like('%-%')  # Contains hyphens
         ).limit(20).all()
         
         logger.info(f"Previewing changes for {len(items_to_preview)} sample items:")
