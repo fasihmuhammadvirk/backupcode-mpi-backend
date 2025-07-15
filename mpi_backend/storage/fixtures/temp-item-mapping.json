@@ -70449,7 +70449,7 @@
   },
   {
     "original_item": "BRFL12",
-    "original_description": "1/2\" BRASS 90\u00b0 ELBOW",
+    "original_description": "1/2\" BRASS 90° ELBOW",
     "sheet_name": "(BRASS)",
     "created_at": "2025-07-01T13:14:59.225398",
     "updated_at": "2025-07-01T13:14:59.225398"
@@ -70932,7 +70932,7 @@
   },
   {
     "original_item": "STFL1",
-    "original_description": "1\" STEAM 90\u00b0 1/4 BEND ELBOW",
+    "original_description": "1\" STEAM 90° 1/4 BEND ELBOW",
     "sheet_name": "(CAST IRON) (STEAM - SPRINKLER)",
     "created_at": "2025-07-01T13:15:00.835356",
     "updated_at": "2025-07-01T13:15:00.835356"
@@ -77771,7 +77771,7 @@
   },
   {
     "original_item": "TB143",
-    "original_description": "1/4\" \u00d7 3\" TOGGLE BOLT",
+    "original_description": "1/4\" × 3\" TOGGLE BOLT",
     "sheet_name": "(HANGERS AND FASTENERS)",
     "created_at": "2025-07-01T13:15:29.125569",
     "updated_at": "2025-07-01T13:15:29.125569"
@@ -80032,7 +80032,7 @@
   },
   {
     "original_item": "NHFSSL4",
-    "original_description": "4\" NO HUB SHORT SWEEP 90\u00b0 1/4 BEND ELBOW",
+    "original_description": "4\" NO HUB SHORT SWEEP 90° 1/4 BEND ELBOW",
     "sheet_name": "(NO-HUB PIPE & FITTINGS)",
     "created_at": "2025-07-01T13:15:45.117268",
     "updated_at": "2025-07-01T13:15:45.117268"
@@ -80081,7 +80081,7 @@
   },
   {
     "original_item": "NHF454",
-    "original_description": "4\" NO HUB 45\u00b0 1/8 BEND ELBOW",
+    "original_description": "4\" NO HUB 45° 1/8 BEND ELBOW",
     "sheet_name": "(NO-HUB PIPE & FITTINGS)",
     "created_at": "2025-07-01T13:15:45.117268",
     "updated_at": "2025-07-01T13:15:45.117268"
@@ -80102,7 +80102,7 @@
   },
   {
     "original_item": "NHFL6",
-    "original_description": "6\" NO HUB 90\u00b0 1/4 BEND ELBOW",
+    "original_description": "6\" NO HUB 90° 1/4 BEND ELBOW",
     "sheet_name": "(NO-HUB PIPE & FITTINGS)",
     "created_at": "2025-07-01T13:15:45.117268",
     "updated_at": "2025-07-01T13:15:45.117268"
@@ -80123,7 +80123,7 @@
   },
   {
     "original_item": "NHF452",
-    "original_description": "2\" NO HUB 45\u00b0 1/8 BEND ELBOW",
+    "original_description": "2\" NO HUB 45° 1/8 BEND ELBOW",
     "sheet_name": "(NO-HUB PIPE & FITTINGS)",
     "created_at": "2025-07-01T13:15:45.117268",
     "updated_at": "2025-07-01T13:15:45.117268"
@@ -80137,7 +80137,7 @@
   },
   {
     "original_item": "NHFTL22",
-    "original_description": "2\" X 2\" NO HUB TAPPED 90\u00b0 1/4 BEND ELBOW",
+    "original_description": "2\" X 2\" NO HUB TAPPED 90° 1/4 BEND ELBOW",
     "sheet_name": "(NO-HUB PIPE & FITTINGS)",
     "created_at": "2025-07-01T13:15:45.117268",
     "updated_at": "2025-07-01T13:15:45.117268"
@@ -80242,7 +80242,7 @@
   },
   {
     "original_item": "NHF453",
-    "original_description": "3\" NO HUB 45\u00b0 1/8 BEND ELBOW",
+    "original_description": "3\" NO HUB 45° 1/8 BEND ELBOW",
     "sheet_name": "(NO-HUB PIPE & FITTINGS)",
     "created_at": "2025-07-01T13:15:45.117268",
     "updated_at": "2025-07-01T13:15:45.117268"
@@ -81803,7 +81803,7 @@
   },
   {
     "original_item": "PFLS3",
-    "original_description": "3\" PVC DWV LONG SWEEP 1/4 BEND 90\u00b0 nan ELBOW",
+    "original_description": "3\" PVC DWV LONG SWEEP 1/4 BEND 90° nan ELBOW",
     "sheet_name": "(PVC)",
     "created_at": "2025-07-01T13:15:52.340675",
     "updated_at": "2025-07-01T13:15:52.340675"
@@ -81957,7 +81957,7 @@
   },
   {
     "original_item": "PFLS2",
-    "original_description": "2\" PVC DWV LONG SWEEP 1/4 BEND 90\u00b0 ELBOW",
+    "original_description": "2\" PVC DWV LONG SWEEP 1/4 BEND 90° ELBOW",
     "sheet_name": "(PVC)",
     "created_at": "2025-07-01T13:15:52.340675",
     "updated_at": "2025-07-01T13:15:52.340675"
@@ -83126,21 +83126,21 @@
   },
   {
     "original_item": "PF22112",
-    "original_description": "1-1/2\" PVC DWV 22\u00b0 1/16 BEND ELBOW",
+    "original_description": "1-1/2\" PVC DWV 22° 1/16 BEND ELBOW",
     "sheet_name": "(PVC)",
     "created_at": "2025-07-01T13:15:52.340675",
     "updated_at": "2025-07-01T13:15:52.340675"
   },
   {
     "original_item": "PF45114",
-    "original_description": "1-1/4\" PVC SCH 40 45\u00b0 1/8 BEND ELBOW",
+    "original_description": "1-1/4\" PVC SCH 40 45° 1/8 BEND ELBOW",
     "sheet_name": "(PVC)",
     "created_at": "2025-07-01T13:15:52.340675",
     "updated_at": "2025-07-01T13:15:52.340675"
   },
   {
     "original_item": "PF451",
-    "original_description": "1\" PVC SCH 40 45\u00b0 1/8 BEND ELBOW",
+    "original_description": "1\" PVC SCH 40 45° 1/8 BEND ELBOW",
     "sheet_name": "(PVC)",
     "created_at": "2025-07-01T13:15:52.340675",
     "updated_at": "2025-07-01T13:15:52.340675"
@@ -83259,14 +83259,14 @@
   },
   {
     "original_item": "PFL114",
-    "original_description": "1-1/4\" PVC SCH 40 90\u00b0 1/4 BEND",
+    "original_description": "1-1/4\" PVC SCH 40 90° 1/4 BEND",
     "sheet_name": "(PVC)",
     "created_at": "2025-07-01T13:15:52.340675",
     "updated_at": "2025-07-01T13:15:52.340675"
   },
   {
     "original_item": "PFL1",
-    "original_description": "1\" PVC SCH 40 90\u00b0 1/4 BEND ELBOW",
+    "original_description": "1\" PVC SCH 40 90° 1/4 BEND ELBOW",
     "sheet_name": "(PVC)",
     "created_at": "2025-07-01T13:15:52.340675",
     "updated_at": "2025-07-01T13:15:52.340675"
@@ -83385,7 +83385,7 @@
   },
   {
     "original_item": "PFS45114",
-    "original_description": "1-1/4\" PVC SCH 40 STREET 45\u00b0 1/8 BEND ELBOW",
+    "original_description": "1-1/4\" PVC SCH 40 STREET 45° 1/8 BEND ELBOW",
     "sheet_name": "(PVC)",
     "created_at": "2025-07-01T13:15:52.340675",
     "updated_at": "2025-07-01T13:15:52.340675"
@@ -83406,14 +83406,14 @@
   },
   {
     "original_item": "PFSL112",
-    "original_description": "1-1/2\" PVC DWV STREET 90\u00b0 1/4 BEND ELBOW",
+    "original_description": "1-1/2\" PVC DWV STREET 90° 1/4 BEND ELBOW",
     "sheet_name": "(PVC)",
     "created_at": "2025-07-01T13:15:52.340675",
     "updated_at": "2025-07-01T13:15:52.340675"
   },
   {
     "original_item": "PFSL114",
-    "original_description": "1-1/4\" PVC SCH 40 STREET 90\u00b0 1/4 BEND ELBOW (SPIGxSOC)",
+    "original_description": "1-1/4\" PVC SCH 40 STREET 90° 1/4 BEND ELBOW (SPIGxSOC)",
     "sheet_name": "(PVC)",
     "created_at": "2025-07-01T13:15:52.340675",
     "updated_at": "2025-07-01T13:15:52.340675"
@@ -85975,14 +85975,14 @@
   },
   {
     "original_item": "PS8",
-    "original_description": "8\" PIPE SURE-SLEEVE LSP 3\u00b0 Taper",
+    "original_description": "8\" PIPE SURE-SLEEVE LSP 3° Taper",
     "sheet_name": "(TAPE)",
     "created_at": "2025-07-01T13:16:16.237877",
     "updated_at": "2025-07-01T13:16:16.237877"
   },
   {
     "original_item": "PS5",
-    "original_description": "5\" PIPE SURE-SLEEVE LSP 3\u00b0 Taper",
+    "original_description": "5\" PIPE SURE-SLEEVE LSP 3° Taper",
     "sheet_name": "(TAPE)",
     "created_at": "2025-07-01T13:16:16.237877",
     "updated_at": "2025-07-01T13:16:16.237877"
@@ -89923,7 +89923,7 @@
   },
   {
     "original_item": "BRFL12",
-    "original_description": "1/2\" BRASS 90\u00b0 ELBOW",
+    "original_description": "1/2\" BRASS 90° ELBOW",
     "sheet_name": "BRASS",
     "created_at": "2025-07-13T20:00:41.798810",
     "updated_at": "2025-07-13T20:00:41.798810"
@@ -90532,7 +90532,7 @@
   },
   {
     "original_item": "STFL1",
-    "original_description": "1\" STEAM 90\u00b0 1/4 BEND ELBOW",
+    "original_description": "1\" STEAM 90° 1/4 BEND ELBOW",
     "sheet_name": "CAST IRON STEAM - SPRINKLER",
     "created_at": "2025-07-13T20:00:44.227835",
     "updated_at": "2025-07-13T20:00:44.227835"
@@ -96482,7 +96482,7 @@
   },
   {
     "original_item": "TB143",
-    "original_description": "1/4\" \u00d7 3\" TOGGLE BOLT",
+    "original_description": "1/4\" × 3\" TOGGLE BOLT",
     "sheet_name": "HANGERS AND FASTENERS",
     "created_at": "2025-07-13T20:01:21.971562",
     "updated_at": "2025-07-13T20:01:21.971562"
@@ -97581,7 +97581,7 @@
   },
   {
     "original_item": "NHFSSL4",
-    "original_description": "4\" NO HUB SHORT SWEEP 90\u00b0 1/4 BEND ELBOW",
+    "original_description": "4\" NO HUB SHORT SWEEP 90° 1/4 BEND ELBOW",
     "sheet_name": "NO-HUB PIPE FITTINGS",
     "created_at": "2025-07-13T20:01:43.158837",
     "updated_at": "2025-07-13T20:01:43.158837"
@@ -97630,7 +97630,7 @@
   },
   {
     "original_item": "NHF454",
-    "original_description": "4\" NO HUB 45\u00b0 1/8 BEND ELBOW",
+    "original_description": "4\" NO HUB 45° 1/8 BEND ELBOW",
     "sheet_name": "NO-HUB PIPE FITTINGS",
     "created_at": "2025-07-13T20:01:43.158837",
     "updated_at": "2025-07-13T20:01:43.158837"
@@ -97651,7 +97651,7 @@
   },
   {
     "original_item": "NHFL6",
-    "original_description": "6\" NO HUB 90\u00b0 1/4 BEND ELBOW",
+    "original_description": "6\" NO HUB 90° 1/4 BEND ELBOW",
     "sheet_name": "NO-HUB PIPE FITTINGS",
     "created_at": "2025-07-13T20:01:43.158837",
     "updated_at": "2025-07-13T20:01:43.158837"
@@ -97672,7 +97672,7 @@
   },
   {
     "original_item": "NHF452",
-    "original_description": "2\" NO HUB 45\u00b0 1/8 BEND ELBOW",
+    "original_description": "2\" NO HUB 45° 1/8 BEND ELBOW",
     "sheet_name": "NO-HUB PIPE FITTINGS",
     "created_at": "2025-07-13T20:01:43.158837",
     "updated_at": "2025-07-13T20:01:43.158837"
@@ -97686,7 +97686,7 @@
   },
   {
     "original_item": "NHFTL22",
-    "original_description": "2\" X 2\" NO HUB TAPPED 90\u00b0 1/4 BEND ELBOW",
+    "original_description": "2\" X 2\" NO HUB TAPPED 90° 1/4 BEND ELBOW",
     "sheet_name": "NO-HUB PIPE FITTINGS",
     "created_at": "2025-07-13T20:01:43.158837",
     "updated_at": "2025-07-13T20:01:43.158837"
@@ -99303,7 +99303,7 @@
   },
   {
     "original_item": "NHF453",
-    "original_description": "3\" NO HUB 45\u00b0 1/8 BEND ELBOW",
+    "original_description": "3\" NO HUB 45° 1/8 BEND ELBOW",
     "sheet_name": "NO-HUB PIPE FITTINGS",
     "created_at": "2025-07-13T20:01:43.158837",
     "updated_at": "2025-07-13T20:01:43.158837"
@@ -102208,14 +102208,14 @@
   },
   {
     "original_item": "PS8",
-    "original_description": "8\" PIPE SURE-SLEEVE LSP 3\u00b0 Taper",
+    "original_description": "8\" PIPE SURE-SLEEVE LSP 3° Taper",
     "sheet_name": "TAPE",
     "created_at": "2025-07-13T20:02:19.985415",
     "updated_at": "2025-07-13T20:02:19.985415"
   },
   {
     "original_item": "PS5",
-    "original_description": "5\" PIPE SURE-SLEEVE LSP 3\u00b0 Taper",
+    "original_description": "5\" PIPE SURE-SLEEVE LSP 3° Taper",
     "sheet_name": "TAPE",
     "created_at": "2025-07-13T20:02:19.985415",
     "updated_at": "2025-07-13T20:02:19.985415"
