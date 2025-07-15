@@ -52,14 +52,14 @@ def clean_item_code(item_code):
     cleaned = re.sub(r'\s+', ' ', cleaned)
     cleaned = cleaned.strip()
 
-    # Remove any numbers (with or without spaces) that are between the main code and the suffix
-    # e.g., 'PFS453 2389-F' -> 'PFS453-F', 'ABC123 456 XYZ-F' -> 'ABC123 XYZ-F'
-    # This will remove any group of digits surrounded by spaces, before a hyphen and suffix
-    cleaned = re.sub(r' (\d+)(?=-[A-Za-z])', '', cleaned)
-    # Also remove numbers at the end if not part of the suffix
-    cleaned = re.sub(r' (\d+)$', '', cleaned)
-    # Remove numbers between words, e.g., 'ABC123 456 XYZ-F' -> 'ABC123 XYZ-F'
-    cleaned = re.sub(r' (\d+) ', ' ', cleaned)
+    # Remove any numbers with 4 or more digits that are between the main code and the suffix
+    # e.g., 'PFS453 2389-F' -> 'PFS453-F', 'ABC123 4567 XYZ-F' -> 'ABC123 XYZ-F'
+    # This will remove any group of 4+ digits surrounded by spaces, before a hyphen and suffix
+    cleaned = re.sub(r' (\d{4,})(?=-[A-Za-z])', '', cleaned)
+    # Also remove 4+ digit numbers at the end if not part of the suffix
+    cleaned = re.sub(r' (\d{4,})$', '', cleaned)
+    # Remove 4+ digit numbers between words, e.g., 'ABC123 4567 XYZ-F' -> 'ABC123 XYZ-F'
+    cleaned = re.sub(r' (\d{4,}) ', ' ', cleaned)
 
     return cleaned
 
