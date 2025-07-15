@@ -454,27 +454,48 @@ class ItemsMappingController:
             old_mpi_code = None
             old_description = None
             
-            # Check if mapping already exists
+            # Check if mapping already exists (by supplier_id, supplier_item_ids, and mpi_code)
             existing_mapping = db.query(ItemsMapping).filter_by(
                 supplier_id=supplier_id,
-                supplier_item_ids=cleaned_data["supplier_item_ids"]
+                supplier_item_ids=cleaned_data["supplier_item_ids"],
+                mpi_code=cleaned_data["mpi_code"]
             ).first()
             
             if existing_mapping:
+                # Mapping already exists with same data - no need to update
+                logger.debug(f"Mapping already exists (no change): {cleaned_data['supplier_item_ids']} -> {cleaned_data['mpi_code']}")
+                return {
+                    "status": "success",
+                    "message": "Mapping already exists with same data",
+                    "action": "no_change",
+                    "mapping_id": existing_mapping.id
+                }
+            
+            # Check if there's an existing mapping with same supplier_item_ids but different mpi_code
+            conflicting_mapping = db.query(ItemsMapping).filter_by(
+                supplier_id=supplier_id,
+                supplier_item_ids=cleaned_data["supplier_item_ids"]
+            ).filter(
+                ItemsMapping.mpi_code != cleaned_data["mpi_code"]
+            ).first()
+            
+            if conflicting_mapping:
+                # Update existing mapping with new mpi_code
                 is_update = True
-                old_mpi_code = existing_mapping.mpi_code
-                old_description = existing_mapping.description
+                old_mpi_code = conflicting_mapping.mpi_code
+                old_description = conflicting_mapping.description
                 
                 # Update existing mapping
                 for key, value in cleaned_data.items():
-                    setattr(existing_mapping, key, value)
+                    setattr(conflicting_mapping, key, value)
                     
-                logger.info(f"Updated permanent mapping: {cleaned_data['supplier_item_ids']} -> {cleaned_data['mpi_code']}")
+                logger.info(f"Updated existing mapping: {cleaned_data['supplier_item_ids']} | {old_mpi_code} -> {cleaned_data['mpi_code']}")
             else:
-                # Create new mapping
+                # Create new mapping (append)
+                is_update = False
                 db_mapping = ItemsMapping(**cleaned_data, supplier_id=supplier_id)
                 db.add(db_mapping)
-                logger.info(f"Created new permanent mapping: {cleaned_data['supplier_item_ids']} -> {cleaned_data['mpi_code']}")
+                logger.info(f"Created new mapping (append): {cleaned_data['supplier_item_ids']} -> {cleaned_data['mpi_code']}")
             
             # Commit the changes to the mapping
             db.commit()
@@ -499,9 +520,12 @@ class ItemsMappingController:
             
             return {
                 "status": "success",
-                "message": "Permanent mapping created/updated successfully",
+                "message": f"{'Updated' if is_update else 'Created'} mapping: {cleaned_data['supplier_item_ids']} -> {cleaned_data['mpi_code']}",
                 "mapping_type": "permanent",
-                "is_update": is_update
+                "action": "update" if is_update else "create",
+                "is_update": is_update,
+                "old_mpi_code": old_mpi_code if is_update else None,
+                "old_description": old_description if is_update else None
             }
             
         except Exception as e:

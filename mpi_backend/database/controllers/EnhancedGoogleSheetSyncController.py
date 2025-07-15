@@ -198,6 +198,9 @@ class EnhancedGoogleSheetSyncController:
         if final_result["success"]:
             self.__class__._last_sync_time = datetime.now()
         
+        # Log comprehensive summary at the end
+        self._log_comprehensive_summary(extract_result, process_result, temp_result)
+        
         return final_result
 
     def _perform_uidi_update_operation(self) -> Dict[str, Any]:
@@ -221,6 +224,9 @@ class EnhancedGoogleSheetSyncController:
         # Update last UIDI update time
         if update_result.get("status") == "success":
             self.__class__._last_update_no_match_uidi_time = datetime.now()
+        
+        # Log comprehensive summary for UIDI update operation
+        self._log_uidi_update_summary(sync_result, update_result)
         
         # Combine results
         return {
@@ -256,6 +262,9 @@ class EnhancedGoogleSheetSyncController:
         # Update last full update time
         if update_result.get("status") == "success":
             self.__class__._last_update_all_time = datetime.now()
+        
+        # Log comprehensive summary for full update operation
+        self._log_full_update_summary(sync_result, update_result)
         
         # Combine results
         return {
@@ -335,6 +344,8 @@ class EnhancedGoogleSheetSyncController:
             
             # Process permanent mappings
             permanent_saved = 0
+            permanent_updated = 0
+            permanent_created = 0
             permanent_errors = 0
             
             for mapping in permanent_mappings:
@@ -353,6 +364,10 @@ class EnhancedGoogleSheetSyncController:
                     
                     if result.get("status") == "success":
                         permanent_saved += 1
+                        if result.get("action") == "update":
+                            permanent_updated += 1
+                        elif result.get("action") == "create":
+                            permanent_created += 1
                     else:
                         permanent_errors += 1
                         self.logger.warning(f"Failed to save permanent mapping: {result.get('message')}")
@@ -386,10 +401,13 @@ class EnhancedGoogleSheetSyncController:
             return {
                 "success": True,
                 "message": (
-                    f"Processing completed: {permanent_saved} permanent mappings saved, "
+                    f"Processing completed: {permanent_created} new mappings created, "
+                    f"{permanent_updated} existing mappings updated, "
                     f"{temp_saved} temporary mappings saved, {len(invalid_mappings)} invalid mappings skipped"
                 ),
                 "permanent_saved": permanent_saved,
+                "permanent_created": permanent_created,
+                "permanent_updated": permanent_updated,
                 "permanent_errors": permanent_errors,
                 "temporary_saved": temp_saved,
                 "temporary_errors": temp_errors,
@@ -442,4 +460,229 @@ class EnhancedGoogleSheetSyncController:
                 "message": f"Error syncing temporary mappings: {str(e)}",
                 "extraction_result": {"total_mappings_extracted": 0},
                 "update_result": {"items_updated": 0}
-            } 
+            }
+
+    def _log_comprehensive_summary(self, extract_result: Dict[str, Any], process_result: Dict[str, Any], temp_result: Dict[str, Any]) -> None:
+        """
+        Log comprehensive summary of extraction and processing results.
+        
+        Args:
+            extract_result: Results from the enhanced extractor
+            process_result: Results from processing and saving mappings
+            temp_result: Results from temporary mapping sync
+        """
+        try:
+            # Extract statistics
+            extract_stats = extract_result.get("statistics", {})
+            process_stats = process_result or {}
+            temp_stats = temp_result or {}
+            
+            # Calculate totals
+            total_extracted = extract_stats.get("total_extracted", 0)
+            total_permanent = extract_stats.get("permanent_mappings", 0)
+            total_temporary = extract_stats.get("temporary_mappings", 0)
+            total_invalid = extract_stats.get("invalid_mappings", 0)
+            sheets_processed = extract_stats.get("sheets_processed", 0)
+            
+            # Processing results
+            permanent_created = process_stats.get("permanent_created", 0)
+            permanent_updated = process_stats.get("permanent_updated", 0)
+            permanent_errors = process_stats.get("permanent_errors", 0)
+            temporary_saved = process_stats.get("temporary_saved", 0)
+            temporary_errors = process_stats.get("temporary_errors", 0)
+            
+            # Temporary mapping sync results
+            temp_extracted = temp_stats.get("extraction_result", {}).get("total_mappings_extracted", 0)
+            temp_updated = temp_stats.get("update_result", {}).get("items_updated", 0)
+            
+            # Log comprehensive summary
+            self.logger.info("=" * 80)
+            self.logger.info("COMPREHENSIVE EXTRACTION AND MAPPING UPDATE SUMMARY")
+            self.logger.info("=" * 80)
+            
+            # Extraction Summary
+            self.logger.info("📊 EXTRACTION SUMMARY:")
+            self.logger.info(f"   • Total Sheets Processed: {sheets_processed}")
+            self.logger.info(f"   • Total Items Extracted: {total_extracted}")
+            self.logger.info(f"   • Permanent Mappings: {total_permanent}")
+            self.logger.info(f"   • Temporary Mappings: {total_temporary}")
+            self.logger.info(f"   • Invalid Mappings: {total_invalid}")
+            
+            # Processing Summary
+            self.logger.info("🔄 PROCESSING SUMMARY:")
+            self.logger.info(f"   • Permanent Mappings Created: {permanent_created}")
+            self.logger.info(f"   • Permanent Mappings Updated: {permanent_updated}")
+            self.logger.info(f"   • Permanent Mapping Errors: {permanent_errors}")
+            self.logger.info(f"   • Temporary Mappings Saved: {temporary_saved}")
+            self.logger.info(f"   • Temporary Mapping Errors: {temporary_errors}")
+            
+            # Temporary Sync Summary
+            self.logger.info("🔄 TEMPORARY MAPPING SYNC SUMMARY:")
+            self.logger.info(f"   • Temporary Items Extracted: {temp_extracted}")
+            self.logger.info(f"   • Invoice Items Updated: {temp_updated}")
+            
+            # Success Rates
+            if total_permanent > 0:
+                permanent_success_rate = ((permanent_created + permanent_updated) / total_permanent) * 100
+                self.logger.info(f"   • Permanent Mapping Success Rate: {permanent_success_rate:.1f}%")
+            
+            if total_temporary > 0:
+                temp_success_rate = (temporary_saved / total_temporary) * 100
+                self.logger.info(f"   • Temporary Mapping Success Rate: {temp_success_rate:.1f}%")
+            
+            # Overall Summary
+            self.logger.info("📈 OVERALL SUMMARY:")
+            self.logger.info(f"   • Total Items Processed: {total_extracted}")
+            self.logger.info(f"   • Total Mappings Updated: {permanent_created + permanent_updated + temporary_saved}")
+            self.logger.info(f"   • Total Errors: {permanent_errors + temporary_errors}")
+            
+            # Status
+            if extract_result.get("success") and process_result.get("success"):
+                self.logger.info("✅ SYNC STATUS: SUCCESSFUL")
+            else:
+                self.logger.info("❌ SYNC STATUS: FAILED")
+            
+            self.logger.info("=" * 80)
+            
+        except Exception as e:
+            self.logger.error(f"Error logging comprehensive summary: {str(e)}")
+
+    def _log_full_update_summary(self, sync_result: Dict[str, Any], update_result: Dict[str, Any]) -> None:
+        """
+        Log comprehensive summary for full update operation.
+        
+        Args:
+            sync_result: Results from Google Sheets sync
+            update_result: Results from updating all mappings
+        """
+        try:
+            # Extract sync statistics
+            sync_extract_result = sync_result.get("extraction_result", {})
+            sync_process_result = sync_result.get("processing_result", {})
+            sync_temp_result = sync_result.get("temporary_mapping_result", {})
+            
+            sync_stats = sync_extract_result.get("statistics", {})
+            process_stats = sync_process_result or {}
+            temp_stats = sync_temp_result or {}
+            
+            # Calculate sync totals
+            total_extracted = sync_stats.get("total_extracted", 0)
+            total_permanent = sync_stats.get("permanent_mappings", 0)
+            total_temporary = sync_stats.get("temporary_mappings", 0)
+            sheets_processed = sync_stats.get("sheets_processed", 0)
+            
+            # Processing results
+            permanent_created = process_stats.get("permanent_created", 0)
+            permanent_updated = process_stats.get("permanent_updated", 0)
+            temporary_saved = process_stats.get("temporary_saved", 0)
+            
+            # Update results
+            items_updated = update_result.get("items_updated", 0)
+            update_status = update_result.get("status", "unknown")
+            
+            # Log comprehensive summary
+            self.logger.info("=" * 80)
+            self.logger.info("FULL UPDATE OPERATION - COMPREHENSIVE SUMMARY")
+            self.logger.info("=" * 80)
+            
+            # Phase 1: Google Sheets Sync
+            self.logger.info("📊 PHASE 1 - GOOGLE SHEETS SYNC:")
+            self.logger.info(f"   • Sheets Processed: {sheets_processed}")
+            self.logger.info(f"   • Total Items Extracted: {total_extracted}")
+            self.logger.info(f"   • Permanent Mappings: {total_permanent}")
+            self.logger.info(f"   • Temporary Mappings: {total_temporary}")
+            self.logger.info(f"   • Permanent Created: {permanent_created}")
+            self.logger.info(f"   • Permanent Updated: {permanent_updated}")
+            self.logger.info(f"   • Temporary Saved: {temporary_saved}")
+            
+            # Phase 2: All Items Update
+            self.logger.info("🔄 PHASE 2 - ALL ITEMS UPDATE:")
+            self.logger.info(f"   • Update Status: {update_status}")
+            self.logger.info(f"   • Invoice Items Updated: {items_updated}")
+            
+            # Overall Summary
+            self.logger.info("📈 OVERALL FULL UPDATE SUMMARY:")
+            self.logger.info(f"   • Total Items Extracted: {total_extracted}")
+            self.logger.info(f"   • Total Mappings Processed: {permanent_created + permanent_updated + temporary_saved}")
+            self.logger.info(f"   • Total Invoice Items Updated: {items_updated}")
+            
+            # Success Status
+            if sync_result.get("success") and update_result.get("status") == "success":
+                self.logger.info("✅ FULL UPDATE STATUS: SUCCESSFUL")
+            else:
+                self.logger.info("❌ FULL UPDATE STATUS: FAILED")
+            
+            self.logger.info("=" * 80)
+            
+        except Exception as e:
+            self.logger.error(f"Error logging full update summary: {str(e)}")
+
+    def _log_uidi_update_summary(self, sync_result: Dict[str, Any], update_result: Dict[str, Any]) -> None:
+        """
+        Log comprehensive summary for UIDI update operation.
+        
+        Args:
+            sync_result: Results from Google Sheets sync
+            update_result: Results from updating UIDI mappings
+        """
+        try:
+            # Extract sync statistics
+            sync_extract_result = sync_result.get("extraction_result", {})
+            sync_process_result = sync_result.get("processing_result", {})
+            sync_temp_result = sync_result.get("temporary_mapping_result", {})
+            
+            sync_stats = sync_extract_result.get("statistics", {})
+            process_stats = sync_process_result or {}
+            temp_stats = sync_temp_result or {}
+            
+            # Calculate sync totals
+            total_extracted = sync_stats.get("total_extracted", 0)
+            total_permanent = sync_stats.get("permanent_mappings", 0)
+            total_temporary = sync_stats.get("temporary_mappings", 0)
+            sheets_processed = sync_stats.get("sheets_processed", 0)
+            
+            # Processing results
+            permanent_created = process_stats.get("permanent_created", 0)
+            permanent_updated = process_stats.get("permanent_updated", 0)
+            temporary_saved = process_stats.get("temporary_saved", 0)
+            
+            # Update results
+            items_updated = update_result.get("items_updated", 0)
+            update_status = update_result.get("status", "unknown")
+            
+            # Log comprehensive summary
+            self.logger.info("=" * 80)
+            self.logger.info("UIDI UPDATE OPERATION - COMPREHENSIVE SUMMARY")
+            self.logger.info("=" * 80)
+            
+            # Phase 1: Google Sheets Sync
+            self.logger.info("📊 PHASE 1 - GOOGLE SHEETS SYNC:")
+            self.logger.info(f"   • Sheets Processed: {sheets_processed}")
+            self.logger.info(f"   • Total Items Extracted: {total_extracted}")
+            self.logger.info(f"   • Permanent Mappings: {total_permanent}")
+            self.logger.info(f"   • Temporary Mappings: {total_temporary}")
+            self.logger.info(f"   • Permanent Created: {permanent_created}")
+            self.logger.info(f"   • Permanent Updated: {permanent_updated}")
+            self.logger.info(f"   • Temporary Saved: {temporary_saved}")
+            
+            # Phase 2: UIDI Items Update
+            self.logger.info("🔄 PHASE 2 - UIDI ITEMS UPDATE:")
+            self.logger.info(f"   • Update Status: {update_status}")
+            self.logger.info(f"   • UIDI Items Updated: {items_updated}")
+            
+            # Overall Summary
+            self.logger.info("📈 OVERALL UIDI UPDATE SUMMARY:")
+            self.logger.info(f"   • Total Items Extracted: {total_extracted}")
+            self.logger.info(f"   • Total Mappings Processed: {permanent_created + permanent_updated + temporary_saved}")
+            self.logger.info(f"   • Total UIDI Items Updated: {items_updated}")
+            
+            # Success Status
+            if sync_result.get("success") and update_result.get("status") == "success":
+                self.logger.info("✅ UIDI UPDATE STATUS: SUCCESSFUL")
+            else:
+                self.logger.info("❌ UIDI UPDATE STATUS: FAILED")
+            
+            self.logger.info("=" * 80)
+            
+        except Exception as e:
+            self.logger.error(f"Error logging UIDI update summary: {str(e)}") 
