@@ -50,6 +50,7 @@ from mpi_backend.utils.statement_downloader import (
 from mpi_backend.utils.missing_invoice_downaloder import (
     missing_email_download_background_task
 )
+from scripts.failed_invoice_recovery import process_failed_invoice_recovery
 
 # Import priority control utilities
 from mpi_backend.utils.quickbooks_priority import set_scheduler_instance
@@ -169,6 +170,24 @@ def async_statement_download_wrapper():
     # Submit to dedicated email thread pool
     future = _email_executor.submit(_execute_statement_download)
     logger.debug("Statement download task submitted to background thread pool")
+    return future
+
+
+def async_failed_invoice_recovery_wrapper():
+    """
+    Async wrapper for failed invoice recovery task to prevent blocking
+    """
+    def _execute_failed_invoice_recovery():
+        try:
+            logger.info("Starting async failed invoice recovery task")
+            process_failed_invoice_recovery()
+            logger.info("Failed invoice recovery task completed successfully")
+        except Exception as e:
+            logger.error(f"Failed invoice recovery task failed: {str(e)}")
+    
+    # Submit to dedicated email thread pool
+    future = _email_executor.submit(_execute_failed_invoice_recovery)
+    logger.debug("Failed invoice recovery task submitted to background thread pool")
     return future
 
 
@@ -327,6 +346,17 @@ async def lifespan(app: FastAPI):
         misfire_grace_time=1800
     )
     
+    # Failed invoice recovery - daily at 3 AM PKT (10 PM UTC, PKT = UTC+5) (async wrapper for non-blocking execution)
+    scheduler.add_job(
+        async_failed_invoice_recovery_wrapper,  # NEW: Using async wrapper to prevent blocking
+        CronTrigger(hour=22, minute=0, timezone=UTC_TZ),  # 3 AM PKT = 10 PM UTC
+        max_instances=1,
+        replace_existing=True,
+        id="failed_invoice_recovery",
+        name="Failed Invoice Recovery Task (Daily at 3 AM PKT, Async)",
+        misfire_grace_time=3600  # 1 hour grace period
+    )
+    
     # # Missing invoice download - daily (async wrapper for non-blocking execution)
     # scheduler.add_job(
     #     async_missing_email_download_wrapper,  # NEW: Using async wrapper to prevent blocking
@@ -405,9 +435,18 @@ async def lifespan(app: FastAPI):
     # except Exception as e:
     #     logger.error(f"Startup missing invoice download failed: {str(e)}")
     
+    # Run failed invoice recovery on startup (async)
+    logger.info("Running failed invoice recovery on startup...")
+    try:
+        async_failed_invoice_recovery_wrapper()
+        logger.info("Startup failed invoice recovery submitted successfully")
+    except Exception as e:
+        logger.error(f"Startup failed invoice recovery failed: {str(e)}")
+    
     logger.info("Background tasks configured with async execution:")
     logger.info("  • Email Download: Every 5 minutes (async, non-blocking)")
     logger.info("  • Statement Download: Every 12 hours (async, non-blocking)")
+    logger.info("  • Failed Invoice Recovery: Daily at 3 AM PKT (async, non-blocking, and on startup)")
     logger.info("  • Missing Invoice Download: Daily (async, non-blocking, and on startup)")
     logger.info("  • UIDI/NO Match Update: Daily at 6 PM PKT (async, thread pool)")
     logger.info("  • All Mappings Update: Every 48 hours at 1 AM PKT (async, thread pool)")
