@@ -319,17 +319,10 @@ class InvoiceItemController:
 
     @staticmethod
     def _calculate_item_suffix_fast(item: str, vendor: str) -> str:
-        """Ultra-fast item suffix calculation with suffix standardization."""
+        """Ultra-fast item suffix calculation with minimal string operations."""
         if not item or not vendor:
             return item or ""
         
-        # Check if item already has a suffix
-        existing_suffixes = ['B', 'W', 'Y', 'S', 'P', 'A', 'G', 'F']
-        for existing_suffix in existing_suffixes:
-            if item.endswith(f"-{existing_suffix}"):
-                return item  # Already has a suffix, preserve it
-        
-        # Add suffix only if none exists
         vendor_upper = vendor.upper()
         if 'BMW' in vendor_upper:
             return f"{item}-B"
@@ -1926,20 +1919,15 @@ class InvoiceItemController:
     def _add_suffix_to_item(self, item_code: str, vendor: str) -> str:
         """
         Add the correct suffix to an item code based on vendor information.
-        With suffix standardization, we preserve existing suffixes and only add if missing.
         
         Args:
             item_code: The original item code from the invoice
             vendor: The vendor/supplier name
             
         Returns:
-            Item code with proper suffix added (if missing)
+            Item code with proper suffix added
         """
         if not item_code or not vendor:
-            return item_code
-        
-        # Check if item should be skipped from suffix processing
-        if self._should_skip_item(item_code):
             return item_code
         
         # Extract supplier ID from vendor name
@@ -1952,18 +1940,15 @@ class InvoiceItemController:
         if not suffix:
             return item_code
         
-        # Check if item already has the correct suffix
-        if item_code.endswith(f"-{suffix}"):
-            return item_code  # Already has correct suffix
+        # Check if item should be skipped from suffix processing
+        if self._should_skip_item(item_code):
+            return item_code
         
-        # Check if item has any other suffix (preserve it)
-        existing_suffixes = ['B', 'W', 'Y', 'S', 'P', 'A', 'G', 'F']
-        for existing_suffix in existing_suffixes:
-            if item_code.endswith(f"-{existing_suffix}"):
-                return item_code  # Already has a suffix, preserve it
+        # Clean any existing suffixes first
+        clean_item = self._clean_existing_suffixes(item_code)
         
-        # Add the correct suffix if none exists
-        return f"{item_code}-{suffix}"
+        # Add the correct suffix
+        return f"{clean_item}-{suffix}"
     
     def _extract_supplier_id(self, vendor_name: str) -> tuple:
         """Extract supplier ID and name from vendor string."""
@@ -2033,4 +2018,25 @@ class InvoiceItemController:
         
         return False
     
-
+    def _clean_existing_suffixes(self, item_code: str) -> str:
+        """Remove all existing suffixes from item code."""
+        if not item_code:
+            return item_code
+        
+        clean_item = str(item_code).strip()
+        
+        # Remove ALL existing suffixes first (including double suffixes)
+        all_suffixes = ['B', 'W', 'Y', 'S', 'P', 'A', 'G', 'F']
+        
+        # Keep removing suffixes until none are found
+        while True:
+            found_suffix = False
+            for existing_suffix in all_suffixes:
+                if clean_item.endswith(f"-{existing_suffix}"):
+                    clean_item = clean_item[:-len(f"-{existing_suffix}")]
+                    found_suffix = True
+                    break
+            if not found_suffix:
+                break
+        
+        return clean_item
