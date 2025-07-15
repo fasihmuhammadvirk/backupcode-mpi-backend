@@ -10,7 +10,7 @@ def convert_items_to_dataframe(items, use_suffix=True):
     
     Args:
         items: List of InvoiceItem objects
-        use_suffix: Whether to use item_code_with_suffix property for display
+        use_suffix: Whether to use item codes with suffixes (deprecated - always uses full item codes now)
     """
     columns_mapping = {
         'item': 'Item',
@@ -41,9 +41,8 @@ def convert_items_to_dataframe(items, use_suffix=True):
             continue
             
         item_data = item.__dict__.copy()
-        # Use item_code_with_suffix for display if requested
-        if use_suffix and hasattr(item, 'item_code_with_suffix'):
-            item_data['item'] = item.item_code_with_suffix
+        # With suffix standardization, we always use the full item code as stored
+        # No need to check for item_code_with_suffix property
         items_dict.append(item_data)
     
     df = pd.DataFrame(items_dict).rename(columns=columns_mapping)
@@ -177,9 +176,8 @@ def convert_items_to_dataframe_optimized(db_session, ids, columns=None, order_by
     display_columns = {col: column_mapping.get(col, col.title()) for col in df.columns}
     df = df.rename(columns=display_columns)
     
-    # Remove vendor column if it was only added for suffix calculation
-    if use_suffix and columns and 'Vendor' not in columns and 'Vendor' in df.columns:
-        df = df.drop('Vendor', axis=1)
+    # With suffix standardization, vendor column is not needed for suffix calculation
+    # Keep vendor column as requested by user
     
     return df
 
@@ -229,23 +227,9 @@ def _apply_suffix_to_row(row):
     if not suffix:
         return item_code
     
-    # Remove ALL existing suffixes first (including double suffixes)
-    all_suffixes = set(suffix_map.values())
-    all_suffixes.discard("")  # Remove empty suffix
-    
-    clean_item = item_str
-    # Keep removing suffixes until none are found
-    while True:
-        found_suffix = False
-        for existing_suffix in all_suffixes:
-            if existing_suffix and clean_item.endswith(existing_suffix):
-                clean_item = clean_item[:-len(existing_suffix)]
-                found_suffix = True
-                break
-        if not found_suffix:
-            break
-    
-    return f"{clean_item}{suffix}"
+    # With suffix standardization, we use the full item codes as stored
+    # No suffix manipulation needed
+    return item_code
 
 
 # because of circular dependency, had to duplicate code here, will find a better way soon (hopefully)
@@ -270,17 +254,17 @@ def extract_supplier_id(file_path):
 
 def convert_items_to_dataframe_with_suffixes(invoice_items, supplier_id=None, context="display"):
     """
-    Convert invoice items to DataFrame with supplier-specific suffixes for display/export.
+    Convert invoice items to DataFrame with full item codes (suffix standardization).
     
     Args:
         invoice_items: List of InvoiceItem objects
-        supplier_id: Supplier ID for suffix determination
+        supplier_id: Supplier ID (deprecated - no longer used for suffix determination)
         context: Context (display, export, pdf, excel, etc.)
         
     Returns:
-        DataFrame with suffixes applied to Item column
+        DataFrame with full item codes as stored
     """
-    from mpi_backend.utils.item_utils import should_restore_suffix, restore_suffix_by_supplier_id
+    # Removed suffix restoration imports - no longer needed with suffix standardization
     
     if not invoice_items:
         return pd.DataFrame()
@@ -320,10 +304,8 @@ def convert_items_to_dataframe_with_suffixes(invoice_items, supplier_id=None, co
     # Create DataFrame
     df = pd.DataFrame(items_data)
     
-    # Apply suffixes if context requires it
-    if should_restore_suffix(context) and supplier_id and 'item' in df.columns:
-        df['Item'] = df['item'].apply(lambda x: restore_suffix_by_supplier_id(x, supplier_id) if x else x)
-    elif 'item' in df.columns:
+    # With suffix standardization, we use the full item codes as stored
+    if 'item' in df.columns:
         df['Item'] = df['item']
     
     return df
@@ -331,17 +313,17 @@ def convert_items_to_dataframe_with_suffixes(invoice_items, supplier_id=None, co
 
 def prepare_invoice_items_for_display(data, supplier_info=None, context="display"):
     """
-    Prepare invoice items for display with suffix restoration.
+    Prepare invoice items for display with full item codes (suffix standardization).
     
     Args:
         data: DataFrame or list of items
-        supplier_info: Dictionary with supplier information (must contain 'id' key)
+        supplier_info: Dictionary with supplier information (deprecated - no longer used for suffix determination)
         context: Display context
         
     Returns:
-        Prepared data with suffixes applied
+        Prepared data with full item codes as stored
     """
-    from mpi_backend.utils.item_utils import should_restore_suffix, restore_suffix_by_supplier_id
+    # Removed suffix restoration imports - no longer needed with suffix standardization
     
     if data is None or len(data) == 0:
         return data
@@ -350,16 +332,8 @@ def prepare_invoice_items_for_display(data, supplier_info=None, context="display
     if isinstance(data, pd.DataFrame):
         result_df = data.copy()
         
-        # Apply suffixes if context and supplier info provided
-        if (should_restore_suffix(context) and 
-            supplier_info and 
-            'id' in supplier_info and 
-            'Item' in result_df.columns):
-            
-            supplier_id = supplier_info['id']
-            result_df['Item'] = result_df['Item'].apply(
-                lambda x: restore_suffix_by_supplier_id(x, supplier_id) if x else x
-            )
+        # With suffix standardization, we use the full item codes as stored
+        # No suffix restoration needed
         
         return result_df
     
@@ -372,16 +346,8 @@ def prepare_invoice_items_for_display(data, supplier_info=None, context="display
         for item in data:
             if isinstance(item, dict):
                 item_copy = item.copy()
-                # Apply suffix to item field
-                if (should_restore_suffix(context) and 
-                    supplier_info and 
-                    'id' in supplier_info and 
-                    'item' in item_copy):
-                    
-                    supplier_id = supplier_info['id']
-                    item_copy['item'] = restore_suffix_by_supplier_id(
-                        item_copy['item'], supplier_id
-                    )
+                # With suffix standardization, we use the full item codes as stored
+                # No suffix restoration needed
                 result_list.append(item_copy)
             else:
                 result_list.append(item)

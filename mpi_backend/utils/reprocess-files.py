@@ -12,7 +12,7 @@ from datetime import datetime
 import os
 import pandas as pd
 import uuid
-from mpi_backend.utils.item_utils import clean_supplier_suffix
+# Removed clean_supplier_suffix import - no longer needed with suffix standardization
 
 
 db = contextmanager(get_db)
@@ -90,11 +90,8 @@ def search_replace(row, temp_items, item_mappings):
     # First try exact match with clean invoice item
     temp_match = temp_items[temp_items['original_item'] == original_item]
     
-    # If no exact match and we have supplier_id, clean the DB data and compare with clean invoice item
-    if temp_match.empty and supplier_id:
-        temp_match = temp_items[
-            temp_items['original_item'].apply(lambda x: clean_supplier_suffix(x, supplier_id)) == original_item
-        ]
+    # With suffix standardization, we only do exact matches
+    # No suffix cleaning needed - items are stored with full suffixes
     
     if not temp_match.empty:
         # For temporary mappings, we assign the sheet name but keep "No Match" for the MPI item
@@ -110,11 +107,8 @@ def search_replace(row, temp_items, item_mappings):
         # First try exact match with clean invoice item
         mapping_match = item_mappings[item_mappings['supplier_item_ids'] == original_item]
         
-        # If no exact match and we have supplier_id, clean the DB mapping data and compare with clean invoice item
-        if mapping_match.empty and supplier_id:
-            mapping_match = item_mappings[
-                item_mappings['supplier_item_ids'].apply(lambda x: clean_supplier_suffix(x, supplier_id)) == original_item
-            ]
+        # With suffix standardization, we only do exact matches
+        # No suffix cleaning needed - items are stored with full suffixes
         
         if not mapping_match.empty:
             row['MpiItem'] = mapping_match.iloc[0]['mpi_code']  # This is the target mpi_code

@@ -67,12 +67,13 @@ class TemporaryMappingExtractor:
 
     def clean_item_suffix(self, item: str) -> str:
         """
-        Remove common supplier suffixes like -B, -Y, -F, etc. from the end of the item code.
+        With suffix standardization, we preserve the full item codes.
+        This method is kept for backward compatibility but no longer removes suffixes.
         """
         if not item:
             return item
-        # Remove dash followed by a single uppercase letter at the end
-        return re.sub(r'-[A-Z]$', '', item)
+        # With suffix standardization, return the item as-is
+        return item
 
     def extract_temporary_mappings(self, df: pd.DataFrame, sheet_name: str) -> List[Dict[str, Any]]:
         """

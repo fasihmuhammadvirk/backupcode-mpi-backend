@@ -23,7 +23,6 @@ from mpi_backend.database.controllers.UnmappedItems import (
     UnmappedItemsController
 )
 from mpi_backend.utils.s3_utils import upload_file
-from mpi_backend.utils.item_utils import clean_supplier_suffix
 
 logger = logging.getLogger(__name__)
 
@@ -194,13 +193,12 @@ def process_failed_file(file, db):
 
 def search_replace(row, temp_items, item_mappings, db):
     """
-    Search for item mappings with supplier-specific suffix cleaning.
+    Search for item mappings with direct comparison (no suffix cleaning).
     Maps original_item (supplier_item_ids) to mpi_code.
 
     Prioritizes permanent mappings over temporary ones to ensure valid
     mappings override UIDI.
-    Note: Invoice data is clean, but database mapping data has suffixes
-    that need cleaning.
+    Note: With suffix standardization, we use direct comparisons.
     """
     from mpi_backend.utils.mapping_validators import is_temporary_mapping
 
@@ -210,19 +208,10 @@ def search_replace(row, temp_items, item_mappings, db):
     # FIRST: Search in permanent mappings (supplier_item_mappings table)
     # This ensures permanent mappings override temporary ones
     if 'supplier_item_ids' in item_mappings.columns:
-        # First try exact match with clean invoice item
+        # With suffix standardization, we only do exact matches
         mapping_match = item_mappings[
             item_mappings['supplier_item_ids'] == original_item
         ]
-
-        # If no exact match and we have supplier_id, clean the DB mapping
-        # data and compare with clean invoice item
-        if mapping_match.empty and supplier_id:
-            mapping_match = item_mappings[
-                item_mappings['supplier_item_ids'].apply(
-                    lambda x: clean_supplier_suffix(x, supplier_id)
-                ) == original_item
-            ]
 
         if not mapping_match.empty:
             mpi_code = mapping_match.iloc[0]['mpi_code']
@@ -243,19 +232,10 @@ def search_replace(row, temp_items, item_mappings, db):
                                f"skipping: {mpi_code}")
 
     # SECOND: If no permanent mapping found, check temporary mappings
-    # First try exact match with clean invoice item
+    # With suffix standardization, we only do exact matches
     temp_match = temp_items[
         temp_items['original_item'] == original_item
     ]
-
-    # If no exact match and we have supplier_id, clean the DB data and
-    # compare with clean invoice item
-    if temp_match.empty and supplier_id:
-        temp_match = temp_items[
-            temp_items['original_item'].apply(
-                lambda x: clean_supplier_suffix(x, supplier_id)
-            ) == original_item
-        ]
 
     if not temp_match.empty:
         # For temporary mappings, we assign the sheet name but keep "No Match" for the MPI item
