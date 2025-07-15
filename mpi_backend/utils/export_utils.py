@@ -183,52 +183,15 @@ def convert_items_to_dataframe_optimized(db_session, ids, columns=None, order_by
 
 
 def _apply_suffix_to_row(row):
-    """Helper function to apply suffix to item code based on vendor."""
+    """Helper function to preserve item codes with suffix standardization."""
     item_code = row.get('item', '')
     vendor = row.get('vendor', '')
     
     if not item_code or not vendor:
         return item_code
     
-    # Exclude tax and administrative items from getting suffixes
-    item_str = str(item_code).strip()
-    excluded_items = [
-        "tax", "freight", "shipping", "handling", "subtotal", "total"
-    ]
-    if (item_str.startswith("10 Materials") or 
-            item_str.lower() in excluded_items):
-        return item_code
-    
-    # Supplier suffix mapping (from InvoiceItems model)
-    suffix_map = {
-        "BMW Plumbing Supplies": "-B",
-        "World Wide Plumbing": "-W",
-        "Y & S Plumbing Supply": "-Y", 
-        "Supreme Plumbing Supply": "-S",
-        "Pyramid Plumbing": "-P",
-        "ABC Opus Services": "-A",
-        "Park Plumbing Supply": "-P",
-        "Gotham Plumbing Supply": "-G",
-        "FW Webb Plumbing Supply": "-F",
-        "Flow Mark Plumbing Supply": "-F",
-        "Plumbing Exchange": "",
-        "AF Supply": "-A",
-        "Lion Hvac Supplies": "",
-        "Bruce Ferguson": "-F",
-    }
-    
-    # Find suffix for vendor
-    suffix = ""
-    for supplier_name, supplier_suffix in suffix_map.items():
-        if supplier_name in vendor:
-            suffix = supplier_suffix
-            break
-    
-    if not suffix:
-        return item_code
-    
-    # With suffix standardization, we use the full item codes as stored
-    # No suffix manipulation needed
+    # With suffix standardization, we preserve the full item codes as stored
+    # No suffix manipulation needed - items already have correct suffixes
     return item_code
 
 

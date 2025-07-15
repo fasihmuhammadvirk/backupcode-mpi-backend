@@ -155,6 +155,7 @@ def clean_existing_suffixes(item_code: str) -> str:
 def add_suffix_to_item(item_code: str, supplier_id: int) -> str:
     """
     Add the correct suffix to an item code based on supplier ID.
+    With suffix standardization, we preserve existing suffixes and only add if missing.
     """
     if should_skip_item(item_code):
         return item_code
@@ -163,11 +164,18 @@ def add_suffix_to_item(item_code: str, supplier_id: int) -> str:
     if not suffix:
         return item_code
     
-    # Clean existing suffixes first
-    clean_item = clean_existing_suffixes(item_code)
+    # Check if item already has the correct suffix
+    if item_code.endswith(f"-{suffix}"):
+        return item_code  # Already has correct suffix
     
-    # Add the correct suffix
-    return f"{clean_item}-{suffix}"
+    # Check if item has any other suffix (preserve it)
+    existing_suffixes = ['B', 'W', 'Y', 'S', 'P', 'A', 'G', 'F']
+    for existing_suffix in existing_suffixes:
+        if item_code.endswith(f"-{existing_suffix}"):
+            return item_code  # Already has a suffix, preserve it
+    
+    # Add the correct suffix if none exists
+    return f"{item_code}-{suffix}"
 
 
 class SuffixStandardizationMigration:
