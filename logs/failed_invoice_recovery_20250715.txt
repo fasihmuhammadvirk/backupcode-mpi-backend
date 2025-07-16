@@ -522,3 +522,473 @@
   Search Date: 2023-07-16
   Details: Processed from email UID 41282
 --------------------------------------------------------------------------------
+[2025-07-15 12:04:00] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 124929
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2024-05-27
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:01] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 57239
+  Supplier: Park Plumbing Supply
+  Search Date: 2024-05-14
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:01] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 122912
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2024-05-06
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:01] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 122911
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2024-05-06
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:01] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 122900
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2024-05-06
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:01] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 122932
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2024-05-06
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:01] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 122897
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2024-05-06
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:01] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 56366
+  Supplier: Park Plumbing Supply
+  Search Date: 2024-05-03
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:01] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 93101
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-10-19
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:01] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 88507
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-06
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:01] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 88500
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-06
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:01] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 102655-01
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-09-06
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:01] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 88503
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-06
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:01] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 88504
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-06
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:01] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 88502
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-06
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:01] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 88182
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-05
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:01] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 102655
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-09-05
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:02] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 88202
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-05
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:02] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 88228
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-05
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:02] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 102704
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-09-05
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:02] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 88182-01
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-05
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:02] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 87190-01
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-04
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:02] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 87190
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-04
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:05] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 099058
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-19
+  Details: Processed from email UID 41303
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:06] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 099027
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-19
+  Details: Processed from email UID 41302
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:08] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098921
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-18
+  Details: Processed from email UID 41294
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:09] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098946
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-18
+  Details: Processed from email UID 41295
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:10] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098953
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-18
+  Details: Processed from email UID 41297
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:11] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098971
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-18
+  Details: Processed from email UID 41299
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:13] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 099017
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-18
+  Details: Processed from email UID 41301
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:14] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098983
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-18
+  Details: Processed from email UID 41300
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:15] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098970
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-18
+  Details: Processed from email UID 41298
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:17] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098952
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-18
+  Details: Processed from email UID 41296
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:18] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098880
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-17
+  Details: Processed from email UID 41292
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:19] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098847
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-17
+  Details: Processed from email UID 41286
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:21] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098878
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-17
+  Details: Processed from email UID 41291
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:22] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098873
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-17
+  Details: Processed from email UID 41290
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:23] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098807
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-17
+  Details: Processed from email UID 41283
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:24] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098872
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-17
+  Details: Processed from email UID 41289
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:26] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098860
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-17
+  Details: Processed from email UID 41288
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:27] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098904
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-17
+  Details: Processed from email UID 41293
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:28] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098857
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-16
+  Details: Processed from email UID 41287
+--------------------------------------------------------------------------------
+[2025-07-15 12:04:29] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098802
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-16
+  Details: Processed from email UID 41282
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:05] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 124929
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2024-05-27
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:06] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 57239
+  Supplier: Park Plumbing Supply
+  Search Date: 2024-05-14
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:07] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 122912
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2024-05-06
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:08] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 122911
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2024-05-06
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:08] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 122900
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2024-05-06
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:08] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 122932
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2024-05-06
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:08] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 122897
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2024-05-06
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:08] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 56366
+  Supplier: Park Plumbing Supply
+  Search Date: 2024-05-03
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:08] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 93101
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-10-19
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:08] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 88507
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-06
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:08] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 88500
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-06
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:08] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 102655-01
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-09-06
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:08] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 88503
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-06
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:08] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 88504
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-06
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:08] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 88502
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-06
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:08] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 88182
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-05
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:09] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 102655
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-09-05
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:09] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 88202
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-05
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:09] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 88228
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-05
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:09] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 102704
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-09-05
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:10] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 88182-01
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-05
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:11] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 87190-01
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-04
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:12] RECOVERY ATTEMPT: NO_EMAILS_FOUND
+  Invoice: 87190
+  Supplier: Pyramid Plumbing
+  Search Date: 2023-09-04
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:16] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 099058
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-19
+  Details: Processed from email UID 41303
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:20] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 099027
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-19
+  Details: Processed from email UID 41302
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:23] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098921
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-18
+  Details: Processed from email UID 41294
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:31] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098946
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-18
+  Details: Processed from email UID 41295
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:34] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098953
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-18
+  Details: Processed from email UID 41297
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:41] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098971
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-18
+  Details: Processed from email UID 41299
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:43] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 099017
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-18
+  Details: Processed from email UID 41301
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:46] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098983
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-18
+  Details: Processed from email UID 41300
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:51] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098970
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-18
+  Details: Processed from email UID 41298
+--------------------------------------------------------------------------------
+[2025-07-15 18:00:57] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098952
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-18
+  Details: Processed from email UID 41296
+--------------------------------------------------------------------------------
+[2025-07-15 18:01:04] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098880
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-17
+  Details: Processed from email UID 41292
+--------------------------------------------------------------------------------
+[2025-07-15 18:01:06] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098847
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-17
+  Details: Processed from email UID 41286
+--------------------------------------------------------------------------------
+[2025-07-15 18:01:08] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098878
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-17
+  Details: Processed from email UID 41291
+--------------------------------------------------------------------------------
+[2025-07-15 18:01:17] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098873
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-17
+  Details: Processed from email UID 41290
+--------------------------------------------------------------------------------
+[2025-07-15 18:01:20] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098807
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-17
+  Details: Processed from email UID 41283
+--------------------------------------------------------------------------------
+[2025-07-15 18:01:24] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098872
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-17
+  Details: Processed from email UID 41289
+--------------------------------------------------------------------------------
+[2025-07-15 18:01:31] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098860
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-17
+  Details: Processed from email UID 41288
+--------------------------------------------------------------------------------
+[2025-07-15 18:01:34] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098904
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-17
+  Details: Processed from email UID 41293
+--------------------------------------------------------------------------------
+[2025-07-15 18:01:38] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098857
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-16
+  Details: Processed from email UID 41287
+--------------------------------------------------------------------------------
+[2025-07-15 18:01:41] RECOVERY ATTEMPT: SUCCESS
+  Invoice: 098802
+  Supplier: Y & S Plumbing Supply
+  Search Date: 2023-07-16
+  Details: Processed from email UID 41282
+--------------------------------------------------------------------------------
