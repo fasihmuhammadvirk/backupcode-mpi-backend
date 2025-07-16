@@ -3,7 +3,8 @@
 Complete S3 Statement Reprocessing Script
 
 This script reprocesses ALL statements in the database using S3 PDFs.
-It provides comprehensive options for filtering, batch processing, and detailed reporting.
+It provides comprehensive options for filtering, batch processing, and
+detailed reporting.
 """
 
 import sys
@@ -16,7 +17,9 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mpi_backend.database import SessionLocal
-from mpi_backend.database.controllers.StatementController import StatementController
+from mpi_backend.database.controllers.StatementController import (
+    StatementController
+)
 
 
 def get_all_statements(db, supplier_filter=None):
@@ -30,6 +33,41 @@ def get_all_statements(db, supplier_filter=None):
     )
     
     return statements
+
+
+def verify_s3_pdf_exists(pdf_filename):
+    """
+    Verify if a PDF file exists in S3 before attempting to reprocess
+    
+    Args:
+        pdf_filename: The PDF filename to check
+        
+    Returns:
+        bool: True if file exists, False otherwise
+    """
+    try:
+        from mpi_backend.utils.s3_utils import get_presigned_url
+        import requests
+        
+        # Generate S3 key for statement PDF
+        s3_key = f"statements/{pdf_filename}"
+        
+        # Try to get presigned URL
+        statement_url = get_presigned_url(
+            file_key=s3_key,
+            expiration_time=60,  # 1 minute
+            is_invoice=True
+        )
+        
+        if not statement_url:
+            return False
+        
+        # Try to access the URL to verify it exists
+        response = requests.head(statement_url, timeout=10)
+        return response.status_code == 200
+        
+    except Exception as e:
+        return False
 
 
 def reprocess_all_statements_s3(db, statements, batch_size=50, start_from=0):
@@ -50,19 +88,20 @@ def reprocess_all_statements_s3(db, statements, batch_size=50, start_from=0):
         'total': total_statements,
         'successful': 0,
         'failed': 0,
+        'skipped_missing_pdf': 0,
         'supplier_changes': 0,
         'errors': [],
         'processed': 0
     }
     
-    print(f"\n{'='*80}")
-    print(f"STARTING COMPLETE REPROCESSING OF ALL STATEMENTS")
-    print(f"{'='*80}")
+    print("\n" + "="*80)
+    print("STARTING COMPLETE REPROCESSING OF ALL STATEMENTS")
+    print("="*80)
     print(f"Total Statements: {total_statements}")
     print(f"Batch Size: {batch_size}")
     print(f"Starting From: {start_from}")
     print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'='*80}")
+    print("="*80)
     
     # Process statements in batches
     for batch_start in range(start_from, total_statements, batch_size):
@@ -72,25 +111,67 @@ def reprocess_all_statements_s3(db, statements, batch_size=50, start_from=0):
         print(f"\n{'='*60}")
         print(f"PROCESSING BATCH {batch_start//batch_size + 1}")
         print(f"Statements {batch_start + 1} to {batch_end} of {total_statements}")
-        print(f"{'='*60}")
+        print("="*60)
         
         batch_results = []
         batch_stats = {
             'successful': 0,
             'failed': 0,
+            'skipped_missing_pdf': 0,
             'supplier_changes': 0,
             'errors': []
         }
         
         for i, stmt in enumerate(batch_statements, 1):
             global_index = batch_start + i
-            print(f"\n[{global_index}/{total_statements}] Processing Statement ID {stmt['id']}")
+            print(f"\n[{global_index}/{total_statements}] "
+                  f"Processing Statement ID {stmt['id']}")
             print(f"  Supplier: {stmt['supplier_name']}")
             print(f"  Date: {stmt['statement_date']}")
             print(f"  Invoices: {stmt['total_invoices']}")
+            print(f"  PDF: {stmt.get('pdf_filename', 'N/A')}")
+            
+            # Check if PDF exists in S3 before attempting to reprocess
+            pdf_filename = stmt.get('pdf_filename')
+            if not pdf_filename:
+                error_msg = "No PDF filename associated with statement"
+                batch_stats['errors'].append(f"Statement {stmt['id']}: {error_msg}")
+                statistics['errors'].append(f"Statement {stmt['id']}: {error_msg}")
+                print(f"  ❌ SKIPPED: {error_msg}")
+                
+                batch_results.append({
+                    'statement_id': stmt['id'],
+                    'success': False,
+                    'error': error_msg,
+                    'supplier_name': stmt['supplier_name'],
+                    'statement_date': stmt['statement_date'],
+                    'skipped_reason': 'no_pdf_filename'
+                })
+                statistics['processed'] += 1
+                continue
+            
+            # Verify PDF exists in S3
+            if not verify_s3_pdf_exists(pdf_filename):
+                error_msg = f"PDF file not found in S3: {pdf_filename}"
+                batch_stats['skipped_missing_pdf'] += 1
+                statistics['skipped_missing_pdf'] += 1
+                batch_stats['errors'].append(f"Statement {stmt['id']}: {error_msg}")
+                statistics['errors'].append(f"Statement {stmt['id']}: {error_msg}")
+                print(f"  ⚠️  SKIPPED: {error_msg}")
+                
+                batch_results.append({
+                    'statement_id': stmt['id'],
+                    'success': False,
+                    'error': error_msg,
+                    'supplier_name': stmt['supplier_name'],
+                    'statement_date': stmt['statement_date'],
+                    'skipped_reason': 'missing_pdf'
+                })
+                statistics['processed'] += 1
+                continue
             
             try:
-                # Reprocess the statement using S3
+                # Use the existing working reprocess_statement method
                 result = controller.reprocess_statement(stmt['id'])
                 
                 if result['success']:
@@ -103,28 +184,35 @@ def reprocess_all_statements_s3(db, statements, batch_size=50, start_from=0):
                     if supplier_changed:
                         batch_stats['supplier_changes'] += 1
                         statistics['supplier_changes'] += 1
-                        print(f"  ⚠️  SUPPLIER CHANGED: {details['old_supplier_name']} → {details['supplier_name']}")
+                        old_supplier = details['old_supplier_name']
+                        new_supplier = details['supplier_name']
+                        print(f"  ⚠️  SUPPLIER CHANGED: {old_supplier} → {new_supplier}")
                     else:
-                        print(f"  ✅ SUCCESS: {details.get('invoices_processed', 0)} invoices processed")
+                        invoices_processed = details.get('invoices_processed', 0)
+                        print(f"  ✅ SUCCESS: {invoices_processed} invoices processed")
                     
                     batch_results.append({
                         'statement_id': stmt['id'],
                         'success': True,
-                        'supplier_name': details.get('supplier_name', stmt['supplier_name']),
+                        'supplier_name': details.get('supplier_name', 
+                                                    stmt['supplier_name']),
                         'supplier_changed': supplier_changed,
-                        'old_supplier_name': details.get('old_supplier_name', stmt['supplier_name']),
+                        'old_supplier_name': details.get('old_supplier_name', 
+                                                        stmt['supplier_name']),
                         'invoices_processed': details.get('invoices_processed', 0),
                         'total_amount': details.get('total_amount', 0),
                         'statement_date': stmt['statement_date'],
-                        'new_statement_id': details.get('new_statement_id', stmt['id'])
+                        'new_statement_id': details.get('new_statement_id', 
+                                                       stmt['id'])
                     })
                     
                 else:
                     batch_stats['failed'] += 1
                     statistics['failed'] += 1
                     error_msg = result.get('error', 'Unknown error')
-                    batch_stats['errors'].append(f"Statement {stmt['id']}: {error_msg}")
-                    statistics['errors'].append(f"Statement {stmt['id']}: {error_msg}")
+                    error_entry = f"Statement {stmt['id']}: {error_msg}"
+                    batch_stats['errors'].append(error_entry)
+                    statistics['errors'].append(error_entry)
                     print(f"  ❌ FAILED: {error_msg}")
                     
                     batch_results.append({
@@ -139,8 +227,9 @@ def reprocess_all_statements_s3(db, statements, batch_size=50, start_from=0):
                 batch_stats['failed'] += 1
                 statistics['failed'] += 1
                 error_msg = f"Exception: {str(e)}"
-                batch_stats['errors'].append(f"Statement {stmt['id']}: {error_msg}")
-                statistics['errors'].append(f"Statement {stmt['id']}: {error_msg}")
+                error_entry = f"Statement {stmt['id']}: {error_msg}"
+                batch_stats['errors'].append(error_entry)
+                statistics['errors'].append(error_entry)
                 print(f"  ❌ EXCEPTION: {error_msg}")
                 
                 batch_results.append({
@@ -155,44 +244,54 @@ def reprocess_all_statements_s3(db, statements, batch_size=50, start_from=0):
             
             # Progress update every 10 statements
             if global_index % 10 == 0:
-                success_rate = (statistics['successful'] / statistics['processed']) * 100
-                print(f"\n  📊 PROGRESS: {statistics['processed']}/{total_statements} ({success_rate:.1f}% success)")
+                success_rate = (statistics['successful'] / 
+                               statistics['processed']) * 100
+                print(f"\n  📊 PROGRESS: {statistics['processed']}/"
+                      f"{total_statements} ({success_rate:.1f}% success)")
         
         # Batch summary
         print(f"\n{'='*40}")
         print(f"BATCH {batch_start//batch_size + 1} SUMMARY")
-        print(f"{'='*40}")
+        print("="*40)
         print(f"Successful: {batch_stats['successful']}")
         print(f"Failed: {batch_stats['failed']}")
+        print(f"Skipped (missing PDF): {batch_stats['skipped_missing_pdf']}")
         print(f"Supplier Changes: {batch_stats['supplier_changes']}")
         
         if batch_stats['errors']:
-            print(f"\nBatch Errors:")
+            print("\nBatch Errors:")
             for error in batch_stats['errors'][:5]:  # Show first 5 errors
                 print(f"  - {error}")
             if len(batch_stats['errors']) > 5:
-                print(f"  ... and {len(batch_stats['errors']) - 5} more errors")
+                remaining = len(batch_stats['errors']) - 5
+                print(f"  ... and {remaining} more errors")
         
         results.extend(batch_results)
         
         # Overall progress
-        overall_success_rate = (statistics['successful'] / statistics['processed']) * 100
+        overall_success_rate = (statistics['successful'] / 
+                               statistics['processed']) * 100
         print(f"\n{'='*40}")
         print(f"OVERALL PROGRESS: {statistics['processed']}/{total_statements}")
         print(f"Success Rate: {overall_success_rate:.1f}%")
         print(f"Supplier Changes: {statistics['supplier_changes']}")
-        print(f"{'='*40}")
+        print(f"Skipped (missing PDF): {statistics['skipped_missing_pdf']}")
+        print("="*40)
         
         # Ask for confirmation to continue (optional)
         if batch_start + batch_size < total_statements:
-            print(f"\nPress Enter to continue to next batch, or 'q' to quit...")
+            print("\nPress Enter to continue to next batch, or 'q' to quit...")
             try:
                 user_input = input().strip().lower()
                 if user_input == 'q':
-                    print(f"\nStopping at user request. Processed {statistics['processed']}/{total_statements} statements.")
+                    processed = statistics['processed']
+                    print(f"\nStopping at user request. "
+                          f"Processed {processed}/{total_statements} statements.")
                     break
             except KeyboardInterrupt:
-                print(f"\nStopping at user request. Processed {statistics['processed']}/{total_statements} statements.")
+                processed = statistics['processed']
+                print(f"\nStopping at user request. "
+                      f"Processed {processed}/{total_statements} statements.")
                 break
     
     return results, statistics
@@ -234,6 +333,12 @@ def main():
         action='store_true', 
         help='Show only summary statistics, not detailed progress'
     )
+    parser.add_argument(
+        '--skip-missing-pdfs', 
+        action='store_true', 
+        default=True,
+        help='Skip statements with missing PDF files (default: True)'
+    )
     
     args = parser.parse_args()
     
@@ -246,6 +351,7 @@ def main():
     print(f"Start From: {args.start_from}")
     print(f"Dry Run: {args.dry_run}")
     print(f"Summary Only: {args.summary_only}")
+    print(f"Skip Missing PDFs: {args.skip_missing_pdfs}")
     print("=" * 80)
     
     # Create database session
@@ -267,14 +373,18 @@ def main():
             
             # Show sample of statements
             for i, stmt in enumerate(statements[:10]):
-                print(f"  {i+1}. ID: {stmt['id']}, Supplier: {stmt['supplier_name']}, "
-                      f"Date: {stmt['statement_date']}, Invoices: {stmt['total_invoices']}")
+                print(f"  {i+1}. ID: {stmt['id']}, "
+                      f"Supplier: {stmt['supplier_name']}, "
+                      f"Date: {stmt['statement_date']}, "
+                      f"Invoices: {stmt['total_invoices']}")
             
             if len(statements) > 10:
-                print(f"  ... and {len(statements) - 10} more statements")
+                remaining = len(statements) - 10
+                print(f"  ... and {remaining} more statements")
             
             print(f"\nTotal: {len(statements)} statements would be reprocessed")
-            print(f"Estimated batches: {len(statements) // args.batch_size + 1}")
+            estimated_batches = len(statements) // args.batch_size + 1
+            print(f"Estimated batches: {estimated_batches}")
             return
         
         # Confirm before starting
@@ -285,8 +395,9 @@ def main():
             print("  - Re-extract data from S3 PDFs")
             print("  - Create new records with potentially corrected supplier assignments")
             print("  - Potentially change supplier assignments")
+            print("  - Skip statements with missing PDF files")
             
-            print(f"\nPress Enter to continue, or 'q' to quit...")
+            print("\nPress Enter to continue, or 'q' to quit...")
             try:
                 user_input = input().strip().lower()
                 if user_input == 'q':
@@ -308,18 +419,21 @@ def main():
             
             if result['success']:
                 stats = result['statistics']
-                print(f"\n✅ REPROCESSING COMPLETED!")
+                print("\n✅ REPROCESSING COMPLETED!")
                 print("=" * 50)
                 print(f"Total Statements: {stats['total_statements']}")
                 print(f"Successful: {stats['successful']}")
                 print(f"Failed: {stats['failed']}")
                 print(f"Supplier Changes: {stats['supplier_changes']}")
                 
-                success_rate = (stats['successful'] / stats['total_statements']) * 100
+                success_rate = (stats['successful'] / 
+                               stats['total_statements']) * 100
                 print(f"Success Rate: {success_rate:.1f}%")
                 
                 if stats['supplier_changes'] > 0:
-                    print(f"\n⚠️  SUPPLIER CORRECTIONS: {stats['supplier_changes']} statements had supplier corrections!")
+                    changes = stats['supplier_changes']
+                    print(f"\n⚠️  SUPPLIER CORRECTIONS: {changes} statements "
+                          f"had supplier corrections!")
             else:
                 print(f"\n❌ REPROCESSING FAILED: {result.get('error')}")
         else:
@@ -336,21 +450,34 @@ def main():
             print(f"Processed: {statistics['processed']}")
             print(f"Successful: {statistics['successful']}")
             print(f"Failed: {statistics['failed']}")
+            print(f"Skipped (missing PDF): {statistics['skipped_missing_pdf']}")
             print(f"Supplier Changes: {statistics['supplier_changes']}")
             
-            success_rate = (statistics['successful'] / statistics['processed']) * 100
+            success_rate = (statistics['successful'] / 
+                           statistics['processed']) * 100
             print(f"Success Rate: {success_rate:.1f}%")
             
             if statistics['supplier_changes'] > 0:
-                print(f"\n⚠️  SUPPLIER CORRECTIONS: {statistics['supplier_changes']} statements had supplier corrections!")
-                print("   This indicates previous misassignments that have now been fixed.")
+                changes = statistics['supplier_changes']
+                print(f"\n⚠️  SUPPLIER CORRECTIONS: {changes} statements "
+                      f"had supplier corrections!")
+                print("   This indicates previous misassignments that have "
+                      "now been fixed.")
+            
+            if statistics['skipped_missing_pdf'] > 0:
+                skipped = statistics['skipped_missing_pdf']
+                print(f"\n⚠️  MISSING PDF FILES: {skipped} statements were "
+                      f"skipped due to missing PDF files in S3.")
+                print("   These statements need their PDF files uploaded to S3 "
+                      "before they can be reprocessed.")
             
             if statistics['errors']:
                 print(f"\nErrors encountered ({len(statistics['errors'])} total):")
                 for error in statistics['errors'][:10]:  # Show first 10 errors
                     print(f"  - {error}")
                 if len(statistics['errors']) > 10:
-                    print(f"  ... and {len(statistics['errors']) - 10} more errors")
+                    remaining = len(statistics['errors']) - 10
+                    print(f"  ... and {remaining} more errors")
             
             # Save detailed results to CSV if requested
             if args.output:
@@ -358,7 +485,8 @@ def main():
                 df.to_csv(args.output, index=False)
                 print(f"\nDetailed results saved to: {args.output}")
         
-        print(f"\nReprocessing completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print(f"\nReprocessing completed at: {timestamp}")
             
     except Exception as e:
         print(f"\n❌ SCRIPT ERROR: {str(e)}")
@@ -367,7 +495,7 @@ def main():
         
     finally:
         db.close()
-        print(f"\nDatabase connection closed.")
+        print("\nDatabase connection closed.")
 
 
 if __name__ == "__main__":
