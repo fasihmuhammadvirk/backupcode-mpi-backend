@@ -3,6 +3,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_
 from math import ceil
+import pandas as pd
 # Setup temporary directory for reprocessing
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 import requests
@@ -684,17 +685,23 @@ class StatementController:
                 else:
                     logger.warning(f"  Could not detect supplier from filename: {pdf_filename}")
                 
-                # Create extractor WITHOUT pre-set supplier name to allow fresh detection
+                # Create extractor with the new unified interface
                 extractor = StatementExtractor(
                     pdf_path=str(pdf_path),
-                    save_to_db=True,
-                    save_to_excel=False,
-                    db_session=self.db,
                     supplier_name=filename_detected_supplier  # Use filename-detected or None for PDF detection
                 )
                 
-                # Verify what supplier was actually detected
-                detected_supplier = extractor.detect_supplier()
+                # Extract data using the new unified method
+                result = extractor.extract_full_statement()
+                
+                if result['invoice_data'].empty:
+                    return {
+                        'success': False,
+                        'error': 'Failed to extract data from PDF'
+                    }
+                
+                # Get detected supplier from metadata
+                detected_supplier = result['metadata'].get('supplier_name', '')
                 logger.info(f" FINAL DETECTED SUPPLIER: {detected_supplier}")
                 
                 # Compare with old assignment
@@ -708,25 +715,63 @@ class StatementController:
                 
                 final_supplier_name = detected_supplier
                 
-                # Extract all pages
-                extract_success = extractor.extract_all_pages()
-                if not extract_success:
+                # Save to database using the new unified method
+                # Note: The new extractor doesn't have save_to_database method, so we need to implement it
+                # For now, we'll create the database records manually
+                try:
+                    # Get or create supplier
+                    supplier = self.db.query(PlumbingSupplier).filter(
+                        PlumbingSupplier.name == final_supplier_name
+                    ).first()
+                    
+                    if not supplier:
+                        logger.error(f"Supplier {final_supplier_name} not found in database")
+                        return {
+                            'success': False,
+                            'error': f'Supplier {final_supplier_name} not found in database'
+                        }
+                    
+                    # Create new statement
+                    from mpi_backend.database.models.statement_models import PlumbingStatement, PlumbingInvoice
+                    
+                    new_statement = PlumbingStatement(
+                        supplier_id=supplier.id,
+                        statement_date=result['metadata'].get('statement_date'),
+                        account_number=result['metadata'].get('account_number', ''),
+                        total_amount=result['total_amount'],
+                        total_invoices=result['total_invoices'],
+                        pdf_filename=pdf_filename
+                    )
+                    
+                    self.db.add(new_statement)
+                    self.db.flush()  # Get the statement ID
+                    
+                    # Create invoice records
+                    for _, row in result['invoice_data'].iterrows():
+                        invoice = PlumbingInvoice(
+                            statement_id=new_statement.id,
+                            invoice_number=str(row['Invoice Number']) if pd.notna(row['Invoice Number']) else None,
+                            invoice_date=row.get('Invoice Date'),
+                            customer_po=str(row.get('Customer PO', '')) if pd.notna(row.get('Customer PO')) else None,
+                            original_amount=row.get('Original Inv Amount'),
+                            payment_date=row.get('Payment Date'),
+                            amount_paid=row.get('Amount Paid'),
+                            balance=row.get('Invoice Balance')
+                        )
+                        self.db.add(invoice)
+                    
+                    self.db.commit()
+                    
+                    new_statement_id = new_statement.id
+                    new_invoice_count = result['total_invoices']
+                    
+                except Exception as db_error:
+                    self.db.rollback()
+                    logger.error(f"Failed to save to database: {str(db_error)}")
                     return {
                         'success': False,
-                        'error': 'Failed to extract data from PDF'
+                        'error': f'Failed to save to database: {str(db_error)}'
                     }
-                
-                # Save to database
-                db_success = extractor.save_to_database()
-                if not db_success:
-                    return {
-                        'success': False,
-                        'error': 'Failed to save extracted data to database'
-                    }
-                
-                # Get the new statement ID
-                new_statement_id = extractor.statement_obj.id if extractor.statement_obj else None
-                new_invoice_count = len(extractor.combined_data) if hasattr(extractor, 'combined_data') else 0
                 
                 logger.info(f"Successfully reprocessed statement. New ID: {new_statement_id}, Invoices: {new_invoice_count}")
                 
