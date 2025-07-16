@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """
-Direct Statement Reprocessing Script
+Reprocess All Statements Script
 
-This script directly uses the StatementController to reprocess all statements
-in the database. It bypasses the API endpoint and works directly with the database.
-
-This approach is simpler and doesn't require authentication or API server setup.
+This script fetches all statement IDs from the database and uses the same code
+as the /statements/reprocess endpoint to reprocess each statement one by one.
 """
 
 import sys
@@ -56,7 +54,7 @@ def get_all_statement_ids(db, supplier_filter=None) -> List[int]:
 
 def reprocess_single_statement(controller: StatementController, statement_id: int) -> Dict[str, Any]:
     """
-    Reprocess a single statement using the controller
+    Reprocess a single statement using the same code as the endpoint
     
     Args:
         controller: StatementController instance
@@ -67,8 +65,13 @@ def reprocess_single_statement(controller: StatementController, statement_id: in
     """
     try:
         print(f"  Processing Statement ID {statement_id}...")
+        
+        # This is the same code as in the /statements/reprocess endpoint
+        # The controller.reprocess_statement method handles all the logic
         result = controller.reprocess_statement(statement_id)
+        
         return result
+        
     except Exception as e:
         return {
             'success': False,
@@ -76,27 +79,24 @@ def reprocess_single_statement(controller: StatementController, statement_id: in
         }
 
 
-def reprocess_all_statements_direct(supplier_filter: Optional[str] = None,
-                                   max_statements: int = 100,
-                                   batch_size: int = 10) -> Dict[str, Any]:
+def reprocess_all_statements(supplier_filter: Optional[str] = None,
+                            max_statements: int = 100) -> Dict[str, Any]:
     """
-    Reprocess all statements directly using the controller
+    Reprocess all statements using the same code as the endpoint
     
     Args:
         supplier_filter: Optional supplier filter
         max_statements: Maximum number of statements to process
-        batch_size: Number of statements to process in each batch
         
     Returns:
         Summary of processing results
     """
     print(f"\n{'='*80}")
-    print("REPROCESSING ALL STATEMENTS (DIRECT CONTROLLER)")
+    print("REPROCESSING ALL STATEMENTS")
     print("="*80)
     print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Supplier Filter: {supplier_filter or 'ALL SUPPLIERS'}")
     print(f"Max Statements: {max_statements}")
-    print(f"Batch Size: {batch_size}")
     print("="*80)
     
     # Get all statement IDs from database
@@ -119,107 +119,59 @@ def reprocess_all_statements_direct(supplier_filter: Optional[str] = None,
         # Create controller instance
         controller = StatementController(db)
         
-        # Process statements in batches
-        total_batches = (len(statement_ids) + batch_size - 1) // batch_size
+        # Process statements one by one
         all_results = []
+        successful = 0
+        failed = 0
+        supplier_changes = 0
         
-        for batch_num in range(total_batches):
-            start_idx = batch_num * batch_size
-            end_idx = min(start_idx + batch_size, len(statement_ids))
-            batch_ids = statement_ids[start_idx:end_idx]
+        for i, statement_id in enumerate(statement_ids, 1):
+            print(f"\n[{i}/{len(statement_ids)}] Processing Statement ID {statement_id}")
             
-            print(f"\n{'='*60}")
-            print(f"PROCESSING BATCH {batch_num + 1}/{total_batches}")
-            print(f"Statements {start_idx + 1} to {end_idx} of {len(statement_ids)}")
-            print("="*60)
+            # Use the same code as the endpoint
+            result = reprocess_single_statement(controller, statement_id)
             
-            batch_results = []
-            batch_successful = 0
-            batch_failed = 0
-            batch_supplier_changes = 0
-            
-            for i, statement_id in enumerate(batch_ids, 1):
-                global_index = start_idx + i
-                print(f"\n[{global_index}/{len(statement_ids)}] Processing Statement ID {statement_id}")
+            if result.get('success'):
+                successful += 1
+                details = result.get('details', {})
+                supplier_changed = details.get('supplier_changed', False)
                 
-                result = reprocess_single_statement(controller, statement_id)
-                
-                if result.get('success'):
-                    batch_successful += 1
-                    details = result.get('details', {})
-                    supplier_changed = details.get('supplier_changed', False)
-                    
-                    if supplier_changed:
-                        batch_supplier_changes += 1
-                        old_supplier = details.get('old_supplier_name', 'Unknown')
-                        new_supplier = details.get('supplier_name', 'Unknown')
-                        print(f"  ⚠️  SUPPLIER CHANGED: {old_supplier} → {new_supplier}")
-                    else:
-                        invoices_processed = details.get('invoices_processed', 0)
-                        print(f"  ✅ SUCCESS: {invoices_processed} invoices processed")
+                if supplier_changed:
+                    supplier_changes += 1
+                    old_supplier = details.get('old_supplier_name', 'Unknown')
+                    new_supplier = details.get('supplier_name', 'Unknown')
+                    print(f"  ⚠️  SUPPLIER CHANGED: {old_supplier} → {new_supplier}")
                 else:
-                    batch_failed += 1
-                    error_msg = result.get('error', 'Unknown error')
-                    print(f"  ❌ FAILED: {error_msg}")
-                
-                batch_results.append({
-                    'statement_id': statement_id,
-                    'result': result
-                })
-                
-                # Small delay between statements
-                time.sleep(0.5)
+                    invoices_processed = details.get('invoices_processed', 0)
+                    print(f"  ✅ SUCCESS: {invoices_processed} invoices processed")
+            else:
+                failed += 1
+                error_msg = result.get('error', 'Unknown error')
+                print(f"  ❌ FAILED: {error_msg}")
             
-            # Batch summary
-            print(f"\n{'='*40}")
-            print(f"BATCH {batch_num + 1} SUMMARY")
-            print("="*40)
-            print(f"Successful: {batch_successful}")
-            print(f"Failed: {batch_failed}")
-            print(f"Supplier Changes: {batch_supplier_changes}")
+            all_results.append({
+                'statement_id': statement_id,
+                'result': result
+            })
             
-            all_results.extend(batch_results)
+            # Small delay between statements
+            time.sleep(0.5)
             
-            # Overall progress
-            total_processed_so_far = len(all_results)
-            total_successful_so_far = sum(1 for r in all_results if r['result'].get('success'))
-            success_rate = (total_successful_so_far / total_processed_so_far * 100) if total_processed_so_far > 0 else 0
-            
-            print(f"\n{'='*40}")
-            print(f"OVERALL PROGRESS: {total_processed_so_far}/{len(statement_ids)}")
-            print(f"Success Rate: {success_rate:.1f}%")
-            print("="*40)
-            
-            # Ask for confirmation to continue (optional)
-            if batch_num < total_batches - 1:
-                print(f"\nPress Enter to continue to next batch, or 'q' to quit...")
-                try:
-                    user_input = input().strip().lower()
-                    if user_input == 'q':
-                        print(f"\nStopping at user request. Processed {total_processed_so_far}/{len(statement_ids)} statements.")
-                        break
-                except KeyboardInterrupt:
-                    print(f"\nStopping at user request. Processed {total_processed_so_far}/{len(statement_ids)} statements.")
-                    break
+            # Progress update every 10 statements
+            if i % 10 == 0:
+                success_rate = (successful / i * 100)
+                print(f"\n  📊 PROGRESS: {i}/{len(statement_ids)} ({success_rate:.1f}% success)")
         
-        # Compile final results
-        total_processed = len(all_results)
-        total_successful = sum(1 for r in all_results if r['result'].get('success'))
-        total_failed = total_processed - total_successful
-        total_supplier_changes = sum(
-            1 for r in all_results 
-            if r['result'].get('success') and r['result'].get('details', {}).get('supplier_changed', False)
-        )
-        
-        success_rate = (total_successful / total_processed * 100) if total_processed > 0 else 0
+        # Final summary
+        success_rate = (successful / len(statement_ids) * 100) if statement_ids else 0
         
         return {
             'success': True,
             'summary': {
-                'total_processed': total_processed,
-                'total_successful': total_successful,
-                'total_failed': total_failed,
-                'total_supplier_changes': total_supplier_changes,
+                'total_processed': len(statement_ids),
+                'successful': successful,
+                'failed': failed,
+                'supplier_changes': supplier_changes,
                 'success_rate': success_rate
             },
             'detailed_results': all_results
@@ -236,7 +188,7 @@ def reprocess_all_statements_direct(supplier_filter: Optional[str] = None,
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Reprocess all statements directly using the controller'
+        description='Reprocess all statements using the same code as the endpoint'
     )
     parser.add_argument(
         '--supplier', 
@@ -248,12 +200,6 @@ def main():
         type=int, 
         default=100, 
         help='Maximum number of statements to process (default: 100)'
-    )
-    parser.add_argument(
-        '--batch-size', 
-        type=int, 
-        default=10, 
-        help='Number of statements to process in each batch (default: 10)'
     )
     parser.add_argument(
         '--dry-run', 
@@ -269,12 +215,11 @@ def main():
     args = parser.parse_args()
     
     print("=" * 80)
-    print("DIRECT STATEMENT REPROCESSING SCRIPT")
+    print("REPROCESS ALL STATEMENTS")
     print("=" * 80)
     print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Supplier Filter: {args.supplier or 'ALL SUPPLIERS'}")
     print(f"Max Statements: {args.max_statements}")
-    print(f"Batch Size: {args.batch_size}")
     print(f"Dry Run: {args.dry_run}")
     print("=" * 80)
     
@@ -296,8 +241,8 @@ def main():
                 if len(statement_ids) > 10:
                     print(f"... and {len(statement_ids) - 10} more")
                 
-                estimated_batches = (len(statement_ids) + args.batch_size - 1) // args.batch_size
-                print(f"Estimated batches: {estimated_batches}")
+                if args.max_statements and len(statement_ids) > args.max_statements:
+                    print(f"Would process first {args.max_statements} statements")
             else:
                 print("No statements found to process")
         finally:
@@ -323,10 +268,9 @@ def main():
         return
     
     # Process all statements
-    result = reprocess_all_statements_direct(
+    result = reprocess_all_statements(
         supplier_filter=args.supplier,
-        max_statements=args.max_statements,
-        batch_size=args.batch_size
+        max_statements=args.max_statements
     )
     
     # Display results
@@ -336,13 +280,13 @@ def main():
         print("REPROCESSING COMPLETED SUCCESSFULLY")
         print("=" * 80)
         print(f"Total Processed: {summary['total_processed']}")
-        print(f"Successful: {summary['total_successful']}")
-        print(f"Failed: {summary['total_failed']}")
-        print(f"Supplier Changes: {summary['total_supplier_changes']}")
+        print(f"Successful: {summary['successful']}")
+        print(f"Failed: {summary['failed']}")
+        print(f"Supplier Changes: {summary['supplier_changes']}")
         print(f"Success Rate: {summary['success_rate']:.1f}%")
         
-        if summary['total_supplier_changes'] > 0:
-            print(f"\n⚠️  SUPPLIER CORRECTIONS: {summary['total_supplier_changes']} statements had supplier corrections!")
+        if summary['supplier_changes'] > 0:
+            print(f"\n⚠️  SUPPLIER CORRECTIONS: {summary['supplier_changes']} statements had supplier corrections!")
             print("   This indicates previous misassignments that have now been fixed.")
         
         # Save detailed results to JSON if requested
