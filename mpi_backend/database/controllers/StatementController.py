@@ -1593,6 +1593,7 @@ class StatementController:
                     InvoiceItem.customer_job,
                     InvoiceItem.item,
                     InvoiceItem.description,
+                    InvoiceItem.vendor.label('vendor'),
                     Invoice.id.label('system_invoice_id'),
                     PlumbingSupplier.name.label('supplier_name'),
                     PlumbingSupplier.id.label('supplier_id')

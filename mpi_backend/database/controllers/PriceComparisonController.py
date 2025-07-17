@@ -204,7 +204,12 @@ class PriceComparisonController:
             total = query.distinct().count()
             
             # Apply pagination and ordering directly to the main query
+            # For DISTINCT queries, we need to include ORDER BY expressions in the SELECT
             items = query.distinct()\
+                    .add_columns(
+                        func.upper(InvoiceItem.mpi_item).like(f'{search_term}%').label('starts_with'),
+                        func.upper(InvoiceItem.mpi_item).like(f'%{search_term}%').label('contains_term')
+                    )\
                     .order_by(
                         func.upper(InvoiceItem.mpi_item).like(f'{search_term}%').desc(),  # Starts with first
                         func.upper(InvoiceItem.mpi_item).like(f'%{search_term}%').desc(),  # Contains the term
@@ -214,6 +219,9 @@ class PriceComparisonController:
                     .limit(size)\
                     .all()
             
+            # Extract the InvoiceItem objects from the result tuples
+            invoice_items = [item[0] for item in items]
+            
             # Format response with suffixed item codes
             formatted_items = [
                 ItemInfo(
@@ -222,7 +230,7 @@ class PriceComparisonController:
                     original_item=item.item or '',  # Use full item code
                     mpi_description=item.mpi_description or ''
                 )
-                for item in items
+                for item in invoice_items
             ]
             
             # Calculate total pages
