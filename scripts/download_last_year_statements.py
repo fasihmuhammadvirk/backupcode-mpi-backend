@@ -7,13 +7,15 @@ This script downloads and processes monthly statements and invoices from email f
 It handles:
 - Email connection and search for statement emails (using BODY.PEEK to avoid marking as read)
 - PDF download and processing for statements and associated invoice data
-- Data extraction and database storage
+- Complete data reprocessing with deletion of existing statements, invoices, and invoice items
+- Fresh data extraction and database storage
 - S3 upload for storage
 - Automatic deletion and re-download of existing statements
 - Support for up to 10 years of historical data
 
 The script ensures NO emails are marked as read during processing by using BODY.PEEK commands.
-Existing statements are automatically deleted and re-downloaded to ensure the latest data.
+Existing statements, invoices, and invoice items are automatically deleted and fresh data is extracted
+to ensure complete data accuracy and consistency.
 
 Usage:
     python scripts/download_last_year_statements.py [options]
@@ -130,6 +132,8 @@ class StatementDownloader:
             'statements_processed': 0,
             'statements_saved': 0,
             'statements_deleted': 0,
+            'invoices_deleted': 0,
+            'invoice_items_deleted': 0,
             'errors': 0,
             'skipped_existing': 0
         }
@@ -425,9 +429,9 @@ class StatementDownloader:
             )
             return []
     
-    def delete_existing_statement(self, supplier_name: str, 
-                                 statement_date: datetime) -> bool:
-        """Delete existing statement and its records for supplier and month"""
+    def delete_existing_statement_and_invoices(self, supplier_name: str, 
+                                              statement_date: datetime) -> bool:
+        """Delete existing statement, invoices, and invoice items for supplier and month"""
         try:
             # Get supplier
             supplier = self.db_session.query(PlumbingSupplier).filter(
@@ -460,15 +464,45 @@ class StatementDownloader:
             if existing_statement:
                 logger.info(
                     f"Found existing statement for {supplier_name} - "
-                    f"{statement_date.strftime('%Y-%m')}, deleting..."
+                    f"{statement_date.strftime('%Y-%m')}, deleting all related data..."
                 )
                 
-                # Delete associated invoices first (foreign key constraint)
-                from mpi_backend.database.models.statement_models import PlumbingInvoice
-                invoice_count = self.db_session.query(PlumbingInvoice).filter(
-                    PlumbingInvoice.statement_id == existing_statement.id
-                ).count()
+                # Delete invoice items first (foreign key constraint)
+                from mpi_backend.database.models.statement_models import PlumbingInvoice, PlumbingInvoiceItem
+                from mpi_backend.database.models.invoice import InvoiceItems
                 
+                # Get all invoices for this statement
+                invoices = self.db_session.query(PlumbingInvoice).filter(
+                    PlumbingInvoice.statement_id == existing_statement.id
+                ).all()
+                
+                total_invoice_items_deleted = 0
+                total_invoices_deleted = 0
+                
+                for invoice in invoices:
+                    # Delete invoice items from both tables
+                    # 1. Delete from PlumbingInvoiceItem (statement models)
+                    invoice_items_count = self.db_session.query(PlumbingInvoiceItem).filter(
+                        PlumbingInvoiceItem.invoice_id == invoice.id
+                    ).count()
+                    self.db_session.query(PlumbingInvoiceItem).filter(
+                        PlumbingInvoiceItem.invoice_id == invoice.id
+                    ).delete()
+                    
+                    # 2. Delete from InvoiceItems (main invoice models)
+                    main_invoice_items_count = self.db_session.query(InvoiceItems).filter(
+                        InvoiceItems.invoice_number == invoice.invoice_number,
+                        InvoiceItems.supplier_name == supplier_name
+                    ).count()
+                    self.db_session.query(InvoiceItems).filter(
+                        InvoiceItems.invoice_number == invoice.invoice_number,
+                        InvoiceItems.supplier_name == supplier_name
+                    ).delete()
+                    
+                    total_invoice_items_deleted += invoice_items_count + main_invoice_items_count
+                    total_invoices_deleted += 1
+                
+                # Delete the invoices
                 self.db_session.query(PlumbingInvoice).filter(
                     PlumbingInvoice.statement_id == existing_statement.id
                 ).delete()
@@ -478,10 +512,16 @@ class StatementDownloader:
                 self.db_session.commit()
                 
                 logger.info(
-                    f"Deleted statement {existing_statement.id} and "
-                    f"{invoice_count} associated invoices for "
+                    f"Deleted statement {existing_statement.id}, "
+                    f"{total_invoices_deleted} invoices, and "
+                    f"{total_invoice_items_deleted} invoice items for "
                     f"{supplier_name} - {statement_date.strftime('%Y-%m')}"
                 )
+                
+                # Update statistics
+                self.stats['invoices_deleted'] += total_invoices_deleted
+                self.stats['invoice_items_deleted'] += total_invoice_items_deleted
+                
                 return True
             else:
                 logger.debug(
@@ -491,7 +531,7 @@ class StatementDownloader:
                 return False
             
         except Exception as e:
-            logger.error(f"Error deleting existing statement: {str(e)}")
+            logger.error(f"Error deleting existing statement and invoices: {str(e)}")
             self.db_session.rollback()
             return False
     
@@ -586,13 +626,13 @@ class StatementDownloader:
             # Extract statement date
             statement_date = self.extract_statement_date_from_subject(subject)
             
-            # Always delete existing statement and re-download (updated behavior)
-            # This ensures we get the latest version of the statement
-            deleted = self.delete_existing_statement(supplier_name, statement_date)
+            # Always delete existing statement, invoices, and invoice items and re-download
+            # This ensures we get the latest version of the statement and fresh data
+            deleted = self.delete_existing_statement_and_invoices(supplier_name, statement_date)
             if deleted:
                 logger.info(
-                    f"Deleted existing statement for {supplier_name} - "
-                    f"{statement_date.strftime('%Y-%m')}, will re-download"
+                    f"Deleted existing statement, invoices, and invoice items for {supplier_name} - "
+                    f"{statement_date.strftime('%Y-%m')}, will re-download and re-extract"
                 )
                 self.stats['statements_deleted'] = self.stats.get('statements_deleted', 0) + 1
             
@@ -658,7 +698,7 @@ class StatementDownloader:
             return []
     
     def process_statement_file(self, file_path: str) -> bool:
-        """Process a downloaded statement file"""
+        """Process a downloaded statement file with complete data reprocessing"""
         try:
             if self.dry_run:
                 logger.info(f"[DRY RUN] Would process: {file_path}")
@@ -692,22 +732,24 @@ class StatementDownloader:
                 logger.warning(f"Could not extract supplier name for {file_path}, will rely on PDF detection")
             
             # Extract data using statement extractor with supplier name
+            # Force complete reprocessing by setting force_reprocess=True
             extractor = StatementExtractor(
                 pdf_path=file_path,
                 save_to_db=True,
                 save_to_excel=False,
                 db_session=self.db_session,
-                supplier_name=supplier_name  # Pass email-detected supplier name
+                supplier_name=supplier_name,  # Pass email-detected supplier name
+                force_reprocess=True  # Force complete reprocessing
             )
             
-            # Extract data
+            # Extract data with complete reprocessing
             success = extractor.extract_all_pages()
             if not success:
                 logger.error(f"Failed to extract data from: {file_path}")
                 self.stats['errors'] += 1
                 return False
             
-            # Save to database
+            # Save to database with fresh data
             db_success = extractor.save_to_database()
             if not db_success:
                 logger.error(f"Failed to save to database: {file_path}")
@@ -728,7 +770,7 @@ class StatementDownloader:
             self.stats['statements_processed'] += 1
             self.stats['statements_saved'] += 1
             
-            logger.info(f"Successfully processed: {file_path}")
+            logger.info(f"Successfully processed and reprocessed: {file_path}")
             return True
             
         except Exception as e:
@@ -883,19 +925,23 @@ class StatementDownloader:
         print(f"Statements processed:  {self.stats['statements_processed']:,}")
         print(f"Statements saved:      {self.stats['statements_saved']:,}")
         print(f"Statements deleted:    {self.stats['statements_deleted']:,}")
+        print(f"Invoices deleted:      {self.stats['invoices_deleted']:,}")
+        print(f"Invoice items deleted: {self.stats['invoice_items_deleted']:,}")
         print(f"Skipped existing:      {self.stats['skipped_existing']:,}")
         print(f"Errors:                {self.stats['errors']:,}")
         print("="*60)
         print(" No emails were marked as read (used BODY.PEEK)")
         print(" Each statement contains multiple invoice records")
-        print(" Existing statements are automatically deleted and re-downloaded")
+        print(" Existing statements, invoices, and invoice items are automatically deleted")
+        print(" Fresh data is extracted and saved to database")
+        print(" Complete reprocessing ensures data accuracy")
         print("="*60)
 
 
 def main():
     """Main function with command line argument parsing"""
     parser = argparse.ArgumentParser(
-        description="Download and process monthly statements and invoices for historical periods (up to 10 years). Existing statements are automatically deleted and re-downloaded.",
+        description="Download and process monthly statements and invoices for historical periods (up to 10 years). Existing statements, invoices, and invoice items are automatically deleted and fresh data is extracted.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -914,7 +960,7 @@ Examples:
   # Preview what would be downloaded without actually processing
   python scripts/download_last_year_statements.py --download-all-historical --dry-run
   
-  # Force reprocessing (existing statements are always deleted and re-downloaded)
+  # Force reprocessing (existing statements, invoices, and invoice items are always deleted and fresh data is extracted)
   python scripts/download_last_year_statements.py --force
         """
     )
@@ -937,7 +983,7 @@ Examples:
     parser.add_argument(
         '--download-all-historical',
         action='store_true',
-        help='Download all historical statements and invoices for the past 10 years (existing statements will be deleted and re-downloaded)'
+        help='Download all historical statements and invoices for the past 10 years (existing statements, invoices, and invoice items will be deleted and fresh data extracted)'
     )
     
     # Supplier filtering
@@ -956,7 +1002,7 @@ Examples:
     parser.add_argument(
         '--force',
         action='store_true',
-        help='Force reprocessing (existing statements are always deleted and re-downloaded)'
+        help='Force reprocessing (existing statements, invoices, and invoice items are always deleted and fresh data is extracted)'
     )
     parser.add_argument(
         '--verbose',
@@ -991,7 +1037,9 @@ Examples:
         logger.info(" DOWNLOADING ALL HISTORICAL STATEMENTS AND INVOICES (PAST 10 YEARS)")
         logger.info("This will download statements and associated invoice data from all suppliers for the past 10 years")
         logger.info(" Using BODY.PEEK commands to ensure NO emails are marked as read")
-        logger.info(" Existing statements will be automatically deleted and re-downloaded")
+        logger.info(" Existing statements, invoices, and invoice items will be automatically deleted")
+        logger.info(" Fresh data will be extracted and saved to database")
+        logger.info(" Complete reprocessing ensures data accuracy and consistency")
         if not args.dry_run:
             confirmation = input("This is a large operation that will process 10 years of data. Continue? (y/N): ")
             if confirmation.lower() != 'y':
@@ -1001,7 +1049,8 @@ Examples:
         from_months_ago = args.from_months_ago
         to_months_ago = args.to_months_ago
         logger.info(" Using BODY.PEEK commands to ensure NO emails are marked as read")
-        logger.info(" Existing statements will be automatically deleted and re-downloaded")
+        logger.info(" Existing statements, invoices, and invoice items will be automatically deleted")
+        logger.info(" Fresh data will be extracted and saved to database")
     
     # Create downloader and run
     try:
@@ -1030,11 +1079,14 @@ Examples:
                     print("\n Historical download completed!")
                     print("All available monthly statements and invoices from the past 10 years have been processed.")
                     print(" No emails were marked as read during this process.")
-                    print(" Existing statements were automatically deleted and re-downloaded.")
+                    print(" Existing statements, invoices, and invoice items were automatically deleted.")
+                    print(" Fresh data was extracted and saved to database.")
+                    print(" Complete reprocessing ensures data accuracy and consistency.")
                     print("Check the summary above for detailed statistics.")
                 else:
                     print(" No emails were marked as read during this process.")
-                    print(" Existing statements were automatically deleted and re-downloaded.")
+                    print(" Existing statements, invoices, and invoice items were automatically deleted.")
+                    print(" Fresh data was extracted and saved to database.")
             else:
                 print(f"\nERROR: Operation failed: {result.get('error', 'Unknown error')}")
                 return 1
