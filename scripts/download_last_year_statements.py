@@ -7,14 +7,14 @@ This script downloads and processes monthly statements and invoices from email f
 It handles:
 - Email connection and search for statement emails (using BODY.PEEK to avoid marking as read)
 - PDF download and processing for statements and associated invoice data
-- Complete data reprocessing with deletion of existing statements, invoices, and invoice items
+- Complete data reprocessing with deletion of existing statements and invoices
 - Fresh data extraction and database storage
 - S3 upload for storage
 - Automatic deletion and re-download of existing statements
 - Support for up to 10 years of historical data
 
 The script ensures NO emails are marked as read during processing by using BODY.PEEK commands.
-Existing statements, invoices, and invoice items are automatically deleted and fresh data is extracted
+Existing statements and invoices are automatically deleted and fresh data is extracted
 to ensure complete data accuracy and consistency.
 
 Usage:
@@ -40,7 +40,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime, timedelta
 from contextlib import contextmanager
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import time
 from dateutil.relativedelta import relativedelta
 from email.utils import parsedate_to_datetime
@@ -133,7 +133,6 @@ class StatementDownloader:
             'statements_saved': 0,
             'statements_deleted': 0,
             'invoices_deleted': 0,
-            'invoice_items_deleted': 0,
             'errors': 0,
             'skipped_existing': 0
         }
@@ -431,7 +430,7 @@ class StatementDownloader:
     
     def delete_existing_statement_and_invoices(self, supplier_name: str, 
                                               statement_date: datetime) -> bool:
-        """Delete existing statement, invoices, and invoice items for supplier and month"""
+        """Delete existing statement and invoices for supplier and month"""
         try:
             # Get supplier
             supplier = self.db_session.query(PlumbingSupplier).filter(
@@ -467,40 +466,15 @@ class StatementDownloader:
                     f"{statement_date.strftime('%Y-%m')}, deleting all related data..."
                 )
                 
-                # Delete invoice items first (foreign key constraint)
-                from mpi_backend.database.models.statement_models import PlumbingInvoice, PlumbingInvoiceItem
-                from mpi_backend.database.models.invoice import InvoiceItems
+                # Delete invoices first (foreign key constraint)
+                from mpi_backend.database.models.statement_models import PlumbingInvoice
                 
                 # Get all invoices for this statement
                 invoices = self.db_session.query(PlumbingInvoice).filter(
                     PlumbingInvoice.statement_id == existing_statement.id
                 ).all()
                 
-                total_invoice_items_deleted = 0
-                total_invoices_deleted = 0
-                
-                for invoice in invoices:
-                    # Delete invoice items from both tables
-                    # 1. Delete from PlumbingInvoiceItem (statement models)
-                    invoice_items_count = self.db_session.query(PlumbingInvoiceItem).filter(
-                        PlumbingInvoiceItem.invoice_id == invoice.id
-                    ).count()
-                    self.db_session.query(PlumbingInvoiceItem).filter(
-                        PlumbingInvoiceItem.invoice_id == invoice.id
-                    ).delete()
-                    
-                    # 2. Delete from InvoiceItems (main invoice models)
-                    main_invoice_items_count = self.db_session.query(InvoiceItems).filter(
-                        InvoiceItems.invoice_number == invoice.invoice_number,
-                        InvoiceItems.supplier_name == supplier_name
-                    ).count()
-                    self.db_session.query(InvoiceItems).filter(
-                        InvoiceItems.invoice_number == invoice.invoice_number,
-                        InvoiceItems.supplier_name == supplier_name
-                    ).delete()
-                    
-                    total_invoice_items_deleted += invoice_items_count + main_invoice_items_count
-                    total_invoices_deleted += 1
+                total_invoices_deleted = len(invoices)
                 
                 # Delete the invoices
                 self.db_session.query(PlumbingInvoice).filter(
@@ -512,15 +486,14 @@ class StatementDownloader:
                 self.db_session.commit()
                 
                 logger.info(
-                    f"Deleted statement {existing_statement.id}, "
-                    f"{total_invoices_deleted} invoices, and "
-                    f"{total_invoice_items_deleted} invoice items for "
+                    f"Deleted statement {existing_statement.id} and "
+                    f"{total_invoices_deleted} invoices for "
                     f"{supplier_name} - {statement_date.strftime('%Y-%m')}"
                 )
                 
                 # Update statistics
                 self.stats['invoices_deleted'] += total_invoices_deleted
-                self.stats['invoice_items_deleted'] += total_invoice_items_deleted
+                self.stats['statements_deleted'] += 1
                 
                 return True
             else:
@@ -731,26 +704,22 @@ class StatementDownloader:
             if not supplier_name:
                 logger.warning(f"Could not extract supplier name for {file_path}, will rely on PDF detection")
             
-            # Extract data using statement extractor with supplier name
-            # Force complete reprocessing by setting force_reprocess=True
+            # Extract data using statement extractor
             extractor = StatementExtractor(
                 pdf_path=file_path,
-                save_to_db=True,
-                save_to_excel=False,
-                db_session=self.db_session,
-                supplier_name=supplier_name,  # Pass email-detected supplier name
-                force_reprocess=True  # Force complete reprocessing
+                supplier_name=supplier_name
             )
             
-            # Extract data with complete reprocessing
-            success = extractor.extract_all_pages()
-            if not success:
-                logger.error(f"Failed to extract data from: {file_path}")
+            # Extract full statement data
+            result = extractor.extract_full_statement()
+            
+            if result['invoice_data'].empty:
+                logger.error(f"No invoice data extracted from: {file_path}")
                 self.stats['errors'] += 1
                 return False
             
-            # Save to database with fresh data
-            db_success = extractor.save_to_database()
+            # Save statement and invoice data to database
+            db_success = self.save_statement_to_database(result, supplier_name, file_path)
             if not db_success:
                 logger.error(f"Failed to save to database: {file_path}")
                 self.stats['errors'] += 1
@@ -779,6 +748,169 @@ class StatementDownloader:
                 f"\n{traceback.format_exc()}"
             )
             self.stats['errors'] += 1
+            return False
+    
+    def save_statement_to_database(self, result: Dict[str, Any], supplier_name: str, file_path: str) -> bool:
+        """Save extracted statement and invoice data to database"""
+        try:
+            from mpi_backend.database.models.statement_models import (
+                PlumbingSupplier, PlumbingStatement, PlumbingInvoice
+            )
+            
+            # Get or create supplier
+            supplier = self.db_session.query(PlumbingSupplier).filter(
+                PlumbingSupplier.name == supplier_name
+            ).first()
+            
+            if not supplier:
+                supplier = PlumbingSupplier(
+                    name=supplier_name,
+                    is_active="Active"
+                )
+                self.db_session.add(supplier)
+                self.db_session.flush()  # Get the ID
+            
+            # Create statement record
+            metadata = result['metadata']
+            statement_date = metadata.get('statement_date', '')
+            
+            # Parse statement date
+            parsed_statement_date = None
+            if statement_date:
+                try:
+                    if isinstance(statement_date, str):
+                        # Try different date formats
+                        for fmt in ['%Y-%m-%d', '%m/%d/%Y', '%m/%d/%y', '%Y-%m']:
+                            try:
+                                parsed_statement_date = datetime.strptime(statement_date, fmt).date()
+                                break
+                            except ValueError:
+                                continue
+                    else:
+                        parsed_statement_date = statement_date
+                except Exception as e:
+                    logger.warning(f"Could not parse statement date '{statement_date}': {str(e)}")
+            
+            if not parsed_statement_date:
+                # Extract date from filename as fallback
+                file_path_obj = Path(file_path)
+                filename = file_path_obj.name
+                # Look for YYYY-MM pattern in filename
+                import re
+                date_match = re.search(r'(\d{4})-(\d{2})', filename)
+                if date_match:
+                    year, month = date_match.groups()
+                    parsed_statement_date = datetime(int(year), int(month), 1).date()
+                else:
+                    parsed_statement_date = datetime.now().date()
+            
+            # Create statement
+            # Handle total_amount with None handling
+            total_amount = result.get('total_amount')
+            try:
+                total_amount = float(total_amount) if total_amount is not None else 0.0
+            except (ValueError, TypeError):
+                total_amount = 0.0
+            
+            statement = PlumbingStatement(
+                supplier_id=supplier.id,
+                statement_date=parsed_statement_date,
+                account_number=metadata.get('account_number', ''),
+                total_amount=total_amount,
+                total_invoices=len(result['invoice_data']),
+                pdf_filename=Path(file_path).name
+            )
+            
+            self.db_session.add(statement)
+            self.db_session.flush()  # Get the statement ID
+            
+            # Process invoice data
+            invoice_data = result['invoice_data']
+            invoices_saved = 0
+            
+            for _, row in invoice_data.iterrows():
+                try:
+                    # Parse invoice date
+                    invoice_date = row.get('Invoice Date')
+                    if isinstance(invoice_date, str):
+                        try:
+                            # Try different date formats
+                            for fmt in ['%Y-%m-%d', '%m/%d/%Y', '%m/%d/%y']:
+                                try:
+                                    invoice_date = datetime.strptime(invoice_date, fmt).date()
+                                    break
+                                except ValueError:
+                                    continue
+                        except:
+                            invoice_date = None
+                    
+                    # Parse payment date
+                    payment_date = row.get('Payment Date')
+                    if isinstance(payment_date, str):
+                        try:
+                            # Try different date formats
+                            for fmt in ['%Y-%m-%d', '%m/%d/%Y', '%m/%d/%y']:
+                                try:
+                                    payment_date = datetime.strptime(payment_date, fmt).date()
+                                    break
+                                except ValueError:
+                                    continue
+                        except:
+                            payment_date = None
+                    
+                    # Create invoice record using correct field names
+                    # Handle None values for numeric fields
+                    original_amount = row.get('Original Inv Amount')
+                    amount_paid = row.get('Amount Paid')
+                    balance = row.get('Invoice Balance')
+                    
+                    # Convert to float with None handling
+                    try:
+                        original_amount = float(original_amount) if original_amount is not None else 0.0
+                    except (ValueError, TypeError):
+                        original_amount = 0.0
+                    
+                    try:
+                        amount_paid = float(amount_paid) if amount_paid is not None else 0.0
+                    except (ValueError, TypeError):
+                        amount_paid = 0.0
+                    
+                    try:
+                        balance = float(balance) if balance is not None else 0.0
+                    except (ValueError, TypeError):
+                        balance = 0.0
+                    
+                    invoice = PlumbingInvoice(
+                        statement_id=statement.id,
+                        invoice_number=str(row.get('Invoice Number', '')),
+                        invoice_date=invoice_date,
+                        customer_po=str(row.get('Customer PO', '')),
+                        original_amount=original_amount,
+                        amount_paid=amount_paid,
+                        balance=balance,  # Use 'balance' field
+                        payment_date=payment_date
+                    )
+                    
+                    self.db_session.add(invoice)
+                    invoices_saved += 1
+                    
+                except Exception as invoice_error:
+                    logger.error(f"Error saving invoice data: {str(invoice_error)}")
+                    continue
+            
+            # Commit all changes
+            self.db_session.commit()
+            
+            logger.info(
+                f"Saved statement {statement.id} with {invoices_saved} invoices "
+                f"for {supplier_name}"
+            )
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error saving statement to database: {str(e)}")
+            self.db_session.rollback()
             return False
     
     def download_statements_for_period(self, from_months_ago: int, 
@@ -926,13 +1058,12 @@ class StatementDownloader:
         print(f"Statements saved:      {self.stats['statements_saved']:,}")
         print(f"Statements deleted:    {self.stats['statements_deleted']:,}")
         print(f"Invoices deleted:      {self.stats['invoices_deleted']:,}")
-        print(f"Invoice items deleted: {self.stats['invoice_items_deleted']:,}")
         print(f"Skipped existing:      {self.stats['skipped_existing']:,}")
         print(f"Errors:                {self.stats['errors']:,}")
         print("="*60)
         print(" No emails were marked as read (used BODY.PEEK)")
         print(" Each statement contains multiple invoice records")
-        print(" Existing statements, invoices, and invoice items are automatically deleted")
+        print(" Existing statements and invoices are automatically deleted")
         print(" Fresh data is extracted and saved to database")
         print(" Complete reprocessing ensures data accuracy")
         print("="*60)
@@ -1037,7 +1168,7 @@ Examples:
         logger.info(" DOWNLOADING ALL HISTORICAL STATEMENTS AND INVOICES (PAST 10 YEARS)")
         logger.info("This will download statements and associated invoice data from all suppliers for the past 10 years")
         logger.info(" Using BODY.PEEK commands to ensure NO emails are marked as read")
-        logger.info(" Existing statements, invoices, and invoice items will be automatically deleted")
+        logger.info(" Existing statements and invoices will be automatically deleted")
         logger.info(" Fresh data will be extracted and saved to database")
         logger.info(" Complete reprocessing ensures data accuracy and consistency")
         if not args.dry_run:
@@ -1049,7 +1180,7 @@ Examples:
         from_months_ago = args.from_months_ago
         to_months_ago = args.to_months_ago
         logger.info(" Using BODY.PEEK commands to ensure NO emails are marked as read")
-        logger.info(" Existing statements, invoices, and invoice items will be automatically deleted")
+        logger.info(" Existing statements and invoices will be automatically deleted")
         logger.info(" Fresh data will be extracted and saved to database")
     
     # Create downloader and run
@@ -1079,13 +1210,13 @@ Examples:
                     print("\n Historical download completed!")
                     print("All available monthly statements and invoices from the past 10 years have been processed.")
                     print(" No emails were marked as read during this process.")
-                    print(" Existing statements, invoices, and invoice items were automatically deleted.")
+                    print(" Existing statements and invoices were automatically deleted.")
                     print(" Fresh data was extracted and saved to database.")
                     print(" Complete reprocessing ensures data accuracy and consistency.")
                     print("Check the summary above for detailed statistics.")
                 else:
                     print(" No emails were marked as read during this process.")
-                    print(" Existing statements, invoices, and invoice items were automatically deleted.")
+                    print(" Existing statements and invoices were automatically deleted.")
                     print(" Fresh data was extracted and saved to database.")
             else:
                 print(f"\nERROR: Operation failed: {result.get('error', 'Unknown error')}")
