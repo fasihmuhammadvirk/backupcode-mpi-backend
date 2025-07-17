@@ -67,23 +67,68 @@ def get_presigned_url(file_key, expiration_time=180, is_invoice=True) -> Optiona
             else:
                 key = file_key_str
             
-            presigned_url = s3_client.generate_presigned_url(
-                'get_object',
-                Params={
-                    'Bucket': BUCKET_NAME, 
-                    'Key': key,
-                    'ResponseContentDisposition': 'inline',
-                    'ResponseContentType': 'application/pdf'
-                },
-                ExpiresIn=expiration_time
-            )
+            # Try multiple key patterns to handle case differences and double extensions
+            possible_keys = [key]
+            
+            # If key ends with .pdf, try with .PDF
+            if key.lower().endswith('.pdf'):
+                base_name = key[:-4]  # Remove .pdf
+                possible_keys.extend([
+                    base_name + '.PDF',
+                    base_name + '.PDF.pdf',  # Handle double extension case
+                ])
+            
+            # If key ends with .PDF, try with .pdf
+            elif key.upper().endswith('.PDF'):
+                base_name = key[:-4]  # Remove .PDF
+                possible_keys.extend([
+                    base_name + '.pdf',
+                    base_name + '.PDF.pdf',  # Handle double extension case
+                ])
+            
+            # Also try the original key with .pdf added (for double extension cases)
+            if not key.lower().endswith('.pdf.pdf'):
+                possible_keys.append(key + '.pdf')
+            
+            # CRITICAL FIX: Try the exact pattern that exists in S3
+            # If the key ends with .PDF, also try .PDF.pdf (double extension)
+            if key.upper().endswith('.PDF'):
+                possible_keys.append(key + '.pdf')
+            
+            logger.info(f"Trying possible keys: {possible_keys}")
+            
+            # Try each possible key
+            for try_key in possible_keys:
+                try:
+                    presigned_url = s3_client.generate_presigned_url(
+                        'get_object',
+                        Params={
+                            'Bucket': BUCKET_NAME, 
+                            'Key': try_key,
+                            'ResponseContentDisposition': 'inline',
+                            'ResponseContentType': 'application/pdf'
+                        },
+                        ExpiresIn=expiration_time
+                    )
+                    logger.info(f"Successfully generated presigned URL for key: {try_key}")
+                    return presigned_url
+                except s3_client.exceptions.NoSuchKey:
+                    logger.warning(f"Key not found: {try_key}")
+                    continue
+                except Exception as e:
+                    logger.warning(f"Error with key {try_key}: {str(e)}")
+                    continue
+            
+            # If we get here, none of the keys worked
+            logger.error(f"Failed to generate presigned URL for any of the keys: {possible_keys}")
+            return None
         else:
             presigned_url = s3_client.generate_presigned_url(
                 'get_object',
                 Params={'Bucket': BUCKET_NAME, 'Key': file_key},
                 ExpiresIn=expiration_time
             )
-        return presigned_url
+            return presigned_url
     except Exception as e:
         logger.error(
             f"Error generating presigned URL for {file_key}: {str(e)}"

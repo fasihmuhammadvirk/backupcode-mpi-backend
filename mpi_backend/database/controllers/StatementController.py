@@ -590,14 +590,62 @@ class StatementController:
             # Generate S3 key for statement PDF
             # Statements are stored with .pdf extension due to is_invoice=True
             s3_key = f"statements/{pdf_filename}"
+            logger.info(f"Generated S3 key for reprocessing: {s3_key}")
             
             try:
                 from mpi_backend.utils.s3_utils import get_presigned_url
+                
+                # Use the same simple approach as the download endpoint
+                # This ensures consistency between viewing and reprocessing
                 statement_url = get_presigned_url(
                     file_key=s3_key,
-                    expiration_time=300,  # 5 minutes
+                    expiration_time=600,  # 10 minutes for reprocessing
                     is_invoice=True
                 )
+                
+                if not statement_url:
+                    logger.error(f"Failed to generate presigned URL for {s3_key}")
+                    
+                    # Try to check if the file exists in S3 to provide better error message
+                    try:
+                        import boto3
+                        from mpi_backend.config import AWS_SERVER_PUBLIC_KEY, AWS_SERVER_SECRET_KEY, REGION, BUCKET_NAME
+                        
+                        s3_client = boto3.client(
+                            's3',
+                            aws_access_key_id=AWS_SERVER_PUBLIC_KEY,
+                            aws_secret_access_key=AWS_SERVER_SECRET_KEY,
+                            region_name=REGION
+                        )
+                        
+                        try:
+                            s3_client.head_object(Bucket=BUCKET_NAME, Key=s3_key)
+                            logger.error(f"File exists in S3 but presigned URL generation failed for key: {s3_key}")
+                            return {
+                                'success': False,
+                                'error': f'S3 file exists but could not generate download URL. This might be a permissions issue. S3 key: {s3_key}'
+                            }
+                        except s3_client.exceptions.NoSuchKey:
+                            logger.error(f"File does not exist in S3. S3 key: {s3_key}")
+                            return {
+                                'success': False,
+                                'error': f'Statement PDF file not found in S3. The file may have been deleted or never uploaded. S3 key: {s3_key}'
+                            }
+                        except Exception as s3_error:
+                            logger.error(f"S3 check failed: {str(s3_error)}")
+                            return {
+                                'success': False,
+                                'error': f'Could not verify S3 file existence. S3 key: {s3_key}. Error: {str(s3_error)}'
+                            }
+                    except Exception as config_error:
+                        logger.error(f"Failed to initialize S3 client: {str(config_error)}")
+                        return {
+                            'success': False,
+                            'error': f'Could not generate download URL for statement PDF: {s3_key}. S3 client error: {str(config_error)}'
+                        }
+                
+                logger.info(f"Successfully generated presigned URL for key: {s3_key}")
+                    
             except Exception as e:
                 logger.error(f"Failed to get presigned URL for {s3_key}: {str(e)}")
                 return {
@@ -614,17 +662,43 @@ class StatementController:
             pdf_path = temp_dir / pdf_filename
             
             try:
-                response = requests.get(statement_url, timeout=30)
-                if response.status_code != 200:
-                    return {
-                        'success': False,
-                        'error': f'Failed to download PDF: Status {response.status_code}'
-                    }
-                
-                with open(pdf_path, 'wb') as f:
-                    f.write(response.content)
-                
-                logger.info(f"Downloaded PDF to {pdf_path}")
+                # Add retry logic for download
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        response = requests.get(statement_url, timeout=60)  # Increased timeout
+                        if response.status_code == 200:
+                            with open(pdf_path, 'wb') as f:
+                                f.write(response.content)
+                            logger.info(f"Downloaded PDF to {pdf_path} (attempt {attempt + 1})")
+                            break
+                        elif response.status_code == 404:
+                            logger.error(f"PDF not found on S3 (404) - URL may be expired or file doesn't exist")
+                            return {
+                                'success': False,
+                                'error': f'PDF not found on S3 (404). The file may not exist or the URL has expired. S3 key: {s3_key}'
+                            }
+                        else:
+                            logger.warning(f"Download attempt {attempt + 1} failed with status {response.status_code}")
+                            if attempt == max_retries - 1:
+                                return {
+                                    'success': False,
+                                    'error': f'Failed to download PDF after {max_retries} attempts. Last status: {response.status_code}'
+                                }
+                    except requests.exceptions.Timeout:
+                        logger.warning(f"Download attempt {attempt + 1} timed out")
+                        if attempt == max_retries - 1:
+                            return {
+                                'success': False,
+                                'error': f'Download timed out after {max_retries} attempts'
+                            }
+                    except Exception as download_error:
+                        logger.warning(f"Download attempt {attempt + 1} failed: {str(download_error)}")
+                        if attempt == max_retries - 1:
+                            return {
+                                'success': False,
+                                'error': f'Failed to download PDF: {str(download_error)}'
+                            }
                 
             except Exception as e:
                 logger.error(f"Failed to download PDF: {str(e)}")
@@ -636,28 +710,35 @@ class StatementController:
             # Delete existing statement and invoice records
             logger.info(f"Deleting existing records for statement {statement_id}")
             try:
-                # Delete associated invoices first (foreign key constraint)
-                invoice_count = self.db.query(PlumbingInvoice).filter(
-                    PlumbingInvoice.statement_id == statement_id
-                ).count()
-                
-                self.db.query(PlumbingInvoice).filter(
-                    PlumbingInvoice.statement_id == statement_id
-                ).delete()
-                
-                # Delete the statement
-                statement_deleted = self.db.query(PlumbingStatement).filter(
+                # Check if statement still exists (might have been deleted by another process)
+                existing_statement = self.db.query(PlumbingStatement).filter(
                     PlumbingStatement.id == statement_id
-                ).delete()
+                ).first()
                 
-                if not statement_deleted:
-                    return {
-                        'success': False,
-                        'error': f'Failed to delete statement {statement_id}'
-                    }
+                if not existing_statement:
+                    logger.warning(f"Statement {statement_id} no longer exists in database")
+                    # Continue with reprocessing - we'll create a new statement
+                else:
+                    # Delete associated invoices first (foreign key constraint)
+                    invoice_count = self.db.query(PlumbingInvoice).filter(
+                        PlumbingInvoice.statement_id == statement_id
+                    ).count()
+                    
+                    self.db.query(PlumbingInvoice).filter(
+                        PlumbingInvoice.statement_id == statement_id
+                    ).delete()
+                    
+                    # Delete the statement
+                    statement_deleted = self.db.query(PlumbingStatement).filter(
+                        PlumbingStatement.id == statement_id
+                    ).delete()
+                    
+                    if not statement_deleted:
+                        logger.warning(f"Statement {statement_id} was already deleted")
+                    else:
+                        logger.info(f"Deleted statement {statement_id} and {invoice_count} associated invoices")
                 
                 self.db.commit()
-                logger.info(f"Deleted statement {statement_id} and {invoice_count} associated invoices")
                 
             except Exception as e:
                 self.db.rollback()
@@ -695,10 +776,13 @@ class StatementController:
                 result = extractor.extract_full_statement()
                 
                 if result['invoice_data'].empty:
+                    logger.error(f"No invoice data extracted from PDF: {pdf_path}")
                     return {
                         'success': False,
-                        'error': 'Failed to extract data from PDF'
+                        'error': 'Failed to extract invoice data from PDF. The PDF might be corrupted, empty, or in an unsupported format.'
                     }
+                
+                logger.info(f"Successfully extracted {len(result['invoice_data'])} invoices from PDF")
                 
                 # Get detected supplier from metadata
                 detected_supplier = result['metadata'].get('supplier_name', '')
@@ -732,7 +816,6 @@ class StatementController:
                         }
                     
                     # Create new statement
-                    from mpi_backend.database.models.statement_models import PlumbingStatement, PlumbingInvoice
                     
                     new_statement = PlumbingStatement(
                         supplier_id=supplier.id,
@@ -768,9 +851,10 @@ class StatementController:
                 except Exception as db_error:
                     self.db.rollback()
                     logger.error(f"Failed to save to database: {str(db_error)}")
+                    logger.error(f"Database error details: {type(db_error).__name__}: {str(db_error)}")
                     return {
                         'success': False,
-                        'error': f'Failed to save to database: {str(db_error)}'
+                        'error': f'Failed to save to database: {str(db_error)}. Please check if the supplier exists and the data format is correct.'
                     }
                 
                 logger.info(f"Successfully reprocessed statement. New ID: {new_statement_id}, Invoices: {new_invoice_count}")
