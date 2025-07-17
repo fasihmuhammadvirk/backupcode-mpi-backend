@@ -220,26 +220,43 @@ class HistoricalInvoiceDownloader:
 
             if "statement" in subject:
                 return "no_supplier"
-            if "bmw" in subject:
+            
+            # BMW Plumbing Supplies - multiple patterns
+            if any(pattern in subject for pattern in ["bmw", "bmwpsupply"]):
                 return SUPPLIERS[0]
-            elif "world wide" in subject:
+            
+            # World Wide Plumbing - multiple patterns
+            elif any(pattern in subject for pattern in ["world wide", "wwps", "worldwide"]):
                 return SUPPLIERS[1]
-            elif "y&s" in subject:
+            
+            # Y & S Plumbing Supply - multiple patterns
+            elif any(pattern in subject for pattern in ["y&s", "y and s", "ys plumbing", "y s plumbing"]):
                 return SUPPLIERS[2]
-            elif ("invoice # i-" in subject or 
-                  "supreme plumbing" in subject):
+            
+            # Supreme Plumbing Supply - multiple patterns
+            elif any(pattern in subject for pattern in ["supreme plumbing", "invoice # i-", "supremeplumbing"]):
                 return SUPPLIERS[3]
-            elif "pyramid plumbing invoice" in subject:
+            
+            # Pyramid Plumbing - multiple patterns
+            elif any(pattern in subject for pattern in ["pyramid plumbing", "pyramidps"]):
                 return SUPPLIERS[4]
-            elif "abc opus services" in subject:
+            
+            # ABC Opus Services - multiple patterns
+            elif any(pattern in subject for pattern in ["abc opus", "opusoperations", "abc opus services"]):
                 return SUPPLIERS[5]
-            elif ("park plumbing & heating supply - "
-                  "invoices overnight" in subject):
+            
+            # Park Plumbing Supply - multiple patterns
+            elif any(pattern in subject for pattern in ["park plumbing", "parkplumbingsupply", "park plumbing & heating supply"]):
                 return SUPPLIERS[6]
-            elif "webb payment receipt" in subject:
+            
+            # FW Webb Plumbing Supply - multiple patterns
+            elif any(pattern in subject for pattern in ["webb payment receipt", "fw webb", "webb plumbing"]):
                 return SUPPLIERS[8]
+            
+            # Flow Mark Plumbing Supply - specific pattern
             elif "see invoice i-" in subject:
                 return SUPPLIERS[9]
+            
             else:
                 return "unknown_supplier"
         except Exception as e:

@@ -1332,7 +1332,7 @@ class InvoiceItemController:
             return []
 
     def get_aggregates(self, request):
-        query = self.db.query(InvoiceItem)
+        query = self.db.query(InvoiceItem).filter(InvoiceItem.is_active == True)
 
         # applying 'IN' filters dynamically
         for column_name, values in request.filters.items():
