@@ -1663,11 +1663,21 @@ class StatementController:
             from mpi_backend.database.models.InvoiceItems import InvoiceItem
             from mpi_backend.database.models.invoice import Invoice
             
-            # Build base query for system invoices (InvoiceItem)
+            # Build optimized query with DISTINCT to avoid duplicates at database level
             query = (
-                self.db.query(InvoiceItem, Invoice)
+                self.db.query(
+                    InvoiceItem.ref_no,
+                    InvoiceItem.date,
+                    InvoiceItem.po_number,
+                    InvoiceItem.amount,
+                    InvoiceItem.customer_job,
+                    Invoice.id.label('invoice_id'),
+                    PlumbingSupplier.name.label('supplier_name'),
+                    PlumbingSupplier.id.label('supplier_id')
+                )
                 .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
                 .join(PlumbingSupplier, Invoice.supplier_id == PlumbingSupplier.id)
+                .distinct(InvoiceItem.ref_no, PlumbingSupplier.name, InvoiceItem.date)
             )
             
             # Apply date filters on InvoiceItem date
@@ -1695,62 +1705,47 @@ class StatementController:
                     query = query.filter(or_(*supplier_conditions))
             
             # Exclude invoices that exist in statement data (PlumbingInvoice)
-            # This ensures we only get InvoiceItem records that don't exist in PlumbingInvoice
             subquery = self.db.query(PlumbingInvoice.invoice_number).subquery()
             query = query.filter(~InvoiceItem.ref_no.in_(subquery))
             
-            # Order by date (most recent first)
+            # Get total count for pagination
+            total_count = query.count()
+            
+            # Order by date (most recent first) and apply pagination
             query = query.order_by(InvoiceItem.date.desc())
+            offset = (page - 1) * page_size
+            query = query.offset(offset).limit(page_size)
             
-            # Get all results first for deduplication
-            all_results = query.all()
+            # Execute query
+            results = query.all()
             
-            # Process results with deduplication
+            # Process results
             invoice_data = []
-            seen_keys = set()
-            
-            for invoice_item, invoice in all_results:
-                # Get supplier name
-                supplier = self.db.query(PlumbingSupplier).filter(
-                    PlumbingSupplier.id == invoice.supplier_id
-                ).first()
-                supplier_name = supplier.name if supplier else f"Supplier ID {invoice.supplier_id}"
-                
-                # Create unique key for deduplication
-                key = (invoice_item.ref_no, supplier_name, invoice_item.date)
-                if key in seen_keys:
-                    continue
-                seen_keys.add(key)
-                
+            for result in results:
                 invoice_data.append({
-                    'invoice_number': invoice_item.ref_no,
+                    'invoice_number': result.ref_no,
                     'invoice_date': (
-                        invoice_item.date.isoformat() 
-                        if invoice_item.date else None
+                        result.date.isoformat() 
+                        if result.date else None
                     ),
-                    'customer_po': invoice_item.po_number,
+                    'customer_po': result.po_number,
                     'statement_date': None,  # No statement for unlisted items
-                    'supplier_name': supplier_name,
+                    'supplier_name': result.supplier_name,
                     'status': 'Unlisted',
-                    'original_amount': str(invoice_item.amount) if invoice_item.amount else "0",
+                    'original_amount': str(result.amount) if result.amount else "0",
                     'balance': "0",  # System invoices don't have balance
                     'statement_id': None,
                     'invoice_id': None,
-                    'system_invoice_id': str(invoice.id),
-                    'customer_job': invoice_item.customer_job
+                    'system_invoice_id': str(result.invoice_id),
+                    'customer_job': result.customer_job
                 })
-            
-            # Apply pagination after deduplication
-            total_count = len(invoice_data)
-            offset = (page - 1) * page_size
-            paginated_data = invoice_data[offset:offset + page_size]
             
             # Calculate pagination metadata
             total_pages = ceil(total_count / page_size) if page_size > 0 else 1
             
             return {
                 'success': True,
-                'data': paginated_data,
+                'data': invoice_data,
                 'pagination': {
                     'current_page': page,
                     'page_size': page_size,
@@ -1832,7 +1827,7 @@ class StatementController:
                         supplier_conditions_system.append(PlumbingSupplier.name.ilike(f"%{supplier_name}%"))
                         supplier_conditions_statement.append(PlumbingSupplier.name.ilike(f"%{supplier_name}%"))
             
-            # OPTIMIZED: Build system invoices query with all needed fields
+            # OPTIMIZED: Build system invoices query with all needed fields and DISTINCT
             system_query = (
                 self.db.query(
                     InvoiceItem.ref_no.label('invoice_number'),
@@ -1849,6 +1844,7 @@ class StatementController:
                 )
                 .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
                 .join(PlumbingSupplier, Invoice.supplier_id == PlumbingSupplier.id)
+                .distinct(InvoiceItem.ref_no, PlumbingSupplier.name, InvoiceItem.date)
             )
             
             # Apply filters to system query
@@ -1862,7 +1858,7 @@ class StatementController:
             # Order system query (no limit for comprehensive data)
             system_query = system_query.order_by(InvoiceItem.date.desc())
             
-            # OPTIMIZED: Build statement invoices query with all needed fields
+            # OPTIMIZED: Build statement invoices query with all needed fields and DISTINCT
             statement_query = (
                 self.db.query(
                     PlumbingInvoice.invoice_number,
@@ -1878,6 +1874,7 @@ class StatementController:
                 )
                 .join(PlumbingStatement, PlumbingInvoice.statement_id == PlumbingStatement.id)
                 .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
+                .distinct(PlumbingInvoice.invoice_number, PlumbingSupplier.name, PlumbingInvoice.invoice_date)
             )
             
             # Apply filters to statement query
@@ -1897,18 +1894,11 @@ class StatementController:
             
             logger.info(f"Missing/Invalid - Retrieved {len(system_invoices)} system invoices and {len(statement_invoices)} statement invoices")
             
-            # Process and filter system invoices efficiently
+            # Process and filter system invoices efficiently (no Python-level deduplication needed due to DISTINCT)
             missing_system_invoices = []
-            seen_keys = set()
             for inv in system_invoices:
                 # Use optimized validation helper
                 if self._has_validation_issues_system(inv):
-                    # Create unique key for deduplication
-                    key = (inv.invoice_number, inv.supplier_name, inv.invoice_date)
-                    if key in seen_keys:
-                        continue
-                    seen_keys.add(key)
-                    
                     # Get detailed issues for response
                     issues = self._get_detailed_issues_system(inv)
                     
@@ -1931,18 +1921,11 @@ class StatementController:
                         'source': 'system'
                     })
             
-            # Process and filter statement invoices efficiently
+            # Process and filter statement invoices efficiently (no Python-level deduplication needed due to DISTINCT)
             missing_statement_invoices = []
-            seen_keys = set()
             for inv in statement_invoices:
                 # Use optimized validation helper
                 if self._has_validation_issues_statement(inv):
-                    # Create unique key for deduplication
-                    key = (inv.invoice_number, inv.supplier_name, inv.invoice_date)
-                    if key in seen_keys:
-                        continue
-                    seen_keys.add(key)
-                    
                     # Get detailed issues for response
                     issues = self._get_detailed_issues_statement(inv)
                     
@@ -2072,7 +2055,7 @@ class StatementController:
                         supplier_conditions_system.append(PlumbingSupplier.name.ilike(f"%{supplier_name}%"))
                         supplier_conditions_statement.append(PlumbingSupplier.name.ilike(f"%{supplier_name}%"))
             
-            # OPTIMIZED: Single efficient query for system invoices with all needed data
+            # OPTIMIZED: Single efficient query for system invoices with all needed data and DISTINCT
             system_base_query = (
                 self.db.query(
                     InvoiceItem.ref_no.label('invoice_number'),
@@ -2089,6 +2072,7 @@ class StatementController:
                 .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
                 .join(PlumbingSupplier, Invoice.supplier_id == PlumbingSupplier.id)
                 .filter(InvoiceItem.ref_no.isnot(None))  # Exclude null invoice numbers
+                .distinct(InvoiceItem.ref_no, PlumbingSupplier.name, InvoiceItem.date)
             )
             
             # Apply filters to system query
@@ -2102,7 +2086,7 @@ class StatementController:
             # Order system invoices (no limit for comprehensive data)
             system_base_query = system_base_query.order_by(InvoiceItem.date.desc())
             
-            # OPTIMIZED: Single query for statement invoices with all needed data
+            # OPTIMIZED: Single query for statement invoices with all needed data and DISTINCT
             statement_base_query = (
                 self.db.query(
                     PlumbingInvoice.invoice_number,
@@ -2119,6 +2103,7 @@ class StatementController:
                 .join(PlumbingStatement, PlumbingInvoice.statement_id == PlumbingStatement.id)
                 .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
                 .filter(PlumbingInvoice.invoice_number.isnot(None))  # Exclude null invoice numbers
+                .distinct(PlumbingInvoice.invoice_number, PlumbingSupplier.name, PlumbingInvoice.invoice_date)
             )
             
             # Apply filters to statement query
@@ -2162,16 +2147,12 @@ class StatementController:
                 )
                 system_matches = {match.ref_no for match in matched_systems}
             
-            # Process all invoices efficiently
+            # Process all invoices efficiently (no Python-level deduplication needed due to DISTINCT)
             all_invoices = []
-            seen_keys = set()
+            
             # Process system invoices (InvoiceItem records)
             for inv in system_invoices:
                 has_issues = self._has_validation_issues_system(inv)
-                key = (inv.invoice_number, inv.supplier_name, inv.invoice_date)
-                if key in seen_keys:
-                    continue
-                seen_keys.add(key)
                 if has_issues:
                     status = "Missing System"
                 elif inv.invoice_number in statement_matches:
@@ -2193,13 +2174,10 @@ class StatementController:
                     'customer_job': inv.customer_job,
                     'source': 'system'
                 })
+            
             # Process statement invoices (PlumbingInvoice records)
             for inv in statement_invoices:
                 has_issues = self._has_validation_issues_statement(inv)
-                key = (inv.invoice_number, inv.supplier_name, inv.invoice_date)
-                if key in seen_keys:
-                    continue
-                seen_keys.add(key)
                 if has_issues:
                     status = "Missing Statement"
                 elif inv.invoice_number in system_matches:
