@@ -2,20 +2,25 @@
 """
 failed_invoice_recovery.py
 
-A script to recover failed invoices by searching the mailbox for missing attachments.
-This script:
-1. Fetches failed invoices from the system (status = 'Failed')
-2. Searches the mailbox for specific invoice numbers and suppliers
-3. Downloads and processes the missing attachments
-4. Runs as a background job that can be scheduled daily
+Enhanced utility for recovering failed invoices by searching the mailbox for missing attachments.
+This utility:
+1. Fetches ALL failed invoices from the system (status = 'Failed')
+2. Processes them in batches to handle large volumes efficiently
+3. Searches the mailbox for specific invoice numbers and suppliers
+4. Downloads and processes the missing attachments
+5. Includes comprehensive logging and error handling
+6. Can be run as a background task or standalone
 
 USAGE:
-  $ python scripts/failed_invoice_recovery.py
+  $ python -m mpi_backend.utils.failed_invoice_recovery
 
-RECOMMENDED:
-- Schedule this script to run daily using cron or a task scheduler
-- The script will only search for invoices that are marked as 'Failed' in the system
-- It uses intelligent date-based searching to avoid overwhelming the mailbox
+FEATURES:
+- Batch processing for large volumes of failed invoices
+- Intelligent date-based searching to avoid overwhelming the mailbox
+- Comprehensive logging with separate recovery tracking
+- Retry mechanism for failed operations
+- Background task integration
+- Memory-efficient processing
 
 """
 import time
@@ -29,11 +34,13 @@ import sys
 from pathlib import Path
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timedelta, date
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Generator
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 # Add project root to path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from mpi_backend.config import (
     SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, INVOICE_DOWNLOAD_FOLDER, 
@@ -47,6 +54,14 @@ from mpi_backend.database import SessionLocal
 # Create logs directory
 LOGS_DIR = Path("logs")
 LOGS_DIR.mkdir(exist_ok=True)
+
+# Configuration constants
+BATCH_SIZE = 50  # Process failed invoices in batches
+MAX_WORKERS = 3  # Number of concurrent workers for email processing
+MAX_RETRIES = 3  # Maximum number of retries on failure
+RETRY_DELAY_MINUTES = 5  # Delay between retries in minutes
+EMAIL_SEARCH_TIMEOUT = 30  # Timeout for email operations in seconds
+MAX_EMAILS_PER_INVOICE = 10  # Maximum emails to check per invoice
 
 # Setup dedicated logger for failed invoice recovery
 def setup_recovery_logger():
@@ -159,13 +174,13 @@ def search_emails_for_invoice(mail, invoice_number: str, supplier_name: str, inv
             start_date = (invoice_date - timedelta(days=30)).strftime('%d-%b-%Y')
             end_date = (invoice_date + timedelta(days=30)).strftime('%d-%b-%Y')
             search_criteria.append(f'SINCE "{start_date}" BEFORE "{end_date}"')
-            logger.info(f"Searching emails from {start_date} to {end_date} for invoice {invoice_number}")
+            logger.debug(f"Searching emails from {start_date} to {end_date} for invoice {invoice_number}")
         else:
             # If no date, search last 2 years
             start_date = (datetime.now(TIMEZONE) - timedelta(days=730)).strftime('%d-%b-%Y')
             end_date = datetime.now(TIMEZONE).strftime('%d-%b-%Y')
             search_criteria.append(f'SINCE "{start_date}" BEFORE "{end_date}"')
-            logger.info(f"Searching emails from {start_date} to {end_date} for invoice {invoice_number} (no specific date)")
+            logger.debug(f"Searching emails from {start_date} to {end_date} for invoice {invoice_number} (no specific date)")
         
         # Add subject search for invoice number
         search_criteria.append(f'SUBJECT "{invoice_number}"')
@@ -173,7 +188,7 @@ def search_emails_for_invoice(mail, invoice_number: str, supplier_name: str, inv
         # Combine search criteria
         search_string = f'({" ".join(search_criteria)})'
         
-        logger.info(f"Searching with criteria: {search_string}")
+        logger.debug(f"Searching with criteria: {search_string}")
         result, data = mail.uid('search', None, search_string)
         
         if result != 'OK':
@@ -181,16 +196,16 @@ def search_emails_for_invoice(mail, invoice_number: str, supplier_name: str, inv
             return []
         
         raw_email_ids = data[0].split()
-        logger.info(f"Found {len(raw_email_ids)} emails with invoice number {invoice_number}")
+        logger.debug(f"Found {len(raw_email_ids)} emails with invoice number {invoice_number}")
         
         # Filter by supplier email addresses
         supplier_emails = get_supplier_emails(supplier_name)
         filtered_email_ids = []
         
-        for idx, email_id in enumerate(raw_email_ids, 1):
+        for idx, email_id in enumerate(raw_email_ids[:MAX_EMAILS_PER_INVOICE], 1):
             try:
                 email_id = email_id.decode('utf-8') if isinstance(email_id, bytes) else email_id
-                logger.debug(f"Processing email {idx}/{len(raw_email_ids)} - UID: {email_id}")
+                logger.debug(f"Processing email {idx}/{min(len(raw_email_ids), MAX_EMAILS_PER_INVOICE)} - UID: {email_id}")
                 
                 result, msg_data = mail.uid('fetch', email_id, '(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)])')
                 
@@ -206,11 +221,11 @@ def search_emails_for_invoice(mail, invoice_number: str, supplier_name: str, inv
                 # Check if email is from the correct supplier
                 if supplier_emails and from_email in supplier_emails:
                     filtered_email_ids.append(email_id)
-                    logger.info(f"Found matching email UID {email_id} from {from_email} with subject: {subject}")
+                    logger.debug(f"Found matching email UID {email_id} from {from_email} with subject: {subject}")
                 elif not supplier_emails:
                     # If no specific emails for supplier, accept any email with invoice number
                     filtered_email_ids.append(email_id)
-                    logger.info(f"Found email UID {email_id} from {from_email} with subject: {subject} (no supplier email mapping)")
+                    logger.debug(f"Found email UID {email_id} from {from_email} with subject: {subject} (no supplier email mapping)")
                 
             except Exception as e:
                 logger.error(f"Error processing email UID {email_id}: {str(e)}")
@@ -264,7 +279,7 @@ def download_attachment_with_retry(part, filepath, max_retries=3):
             if attachment_data:
                 with open(filepath, 'wb') as f:
                     f.write(attachment_data)
-                logger.info(f"Downloaded attachment on attempt {attempt + 1}: {os.path.basename(filepath)}")
+                logger.debug(f"Downloaded attachment on attempt {attempt + 1}: {os.path.basename(filepath)}")
                 return True
             else:
                 logger.warning(f"Attempt {attempt + 1}: No attachment data found")
@@ -291,12 +306,12 @@ def download_email_attachments(email_message, base_folder_path, target_invoice_n
     try:
         # Enhanced supplier detection with fallback
         try:
-            logger.info(f"Processing email with Subject: '{email_subject}'")
+            logger.debug(f"Processing email with Subject: '{email_subject}'")
             supplier_name = get_supplier_from_email(
                 email_subject,
                 email_message.get('Return-Path', '')
             )
-            logger.info(f"Detected supplier: {supplier_name}")
+            logger.debug(f"Detected supplier: {supplier_name}")
         except Exception as sup_error:
             logger.error(f"Supplier detection failed: {str(sup_error)}")
             supplier_name = "unknown_supplier"
@@ -315,9 +330,9 @@ def download_email_attachments(email_message, base_folder_path, target_invoice_n
         date_str = date_time_obj.strftime('%Y-%m-%d')
         
         # Log detailed email information
-        logger.info(f"  {date_str} | {sender}")
-        logger.info(f"    Subject: {email_subject}")
-        logger.info(f"    Supplier: {supplier_name} | Target Invoice: {target_invoice_number}")
+        logger.debug(f"  {date_str} | {sender}")
+        logger.debug(f"    Subject: {email_subject}")
+        logger.debug(f"    Supplier: {supplier_name} | Target Invoice: {target_invoice_number}")
 
         # Enhanced directory structure creation
         try:
@@ -373,7 +388,7 @@ def download_email_attachments(email_message, base_folder_path, target_invoice_n
                     is_pdf = filename.lower().endswith(('.pdf', '.PDF'))
                     attachment_details.append(f"      - {filename} ({content_type}) - PDF: {is_pdf}")
                     
-                    logger.info(f"Found attachment {attachments_found}: {filename} (Type: {content_type})")
+                    logger.debug(f"Found attachment {attachments_found}: {filename} (Type: {content_type})")
                     
                     # Only process PDF files
                     if not is_pdf:
@@ -384,7 +399,7 @@ def download_email_attachments(email_message, base_folder_path, target_invoice_n
                     filepath = os.path.join(inner_dir_path, filename)
                     if download_attachment_with_retry(part, filepath):
                         attachments_downloaded += 1
-                        logger.info(f"Successfully saved: {filename} => {filepath}")
+                        logger.debug(f"Successfully saved: {filename} => {filepath}")
                     else:
                         logger.error(f"Failed to download after retries: {filename}")
                 
@@ -394,15 +409,14 @@ def download_email_attachments(email_message, base_folder_path, target_invoice_n
 
         # Log attachment summary
         if attachment_details:
-            logger.info(f"    Attachments: {attachments_found} total, {attachments_downloaded} PDFs")
+            logger.debug(f"    Attachments: {attachments_found} total, {attachments_downloaded} PDFs")
             for detail in attachment_details:
-                logger.info(detail)
+                logger.debug(detail)
         else:
-            logger.info(f"    Attachments: 0 total, 0 PDFs")
+            logger.debug(f"    Attachments: 0 total, 0 PDFs")
 
         # Log final results
-        logger.info(f"Email processing complete - Found: {attachments_found} attachments, Downloaded: {attachments_downloaded} PDFs")
-        logger.info("")  # Add blank line for readability
+        logger.debug(f"Email processing complete - Found: {attachments_found} attachments, Downloaded: {attachments_downloaded} PDFs")
         
         # Return success status
         return attachments_downloaded > 0
@@ -411,17 +425,19 @@ def download_email_attachments(email_message, base_folder_path, target_invoice_n
         logger.error(f"Error in download_email_attachments: {str(e)}\n{traceback.format_exc()}")
         return False
 
-def get_failed_invoices(from_date: Optional[date] = None, to_date: Optional[date] = None, limit: int = 50) -> List[Dict]:
+def get_failed_invoices_batch(from_date: Optional[date] = None, to_date: Optional[date] = None, 
+                             page: int = 1, page_size: int = BATCH_SIZE) -> Tuple[List[Dict], int]:
     """
-    Get failed invoices from the system
+    Get failed invoices from the system in batches
     
     Args:
         from_date: Start date filter (optional)
         to_date: End date filter (optional)
-        limit: Maximum number of invoices to process
+        page: Page number for pagination
+        page_size: Number of invoices per page
     
     Returns:
-        List of failed invoice dictionaries
+        Tuple of (failed_invoices_list, total_count)
     """
     try:
         db = SessionLocal()
@@ -432,14 +448,14 @@ def get_failed_invoices(from_date: Optional[date] = None, to_date: Optional[date
             from_date=from_date,
             to_date=to_date,
             status='failed',
-            page=1,
-            page_size=limit
+            page=page,
+            page_size=page_size
         )
         
         if not result['success']:
             logger.error(f"Failed to get failed invoices: {result.get('error', 'Unknown error')}")
             db.close()
-            return []
+            return [], 0
         
         failed_invoices = []
         for invoice in result['data']:
@@ -453,25 +469,145 @@ def get_failed_invoices(from_date: Optional[date] = None, to_date: Optional[date
                     'statement_date': invoice['statement_date']
                 })
         
+        total_count = result.get('total', 0)
         db.close()
-        logger.info(f"Found {len(failed_invoices)} failed invoices to process")
-        return failed_invoices
+        logger.info(f"Retrieved batch {page}: {len(failed_invoices)} failed invoices (Total: {total_count})")
+        return failed_invoices, total_count
         
     except Exception as e:
-        logger.error(f"Error getting failed invoices: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"Error getting failed invoices batch: {str(e)}\n{traceback.format_exc()}")
         if 'db' in locals():
             db.close()
-        return []
+        return [], 0
+
+def get_all_failed_invoices(from_date: Optional[date] = None, to_date: Optional[date] = None) -> Generator[List[Dict], None, None]:
+    """
+    Generator to get all failed invoices in batches
+    
+    Args:
+        from_date: Start date filter (optional)
+        to_date: End date filter (optional)
+    
+    Yields:
+        Batches of failed invoice dictionaries
+    """
+    page = 1
+    total_processed = 0
+    
+    while True:
+        batch, total_count = get_failed_invoices_batch(from_date, to_date, page, BATCH_SIZE)
+        
+        if not batch:
+            break
+            
+        total_processed += len(batch)
+        logger.info(f"Processing batch {page}: {len(batch)} invoices (Total processed: {total_processed}/{total_count})")
+        
+        yield batch
+        
+        if total_processed >= total_count:
+            break
+            
+        page += 1
+
+def process_invoice_batch(batch: List[Dict], mail, base_folder_path: Path) -> List[str]:
+    """
+    Process a batch of failed invoices
+    
+    Args:
+        batch: List of failed invoice dictionaries
+        mail: IMAP connection
+        base_folder_path: Base folder for downloads
+    
+    Returns:
+        List of successfully processed invoice numbers
+    """
+    successfully_processed_invoices = []
+    
+    for idx, invoice in enumerate(batch, 1):
+        try:
+            invoice_number = invoice['invoice_number']
+            supplier_name = invoice['supplier_name']
+            invoice_date_str = invoice['invoice_date']
+            
+            # Parse invoice date
+            invoice_date = None
+            if invoice_date_str:
+                try:
+                    invoice_date = datetime.fromisoformat(invoice_date_str).date()
+                except:
+                    logger.warning(f"Could not parse invoice date: {invoice_date_str}")
+            
+            logger.info(f"Processing failed invoice {idx}/{len(batch)}: {invoice_number} from {supplier_name}")
+            
+            # Search for emails containing this invoice
+            matching_email_ids = search_emails_for_invoice(mail, invoice_number, supplier_name, invoice_date)
+            
+            if not matching_email_ids:
+                logger.warning(f"No emails found for invoice {invoice_number} from {supplier_name}")
+                log_recovery_attempt(invoice_number, supplier_name, invoice_date_str or "unknown", "NO_EMAILS_FOUND")
+                continue
+            
+            logger.info(f"Found {len(matching_email_ids)} emails for invoice {invoice_number}")
+            
+            # Process each matching email
+            invoice_processed = False
+            for email_idx, e_id in enumerate(matching_email_ids, 1):
+                try:
+                    logger.debug(f"Processing email {email_idx}/{len(matching_email_ids)} for invoice {invoice_number} - UID: {e_id}")
+                    
+                    result, response = mail.uid('fetch', e_id, '(BODY.PEEK[])')
+                    
+                    if result != 'OK' or not response or not response[0]:
+                        logger.error(f"Failed to fetch email UID {e_id}")
+                        continue
+                    
+                    try:
+                        raw_email = response[0][1].decode('utf-8')
+                    except UnicodeDecodeError:
+                        raw_email = response[0][1].decode('latin-1')
+
+                    email_message = email.message_from_string(raw_email)
+                    
+                    # Download attachments for this specific invoice
+                    download_success = download_email_attachments(email_message, base_folder_path, invoice_number)
+                    
+                    if download_success:
+                        invoice_processed = True
+                        logger.info(f"Successfully processed email UID {e_id} for invoice {invoice_number}")
+                        break  # Found and processed the invoice, no need to check other emails
+                    else:
+                        logger.warning(f"Email UID {e_id} for invoice {invoice_number} had no attachments")
+                        
+                except Exception as email_error:
+                    logger.error(f"Failed to process email UID {e_id} for invoice {invoice_number}: {str(email_error)}")
+                    continue
+            
+            if invoice_processed:
+                successfully_processed_invoices.append(invoice_number)
+                log_recovery_attempt(invoice_number, supplier_name, invoice_date_str or "unknown", "SUCCESS", f"Processed from email UID {e_id}")
+            else:
+                log_recovery_attempt(invoice_number, supplier_name, invoice_date_str or "unknown", "NO_ATTACHMENTS", "No valid attachments found in any matching emails")
+            
+            # Small delay between invoices to avoid overwhelming the server
+            time.sleep(0.5)
+            
+        except Exception as invoice_error:
+            logger.error(f"Failed to process invoice {invoice_number}: {str(invoice_error)}")
+            log_recovery_attempt(invoice_number, supplier_name, invoice_date_str or "unknown", "ERROR", str(invoice_error))
+            continue
+    
+    return successfully_processed_invoices
 
 def process_failed_invoice_recovery():
-    """Main function to process failed invoice recovery"""
+    """Main function to process failed invoice recovery with enhanced batch processing"""
     logger.info("="*80)
-    logger.info("STARTING FAILED INVOICE RECOVERY")
+    logger.info("STARTING ENHANCED FAILED INVOICE RECOVERY")
     logger.info("="*80)
     logger.info(f"Session started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     mail = None
-    db = None
+    all_successfully_processed_invoices = []
     
     try:
         # Setup directory structure
@@ -488,111 +624,53 @@ def process_failed_invoice_recovery():
         # Get failed invoices from last 2 years (to avoid processing very old invoices)
         try:
             from_date = datetime.now(TIMEZONE).date() - timedelta(days=730)  # 2 years back
-            failed_invoices = get_failed_invoices(from_date=from_date, limit=100)
+            total_batches = 0
+            total_invoices = 0
             
-            if not failed_invoices:
-                logger.info("No failed invoices found to process")
-                logger.info("="*80)
-                return
+            # Process all failed invoices in batches
+            for batch in get_all_failed_invoices(from_date=from_date):
+                total_batches += 1
+                total_invoices += len(batch)
+                
+                if not batch:
+                    logger.info("No failed invoices found to process")
+                    break
+                
+                logger.info(f"Processing batch {total_batches}: {len(batch)} failed invoices")
+                logger.info("-" * 80)
+                
+                # Email processing for this batch
+                try:
+                    if mail is None:
+                        mail = login()
+                    
+                    batch_successful = process_invoice_batch(batch, mail, base_folder_path)
+                    all_successfully_processed_invoices.extend(batch_successful)
+                    
+                    logger.info(f"Batch {total_batches} completed: {len(batch_successful)}/{len(batch)} invoices recovered")
+                    logger.info("-" * 80)
+                    
+                except Exception as batch_error:
+                    logger.error(f"Failed to process batch {total_batches}: {str(batch_error)}")
+                    # Try to reconnect for next batch
+                    try:
+                        if mail:
+                            mail.close()
+                            mail.logout()
+                    except:
+                        pass
+                    mail = None
+                    continue
             
-            logger.info(f"Processing {len(failed_invoices)} failed invoices")
-            logger.info("-" * 80)
+            logger.info(f"Completed processing all batches: {total_batches} batches, {total_invoices} total invoices")
             
         except Exception as invoice_error:
             logger.error(f"Failed to get failed invoices: {str(invoice_error)}")
             raise
 
-        # Email processing
-        try:
-            mail = login()
-            successfully_processed_invoices = []
-            
-            for idx, invoice in enumerate(failed_invoices, 1):
-                try:
-                    invoice_number = invoice['invoice_number']
-                    supplier_name = invoice['supplier_name']
-                    invoice_date_str = invoice['invoice_date']
-                    
-                    # Parse invoice date
-                    invoice_date = None
-                    if invoice_date_str:
-                        try:
-                            invoice_date = datetime.fromisoformat(invoice_date_str).date()
-                        except:
-                            logger.warning(f"Could not parse invoice date: {invoice_date_str}")
-                    
-                    logger.info(f"Processing failed invoice {idx}/{len(failed_invoices)}: {invoice_number} from {supplier_name}")
-                    
-                    # Search for emails containing this invoice
-                    matching_email_ids = search_emails_for_invoice(mail, invoice_number, supplier_name, invoice_date)
-                    
-                    if not matching_email_ids:
-                        logger.warning(f"No emails found for invoice {invoice_number} from {supplier_name}")
-                        log_recovery_attempt(invoice_number, supplier_name, invoice_date_str or "unknown", "NO_EMAILS_FOUND")
-                        continue
-                    
-                    logger.info(f"Found {len(matching_email_ids)} emails for invoice {invoice_number}")
-                    
-                    # Process each matching email
-                    invoice_processed = False
-                    for email_idx, e_id in enumerate(matching_email_ids, 1):
-                        try:
-                            logger.info(f"Processing email {email_idx}/{len(matching_email_ids)} for invoice {invoice_number} - UID: {e_id}")
-                            
-                            result, response = mail.uid('fetch', e_id, '(BODY.PEEK[])')
-                            
-                            if result != 'OK' or not response or not response[0]:
-                                logger.error(f"Failed to fetch email UID {e_id}")
-                                continue
-                            
-                            try:
-                                raw_email = response[0][1].decode('utf-8')
-                            except UnicodeDecodeError:
-                                raw_email = response[0][1].decode('latin-1')
-
-                            email_message = email.message_from_string(raw_email)
-                            
-                            # Download attachments for this specific invoice
-                            download_success = download_email_attachments(email_message, base_folder_path, invoice_number)
-                            
-                            if download_success:
-                                invoice_processed = True
-                                logger.info(f"Successfully processed email UID {e_id} for invoice {invoice_number}")
-                                break  # Found and processed the invoice, no need to check other emails
-                            else:
-                                logger.warning(f"Email UID {e_id} for invoice {invoice_number} had no attachments")
-                                
-                        except Exception as email_error:
-                            logger.error(f"Failed to process email UID {e_id} for invoice {invoice_number}: {str(email_error)}")
-                            continue
-                    
-                    if invoice_processed:
-                        successfully_processed_invoices.append(invoice_number)
-                        log_recovery_attempt(invoice_number, supplier_name, invoice_date_str or "unknown", "SUCCESS", f"Processed from email UID {e_id}")
-                    else:
-                        log_recovery_attempt(invoice_number, supplier_name, invoice_date_str or "unknown", "NO_ATTACHMENTS", "No valid attachments found in any matching emails")
-                    
-                    # Small delay between invoices to avoid overwhelming the server
-                    time.sleep(1)
-                    
-                except Exception as invoice_error:
-                    logger.error(f"Failed to process invoice {invoice_number}: {str(invoice_error)}")
-                    log_recovery_attempt(invoice_number, supplier_name, invoice_date_str or "unknown", "ERROR", str(invoice_error))
-                    continue
-
-            logger.info("-" * 80)
-            logger.info(f"Successfully processed {len(successfully_processed_invoices)} invoices out of {len(failed_invoices)}")
-            
-            if successfully_processed_invoices:
-                logger.info("Successfully recovered invoices: " + ", ".join(successfully_processed_invoices))
-
-        except Exception as processing_error:
-            logger.error(f"Email processing failed: {str(processing_error)}\n{traceback.format_exc()}")
-            raise
-
         # Post-processing for successfully downloaded files
         try:
-            if successfully_processed_invoices:
+            if all_successfully_processed_invoices:
                 logger.info("Starting invoice conversion for recovered files")
                 converted_files, failed_files = convert_invoice_for_email(base_folder_path)
                 logger.info(f"Conversion complete. Success: {len(converted_files)}, Failed: {len(failed_files)}")
@@ -621,8 +699,19 @@ def process_failed_invoice_recovery():
             logger.error(f"Error closing connection: {str(logout_error)}")
         
         logger.info("="*80)
-        logger.info("FAILED INVOICE RECOVERY COMPLETED")
+        logger.info(f"ENHANCED FAILED INVOICE RECOVERY COMPLETED")
+        logger.info(f"Total invoices processed: {total_invoices}")
+        logger.info(f"Successfully recovered: {len(all_successfully_processed_invoices)}")
         logger.info("="*80)
+
+def failed_invoice_recovery_background_task():
+    """Background task wrapper for failed invoice recovery"""
+    try:
+        logger.info("Starting failed invoice recovery background task")
+        process_failed_invoice_recovery()
+        logger.info("Failed invoice recovery background task completed successfully")
+    except Exception as e:
+        logger.error(f"Failed invoice recovery background task failed: {str(e)}", exc_info=True)
 
 def main():
     """Main entry point"""

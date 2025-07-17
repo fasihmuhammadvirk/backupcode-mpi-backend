@@ -50,7 +50,7 @@ from mpi_backend.utils.statement_downloader import (
 from mpi_backend.utils.missing_invoice_downaloder import (
     missing_email_download_background_task
 )
-from scripts.failed_invoice_recovery import process_failed_invoice_recovery
+from mpi_backend.utils.failed_invoice_recovery import failed_invoice_recovery_background_task
 
 # Import priority control utilities
 from mpi_backend.utils.quickbooks_priority import set_scheduler_instance
@@ -180,7 +180,7 @@ def async_failed_invoice_recovery_wrapper():
     def _execute_failed_invoice_recovery():
         try:
             logger.info("Starting async failed invoice recovery task")
-            process_failed_invoice_recovery()
+            failed_invoice_recovery_background_task()
             logger.info("Failed invoice recovery task completed successfully")
         except Exception as e:
             logger.error(f"Failed invoice recovery task failed: {str(e)}")
@@ -346,15 +346,16 @@ async def lifespan(app: FastAPI):
         misfire_grace_time=1800
     )
     
-    # Failed invoice recovery - daily at 3 AM PKT (10 PM UTC, PKT = UTC+5) (async wrapper for non-blocking execution)
+    # Failed invoice recovery - every 5 hours (async wrapper for non-blocking execution)
     scheduler.add_job(
         async_failed_invoice_recovery_wrapper,  # NEW: Using async wrapper to prevent blocking
-        CronTrigger(hour=22, minute=0, timezone=UTC_TZ),  # 3 AM PKT = 10 PM UTC
+        "interval",
+        hours=5,
         max_instances=1,
         replace_existing=True,
         id="failed_invoice_recovery",
-        name="Failed Invoice Recovery Task (Daily at 3 AM PKT, Async)",
-        misfire_grace_time=3600  # 1 hour grace period
+        name="Failed Invoice Recovery Task (Every 5 Hours, Async)",
+        misfire_grace_time=1800  # 30 minutes grace period
     )
     
     # # Missing invoice download - daily (async wrapper for non-blocking execution)
@@ -446,7 +447,7 @@ async def lifespan(app: FastAPI):
     logger.info("Background tasks configured with async execution:")
     logger.info("  • Email Download: Every 5 minutes (async, non-blocking)")
     logger.info("  • Statement Download: Every 12 hours (async, non-blocking)")
-    logger.info("  • Failed Invoice Recovery: Daily at 3 AM PKT (async, non-blocking, and on startup)")
+    logger.info("  • Failed Invoice Recovery: Every 5 hours (async, non-blocking, and on startup)")
     logger.info("  • Missing Invoice Download: Daily (async, non-blocking, and on startup)")
     logger.info("  • UIDI/NO Match Update: Daily at 6 PM PKT (async, thread pool)")
     logger.info("  • All Mappings Update: Every 48 hours at 1 AM PKT (async, thread pool)")
