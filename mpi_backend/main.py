@@ -47,9 +47,7 @@ from mpi_backend.utils.invoice_downaloder import email_download_background_task
 from mpi_backend.utils.statement_downloader import (
     statement_download_background_task
 )
-from mpi_backend.utils.missing_invoice_downaloder import (
-    missing_email_download_background_task
-)
+
 from mpi_backend.utils.failed_invoice_recovery import failed_invoice_recovery_background_task
 
 # Import priority control utilities
@@ -137,22 +135,7 @@ def async_email_download_wrapper():
     return future
 
 
-def async_missing_email_download_wrapper():
-    """
-    Async wrapper for missing email download task to prevent blocking
-    """
-    def _execute_missing_download():
-        try:
-            logger.info("Starting async missing email download task")
-            missing_email_download_background_task()
-            logger.info("Missing email download task completed successfully")
-        except Exception as e:
-            logger.error(f"Missing email download task failed: {str(e)}")
-    
-    # Submit to dedicated email thread pool
-    future = _email_executor.submit(_execute_missing_download)
-    logger.debug("Missing email download task submitted to background thread pool")
-    return future
+
 
 
 def async_statement_download_wrapper():
@@ -253,55 +236,7 @@ def scheduled_all_mappings_update():
     return future
 
 
-def async_sequential_mapping_task():
-    """
-    Execute mapping tasks sequentially: First update all mappings, then UIDI.
-    Both operations automatically include Google Sheets sync as the first step.
-    Runs in background thread to avoid blocking the server.
-    """
-    def _execute_sequential():
-        try:
-            logger.info("Starting sequential mapping tasks execution at 12 AM PKT")
-            
-            # Step 1: Update All Mappings (includes Google Sheets sync automatically)
-            logger.info("Step 1/2: Starting update all mappings (with Google Sheets sync)")
-            from mpi_backend.database import SessionLocal
-            with SessionLocal() as temp_db:
-                step1_result = safe_mapping_wrapper(
-                    "Google Sheets Sync + Update All Mappings",
-                    EnhancedGoogleSheetSyncController.execute_sync_task,
-                    temp_db, "update_all"
-                )
-            
-            if step1_result is None:
-                logger.warning("Step 1 failed or was skipped, aborting Step 2")
-                return
-                
-            logger.info("Step 1 completed successfully")
-            
-            # Step 2: UIDI Update (includes Google Sheets sync automatically)
-            logger.info("Step 2/2: Starting UIDI update (with Google Sheets sync)")
-            with SessionLocal() as temp_db:
-                step2_result = safe_mapping_wrapper(
-                    "Google Sheets Sync + UIDI Update",
-                    EnhancedGoogleSheetSyncController.execute_sync_task,
-                    temp_db, "update_no_match_uidi"
-                )
-                
-            if step2_result is None:
-                logger.warning("Step 2 failed or was skipped")
-            else:
-                logger.info("Step 2 completed successfully")
-                
-            logger.info("Sequential mapping tasks execution completed")
-            
-        except Exception as e:
-            logger.error(f"Sequential mapping task failed: {str(e)}")
-    
-    # Submit to thread pool for non-blocking execution
-    future = _task_executor.submit(_execute_sequential)
-    logger.info("Sequential mapping task submitted to background thread pool")
-    return future
+
 
 
 @asynccontextmanager
@@ -358,17 +293,7 @@ async def lifespan(app: FastAPI):
         misfire_grace_time=1800  # 30 minutes grace period
     )
     
-    # # Missing invoice download - daily (async wrapper for non-blocking execution)
-    # scheduler.add_job(
-    #     async_missing_email_download_wrapper,  # NEW: Using async wrapper to prevent blocking
-    #     "interval",
-    #     days=1,
-    #     max_instances=1,
-    #     replace_existing=True,
-    #     id="missing_invoice_download",
-    #     name="Missing Invoice Download Task (Daily, Async)",
-    #     misfire_grace_time=3600  # 1 hour grace period
-    # )
+    # Missing invoice download task removed - not needed as part of regular operations
     
     # SCHEDULED MAPPING TASKS: Daily at specific times
     
@@ -394,19 +319,7 @@ async def lifespan(app: FastAPI):
         misfire_grace_time=3600  # 1 hour grace period
     )
     
-    # LEGACY: DAILY MAPPING TASKS: Run once daily at 12 AM PKT (7 PM UTC, PKT = UTC+5)
-    # Sequential execution: All mappings first (with Google Sheets sync), then UIDI (with Google Sheets sync)
-    # Note: Google Sheets sync is automatically included in both operations
-    # DISABLED: Replaced by individual scheduled tasks above
-    # scheduler.add_job(
-    #     async_sequential_mapping_task,
-    #     CronTrigger(hour=19, minute=0, timezone=UTC_TZ),  # 12 AM PKT = 7 PM UTC
-    #     id="daily_mapping_tasks",
-    #     replace_existing=True,
-    #     max_instances=1,
-    #     name="Daily Mapping Tasks (12 AM PKT)",
-    #     misfire_grace_time=3600  # 1 hour grace period
-    # )
+    # Legacy sequential mapping task removed - replaced by individual scheduled tasks above
 
     # Memory cleanup - every 30 minutes
     def memory_cleanup_task():
@@ -428,27 +341,12 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     logger.info("Background tasks scheduler started successfully")
     
-    # # Run missing invoice downloader on startup (async)
-    # logger.info("Running missing invoice downloader on startup...")
-    # try:
-    #     async_missing_email_download_wrapper()
-    #     logger.info("Startup missing invoice download submitted successfully")
-    # except Exception as e:
-    #     logger.error(f"Startup missing invoice download failed: {str(e)}")
-    
-    # Run failed invoice recovery on startup (async)
-    logger.info("Running failed invoice recovery on startup...")
-    try:
-        async_failed_invoice_recovery_wrapper()
-        logger.info("Startup failed invoice recovery submitted successfully")
-    except Exception as e:
-        logger.error(f"Startup failed invoice recovery failed: {str(e)}")
+    # No startup tasks - all tasks run on their scheduled intervals only
     
     logger.info("Background tasks configured with async execution:")
     logger.info("  • Email Download: Every 5 minutes (async, non-blocking)")
     logger.info("  • Statement Download: Every 12 hours (async, non-blocking)")
-    logger.info("  • Failed Invoice Recovery: Every 5 hours (async, non-blocking, and on startup)")
-    logger.info("  • Missing Invoice Download: Daily (async, non-blocking, and on startup)")
+    logger.info("  • Failed Invoice Recovery: Every 5 hours (async, non-blocking)")
     logger.info("  • UIDI/NO Match Update: Daily at 6 PM PKT (async, thread pool)")
     logger.info("  • All Mappings Update: Every 48 hours at 1 AM PKT (async, thread pool)")
     logger.info("  • Memory Cleanup: Every 30 minutes")
