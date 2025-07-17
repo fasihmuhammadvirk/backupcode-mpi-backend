@@ -1120,6 +1120,26 @@ class StatementController:
             Dict with invoice data and pagination metadata
         """
         try:
+            # Clean and validate search term
+            search = (search or '').strip()
+            if not search:
+                return {
+                    'success': False,
+                    'error': 'Search term is required',
+                    'data': [],
+                    'pagination': {
+                        'current_page': page,
+                        'page_size': page_size,
+                        'total_results': 0,
+                        'total_pages': 0,
+                        'has_next': False,
+                        'has_previous': False
+                    }
+                }
+            
+            logger.info(f"Searching statement invoice data - Search: '{search}', Date range: {from_date} to {to_date}, "
+                       f"Suppliers: {supplier_names}, Status: {status}, Page: {page}, Size: {page_size}")
+            
             # Handle special status filters separately
             if status and status.lower() == "unlisted":
                 # For unlisted, search system invoices not in statements
@@ -1131,12 +1151,22 @@ class StatementController:
                     page_size=page_size
                 )
                 
-                # Filter by search term
+                # Filter by search term with priority for "starts with" matches
                 if unlisted_results['success']:
                     filtered_data = [
                         item for item in unlisted_results['data']
                         if search.lower() in item['invoice_number'].lower()
                     ]
+                    
+                    # Sort by search relevance (starts with first)
+                    def sort_key(item):
+                        invoice_number = item['invoice_number'].lower()
+                        search_lower = search.lower()
+                        if invoice_number.startswith(search_lower):
+                            return 0
+                        return 1
+                    
+                    filtered_data.sort(key=sort_key)
                     unlisted_results['data'] = filtered_data
                     unlisted_results['pagination']['total_results'] = len(filtered_data)
                     unlisted_results['filters_applied']['search'] = search
@@ -1155,13 +1185,23 @@ class StatementController:
                     page_size=page_size
                 )
                 
-                # Filter by search term
+                # Filter by search term with priority for "starts with" matches
                 if missing_results['success']:
                     filtered_data = [
                         item for item in missing_results['data']
                         if item['invoice_number'] != "MISSING" and
                         search.lower() in item['invoice_number'].lower()
                     ]
+                    
+                    # Sort by search relevance (starts with first)
+                    def sort_key(item):
+                        invoice_number = item['invoice_number'].lower()
+                        search_lower = search.lower()
+                        if invoice_number.startswith(search_lower):
+                            return 0
+                        return 1
+                    
+                    filtered_data.sort(key=sort_key)
                     missing_results['data'] = filtered_data
                     missing_results['pagination']['total_results'] = len(filtered_data)
                     missing_results['filters_applied']['search'] = search
@@ -1178,13 +1218,23 @@ class StatementController:
                     page_size=page_size
                 )
                 
-                # Filter by search term
+                # Filter by search term with priority for "starts with" matches
                 if all_results['success']:
                     filtered_data = [
                         item for item in all_results['data']
                         if item['invoice_number'] != "MISSING" and
-                        search.lower() in item['invoice_number'].lower()
+                        (search.lower() in item['invoice_number'].lower())
                     ]
+                    
+                    # Sort by search relevance (starts with first)
+                    def sort_key(item):
+                        invoice_number = item['invoice_number'].lower()
+                        search_lower = search.lower()
+                        if invoice_number.startswith(search_lower):
+                            return 0
+                        return 1
+                    
+                    filtered_data.sort(key=sort_key)
                     all_results['data'] = filtered_data
                     all_results['pagination']['total_results'] = len(filtered_data)
                     all_results['filters_applied']['search'] = search
@@ -1197,11 +1247,17 @@ class StatementController:
             all_matching_invoices = []
             
             # 1. Search in PlumbingInvoice (statement invoices)
+            # Use OR condition to prioritize "starts with" matches first
             statement_query = (
                 self.db.query(PlumbingInvoice, PlumbingStatement, PlumbingSupplier)
                 .join(PlumbingStatement, PlumbingInvoice.statement_id == PlumbingStatement.id)
                 .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
-                .filter(PlumbingInvoice.invoice_number.ilike(f"%{search}%"))
+                .filter(
+                    or_(
+                        PlumbingInvoice.invoice_number.ilike(f"{search}%"),  # Starts with
+                        PlumbingInvoice.invoice_number.ilike(f"%{search}%")   # Contains
+                    )
+                )
             )
             
             # Apply filters to statement query
@@ -1283,7 +1339,12 @@ class StatementController:
                 self.db.query(InvoiceItem, Invoice, PlumbingSupplier)
                 .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
                 .join(PlumbingSupplier, Invoice.supplier_id == PlumbingSupplier.id)
-                .filter(InvoiceItem.ref_no.ilike(f"%{search}%"))
+                .filter(
+                    or_(
+                        InvoiceItem.ref_no.ilike(f"{search}%"),  # Starts with
+                        InvoiceItem.ref_no.ilike(f"%{search}%")   # Contains
+                    )
+                )
                 .filter(InvoiceItem.ref_no.isnot(None))
             )
             
@@ -1347,16 +1408,30 @@ class StatementController:
                     'source': 'system'
                 })
             
-            # Sort by invoice date (most recent first)
-            all_matching_invoices.sort(
-                key=lambda x: datetime.fromisoformat(x['invoice_date']) if x.get('invoice_date') else datetime.min,
-                reverse=True
-            )
+            # Sort by search relevance first (starts with matches first), then by invoice date (most recent first)
+            def sort_key(x):
+                invoice_number = x.get('invoice_number', '').lower()
+                search_lower = search.lower()
+                
+                # Priority 1: Starts with search term
+                if invoice_number.startswith(search_lower):
+                    starts_with_priority = 0
+                else:
+                    starts_with_priority = 1
+                
+                # Priority 2: Invoice date (most recent first)
+                date_priority = datetime.fromisoformat(x['invoice_date']) if x.get('invoice_date') else datetime.min
+                
+                return (starts_with_priority, date_priority)
+            
+            all_matching_invoices.sort(key=sort_key, reverse=False)
             
             # Apply pagination
             total_count = len(all_matching_invoices)
             offset = (page - 1) * page_size
             paginated_invoices = all_matching_invoices[offset:offset + page_size]
+            
+            logger.info(f"Search completed - Found {total_count} total matches, returning {len(paginated_invoices)} for page {page}")
             
             # Calculate pagination metadata
             total_pages = ceil(total_count / page_size) if page_size > 0 else 1
@@ -1565,8 +1640,8 @@ class StatementController:
             Dict with missing/invalid invoice data and pagination metadata
         """
         try:
-            # Prevent SQL server overload with reasonable limits
-            max_records_per_source = 3000
+            # Increased limit for comprehensive data
+            max_records_per_source = 100000
             
             # Build supplier conditions once for reuse
             supplier_conditions_system = []
@@ -1610,8 +1685,8 @@ class StatementController:
             if supplier_conditions_system:
                 system_query = system_query.filter(or_(*supplier_conditions_system))
             
-            # Order and limit system query
-            system_query = system_query.order_by(InvoiceItem.date.desc()).limit(max_records_per_source)
+            # Order system query (no limit for comprehensive data)
+            system_query = system_query.order_by(InvoiceItem.date.desc())
             
             # OPTIMIZED: Build statement invoices query with all needed fields
             statement_query = (
@@ -1639,12 +1714,14 @@ class StatementController:
             if supplier_conditions_statement:
                 statement_query = statement_query.filter(or_(*supplier_conditions_statement))
             
-            # Order and limit statement query
-            statement_query = statement_query.order_by(PlumbingInvoice.invoice_date.desc()).limit(max_records_per_source)
+            # Order statement query (no limit for comprehensive data)
+            statement_query = statement_query.order_by(PlumbingInvoice.invoice_date.desc())
             
             # Execute both queries
             system_invoices = system_query.all()
             statement_invoices = statement_query.all()
+            
+            logger.info(f"Missing/Invalid - Retrieved {len(system_invoices)} system invoices and {len(statement_invoices)} statement invoices")
             
             # Process and filter system invoices efficiently
             missing_system_invoices = []
@@ -1782,8 +1859,12 @@ class StatementController:
             Dict with combined invoice data from all categories and pagination metadata
         """
         try:
-            # Limit the total query scope to prevent SQL server overload
-            max_total_records = 5000
+            # For "all" status, we want comprehensive data without artificial limits
+            # Use a much higher limit to ensure we get all data
+            max_total_records = 200000
+            
+            logger.info(f"Getting all invoices combined - Date range: {from_date} to {to_date}, "
+                       f"Suppliers: {supplier_names}, Page: {page}, Size: {page_size}")
             
             # Build supplier conditions once for reuse
             supplier_conditions_system = []
@@ -1827,8 +1908,8 @@ class StatementController:
             if supplier_conditions_system:
                 system_base_query = system_base_query.filter(or_(*supplier_conditions_system))
             
-            # Limit and order system invoices
-            system_base_query = system_base_query.order_by(InvoiceItem.date.desc()).limit(max_total_records)
+            # Order system invoices (no limit for comprehensive data)
+            system_base_query = system_base_query.order_by(InvoiceItem.date.desc())
             
             # OPTIMIZED: Single query for statement invoices with all needed data
             statement_base_query = (
@@ -1857,12 +1938,14 @@ class StatementController:
             if supplier_conditions_statement:
                 statement_base_query = statement_base_query.filter(or_(*supplier_conditions_statement))
             
-            # Limit and order statement invoices
-            statement_base_query = statement_base_query.order_by(PlumbingInvoice.invoice_date.desc()).limit(max_total_records)
+            # Order statement invoices (no limit for comprehensive data)
+            statement_base_query = statement_base_query.order_by(PlumbingInvoice.invoice_date.desc())
             
             # Execute both queries
             system_invoices = system_base_query.all()
             statement_invoices = statement_base_query.all()
+            
+            logger.info(f"Retrieved {len(system_invoices)} system invoices and {len(statement_invoices)} statement invoices")
             
             # OPTIMIZED: Bulk check for statement matches using a single query
             system_invoice_numbers = [inv.invoice_number for inv in system_invoices if inv.invoice_number]
@@ -1947,9 +2030,9 @@ class StatementController:
                     'source': 'statement'
                 })
             
-            # Remove duplicates (prefer system invoices over statement for same invoice number)
-            seen_invoices = set()
-            unique_invoices = []
+            # For "all" status, we want to show ALL invoices from all categories
+            # NO deduplication - show every single invoice from every category
+            # This ensures we get the same comprehensive data as individual status methods
             
             # Sort by invoice_date desc, then by source (system first)
             all_invoices.sort(key=lambda x: (
@@ -1957,16 +2040,24 @@ class StatementController:
                 x['source'] == 'statement'  # False for system (comes first), True for statement
             ), reverse=True)
             
-            for invoice in all_invoices:
-                invoice_key = f"{invoice['invoice_number']}_{invoice['supplier_name']}"
-                if invoice_key not in seen_invoices:
-                    seen_invoices.add(invoice_key)
-                    unique_invoices.append(invoice)
+            # Use all invoices directly without any deduplication
+            unique_invoices = all_invoices
             
             # Apply pagination
             total_count = len(unique_invoices)
             offset = (page - 1) * page_size
             paginated_data = unique_invoices[offset:offset + page_size]
+            
+            logger.info(f"After processing: {len(all_invoices)} total invoices, {total_count} unique invoices, "
+                       f"showing {len(paginated_data)} for page {page}")
+            
+            # Log detailed breakdown by status
+            status_breakdown = {}
+            for invoice in all_invoices:
+                status = invoice['status']
+                status_breakdown[status] = status_breakdown.get(status, 0) + 1
+            
+            logger.info(f"Status breakdown: {status_breakdown}")
             
             # Calculate counts by status
             status_counts = {}
