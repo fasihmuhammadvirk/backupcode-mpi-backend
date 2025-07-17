@@ -1662,15 +1662,21 @@ class StatementController:
         try:
             from mpi_backend.database.models.InvoiceItems import InvoiceItem
             from mpi_backend.database.models.invoice import Invoice
+            
+            # Build base query for system invoices (InvoiceItem)
             query = (
                 self.db.query(InvoiceItem, Invoice)
                 .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
                 .join(PlumbingSupplier, Invoice.supplier_id == PlumbingSupplier.id)
             )
+            
+            # Apply date filters on InvoiceItem date
             if from_date:
                 query = query.filter(InvoiceItem.date >= from_date)
             if to_date:
                 query = query.filter(InvoiceItem.date <= to_date)
+            
+            # Apply supplier filter
             if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
                 supplier_conditions = []
                 for supplier_name in supplier_names:
@@ -1687,24 +1693,35 @@ class StatementController:
                         )
                 if supplier_conditions:
                     query = query.filter(or_(*supplier_conditions))
+            
+            # Exclude invoices that exist in statement data (PlumbingInvoice)
+            # This ensures we only get InvoiceItem records that don't exist in PlumbingInvoice
             subquery = self.db.query(PlumbingInvoice.invoice_number).subquery()
             query = query.filter(~InvoiceItem.ref_no.in_(subquery))
-            total_count = query.count()
+            
+            # Order by date (most recent first)
             query = query.order_by(InvoiceItem.date.desc())
-            offset = (page - 1) * page_size
-            query = query.offset(offset).limit(page_size)
-            results = query.all()
+            
+            # Get all results first for deduplication
+            all_results = query.all()
+            
+            # Process results with deduplication
             invoice_data = []
             seen_keys = set()
-            for invoice_item, invoice in results:
+            
+            for invoice_item, invoice in all_results:
+                # Get supplier name
                 supplier = self.db.query(PlumbingSupplier).filter(
                     PlumbingSupplier.id == invoice.supplier_id
                 ).first()
                 supplier_name = supplier.name if supplier else f"Supplier ID {invoice.supplier_id}"
+                
+                # Create unique key for deduplication
                 key = (invoice_item.ref_no, supplier_name, invoice_item.date)
                 if key in seen_keys:
                     continue
                 seen_keys.add(key)
+                
                 invoice_data.append({
                     'invoice_number': invoice_item.ref_no,
                     'invoice_date': (
@@ -1722,15 +1739,22 @@ class StatementController:
                     'system_invoice_id': str(invoice.id),
                     'customer_job': invoice_item.customer_job
                 })
-            total_pages = ceil(len(invoice_data) / page_size) if page_size > 0 else 1
-            paginated_data = invoice_data[:page_size]
+            
+            # Apply pagination after deduplication
+            total_count = len(invoice_data)
+            offset = (page - 1) * page_size
+            paginated_data = invoice_data[offset:offset + page_size]
+            
+            # Calculate pagination metadata
+            total_pages = ceil(total_count / page_size) if page_size > 0 else 1
+            
             return {
                 'success': True,
                 'data': paginated_data,
                 'pagination': {
                     'current_page': page,
                     'page_size': page_size,
-                    'total_results': len(invoice_data),
+                    'total_results': total_count,
                     'total_pages': total_pages,
                     'has_next': page < total_pages,
                     'has_previous': page > 1
@@ -1875,9 +1899,16 @@ class StatementController:
             
             # Process and filter system invoices efficiently
             missing_system_invoices = []
+            seen_keys = set()
             for inv in system_invoices:
                 # Use optimized validation helper
                 if self._has_validation_issues_system(inv):
+                    # Create unique key for deduplication
+                    key = (inv.invoice_number, inv.supplier_name, inv.invoice_date)
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    
                     # Get detailed issues for response
                     issues = self._get_detailed_issues_system(inv)
                     
@@ -1902,9 +1933,16 @@ class StatementController:
             
             # Process and filter statement invoices efficiently
             missing_statement_invoices = []
+            seen_keys = set()
             for inv in statement_invoices:
                 # Use optimized validation helper
                 if self._has_validation_issues_statement(inv):
+                    # Create unique key for deduplication
+                    key = (inv.invoice_number, inv.supplier_name, inv.invoice_date)
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    
                     # Get detailed issues for response
                     issues = self._get_detailed_issues_statement(inv)
                     
