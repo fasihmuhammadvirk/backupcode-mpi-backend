@@ -935,6 +935,73 @@ class StatementController:
             logger.warning(f"Could not detect supplier from filename {filename}: {str(e)}")
             return None
     
+    def delete_existing_statement(self, supplier_name: str, 
+                                 statement_date: datetime) -> bool:
+        """Delete existing statement and its records for supplier and month"""
+        try:
+            # Get supplier
+            supplier = self.db.query(PlumbingSupplier).filter(
+                PlumbingSupplier.name == supplier_name
+            ).first()
+            
+            if not supplier:
+                logger.warning(f"Supplier {supplier_name} not found in database")
+                return False
+            
+            # Check if statement exists for this month/year
+            month_start = statement_date.replace(day=1)
+            if statement_date.month == 12:
+                next_month = statement_date.replace(
+                    year=statement_date.year + 1, month=1, day=1
+                )
+            else:
+                next_month = statement_date.replace(
+                    month=statement_date.month + 1, day=1
+                )
+            
+            existing_statement = self.db.query(PlumbingStatement).filter(
+                PlumbingStatement.supplier_id == supplier.id,
+                PlumbingStatement.statement_date >= month_start.date(),
+                PlumbingStatement.statement_date < next_month.date()
+            ).first()
+            
+            if existing_statement:
+                logger.info(
+                    f"Found existing statement for {supplier_name} - "
+                    f"{statement_date.strftime('%Y-%m')}, deleting..."
+                )
+                
+                # Delete associated invoices first (foreign key constraint)
+                invoice_count = self.db.query(PlumbingInvoice).filter(
+                    PlumbingInvoice.statement_id == existing_statement.id
+                ).count()
+                
+                self.db.query(PlumbingInvoice).filter(
+                    PlumbingInvoice.statement_id == existing_statement.id
+                ).delete()
+                
+                # Delete the statement
+                self.db.delete(existing_statement)
+                self.db.commit()
+                
+                logger.info(
+                    f"Deleted statement {existing_statement.id} and "
+                    f"{invoice_count} associated invoices for "
+                    f"{supplier_name} - {statement_date.strftime('%Y-%m')}"
+                )
+                return True
+            else:
+                logger.debug(
+                    f"No existing statement found for {supplier_name} - "
+                    f"{statement_date.strftime('%Y-%m')}"
+                )
+                return False
+            
+        except Exception as e:
+            logger.error(f"Error deleting existing statement: {str(e)}")
+            self.db.rollback()
+            return False
+    
     def reprocess_all_statements(self, supplier_name: Optional[str] = None, max_statements: int = 100) -> Dict[str, Any]:
         """
         Reprocess multiple statements with optional filtering

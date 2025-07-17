@@ -9,10 +9,11 @@ It handles:
 - PDF download and processing for statements and associated invoice data
 - Data extraction and database storage
 - S3 upload for storage
-- Duplicate detection and error handling
+- Automatic deletion and re-download of existing statements
 - Support for up to 10 years of historical data
 
 The script ensures NO emails are marked as read during processing by using BODY.PEEK commands.
+Existing statements are automatically deleted and re-downloaded to ensure the latest data.
 
 Usage:
     python scripts/download_last_year_statements.py [options]
@@ -128,6 +129,7 @@ class StatementDownloader:
             'pdfs_downloaded': 0,
             'statements_processed': 0,
             'statements_saved': 0,
+            'statements_deleted': 0,
             'errors': 0,
             'skipped_existing': 0
         }
@@ -423,6 +425,76 @@ class StatementDownloader:
             )
             return []
     
+    def delete_existing_statement(self, supplier_name: str, 
+                                 statement_date: datetime) -> bool:
+        """Delete existing statement and its records for supplier and month"""
+        try:
+            # Get supplier
+            supplier = self.db_session.query(PlumbingSupplier).filter(
+                PlumbingSupplier.name == supplier_name
+            ).first()
+            
+            if not supplier:
+                logger.warning(f"Supplier {supplier_name} not found in database")
+                return False
+            
+            # Check if statement exists for this month/year
+            month_start = statement_date.replace(day=1)
+            if statement_date.month == 12:
+                next_month = statement_date.replace(
+                    year=statement_date.year + 1, month=1, day=1
+                )
+            else:
+                next_month = statement_date.replace(
+                    month=statement_date.month + 1, day=1
+                )
+            
+            existing_statement = self.db_session.query(
+                PlumbingStatement
+            ).filter(
+                PlumbingStatement.supplier_id == supplier.id,
+                PlumbingStatement.statement_date >= month_start.date(),
+                PlumbingStatement.statement_date < next_month.date()
+            ).first()
+            
+            if existing_statement:
+                logger.info(
+                    f"Found existing statement for {supplier_name} - "
+                    f"{statement_date.strftime('%Y-%m')}, deleting..."
+                )
+                
+                # Delete associated invoices first (foreign key constraint)
+                from mpi_backend.database.models.statement_models import PlumbingInvoice
+                invoice_count = self.db_session.query(PlumbingInvoice).filter(
+                    PlumbingInvoice.statement_id == existing_statement.id
+                ).count()
+                
+                self.db_session.query(PlumbingInvoice).filter(
+                    PlumbingInvoice.statement_id == existing_statement.id
+                ).delete()
+                
+                # Delete the statement
+                self.db_session.delete(existing_statement)
+                self.db_session.commit()
+                
+                logger.info(
+                    f"Deleted statement {existing_statement.id} and "
+                    f"{invoice_count} associated invoices for "
+                    f"{supplier_name} - {statement_date.strftime('%Y-%m')}"
+                )
+                return True
+            else:
+                logger.debug(
+                    f"No existing statement found for {supplier_name} - "
+                    f"{statement_date.strftime('%Y-%m')}"
+                )
+                return False
+            
+        except Exception as e:
+            logger.error(f"Error deleting existing statement: {str(e)}")
+            self.db_session.rollback()
+            return False
+    
     def statement_already_exists(self, supplier_name: str, 
                                 statement_date: datetime) -> bool:
         """Check if statement already exists for supplier and month"""
@@ -514,16 +586,15 @@ class StatementDownloader:
             # Extract statement date
             statement_date = self.extract_statement_date_from_subject(subject)
             
-            # Check if already exists (unless force mode)
-            if not self.force and self.statement_already_exists(
-                supplier_name, statement_date
-            ):
+            # Always delete existing statement and re-download (updated behavior)
+            # This ensures we get the latest version of the statement
+            deleted = self.delete_existing_statement(supplier_name, statement_date)
+            if deleted:
                 logger.info(
-                    f"Statement already exists for {supplier_name} - "
-                    f"{statement_date.strftime('%Y-%m')}, skipping"
+                    f"Deleted existing statement for {supplier_name} - "
+                    f"{statement_date.strftime('%Y-%m')}, will re-download"
                 )
-                self.stats['skipped_existing'] += 1
-                return []
+                self.stats['statements_deleted'] = self.stats.get('statements_deleted', 0) + 1
             
             # Download attachments (using invoice structure)
             downloaded_files = []
@@ -811,18 +882,20 @@ class StatementDownloader:
         print(f"PDFs downloaded:       {self.stats['pdfs_downloaded']:,}")
         print(f"Statements processed:  {self.stats['statements_processed']:,}")
         print(f"Statements saved:      {self.stats['statements_saved']:,}")
+        print(f"Statements deleted:    {self.stats['statements_deleted']:,}")
         print(f"Skipped existing:      {self.stats['skipped_existing']:,}")
         print(f"Errors:                {self.stats['errors']:,}")
         print("="*60)
         print(" No emails were marked as read (used BODY.PEEK)")
         print(" Each statement contains multiple invoice records")
+        print(" Existing statements are automatically deleted and re-downloaded")
         print("="*60)
 
 
 def main():
     """Main function with command line argument parsing"""
     parser = argparse.ArgumentParser(
-        description="Download and process monthly statements and invoices for historical periods (up to 10 years)",
+        description="Download and process monthly statements and invoices for historical periods (up to 10 years). Existing statements are automatically deleted and re-downloaded.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -840,6 +913,9 @@ Examples:
   
   # Preview what would be downloaded without actually processing
   python scripts/download_last_year_statements.py --download-all-historical --dry-run
+  
+  # Force reprocessing (existing statements are always deleted and re-downloaded)
+  python scripts/download_last_year_statements.py --force
         """
     )
     
@@ -861,7 +937,7 @@ Examples:
     parser.add_argument(
         '--download-all-historical',
         action='store_true',
-        help='Download all historical statements and invoices for the past 10 years (overrides --from-months-ago)'
+        help='Download all historical statements and invoices for the past 10 years (existing statements will be deleted and re-downloaded)'
     )
     
     # Supplier filtering
@@ -880,7 +956,7 @@ Examples:
     parser.add_argument(
         '--force',
         action='store_true',
-        help='Reprocess existing statements (skip duplicate check)'
+        help='Force reprocessing (existing statements are always deleted and re-downloaded)'
     )
     parser.add_argument(
         '--verbose',
@@ -915,6 +991,7 @@ Examples:
         logger.info(" DOWNLOADING ALL HISTORICAL STATEMENTS AND INVOICES (PAST 10 YEARS)")
         logger.info("This will download statements and associated invoice data from all suppliers for the past 10 years")
         logger.info(" Using BODY.PEEK commands to ensure NO emails are marked as read")
+        logger.info(" Existing statements will be automatically deleted and re-downloaded")
         if not args.dry_run:
             confirmation = input("This is a large operation that will process 10 years of data. Continue? (y/N): ")
             if confirmation.lower() != 'y':
@@ -923,7 +1000,8 @@ Examples:
     else:
         from_months_ago = args.from_months_ago
         to_months_ago = args.to_months_ago
-        logger.info(f" Using BODY.PEEK commands to ensure NO emails are marked as read")
+        logger.info(" Using BODY.PEEK commands to ensure NO emails are marked as read")
+        logger.info(" Existing statements will be automatically deleted and re-downloaded")
     
     # Create downloader and run
     try:
@@ -952,9 +1030,11 @@ Examples:
                     print("\n Historical download completed!")
                     print("All available monthly statements and invoices from the past 10 years have been processed.")
                     print(" No emails were marked as read during this process.")
+                    print(" Existing statements were automatically deleted and re-downloaded.")
                     print("Check the summary above for detailed statistics.")
                 else:
                     print(" No emails were marked as read during this process.")
+                    print(" Existing statements were automatically deleted and re-downloaded.")
             else:
                 print(f"\nERROR: Operation failed: {result.get('error', 'Unknown error')}")
                 return 1
