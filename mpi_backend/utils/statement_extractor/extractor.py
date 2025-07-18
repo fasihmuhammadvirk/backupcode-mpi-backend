@@ -49,7 +49,7 @@ class StatementExtractor:
                 "name": "Y&S/WWPS Optimized",
                 "params": {
                     "pages": "all",
-                    "area": [230, 25, 680, 580],
+                    "area": [230, 20, 680, 580],
                     "columns": [83, 151, 264, 345, 416, 495, 582],
                     "stream": True,
                     "pandas_options": {"header": None}

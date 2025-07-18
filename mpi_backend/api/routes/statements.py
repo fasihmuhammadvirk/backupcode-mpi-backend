@@ -352,7 +352,7 @@ def download_statement_pdf(
 def reprocess_statement(
     statement_id: Optional[str] = Query(
         None, 
-        description="ID of the statement to reprocess, or 'all' to reprocess all statements"
+        description="ID of the statement to reprocess (optional)"
     ),
     supplier_name: Optional[str] = Query(
         None,
@@ -373,25 +373,33 @@ def reprocess_statement(
     This endpoint supports both single statement and bulk reprocessing.
     
     **Parameters:**
-    - **statement_id**: The ID of the statement to reprocess, or 'all' for bulk reprocessing
-    - **supplier_name**: Optional supplier filter for bulk reprocessing
+    - **statement_id**: The ID of the statement to reprocess (optional)
+    - **supplier_name**: Supplier name filter for bulk reprocessing (optional)
     - **max_statements**: Maximum number of statements to reprocess in bulk (default: 100)
+    
+    **Usage Examples:**
     
     **Single Statement Reprocessing:**
     ```
     POST /statements/reprocess?statement_id=123
     ```
     
-    **Bulk Reprocessing Examples:**
+    **Bulk Reprocessing by Supplier:**
+    ```
+    # Reprocess all statements for a specific supplier
+    POST /statements/reprocess?supplier_name=World Wide Plumbing
+    
+    # Reprocess all statements for a specific supplier with limit
+    POST /statements/reprocess?supplier_name=World Wide Plumbing&max_statements=50
+    ```
+    
+    **Bulk Reprocessing All Statements:**
     ```
     # Reprocess all statements (up to 100)
-    POST /statements/reprocess?statement_id=all
+    POST /statements/reprocess
     
-    # Reprocess all statements for specific supplier
-    POST /statements/reprocess?statement_id=all&supplier_name=World Wide Plumbing
-    
-    # Reprocess up to 50 statements
-    POST /statements/reprocess?statement_id=all&max_statements=50
+    # Reprocess all statements with custom limit
+    POST /statements/reprocess?max_statements=200
     ```
     
     **Returns:**
@@ -404,7 +412,7 @@ def reprocess_statement(
         controller = StatementController(db)
         
         # Single statement reprocessing
-        if statement_id and statement_id.lower() != 'all' and statement_id.isdigit():
+        if statement_id and statement_id.isdigit():
             logger.info(f"Reprocessing single statement with ID: {statement_id}")
             
             result = controller.reprocess_statement(int(statement_id))
@@ -422,8 +430,14 @@ def reprocess_statement(
             return result
         
         # Bulk reprocessing
-        elif not statement_id or statement_id.lower() == 'all':
-            logger.info(f"Starting bulk reprocessing - Supplier: {supplier_name or 'All'}, Max: {max_statements}")
+        else:
+            # Determine the type of bulk reprocessing
+            if supplier_name and not statement_id:
+                logger.info(f"Starting bulk reprocessing for supplier: {supplier_name}, Max: {max_statements}")
+            elif not supplier_name and not statement_id:
+                logger.info(f"Starting bulk reprocessing for all suppliers, Max: {max_statements}")
+            else:
+                logger.info(f"Starting bulk reprocessing - Supplier: {supplier_name or 'All'}, Max: {max_statements}")
             
             result = controller.reprocess_all_statements(
                 supplier_name=supplier_name,
@@ -441,12 +455,6 @@ def reprocess_statement(
             
             logger.info(f"Bulk reprocessing completed: {result['statistics']}")
             return result
-        
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid statement_id. Must be a number or 'all'"
-            )
         
     except HTTPException:
         raise
