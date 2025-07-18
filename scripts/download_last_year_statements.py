@@ -61,8 +61,10 @@ from mpi_backend.utils.s3_utils import upload_file
 from mpi_backend.database.controllers.StatementController import (
     StatementController
 )
+from mpi_backend.config.logging_config import setup_logging
 
-# Configure logging
+# Setup centralized logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 # Statement sender emails (using same pattern as invoice EXCLUDED_SENDERS)
@@ -137,19 +139,7 @@ class StatementDownloader:
             'skipped_existing': 0
         }
         
-        # Setup logging
-        log_level = logging.DEBUG if verbose else logging.INFO
-        logging.basicConfig(
-            level=log_level,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.StreamHandler(),
-                logging.FileHandler(
-                    f'statement_download_'
-                    f'{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
-                )
-            ]
-        )
+
     
     def __enter__(self):
         """Context manager entry"""
@@ -1145,15 +1135,9 @@ Examples:
     
     # Configure logging level
     if args.verbose:
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
+        logging.getLogger().setLevel(logging.DEBUG)
     else:
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s'
-        )
+        logging.getLogger().setLevel(logging.INFO)
     
     # Parse supplier filter
     supplier_filter = None

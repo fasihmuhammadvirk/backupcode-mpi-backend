@@ -14,12 +14,15 @@ from fastapi.middleware.gzip import GZipMiddleware
 import uvicorn
 from datetime import datetime, time
 from concurrent.futures import ThreadPoolExecutor
+import json
 
 # Setup logging first, before any other imports
-from mpi_backend.config.logging_config import setup_logging
+from mpi_backend.config.logging_config import setup_logging, get_missing_logger
 setup_logging()
 
 logger = logging.getLogger(__name__)
+missing_logger = get_missing_logger()
+
 logger.info("Starting MPI Backend application")
 
 from mpi_backend.api.routes import health
@@ -135,9 +138,6 @@ def async_email_download_wrapper():
     return future
 
 
-
-
-
 def async_statement_download_wrapper():
     """
     Async wrapper for statement download task to prevent blocking
@@ -236,9 +236,6 @@ def scheduled_all_mappings_update():
     return future
 
 
-
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -249,9 +246,7 @@ async def lifespan(app: FastAPI):
     
     # Log mapping configuration
     logger.info(f"Mappings enabled: {MAPPINGS_ENABLED}")
-    logger.info(
-        f"Mapping exclusion during business hours: {MAPPINGS_EXCLUSION_ENABLED}"
-    )
+    logger.info(f"Mapping exclusion during business hours: {MAPPINGS_EXCLUSION_ENABLED}")
     
     scheduler = BackgroundScheduler()
     
@@ -386,34 +381,59 @@ app.add_middleware(
     max_age=3600
 )
 
-# Simplified timeout middleware
+# Enhanced request logging middleware
 @app.middleware("http")
-async def timeout_middleware(request: Request, call_next):
+async def request_logging_middleware(request: Request, call_next):
+    start_time = time_module.time()
+    
+    # Extract request details
+    method = request.method
+    url = str(request.url)
+    path = request.url.path
+    query_params = dict(request.query_params)
+    client_ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent", "unknown")
+    
+    # Log request start
+    logger.info(f"REQUEST START | {method} {path} | IP: {client_ip} | UA: {user_agent[:100]}")
+    
+    # Log query parameters if present
+    if query_params:
+        logger.debug(f"Query params: {json.dumps(query_params, default=str)}")
+    
     # Determine timeout based on route
-    if "/quickbooks/migrate-all" in str(request.url):
+    if "/quickbooks/migrate-all" in path:
         timeout_seconds = 900  # 15 minutes for migrate-all
-    elif "/quickbooks" in str(request.url):
+    elif "/quickbooks" in path:
         timeout_seconds = 600  # 10 minutes for other QuickBooks
-    elif "/export" in str(request.url):
+    elif "/export" in path:
         timeout_seconds = 300  # 5 minutes for exports
     else:
         timeout_seconds = 120  # 2 minutes for standard operations
-    
-    start_time = time_module.time()
     
     try:
         response = await call_next(request)
         elapsed = time_module.time() - start_time
         
-        # Log only slow operations
-        if elapsed > 10:
-            logger.info(f"Request completed in {elapsed:.2f}s - {request.url.path}")
+        # Log response details
+        status_code = response.status_code
+        response_size = len(response.body) if hasattr(response, 'body') else 0
+        
+        # Log all requests with different levels based on performance
+        if status_code >= 400:
+            logger.warning(f"REQUEST END | {method} {path} | Status: {status_code} | Time: {elapsed:.2f}s | Size: {response_size}B")
+        elif elapsed > 10:
+            logger.warning(f"REQUEST END | {method} {path} | Status: {status_code} | Time: {elapsed:.2f}s | Size: {response_size}B | SLOW")
+        elif elapsed > 5:
+            logger.info(f"REQUEST END | {method} {path} | Status: {status_code} | Time: {elapsed:.2f}s | Size: {response_size}B")
+        else:
+            logger.debug(f"REQUEST END | {method} {path} | Status: {status_code} | Time: {elapsed:.2f}s | Size: {response_size}B")
             
         return response
         
     except Exception as e:
         elapsed = time_module.time() - start_time
-        logger.error(f"Request failed after {elapsed:.2f}s: {str(e)}")
+        logger.error(f"REQUEST ERROR | {method} {path} | Error: {str(e)} | Time: {elapsed:.2f}s")
         
         if "timeout" in str(e).lower() or elapsed > timeout_seconds:
             return JSONResponse(
@@ -429,18 +449,27 @@ async def timeout_middleware(request: Request, call_next):
 
 def register_routes(app):
     logger.info("Registering API routes")
-    app.include_router(health.router)
-    app.include_router(supplier.router)
-    app.include_router(invoices_list.router)
-    app.include_router(get_mappings.router)
-    app.include_router(signin.router)
-    app.include_router(invoice_items.router)
-    app.include_router(quickbooks.router)
-    app.include_router(filters.router)
-    app.include_router(sync_mappings.router)
-    app.include_router(price_comparison.router)
-    app.include_router(statements.router)
-    logger.info("API routes registered successfully")
+    
+    # Register all routes with logging
+    routes = [
+        ("Health", health.router),
+        ("Supplier", supplier.router),
+        ("Invoices List", invoices_list.router),
+        ("Get Mappings", get_mappings.router),
+        ("Sign In", signin.router),
+        ("Invoice Items", invoice_items.router),
+        ("QuickBooks", quickbooks.router),
+        ("Filters", filters.router),
+        ("Sync Mappings", sync_mappings.router),
+        ("Price Comparison", price_comparison.router),
+        ("Statements", statements.router),
+    ]
+    
+    for route_name, router in routes:
+        app.include_router(router)
+        logger.info(f"Registered route: {route_name}")
+    
+    logger.info("All API routes registered successfully")
 
 register_routes(app)
 add_pagination(app)
@@ -455,7 +484,7 @@ if __name__ == "__main__":
         workers=1,
         loop="asyncio",
         http="h11",
-        access_log=False,
+        access_log=False,  # We handle our own request logging
         log_level="info",
         timeout_keep_alive=65,
         timeout_graceful_shutdown=30,

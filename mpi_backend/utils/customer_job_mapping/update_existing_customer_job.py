@@ -1,9 +1,16 @@
+import sys
 import logging
+from pathlib import Path
+
+# Add the parent directory to the path so we can import mpi_backend
+sys.path.append(str(Path(__file__).parent.parent.parent.parent))
+
+from mpi_backend.config.logging_config import setup_logging
 from mpi_backend.database.models import CustomerJobMapping, InvoiceItem
 from mpi_backend.database import SessionLocal
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+# Setup centralized logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 

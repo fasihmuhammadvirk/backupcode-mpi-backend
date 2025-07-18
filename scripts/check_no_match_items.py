@@ -5,16 +5,15 @@ import logging
 from datetime import date
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from pathlib import Path
 
-# Add the parent directory to the Python path to allow imports to work
-parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, parent_dir)
+# Add the parent directory to the path so we can import mpi_backend
+sys.path.append(str(Path(__file__).parent.parent))
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+from mpi_backend.config.logging_config import setup_logging
+
+# Setup centralized logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 

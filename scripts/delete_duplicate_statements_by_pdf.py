@@ -7,15 +7,19 @@ Keeps one statement per pdf_filename, deletes the rest and their invoices.
 
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import logging
+from pathlib import Path
+
+# Add the parent directory to the path so we can import mpi_backend
+sys.path.append(str(Path(__file__).parent.parent))
 
 from collections import defaultdict
 from mpi_backend.database.models.statement_models import PlumbingStatement, PlumbingInvoice
 from mpi_backend.database import get_db
+from mpi_backend.config.logging_config import setup_logging
 
-import logging
-
-logging.basicConfig(level=logging.INFO)
+# Setup centralized logging
+setup_logging()
 logger = logging.getLogger("delete_duplicate_statements_by_pdf")
 
 def main():

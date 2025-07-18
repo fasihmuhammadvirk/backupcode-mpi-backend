@@ -15,59 +15,22 @@ from mpi_backend.config import (
 )
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.utils.invoice_convertor import convert_invoice_for_email
+from mpi_backend.config.logging_config import get_missing_logger
 
 # Create logs directory
 LOGS_DIR = Path("logs")
 LOGS_DIR.mkdir(exist_ok=True)
 
-# Setup dedicated logger for missing invoice downloader
-def setup_missing_downloader_logger():
-    """Setup dedicated logger for missing invoice downloader"""
-    log_filename = LOGS_DIR / f"missing_invoice_downloader_{datetime.now().strftime('%Y%m%d')}.log"
-    
-    # Create logger
-    downloader_logger = logging.getLogger('missing_invoice_downloader')
-    downloader_logger.setLevel(logging.INFO)
-    
-    # Remove existing handlers to avoid duplicates
-    downloader_logger.handlers.clear()
-    
-    # Create file handler
-    file_handler = logging.FileHandler(log_filename)
-    file_handler.setLevel(logging.INFO)
-    
-    # Create console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    
-    # Create formatter
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
-    
-    # Add handlers
-    downloader_logger.addHandler(file_handler)
-    downloader_logger.addHandler(console_handler)
-    
-    return downloader_logger
-
-logger = setup_missing_downloader_logger()
+# Use the centralized logging system
+logger = logging.getLogger(__name__)
+missing_logger = get_missing_logger()
 
 # Setup missing emails/attachments tracker
 def log_missing_email_or_attachment(email_subject, sender, reason, date_str):
-    """Log missing emails or attachments to a separate file"""
-    missing_log_file = LOGS_DIR / f"missing_emails_attachments_{datetime.now().strftime('%Y%m%d')}.txt"
-    
+    """Log missing emails or attachments to the centralized missing log"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    log_entry = f"[{timestamp}] MISSING: {reason}\n"
-    log_entry += f"  Date: {date_str}\n"
-    log_entry += f"  Sender: {sender}\n"
-    log_entry += f"  Subject: {email_subject}\n"
-    log_entry += f"  Reason: {reason}\n"
-    log_entry += "-" * 80 + "\n"
-    
-    with open(missing_log_file, 'a', encoding='utf-8') as f:
-        f.write(log_entry)
+    log_entry = f"MISSING: {reason} | Date: {date_str} | Sender: {sender} | Subject: {email_subject} | Reason: {reason}"
+    missing_logger.info(log_entry)
 
 
 

@@ -3,9 +3,16 @@ from mpi_backend.database.models import CustomerJobMapping
 import logging
 from mpi_backend.database import get_db
 from contextlib import contextmanager
+import sys
+from pathlib import Path
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+# Add the parent directory to the path so we can import mpi_backend
+sys.path.append(str(Path(__file__).parent.parent.parent.parent))
+
+from mpi_backend.config.logging_config import setup_logging
+
+# Setup centralized logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 

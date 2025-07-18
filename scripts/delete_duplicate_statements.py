@@ -25,10 +25,12 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Any
 from collections import defaultdict
+from pathlib import Path
 
-# Add the project root to the Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add the parent directory to the path so we can import mpi_backend
+sys.path.append(str(Path(__file__).parent.parent))
 
+from mpi_backend.config.logging_config import setup_logging
 from mpi_backend.database import get_db
 from mpi_backend.database.models.statement_models import (
     PlumbingSupplier, PlumbingStatement, PlumbingInvoice
@@ -36,18 +38,8 @@ from mpi_backend.database.models.statement_models import (
 
 from sqlalchemy.orm import joinedload
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(
-            f'delete_duplicates_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
-        ),
-    ]
-)
+# Setup centralized logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 

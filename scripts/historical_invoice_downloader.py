@@ -35,24 +35,28 @@ import imaplib
 import email
 import email.utils
 import os
+import traceback
 import logging
 from pathlib import Path
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timedelta
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 # Add the parent directory to the path so we can import mpi_backend
 sys.path.append(str(Path(__file__).parent.parent))
 
 from mpi_backend.config import (
-    SMTP_SERVER, INVOICE_DOWNLOAD_FOLDER, SUPPLIERS, TIMEZONE,
-    LOGIN_EMAIL, LOGIN_PWD
+    SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, INVOICE_DOWNLOAD_FOLDER, 
+    SUPPLIERS, TIMEZONE
 )
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.utils.invoice_convertor import convert_invoice_for_email
+from mpi_backend.config.logging_config import setup_logging, get_missing_logger
 
-# Setup logging
+# Setup centralized logging
+setup_logging()
 logger = logging.getLogger(__name__)
+missing_logger = get_missing_logger()
 
 # Create logs directory
 LOGS_DIR = Path("logs")
@@ -60,19 +64,10 @@ LOGS_DIR.mkdir(exist_ok=True)
 
 # Setup missing emails/attachments tracker
 def log_missing_email_or_attachment(email_subject, sender, reason, date_str):
-    """Log missing emails or attachments to a separate file"""
-    missing_log_file = LOGS_DIR / f"missing_emails_attachments_{datetime.now().strftime('%Y%m%d')}.txt"
-    
+    """Log missing emails or attachments to the centralized missing log"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    log_entry = f"[{timestamp}] MISSING: {reason}\n"
-    log_entry += f"  Date: {date_str}\n"
-    log_entry += f"  Sender: {sender}\n"
-    log_entry += f"  Subject: {email_subject}\n"
-    log_entry += f"  Reason: {reason}\n"
-    log_entry += "-" * 80 + "\n"
-    
-    with open(missing_log_file, 'a', encoding='utf-8') as f:
-        f.write(log_entry)
+    log_entry = f"MISSING: {reason} | Date: {date_str} | Sender: {sender} | Subject: {email_subject} | Reason: {reason}"
+    missing_logger.info(log_entry)
 
 # Supplier emails to download invoices from
 EXCLUDED_SENDERS = [  # suppliers to download invoices from
@@ -128,18 +123,6 @@ class HistoricalInvoiceDownloader:
             'errors': 0,
             'skipped_days': 0
         }
-        
-        # Setup logging with dedicated historical downloader logs
-        log_level = logging.DEBUG if verbose else logging.INFO
-        log_filename = LOGS_DIR / f"historical_invoice_downloader_{datetime.now().strftime('%Y%m%d')}.log"
-        logging.basicConfig(
-            level=log_level,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.StreamHandler(),
-                logging.FileHandler(log_filename)
-            ]
-        )
         
         logger.info("Historical Invoice Downloader initialized")
         logger.info(f"Date range: {start_date.date()} to {end_date.date()}")

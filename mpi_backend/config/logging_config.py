@@ -42,6 +42,15 @@ LOGGING_CONFIG = {
             "backupCount": 5,
             "level": "ERROR",
             "encoding": "utf-8"
+        },
+        "missing_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": "logs/missing.log",
+            "formatter": "detailed",
+            "maxBytes": 10485760,  # 10MB
+            "backupCount": 5,
+            "level": "INFO",
+            "encoding": "utf-8"
         }
     },
     "root": {
@@ -78,6 +87,11 @@ LOGGING_CONFIG = {
             "handlers": ["console", "file"],
             "level": "INFO",
             "propagate": False,
+        },
+        "missing_logger": {
+            "handlers": ["missing_file"],
+            "level": "INFO",
+            "propagate": False,
         }
     },
 }
@@ -102,3 +116,7 @@ def setup_logging():
         handler.addFilter(ASCIIFilter())
     
     logging.info("Logging configured successfully - ASCII mode enabled")
+
+def get_missing_logger():
+    """Get a logger specifically for missing items/emails/attachments"""
+    return logging.getLogger("missing_logger")

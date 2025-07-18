@@ -40,74 +40,63 @@ def update_progress(operation_id: str, stage: str, progress: int,
         "message": message,
         "timestamp": time.time()
     }
-    logger.info(f"QB Progress [{operation_id}]: {stage} - {progress}% - "
-                f"{message}")
+    logger.info(f"QB Progress [{operation_id}]: {stage} - {progress}% - {message}")
 
 
 @contextmanager
 def safe_priority_context(operation_type="regular"):
     """Context manager to ensure background jobs are always resumed"""
+    logger.info(f"QB Priority Context: Starting {operation_type} operation")
     try:
         if operation_type == "migrate_all":
             pause_all_background_jobs_for_migrate_all()
-            logger.info(
-                "ABSOLUTE PRIORITY: ALL background jobs paused for "
-                "migrate-all operation"
-            )
+            logger.info("ABSOLUTE PRIORITY: ALL background jobs paused for migrate-all operation")
         else:
             pause_background_jobs()
             logger.info("Background jobs paused for QuickBooks migration")
         yield
     except Exception as e:
-        logger.error(f"Error in QuickBooks operation: {str(e)}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"QB Priority Context: Error in QuickBooks operation: {str(e)}")
+        logger.error(f"QB Priority Context: Traceback: {traceback.format_exc()}")
         raise
     finally:
         # CRITICAL: Always resume background jobs, even if operation fails
         try:
             if operation_type == "migrate_all":
                 resume_all_background_jobs_from_migrate_all()
-                logger.info(
-                    "PRIORITY RELEASED: ALL background jobs resumed after "
-                    "migrate-all operation"
-                )
+                logger.info("PRIORITY RELEASED: ALL background jobs resumed after migrate-all operation")
             else:
                 resume_background_jobs()
-                logger.info(
-                    "Background jobs resumed after QuickBooks operation"
-                )
+                logger.info("Background jobs resumed after QuickBooks operation")
         except Exception as resume_error:
-            logger.error(
-                f"CRITICAL: Failed to resume background jobs: {resume_error}"
-            )
+            logger.error(f"CRITICAL: Failed to resume background jobs: {resume_error}")
             # This is critical - try alternative cleanup
             try:
                 resume_all_background_jobs_from_migrate_all()
                 logger.info("Alternative background job resume successful")
             except Exception as alt_error:
-                logger.error(
-                    f"CRITICAL: Alternative resume also failed: {alt_error}"
-                )
+                logger.error(f"CRITICAL: Alternative resume also failed: {alt_error}")
 
 
 def validate_invoice_ids(invoice_ids: List[UUID]) -> List[UUID]:
     """Validate and clean invoice IDs"""
+    logger.info(f"QB Validation: Validating {len(invoice_ids) if invoice_ids else 0} invoice IDs")
+    
     if not invoice_ids:
-        raise HTTPException(
-            status_code=400, detail="No invoice IDs provided"
-        )
+        logger.warning("QB Validation: No invoice IDs provided")
+        raise HTTPException(status_code=400, detail="No invoice IDs provided")
 
     # Remove duplicates and None values
     clean_ids = list(set([id for id in invoice_ids if id is not None]))
 
     if not clean_ids:
-        raise HTTPException(
-            status_code=400, detail="No valid invoice IDs provided"
-        )
+        logger.warning("QB Validation: No valid invoice IDs provided")
+        raise HTTPException(status_code=400, detail="No valid invoice IDs provided")
 
     if len(clean_ids) > 5000:
-        logger.warning(f"Large dataset detected: {len(clean_ids)} invoices")
+        logger.warning(f"QB Validation: Large dataset detected: {len(clean_ids)} invoices")
 
+    logger.info(f"QB Validation: Validated {len(clean_ids)} invoice IDs")
     return clean_ids
 
 
@@ -403,9 +392,11 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
     operation_start = time.time()
     operation_id = f"qb_migrate_all_{int(operation_start)}"
 
+    logger.info(f"POST /quickbooks/migrate-all - Starting migrate-all operation: {operation_id}")
+
     with safe_priority_context("migrate_all"):
         try:
-            logger.info("Starting ULTRA-FAST QuickBooks migration with guaranteed status updates")
+            logger.info("QB Migrate-All: Starting ULTRA-FAST QuickBooks migration with guaranteed status updates")
 
             filtered_data = InvoiceItemController(db).apply_filters(
                 request, page=1, size=0
@@ -423,7 +414,7 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
             # make invoice-ids in list to be unique
             invoice_ids = list(set(invoice_ids))
 
-            logger.info(f"Migrate-all processing {len(invoice_ids)} invoices with STATUS PRIORITY")
+            logger.info(f"QB Migrate-All: Processing {len(invoice_ids)} invoices with STATUS PRIORITY")
 
             # ULTRA-FAST PROCESSING: Generate Excel and ensure status updates
             result = migrate_invoice_to_QB_ultra_fast(
@@ -432,17 +423,12 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
             )
 
             operation_time = time.time() - operation_start
-            logger.info(
-                f"Migrate-all completed ULTRA-FAST in {operation_time:.2f}s with status updates"
-            )
+            logger.info(f"POST /quickbooks/migrate-all - Completed in {operation_time:.2f}s with status updates")
             return result
 
         except Exception as e:
             operation_time = time.time() - operation_start
-            logger.error(
-                f"QuickBooks migrate-all failed after {operation_time:.2f}s: "
-                f"{str(e)}"
-            )
+            logger.error(f"POST /quickbooks/migrate-all - Failed after {operation_time:.2f}s: {str(e)}")
             raise
 
 
@@ -454,12 +440,14 @@ def migrate_invoice_to_QB(invoice_ids: List[UUID],
     start_time = time.time()
     operation_id = f"qb_migrate_{int(start_time)}"
 
+    logger.info(f"POST /quickbooks/migrate - Starting migration for {len(invoice_ids)} invoices")
+
     with safe_priority_context("regular"):
         try:
             # Validate input
             invoice_ids = validate_invoice_ids(invoice_ids)
 
-            logger.info(f"Processing {len(invoice_ids)} invoices with STATUS PRIORITY")
+            logger.info(f"QB Migrate: Processing {len(invoice_ids)} invoices with STATUS PRIORITY")
 
             # Use ultra-fast method with immediate status updates for regular migrations
             result = migrate_invoice_to_QB_ultra_fast(
@@ -468,18 +456,12 @@ def migrate_invoice_to_QB(invoice_ids: List[UUID],
             )
 
             total_time = time.time() - start_time
-            logger.info(
-                f"QuickBooks migration completed successfully in "
-                f"{total_time:.2f}s with guaranteed status updates"
-            )
+            logger.info(f"POST /quickbooks/migrate - Completed in {total_time:.2f}s with guaranteed status updates")
             return result
 
         except Exception as e:
             total_time = time.time() - start_time
-            logger.error(
-                f"QuickBooks migration failed after {total_time:.2f}s: "
-                f"{str(e)}"
-            )
+            logger.error(f"POST /quickbooks/migrate - Failed after {total_time:.2f}s: {str(e)}")
             raise
 
 

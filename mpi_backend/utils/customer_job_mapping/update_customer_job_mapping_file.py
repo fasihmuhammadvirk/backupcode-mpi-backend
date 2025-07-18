@@ -1,10 +1,17 @@
 import pandas as pd
 import json
 import logging
+import sys
+from pathlib import Path
 
-# Configure logger
+# Add the parent directory to the path so we can import mpi_backend
+sys.path.append(str(Path(__file__).parent.parent.parent.parent))
+
+from mpi_backend.config.logging_config import setup_logging
+
+# Setup centralized logging
+setup_logging()
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 def update_customer_job_mappings_json(excel_file, json_file="mpi_backend/storage/fixtures/customer-job-mapping.json"):

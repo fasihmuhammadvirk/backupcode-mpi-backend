@@ -1,12 +1,18 @@
+import sys
 import logging
 import json
+from pathlib import Path
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine, func
 from mpi_backend.database.models import CustomerJobMapping, InvoiceItem
 from mpi_backend.config import SQLALCHEMY_DATABASE_URI
+from mpi_backend.config.logging_config import setup_logging
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+# Add the parent directory to the path so we can import mpi_backend
+sys.path.append(str(Path(__file__).parent.parent))
+
+# Setup centralized logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 

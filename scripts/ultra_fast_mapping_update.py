@@ -15,39 +15,28 @@ Performance features:
 - Raw SQL for maximum speed
 """
 
+import sys
 import logging
 import time
-import sys
 import os
 from typing import Dict, Set, Tuple, Any
 from collections import defaultdict
+from pathlib import Path
 
-# Add parent directory to path for imports and change working directory
-script_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(script_dir)
-sys.path.append(parent_dir)
+# Add the parent directory to the path so we can import mpi_backend
+sys.path.append(str(Path(__file__).parent.parent))
 
-# Change to parent directory so .env file is found
-original_cwd = os.getcwd()
-os.chdir(parent_dir)
+from mpi_backend.config.logging_config import setup_logging
+from mpi_backend.database import db_context
+from mpi_backend.database.controllers import EnhancedGoogleSheetSyncController
+from mpi_backend.config.spreadsheet_config import (
+    DEFAULT_SHEET_ID, DEFAULT_OUTPUT_FILE, GOOGLE_API_KEY, 
+    SKIP_SHEETS, MAPPING_CONFIG
+)
+from mpi_backend.config import SQLALCHEMY_DATABASE_URI
 
-try:
-    from sqlalchemy import text, create_engine
-    from sqlalchemy.orm import sessionmaker
-    from mpi_backend.database import db_context
-    from mpi_backend.database.controllers import EnhancedGoogleSheetSyncController
-    from mpi_backend.config.spreadsheet_config import (
-        DEFAULT_SHEET_ID, DEFAULT_OUTPUT_FILE, GOOGLE_API_KEY, 
-        SKIP_SHEETS, MAPPING_CONFIG
-    )
-    from mpi_backend.config import SQLALCHEMY_DATABASE_URI
-except ImportError as e:
-    print(f"ERROR: Import error: {e}")
-    print("Make sure you're running from the correct directory and all dependencies are installed.")
-    sys.exit(1)
-
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+# Setup centralized logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 class UltraFastMappingUpdater:

@@ -38,6 +38,7 @@ from typing import List, Dict, Optional, Tuple, Generator
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+from contextlib import contextmanager
 
 # Add project root to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -50,10 +51,18 @@ from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.utils.invoice_convertor import convert_invoice_for_email
 from mpi_backend.database.controllers.StatementController import StatementController
 from mpi_backend.database import SessionLocal
+from mpi_backend.database import get_db
+from mpi_backend.database.models.invoice import Invoice
+from mpi_backend.database.models.InvoiceItems import InvoiceItem
+from mpi_backend.config.logging_config import get_missing_logger
 
 # Create logs directory
 LOGS_DIR = Path("logs")
 LOGS_DIR.mkdir(exist_ok=True)
+
+# Use the centralized logging system
+logger = logging.getLogger(__name__)
+missing_logger = get_missing_logger()
 
 # Configuration constants
 BATCH_SIZE = 50  # Process failed invoices in batches
@@ -63,55 +72,16 @@ RETRY_DELAY_MINUTES = 5  # Delay between retries in minutes
 EMAIL_SEARCH_TIMEOUT = 30  # Timeout for email operations in seconds
 MAX_EMAILS_PER_INVOICE = 10  # Maximum emails to check per invoice
 
-# Setup dedicated logger for failed invoice recovery
-def setup_recovery_logger():
-    """Setup dedicated logger for failed invoice recovery"""
-    log_filename = LOGS_DIR / f"failed_invoice_recovery_{datetime.now().strftime('%Y%m%d')}.log"
-    
-    # Create logger
-    recovery_logger = logging.getLogger('failed_invoice_recovery')
-    recovery_logger.setLevel(logging.INFO)
-    
-    # Remove existing handlers to avoid duplicates
-    recovery_logger.handlers.clear()
-    
-    # Create file handler
-    file_handler = logging.FileHandler(log_filename)
-    file_handler.setLevel(logging.INFO)
-    
-    # Create console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    
-    # Create formatter
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
-    
-    # Add handlers
-    recovery_logger.addHandler(file_handler)
-    recovery_logger.addHandler(console_handler)
-    
-    return recovery_logger
 
-logger = setup_recovery_logger()
 
 # Setup recovery tracking
 def log_recovery_attempt(invoice_number: str, supplier_name: str, search_date: str, result: str, details: str = ""):
-    """Log recovery attempts to a separate file"""
-    recovery_log_file = LOGS_DIR / f"failed_invoice_recovery_{datetime.now().strftime('%Y%m%d')}.txt"
-    
+    """Log recovery attempts to the centralized missing log"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    log_entry = f"[{timestamp}] RECOVERY ATTEMPT: {result}\n"
-    log_entry += f"  Invoice: {invoice_number}\n"
-    log_entry += f"  Supplier: {supplier_name}\n"
-    log_entry += f"  Search Date: {search_date}\n"
+    log_entry = f"RECOVERY ATTEMPT: {result} | Invoice: {invoice_number} | Supplier: {supplier_name} | Search Date: {search_date}"
     if details:
-        log_entry += f"  Details: {details}\n"
-    log_entry += "-" * 80 + "\n"
-    
-    with open(recovery_log_file, 'a', encoding='utf-8') as f:
-        f.write(log_entry)
+        log_entry += f" | Details: {details}"
+    missing_logger.info(log_entry)
 
 # Email sender mapping for suppliers
 SUPPLIER_EMAIL_MAPPING = {

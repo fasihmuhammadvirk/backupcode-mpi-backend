@@ -8,6 +8,7 @@ from fastapi_pagination import Page, paginate
 from datetime import date
 import os
 import requests
+import logging
 from mpi_backend.database.controllers.Suppliers import SupplierController
 from mpi_backend.database.controllers.invoice import InvoiceController
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
@@ -17,7 +18,7 @@ from mpi_backend.utils.invoice_convertor import convert_single_invoice
 from mpi_backend.database.schemas import Invoice, PaginatedInvoiceResponse
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.s3_utils import get_presigned_url, upload_file
-import logging
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/invoice", tags=["Invoices"])
@@ -39,6 +40,7 @@ def get_invoices(
         size: int = Query(10, ge=1, le=100),
         token: str = Depends(JWTBearer())
 ):
+    logger.info(f"GET /invoice - Fetching invoices with filters: supplier_id={supplier_id}, status={status}, page={page}, size={size}")
     try:
         invoices = InvoiceController(db).get_invoices(
             db=db,
@@ -50,10 +52,21 @@ def get_invoices(
             export_status=export_status,
             page=page, page_size=size
         )
-
+        # Safely log the number of invoices
+        try:
+            if hasattr(invoices, 'items') and invoices.items is not None:
+                invoice_count = len(invoices.items)
+            elif hasattr(invoices, '__len__'):
+                invoice_count = len(invoices)
+            else:
+                invoice_count = 'unknown'
+            logger.info(f"GET /invoice - Successfully fetched {invoice_count} invoices")
+        except Exception as log_error:
+            logger.info(f"GET /invoice - Successfully fetched invoices (count unavailable: {str(log_error)})")
         return invoices
 
-    except Exception:
+    except Exception as e:
+        logger.error(f"GET /invoice - Error fetching invoices: {str(e)}")
         raise HTTPException(status_code=404, detail="No Records Found!")
 
 
@@ -62,11 +75,21 @@ def get_all_invoices(
     db: Session = Depends(get_db), 
     token: str = Depends(JWTBearer())
 ):
+    logger.info("GET /invoice/all - Fetching all invoices")
     try:
         invoices = InvoiceController(db).get_all_invoices(db=db)
+        # Safely log the number of invoices
+        try:
+            if invoices is not None:
+                invoice_count = len(invoices)
+            else:
+                invoice_count = 0
+            logger.info(f"GET /invoice/all - Successfully fetched {invoice_count} invoices")
+        except Exception as log_error:
+            logger.info(f"GET /invoice/all - Successfully fetched invoices (count unavailable: {str(log_error)})")
         return invoices
     except Exception as e:
-        logger.error(f'Error occurred while fetching all invoices -> {e}')
+        logger.error(f'GET /invoice/all - Error occurred while fetching all invoices: {e}')
         raise HTTPException(
             status_code=500, 
             detail="An Error occurred while fetching invoices."
@@ -78,6 +101,7 @@ def download_invoice(
     db: Session = Depends(get_db), 
     invoice_id: str = Query(None)
 ):
+    logger.info(f"GET /invoice/download - Downloading invoice: {invoice_id}")
     try:
         invoice = InvoiceController(db).get_invoice_by_invoiceID(
             invoice_id, db
@@ -86,13 +110,14 @@ def download_invoice(
             invoice.supplier_id
         )
         url = get_presigned_url(file_key=f'{supplier_name}/{invoice_id}')
-    except Exception:
+        logger.info(f"GET /invoice/download - Successfully generated download URL for invoice: {invoice_id}")
+        return {"link": url}
+    except Exception as e:
+        logger.error(f"GET /invoice/download - Error downloading invoice {invoice_id}: {str(e)}")
         raise HTTPException(
             status_code=404, 
             detail="Couldn't fetch requested file"
         )
-
-    return {"link": url}
 
 
 @router.post("/upload")
@@ -103,9 +128,11 @@ async def upload_and_process_invoice(
     token: str = Depends(JWTBearer())
 ):
     """Upload and process invoice synchronously"""
+    logger.info(f"POST /invoice/upload - Uploading invoice for supplier_id: {supplier_id}, filename: {file.filename}")
     try:
         # Validate file type
         if not file.filename.lower().endswith('.pdf'):
+            logger.warning(f"POST /invoice/upload - Invalid file type: {file.filename}")
             raise HTTPException(
                 status_code=400, 
                 detail="Only PDF files are allowed."
@@ -114,6 +141,7 @@ async def upload_and_process_invoice(
         # Get supplier info
         supplier = SupplierController(db).get_supplier_by_id(supplier_id)
         if not supplier:
+            logger.error(f"POST /invoice/upload - Supplier not found: {supplier_id}")
             raise HTTPException(
                 status_code=404, 
                 detail=f"Supplier with ID {supplier_id} not found"
@@ -134,6 +162,7 @@ async def upload_and_process_invoice(
             file_path, supplier
         )
         if failed_files:
+            logger.error(f"POST /invoice/upload - Failed to convert invoice: {failed_files}")
             raise HTTPException(
                 status_code=500, 
                 detail=f"Failed to convert invoice: {failed_files}"
@@ -150,6 +179,7 @@ async def upload_and_process_invoice(
         ).order_by(Invoice.id.desc()).first()
         
         if not created_invoice:
+            logger.error(f"POST /invoice/upload - Failed to retrieve created invoice record for: {file.filename}")
             raise HTTPException(
                 status_code=500, 
                 detail="Failed to retrieve created invoice record"
@@ -163,6 +193,7 @@ async def upload_and_process_invoice(
         for filename in os.listdir(upload_folder):
             os.remove(os.path.join(upload_folder, filename))
 
+        logger.info(f"POST /invoice/upload - Successfully uploaded and processed invoice: {file.filename}")
         return {
             "status": "success",
             "message": f"Invoice '{file.filename}' uploaded and processed successfully.",
@@ -173,7 +204,7 @@ async def upload_and_process_invoice(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in upload endpoint: {str(e)}")
+        logger.error(f"POST /invoice/upload - Error in upload endpoint: {str(e)}")
         raise HTTPException(
             status_code=500, 
             detail=f"Upload failed: {str(e)}"
@@ -187,12 +218,14 @@ async def process_again(
     token: str = Depends(JWTBearer())
 ):
     """Reprocess invoice synchronously"""
+    logger.info(f"POST /invoice/process - Reprocessing invoice: {invoice_id}")
     try:
         # Get invoice and supplier info
         invoice = InvoiceController(db).get_invoice_by_invoiceID(
             invoice_id, db
         )
         if not invoice:
+            logger.error(f"POST /invoice/process - Invoice not found: {invoice_id}")
             raise HTTPException(
                 status_code=404, 
                 detail=f"Invoice with ID {invoice_id} not found"
@@ -202,6 +235,7 @@ async def process_again(
             invoice.supplier_id
         )
         if not supplier:
+            logger.error(f"POST /invoice/process - Supplier for invoice {invoice_id} not found: {invoice.supplier_id}")
             raise HTTPException(
                 status_code=404, 
                 detail=f"Supplier for invoice {invoice_id} not found"
@@ -210,6 +244,7 @@ async def process_again(
         # Download invoice from S3
         invoice_url = get_presigned_url(file_key=f'{supplier}/{invoice_id}')
         if not invoice_url:
+            logger.error(f"POST /invoice/process - Couldn't fetch requested Invoice URL for: {invoice_id}")
             raise HTTPException(
                 status_code=404, 
                 detail="Couldn't fetch requested Invoice"
@@ -227,6 +262,7 @@ async def process_again(
             with open(file_path, 'wb') as file:
                 file.write(response.content)
         else:
+            logger.error(f"POST /invoice/process - Failed to download invoice from URL: {invoice_url}, status: {response.status_code}, detail: {response.text}")
             raise HTTPException(
                 status_code=response.status_code, 
                 detail=response.text
@@ -241,6 +277,7 @@ async def process_again(
             file_path, supplier
         )
         if failed_files:
+            logger.error(f"POST /invoice/process - Failed to convert invoice: {failed_files}")
             raise HTTPException(
                 status_code=500, 
                 detail=f"Failed to convert invoice: {failed_files}"
@@ -255,6 +292,7 @@ async def process_again(
         for filename in os.listdir(upload_folder):
             os.remove(os.path.join(upload_folder, filename))
 
+        logger.info(f"POST /invoice/process - Successfully reprocessed invoice: {invoice.filename}")
         return {
             "status": f"Success Invoice '{invoice.filename}' reprocessed successfully.",
             "invoice_id": invoice_id,
@@ -264,7 +302,7 @@ async def process_again(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in reprocess endpoint: {str(e)}")
+        logger.error(f"POST /invoice/process - Error in reprocess endpoint: {str(e)}")
         raise HTTPException(
             status_code=500, 
             detail=f"Reprocessing failed: {str(e)}"
