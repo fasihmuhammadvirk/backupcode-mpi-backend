@@ -18,7 +18,7 @@ from mpi_backend.database.controllers.CustomerJobMappingContorller import (
 )
 from mpi_backend.database.controllers.Suppliers import SupplierController
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
-from mpi_backend.database.controllers.invoice import InvoiceController
+from mpi_backend.database.controllers.Invoice import InvoiceController
 from mpi_backend.database.controllers.UnmappedItems import (
     UnmappedItemsController
 )

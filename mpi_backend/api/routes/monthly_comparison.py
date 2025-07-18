@@ -5,27 +5,27 @@ from typing import List, Optional, Union
 from sqlalchemy import or_
 
 from mpi_backend.database import get_db
-from mpi_backend.database.schemas.PriceComparison import (
+from mpi_backend.database.schemas.MonthlyComparison import (
     ItemInfo, 
     ItemPriceResponse, 
     PaginatedItemInfoResponse,
     SupplierPriceInfo,
-    PriceComparisonDateRange,
+    MonthlyComparisonDateRange,
     ItemSearchRequest,
     SupplierCheapestItemsResponse,
     EnrichedItemPriceResponse,
     PaginatedEnrichedItemResponse,
     DateRangeWithExclusions
 )
-from mpi_backend.database.controllers.PriceComparisonController import (
-    PriceComparisonController
+from mpi_backend.database.controllers.MonthlyComparisonController import (
+    MonthlyComparisonController
 )
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 
 
 router = APIRouter(
     prefix="/price-comparison",
-    tags=["Price Comparison"]
+    tags=["Monthly Comparison"]
 )
 
 
@@ -34,7 +34,7 @@ router = APIRouter(
 
 @router.post("/dropdown-items", response_model=PaginatedItemInfoResponse)
 async def get_dropdown_items(
-    date_range: PriceComparisonDateRange,
+    date_range: MonthlyComparisonDateRange,
     query: Optional[str] = Query(None, description="Optional search term for filtering items"),
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     size: int = Query(10, ge=1, le=100, description="Number of items per page"),
@@ -50,7 +50,7 @@ async def get_dropdown_items(
     If no query parameter is provided, it returns all items within the date range.
     """
     try:
-        controller = PriceComparisonController(db)
+        controller = MonthlyComparisonController(db)
         
         # If query parameter is provided, use search functionality
         if query:
@@ -88,7 +88,7 @@ async def get_selected_items_prices(
     Each item includes the lowest unit price and a list of suppliers with their prices.
     """
     try:
-        controller = PriceComparisonController(db)
+        controller = MonthlyComparisonController(db)
         
         # Always use the enriched response with supplier information and pagination
         return controller.get_enriched_items_with_suppliers(
@@ -125,7 +125,7 @@ async def get_items_by_date_range(
     }
     """
     try:
-        controller = PriceComparisonController(db)
+        controller = MonthlyComparisonController(db)
         return controller.get_items_by_date_range_with_suppliers(
             from_date=request.from_date,
             to_date=request.to_date,

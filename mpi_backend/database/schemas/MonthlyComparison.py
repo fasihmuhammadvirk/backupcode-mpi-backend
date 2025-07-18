@@ -13,10 +13,10 @@ class PaginatedResponse(GenericModel, Generic[T]):
     size: int
     pages: int
 
-class PriceComparisonDateRange(BaseModel):
-    """Schema for date range input in price comparison endpoints."""
-    from_date: date = Field(..., description="Start date for price comparison (YYYY-MM-DD)")
-    to_date: date = Field(..., description="End date for price comparison (YYYY-MM-DD)")
+class MonthlyComparisonDateRange(BaseModel):
+    """Schema for date range input in monthly comparison endpoints."""
+    from_date: date = Field(..., description="Start date for monthly comparison (YYYY-MM-DD)")
+    to_date: date = Field(..., description="End date for monthly comparison (YYYY-MM-DD)")
 
 
 class ItemInfo(BaseModel):
@@ -31,7 +31,7 @@ class ItemPriceResponse(ItemInfo):
     """Simplified response schema for item prices with lowest unit price."""
     unit_price: float = Field(..., description="Lowest unit price from any supplier")
 
-class DateRangeWithExclusions(PriceComparisonDateRange):
+class DateRangeWithExclusions(MonthlyComparisonDateRange):
     """Schema for date range with optional list of items to exclude."""
     unselected_items: Optional[List[ItemInfo]] = Field(None, description="Optional list of items to exclude from results")
     
@@ -142,4 +142,4 @@ class PaginatedItemInfoResponse(PaginatedResponse[ItemInfo]):
                 "size": 10,
                 "pages": 1
             }
-        }
+        } 

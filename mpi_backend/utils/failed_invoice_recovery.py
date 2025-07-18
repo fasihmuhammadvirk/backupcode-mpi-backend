@@ -52,7 +52,7 @@ from mpi_backend.utils.invoice_convertor import convert_invoice_for_email
 from mpi_backend.database.controllers.StatementController import StatementController
 from mpi_backend.database import SessionLocal
 from mpi_backend.database import get_db
-from mpi_backend.database.models.invoice import Invoice
+from mpi_backend.database.models.Invoice import Invoice
 from mpi_backend.database.models.InvoiceItems import InvoiceItem
 from mpi_backend.config.logging_config import get_missing_logger
 

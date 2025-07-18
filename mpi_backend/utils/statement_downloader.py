@@ -12,7 +12,7 @@ from mpi_backend.config import (
     SMTP_SERVER, LOGIN_EMAIL, LOGIN_PWD, TIMEZONE, INVOICE_DOWNLOAD_FOLDER
 )
 from mpi_backend.utils.statement_extractor.extractor import StatementExtractor
-from mpi_backend.database.models.statement_models import (
+from mpi_backend.database.models.MonthlyStatement import (
     PlumbingSupplier, PlumbingStatement
 )
 from mpi_backend.database import db_context

@@ -9,7 +9,7 @@ import traceback
 from contextlib import contextmanager
 from mpi_backend.database import get_qb_db
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
-from mpi_backend.database.controllers.invoice import InvoiceController
+from mpi_backend.database.controllers.Invoice import InvoiceController
 from mpi_backend.database.controllers.ItemClassification import (
     ItemClassificationController
 )

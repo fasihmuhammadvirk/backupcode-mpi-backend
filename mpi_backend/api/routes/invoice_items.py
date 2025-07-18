@@ -10,7 +10,7 @@ from datetime import date
 import os
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
-from mpi_backend.database.controllers.invoice import InvoiceController
+from mpi_backend.database.controllers.Invoice import InvoiceController
 from mpi_backend.database.schemas import InvoiceItems, UpdateInvoiceItemRequest, PaginatedInvoiceItemsResponse, ExportToExcelFilterRequest
 from mpi_backend.database.schemas.Filters import OrderByFilter
 from mpi_backend.utils.auth.auth_bearer import JWTBearer

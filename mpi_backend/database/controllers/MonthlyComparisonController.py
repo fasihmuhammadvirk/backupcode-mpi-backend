@@ -6,9 +6,9 @@ import logging
 
 from mpi_backend.database.models.ItemsMapping import ItemsMapping
 from mpi_backend.database.models.InvoiceItems import InvoiceItem
-from mpi_backend.database.models.invoice import Invoice
+from mpi_backend.database.models.Invoice import Invoice
 from mpi_backend.database.models.Suppliers import Supplier
-from mpi_backend.database.schemas.PriceComparison import (
+from mpi_backend.database.schemas.MonthlyComparison import (
     ItemInfo, 
     ItemPriceResponse,
     SupplierPriceInfo,
@@ -20,7 +20,7 @@ from mpi_backend.database.schemas.PriceComparison import (
 
 logger = logging.getLogger(__name__)
 
-class PriceComparisonController:
+class MonthlyComparisonController:
     def __init__(self, db):
         self.db_context = db
 

@@ -33,7 +33,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from mpi_backend.config.logging_config import setup_logging
 from mpi_backend.database import get_db
 from mpi_backend.database.models.InvoiceItems import InvoiceItem
-from mpi_backend.database.models.invoice import Invoice
+from mpi_backend.database.models.Invoice import Invoice
 from mpi_backend.database.models.Suppliers import Supplier
 from sqlalchemy.orm import joinedload
 

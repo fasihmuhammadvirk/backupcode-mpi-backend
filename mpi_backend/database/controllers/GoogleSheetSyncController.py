@@ -40,7 +40,7 @@ from mpi_backend.config.spreadsheet_config import (
 logger = logging.getLogger(__name__)
 
 
-class EnhancedGoogleSheetSyncController:
+class GoogleSheetSyncController:
     """Enhanced controller for synchronizing data from Google Sheets to the database."""
 
     # Class level variables to track sync status

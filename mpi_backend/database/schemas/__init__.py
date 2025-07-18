@@ -1,5 +1,5 @@
 from mpi_backend.database.schemas.Suppliers import SupplierListResponse
-from mpi_backend.database.schemas.invoice import (
+from mpi_backend.database.schemas.Invoice import (
     Invoice, 
     PaginatedInvoiceResponse
 )
@@ -20,6 +20,18 @@ from mpi_backend.database.schemas.Filters import (
 from mpi_backend.database.schemas.PriceHistory import (
     PriceHistoryRequest, 
     PriceHistoryResponse
+)
+from mpi_backend.database.schemas.MonthlyComparison import (
+    MonthlyComparisonDateRange,
+    ItemInfo,
+    ItemPriceResponse,
+    DateRangeWithExclusions,
+    SupplierPriceInfo,
+    SupplierCheapestItemsResponse,
+    EnrichedItemPriceResponse,
+    PaginatedEnrichedItemResponse,
+    ItemSearchRequest,
+    PaginatedItemInfoResponse
 )
 from mpi_backend.database.schemas.SyncMappings import SyncMappingsResponse
 

@@ -32,7 +32,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from mpi_backend.config.logging_config import setup_logging
 from mpi_backend.database import get_db
-from mpi_backend.database.models.statement_models import (
+from mpi_backend.database.models.MonthlyStatement import (
     PlumbingSupplier, PlumbingStatement, PlumbingInvoice
 )
 

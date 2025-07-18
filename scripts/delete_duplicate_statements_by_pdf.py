@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from collections import defaultdict
-from mpi_backend.database.models.statement_models import PlumbingStatement, PlumbingInvoice
+from mpi_backend.database.models.MonthlyStatement import PlumbingStatement, PlumbingInvoice
 from mpi_backend.database import get_db
 from mpi_backend.config.logging_config import setup_logging
 

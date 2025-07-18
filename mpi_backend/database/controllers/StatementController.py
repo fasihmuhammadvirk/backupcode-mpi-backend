@@ -11,10 +11,10 @@ import re
 from pathlib import Path
 import logging
 
-from mpi_backend.database.models.statement_models import (
+from mpi_backend.database.models.MonthlyStatement import (
     PlumbingSupplier, PlumbingStatement, PlumbingInvoice
 )
-from mpi_backend.database.models.invoice import Invoice
+from mpi_backend.database.models.Invoice import Invoice
 from mpi_backend.database.models.InvoiceItems import InvoiceItem
 
 logger = logging.getLogger(__name__)
@@ -359,7 +359,7 @@ class StatementController:
         """
         try:
             from mpi_backend.database.models.InvoiceItems import InvoiceItem
-            from mpi_backend.database.models.invoice import Invoice
+            from mpi_backend.database.models.Invoice import Invoice
             
             # Handle special status filters BEFORE executing query
             if status and status.lower() == "unlisted":
@@ -1507,7 +1507,7 @@ class StatementController:
             
             # 2. Search in InvoiceItem (system invoices) for unlisted items
             from mpi_backend.database.models.InvoiceItems import InvoiceItem
-            from mpi_backend.database.models.invoice import Invoice
+            from mpi_backend.database.models.Invoice import Invoice
             
             system_query = (
                 self.db.query(InvoiceItem, Invoice, PlumbingSupplier)
@@ -1658,7 +1658,7 @@ class StatementController:
         """
         try:
             from mpi_backend.database.models.InvoiceItems import InvoiceItem
-            from mpi_backend.database.models.invoice import Invoice
+            from mpi_backend.database.models.Invoice import Invoice
             
             # Build optimized query with DISTINCT to avoid duplicates at database level
             query = (

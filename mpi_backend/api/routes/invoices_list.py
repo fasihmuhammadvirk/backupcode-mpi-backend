@@ -10,7 +10,7 @@ import os
 import requests
 import logging
 from mpi_backend.database.controllers.Suppliers import SupplierController
-from mpi_backend.database.controllers.invoice import InvoiceController
+from mpi_backend.database.controllers.Invoice import InvoiceController
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
@@ -174,7 +174,7 @@ async def upload_and_process_invoice(
         process_extracted_data(converted_files, failed_files)
 
         # Get the created invoice for S3 upload
-        from mpi_backend.database.models.invoice import Invoice
+        from mpi_backend.database.models.Invoice import Invoice
         created_invoice = db.query(Invoice).filter_by(
             filename=file.filename, 
             supplier_id=supplier_id

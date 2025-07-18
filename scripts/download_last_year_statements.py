@@ -53,7 +53,7 @@ from mpi_backend.config import (
     INVOICE_DOWNLOAD_FOLDER
 )
 from mpi_backend.database import get_db
-from mpi_backend.database.models.statement_models import (
+from mpi_backend.database.models.MonthlyStatement import (
     PlumbingSupplier, PlumbingStatement
 )
 from mpi_backend.utils.statement_extractor.extractor import StatementExtractor
@@ -457,7 +457,7 @@ class StatementDownloader:
                 )
                 
                 # Delete invoices first (foreign key constraint)
-                from mpi_backend.database.models.statement_models import PlumbingInvoice
+                from mpi_backend.database.models.MonthlyStatement import PlumbingInvoice
                 
                 # Get all invoices for this statement
                 invoices = self.db_session.query(PlumbingInvoice).filter(
@@ -743,7 +743,7 @@ class StatementDownloader:
     def save_statement_to_database(self, result: Dict[str, Any], supplier_name: str, file_path: str) -> bool:
         """Save extracted statement and invoice data to database"""
         try:
-            from mpi_backend.database.models.statement_models import (
+            from mpi_backend.database.models.MonthlyStatement import (
                 PlumbingSupplier, PlumbingStatement, PlumbingInvoice
             )
             

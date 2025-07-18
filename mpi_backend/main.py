@@ -34,11 +34,11 @@ from mpi_backend.api.routes import quickbooks
 from mpi_backend.api.routes import signin
 from mpi_backend.api.routes import filters
 from mpi_backend.api.routes import sync_mappings
-from mpi_backend.api.routes import price_comparison
+from mpi_backend.api.routes import monthly_comparison
 from mpi_backend.api.routes import statements
 
-from mpi_backend.database.controllers.EnhancedGoogleSheetSyncController import (
-    EnhancedGoogleSheetSyncController
+from mpi_backend.database.controllers.GoogleSheetSyncController import (
+    GoogleSheetSyncController
 )
 from mpi_backend.database.controllers.ItemsMappingController import (
     ItemsMappingController
@@ -56,6 +56,11 @@ from mpi_backend.utils.failed_invoice_recovery import failed_invoice_recovery_ba
 # Import priority control utilities
 from mpi_backend.utils.quickbooks_priority import set_scheduler_instance
 
+# Import missing invoice downloader
+from mpi_backend.utils.missing_invoice_downaloder import (
+    missing_email_download_background_task
+)
+
 UTC_TZ = pytz.utc
 PKT_TZ = pytz.timezone('Asia/Karachi')  # Pakistan Standard Time (UTC+5)
 
@@ -64,10 +69,22 @@ MAPPINGS_ENABLED = os.getenv("ENABLE_MAPPINGS", "true").lower() == "true"
 MAPPINGS_EXCLUSION_ENABLED = os.getenv("ENABLE_MAPPINGS_EXCLUSION", "true").lower() == "true"
 
 # Thread pool for non-blocking background tasks (only for mapping tasks)
-_task_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="mapping_task")
+task_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="mapping_task")
 
-# NEW: Separate thread pool for invoice/email tasks to prevent blocking
-_email_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="email_task")
+# Separate thread pool for invoice/email tasks to prevent blocking
+# Increased workers to handle more frequent tasks without blocking
+email_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix="email_task")
+
+# Task execution locks to prevent duplicates
+task_locks = {
+    'email_download': False,
+    'statement_download': False,
+    'failed_invoice_recovery': False,
+    'missing_invoice_download': False,
+    'uidi_no_match_update': False,
+    'all_mappings_update': False
+}
+
 
 def is_pakistan_business_hours():
     """
@@ -122,55 +139,113 @@ def safe_mapping_wrapper(operation_name, operation_func, *args, **kwargs):
 
 def async_email_download_wrapper():
     """
-    Async wrapper for email download task to prevent blocking
+    Async wrapper for email download task to prevent blocking and duplicates
     """
     def _execute_email_download():
+        # Check if task is already running
+        if task_locks['email_download']:
+            logger.warning("Email download task already running, skipping duplicate")
+            return
+        
         try:
+            # Set lock to prevent duplicates
+            task_locks['email_download'] = True
             logger.info("Starting async email download task")
             email_download_background_task()
             logger.info("Email download task completed successfully")
         except Exception as e:
             logger.error(f"Email download task failed: {str(e)}")
+        finally:
+            # Always release lock
+            task_locks['email_download'] = False
     
-    # Submit to dedicated email thread pool
-    future = _email_executor.submit(_execute_email_download)
+    # Submit to dedicated email thread pool with low priority
+    future = email_executor.submit(_execute_email_download)
     logger.debug("Email download task submitted to background thread pool")
     return future
 
 
 def async_statement_download_wrapper():
     """
-    Async wrapper for statement download task to prevent blocking
+    Async wrapper for statement download task to prevent blocking and duplicates
     """
     def _execute_statement_download():
+        # Check if task is already running
+        if task_locks['statement_download']:
+            logger.warning("Statement download task already running, skipping duplicate")
+            return
+        
         try:
+            # Set lock to prevent duplicates
+            task_locks['statement_download'] = True
             logger.info("Starting async statement download task")
             statement_download_background_task()
             logger.info("Statement download task completed successfully")
         except Exception as e:
             logger.error(f"Statement download task failed: {str(e)}")
+        finally:
+            # Always release lock
+            task_locks['statement_download'] = False
     
     # Submit to dedicated email thread pool
-    future = _email_executor.submit(_execute_statement_download)
+    future = email_executor.submit(_execute_statement_download)
     logger.debug("Statement download task submitted to background thread pool")
     return future
 
 
 def async_failed_invoice_recovery_wrapper():
     """
-    Async wrapper for failed invoice recovery task to prevent blocking
+    Async wrapper for failed invoice recovery task to prevent blocking and duplicates
     """
     def _execute_failed_invoice_recovery():
+        # Check if task is already running
+        if task_locks['failed_invoice_recovery']:
+            logger.warning("Failed invoice recovery task already running, skipping duplicate")
+            return
+        
         try:
+            # Set lock to prevent duplicates
+            task_locks['failed_invoice_recovery'] = True
             logger.info("Starting async failed invoice recovery task")
             failed_invoice_recovery_background_task()
             logger.info("Failed invoice recovery task completed successfully")
         except Exception as e:
             logger.error(f"Failed invoice recovery task failed: {str(e)}")
+        finally:
+            # Always release lock
+            task_locks['failed_invoice_recovery'] = False
     
     # Submit to dedicated email thread pool
-    future = _email_executor.submit(_execute_failed_invoice_recovery)
+    future = email_executor.submit(_execute_failed_invoice_recovery)
     logger.debug("Failed invoice recovery task submitted to background thread pool")
+    return future
+
+
+def async_missing_invoice_download_wrapper():
+    """
+    Async wrapper for missing invoice download task to prevent blocking and duplicates
+    """
+    def _execute_missing_invoice_download():
+        # Check if task is already running
+        if task_locks['missing_invoice_download']:
+            logger.warning("Missing invoice download task already running, skipping duplicate")
+            return
+        
+        try:
+            # Set lock to prevent duplicates
+            task_locks['missing_invoice_download'] = True
+            logger.info("Starting async missing invoice download task")
+            missing_email_download_background_task()
+            logger.info("Missing invoice download task completed successfully")
+        except Exception as e:
+            logger.error(f"Missing invoice download task failed: {str(e)}")
+        finally:
+            # Always release lock
+            task_locks['missing_invoice_download'] = False
+    
+    # Submit to dedicated email thread pool
+    future = email_executor.submit(_execute_missing_invoice_download)
+    logger.debug("Missing invoice download task submitted to background thread pool")
     return future
 
 
@@ -180,14 +255,21 @@ def scheduled_uidi_no_match_update():
     Runs every day at 6 PM PKT.
     """
     def _execute_uidi_update():
+        # Check if task is already running
+        if task_locks['uidi_no_match_update']:
+            logger.warning("UIDI/NO Match update task already running, skipping duplicate")
+            return
+        
         try:
+            # Set lock to prevent duplicates
+            task_locks['uidi_no_match_update'] = True
             logger.info("Starting scheduled UIDI/NO Match update at 6 PM PKT")
             
             from mpi_backend.database import SessionLocal
             with SessionLocal() as temp_db:
                 result = safe_mapping_wrapper(
                     "Scheduled UIDI/NO Match Update (6 PM PKT)",
-                    EnhancedGoogleSheetSyncController.execute_sync_task,
+                    GoogleSheetSyncController.execute_sync_task,
                     temp_db, "update_no_match_uidi"
                 )
                 
@@ -198,9 +280,12 @@ def scheduled_uidi_no_match_update():
                 
         except Exception as e:
             logger.error(f"Scheduled UIDI/NO Match update failed: {str(e)}")
+        finally:
+            # Always release lock
+            task_locks['uidi_no_match_update'] = False
     
     # Submit to mapping thread pool for non-blocking execution
-    future = _task_executor.submit(_execute_uidi_update)
+    future = task_executor.submit(_execute_uidi_update)
     logger.info("Scheduled UIDI/NO Match update submitted to background thread pool")
     return future
 
@@ -208,17 +293,24 @@ def scheduled_uidi_no_match_update():
 def scheduled_all_mappings_update():
     """
     Scheduled task to update all mappings.
-    Runs every 48 hours at 1 AM PKT (every other day).
+    Runs every Saturday morning at 8 AM PKT.
     """
     def _execute_all_update():
+        # Check if task is already running
+        if task_locks['all_mappings_update']:
+            logger.warning("All mappings update task already running, skipping duplicate")
+            return
+        
         try:
-            logger.info("Starting scheduled All Mappings update at 1 AM PKT (48-hour interval)")
+            # Set lock to prevent duplicates
+            task_locks['all_mappings_update'] = True
+            logger.info("Starting scheduled All Mappings update at 8 AM PKT (Saturday)")
             
             from mpi_backend.database import SessionLocal
             with SessionLocal() as temp_db:
                 result = safe_mapping_wrapper(
-                    "Scheduled All Mappings Update (1 AM PKT)",
-                    EnhancedGoogleSheetSyncController.execute_sync_task,
+                    "Scheduled All Mappings Update (8 AM PKT Saturday)",
+                    GoogleSheetSyncController.execute_sync_task,
                     temp_db, "update_all"
                 )
                 
@@ -229,9 +321,12 @@ def scheduled_all_mappings_update():
                 
         except Exception as e:
             logger.error(f"Scheduled All Mappings update failed: {str(e)}")
+        finally:
+            # Always release lock
+            task_locks['all_mappings_update'] = False
     
     # Submit to mapping thread pool for non-blocking execution
-    future = _task_executor.submit(_execute_all_update)
+    future = task_executor.submit(_execute_all_update)
     logger.info("Scheduled All Mappings update submitted to background thread pool")
     return future
 
@@ -248,47 +343,65 @@ async def lifespan(app: FastAPI):
     logger.info(f"Mappings enabled: {MAPPINGS_ENABLED}")
     logger.info(f"Mapping exclusion during business hours: {MAPPINGS_EXCLUSION_ENABLED}")
     
-    scheduler = BackgroundScheduler()
+    # Configure scheduler with optimized settings to prevent interference and duplicates
+    scheduler = BackgroundScheduler(
+        job_defaults={
+            'coalesce': True,  # Combine missed executions
+            'max_instances': 1,  # Prevent multiple instances
+            'misfire_grace_time': 300  # 5 minutes grace period
+        },
+        timezone=UTC_TZ
+    )
     
     # Register scheduler for dynamic job control
     set_scheduler_instance(scheduler)
     
     # Email download - every 5 minutes (async wrapper for non-blocking execution)
     scheduler.add_job(
-        async_email_download_wrapper,  # NEW: Using async wrapper to prevent blocking
+        async_email_download_wrapper,  # Using async wrapper to prevent blocking
         "interval",
         minutes=5,
         max_instances=1,
         id="email_download",
-        name="Email Download Task (Async)",
+        name="Email Download Task (Every 5 Minutes, Async)",
         misfire_grace_time=600
     )
     
     # Statement download - every 12 hours (async wrapper for non-blocking execution)
     scheduler.add_job(
-        async_statement_download_wrapper,  # NEW: Using async wrapper to prevent blocking
+        async_statement_download_wrapper,  # Using async wrapper to prevent blocking
         "interval",
         hours=12,
         max_instances=1,
         replace_existing=True,
         id="statement_download",
-        name="Statement Download Task (Async)",
+        name="Statement Download Task (Every 12 Hours, Async)",
         misfire_grace_time=1800
     )
     
-    # Failed invoice recovery - every 5 hours (async wrapper for non-blocking execution)
+    # Failed invoice recovery - every 1 hour (async wrapper for non-blocking execution)
     scheduler.add_job(
-        async_failed_invoice_recovery_wrapper,  # NEW: Using async wrapper to prevent blocking
+        async_failed_invoice_recovery_wrapper,  # Using async wrapper to prevent blocking
+        "interval",
+        hours=1,
+        max_instances=1,
+        replace_existing=True,
+        id="failed_invoice_recovery",
+        name="Failed Invoice Recovery Task (Every 1 Hour, Async)",
+        misfire_grace_time=1800  # 30 minutes grace period
+    )
+    
+    # Missing invoice download - every 5 hours (async wrapper for non-blocking execution)
+    scheduler.add_job(
+        async_missing_invoice_download_wrapper,  # Using async wrapper to prevent blocking
         "interval",
         hours=5,
         max_instances=1,
         replace_existing=True,
-        id="failed_invoice_recovery",
-        name="Failed Invoice Recovery Task (Every 5 Hours, Async)",
+        id="missing_invoice_download",
+        name="Missing Invoice Download Task (Every 5 Hours, Async)",
         misfire_grace_time=1800  # 30 minutes grace period
     )
-    
-    # Missing invoice download task removed - not needed as part of regular operations
     
     # SCHEDULED MAPPING TASKS: Daily at specific times
     
@@ -303,18 +416,16 @@ async def lifespan(app: FastAPI):
         misfire_grace_time=3600  # 1 hour grace period
     )
     
-    # 2. All Mappings Update: Every 48 hours at 1 AM PKT (8 PM UTC previous day, PKT = UTC+5)
+    # 2. All Mappings Update: Every Saturday at 8 AM PKT (3 AM UTC, PKT = UTC+5)
     scheduler.add_job(
         scheduled_all_mappings_update,
-        CronTrigger(hour=20, minute=0, timezone=UTC_TZ, day="*/2"),  # 1 AM PKT = 8 PM UTC (previous day), every 2 days
-        id="all_mappings_update_48h_1am",
+        CronTrigger(hour=3, minute=0, timezone=UTC_TZ, day_of_week=5),  # 8 AM PKT = 3 AM UTC, Saturday = 5
+        id="all_mappings_update_saturday_8am",
         replace_existing=True,
         max_instances=1,
-        name="All Mappings Update (Every 48 Hours at 1 AM PKT)",
+        name="All Mappings Update (Every Saturday at 8 AM PKT)",
         misfire_grace_time=3600  # 1 hour grace period
     )
-    
-    # Legacy sequential mapping task removed - replaced by individual scheduled tasks above
 
     # Memory cleanup - every 30 minutes
     def memory_cleanup_task():
@@ -338,13 +449,16 @@ async def lifespan(app: FastAPI):
     
     # No startup tasks - all tasks run on their scheduled intervals only
     
-    logger.info("Background tasks configured with async execution:")
+    logger.info("Background tasks configured with optimized async execution:")
     logger.info("  • Email Download: Every 5 minutes (async, non-blocking)")
     logger.info("  • Statement Download: Every 12 hours (async, non-blocking)")
-    logger.info("  • Failed Invoice Recovery: Every 5 hours (async, non-blocking)")
+    logger.info("  • Failed Invoice Recovery: Every 1 hour (async, non-blocking)")
+    logger.info("  • Missing Invoice Download: Every 5 hours (async, non-blocking)")
     logger.info("  • UIDI/NO Match Update: Daily at 6 PM PKT (async, thread pool)")
-    logger.info("  • All Mappings Update: Every 48 hours at 1 AM PKT (async, thread pool)")
+    logger.info("  • All Mappings Update: Every Saturday at 8 AM PKT (async, thread pool)")
     logger.info("  • Memory Cleanup: Every 30 minutes")
+    logger.info("All tasks run in separate thread pools to prevent server slowdown")
+    logger.info("Task deduplication enabled - prevents concurrent execution of same task")
     logger.info("MPI Backend started successfully with optimized async background tasks")
     
     yield
@@ -353,9 +467,14 @@ async def lifespan(app: FastAPI):
     logger.info("MPI Backend shutting down")
     scheduler.shutdown()
     
+    # Reset all task locks to ensure clean shutdown
+    for task_name in task_locks:
+        task_locks[task_name] = False
+    logger.info("Task locks reset for clean shutdown")
+    
     # Shutdown thread pools
-    _task_executor.shutdown(wait=True)
-    _email_executor.shutdown(wait=True)
+    task_executor.shutdown(wait=True)
+    email_executor.shutdown(wait=True)
     logger.info("Background thread pools shutdown completed")
     
     logger.info("Background scheduler shutdown completed")
@@ -461,7 +580,7 @@ def register_routes(app):
         ("QuickBooks", quickbooks.router),
         ("Filters", filters.router),
         ("Sync Mappings", sync_mappings.router),
-        ("Price Comparison", price_comparison.router),
+        ("Monthly Comparison", monthly_comparison.router),
         ("Statements", statements.router),
     ]
     

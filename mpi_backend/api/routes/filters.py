@@ -35,13 +35,13 @@ router = APIRouter(prefix="/filter", tags=["Filtering Data"])
 logger = logging.getLogger(__name__)
 
 # Enhanced caching with ultra-aggressive optimization
-_cache_store = {}
-_cache_timestamps = {}
-_response_cache = {}  # Pre-computed responses
+cache_store = {}
+cache_timestamps = {}
+response_cache = {}  # Pre-computed responses
 CACHE_TTL = 300  # 5 minutes
 
 # Pre-computed static responses for ultra-fast delivery
-_static_responses = {
+static_responses = {
     "column_mappings": None,
     "empty_filter_result": None
 }
@@ -49,40 +49,40 @@ _static_responses = {
 
 def _is_cache_valid(key: str) -> bool:
     """Check if cache entry is still valid"""
-    if key not in _cache_timestamps:
+    if key not in cache_timestamps:
         return False
-    return (time.time() - _cache_timestamps[key]) < CACHE_TTL
+    return (time.time() - cache_timestamps[key]) < CACHE_TTL
 
 
 def _get_cached_response(key: str):
     """Get cached response if valid - ultra-fast lookup"""
-    if key in _response_cache and _is_cache_valid(key):
-        return _response_cache[key]
-    return _cache_store.get(key) if _is_cache_valid(key) else None
+    if key in response_cache and _is_cache_valid(key):
+        return response_cache[key]
+    return cache_store.get(key) if _is_cache_valid(key) else None
 
 
 def _set_cached_response(key: str, value):
     """Cache response with aggressive optimization"""
-    _cache_store[key] = value
-    _response_cache[key] = value  # Dual cache for speed
-    _cache_timestamps[key] = time.time()
+    cache_store[key] = value
+    response_cache[key] = value  # Dual cache for speed
+    cache_timestamps[key] = time.time()
     
     # Aggressive cache cleanup - keep only most recent
-    if len(_cache_store) > 50:  # Reduced from 100 for speed
-        oldest_keys = sorted(_cache_timestamps.keys(), 
-                           key=lambda k: _cache_timestamps[k])[:20]
+    if len(cache_store) > 50:  # Reduced from 100 for speed
+        oldest_keys = sorted(cache_timestamps.keys(), 
+                           key=lambda k: cache_timestamps[k])[:20]
         for old_key in oldest_keys:
-            _cache_store.pop(old_key, None)
-            _response_cache.pop(old_key, None)
-            _cache_timestamps.pop(old_key, None)
+            cache_store.pop(old_key, None)
+            response_cache.pop(old_key, None)
+            cache_timestamps.pop(old_key, None)
 
 
 def _warmup_cache():
     """Pre-warm frequently used responses"""
     try:
         # Pre-compute column mappings
-        if not _static_responses["column_mappings"]:
-            _static_responses["column_mappings"] = {
+        if not static_responses["column_mappings"]:
+            static_responses["column_mappings"] = {
                 "filename": "Filename",
                 "sheet_name": "Sheet Name", 
                 "mpi_item": "MPI Item Code",
@@ -233,7 +233,7 @@ def customer_job_filter(db: Session = Depends(get_db),
     except Exception as e:
         logger.error(f"Failed to fetch customer-job address: {e}")
         # Return cached fallback if available
-        fallback = _cache_store.get("customer_job_locations_fallback", [])
+        fallback = cache_store.get("customer_job_locations_fallback", [])
         return create_optimized_response(fallback)
 
 
@@ -241,7 +241,7 @@ def customer_job_filter(db: Session = Depends(get_db),
 def column_mappings(token: str = Depends(JWTBearer())):
     """INSTANT column mappings - pre-computed response."""
     # Return pre-computed static response (microsecond speed)
-    return create_optimized_response(_static_responses["column_mappings"])
+    return create_optimized_response(static_responses["column_mappings"])
 
 
 @router.post("/by-column")
@@ -386,7 +386,7 @@ def get_price_difference(request: FilterRequest, db: Session = Depends(get_db),
         filtered_data = InvoiceItemController(db).apply_filters(request, page, size)
         controller = InvoiceItemController(db)
         
-        # Extract item codes and vendor info for supplier-specific price comparison
+        # Extract item codes and vendor info for supplier-specific monthly comparison
         item_id_pairs = []
         item_vendor_pairs = []
         
@@ -535,10 +535,10 @@ def get_aggregates(
 @router.get("/cache-stats")
 def get_cache_stats(token: str = Depends(JWTBearer())):
     """Get cache statistics for performance monitoring."""
-    valid_entries = sum(1 for key in _cache_store.keys() if _is_cache_valid(key))
+    valid_entries = sum(1 for key in cache_store.keys() if _is_cache_valid(key))
     
     return create_optimized_response({
-        "total_cache_entries": len(_cache_store),
+        "total_cache_entries": len(cache_store),
         "valid_cache_entries": valid_entries,
         "cache_hit_ratio": "Available in production logs",
         "cache_ttl_seconds": CACHE_TTL
@@ -547,9 +547,9 @@ def get_cache_stats(token: str = Depends(JWTBearer())):
 @router.delete("/cache")
 def clear_cache(token: str = Depends(JWTBearer())):
     """Clear all cached data."""
-    global _cache_store, _cache_timestamps
-    _cache_store.clear()
-    _cache_timestamps.clear()
+    global cache_store, cache_timestamps
+    cache_store.clear()
+    cache_timestamps.clear()
     
     return create_optimized_response({"message": "Cache cleared successfully"})
 
