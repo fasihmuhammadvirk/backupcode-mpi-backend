@@ -206,6 +206,32 @@ class PythonDatabaseBackup:
             
             logger.info(f"Found {len(tables)} tables to backup")
             
+            # Define table creation order to respect foreign key dependencies
+            # Tables without dependencies first, then dependent tables
+            table_order = [
+                'alembic_version',
+                'suppliers', 
+                'plumbing_suppliers',
+                'plumbing_statements',
+                'invoices',  # Must be created before invoice_items
+                'invoice_items',  # Depends on invoices
+                'customer_job_mappings',
+                'supplier_item_mappings',
+                'users',
+                'unmapped_items',
+                'item_classification',
+                'plumbing_invoices',
+                'temporary_item_mappings'
+            ]
+            
+            # Filter to only include tables that exist
+            ordered_tables = [table for table in table_order if table in tables]
+            # Add any remaining tables that weren't in the predefined order
+            remaining_tables = [table for table in tables if table not in ordered_tables]
+            final_table_order = ordered_tables + remaining_tables
+            
+            logger.info(f"Tables will be backed up in dependency order: {final_table_order}")
+            
             with open(backup_path, 'w', encoding='utf-8') as backup_file:
                 # Write header
                 backup_file.write("-- MPI Backend Database Backup\n")
@@ -217,9 +243,9 @@ class PythonDatabaseBackup:
                 backup_file.write(f"CREATE DATABASE {self.db_name};\n")
                 backup_file.write(f"\\c {self.db_name};\n\n")
                 
-                # Process each table
-                for i, table_name in enumerate(tables, 1):
-                    logger.info(f"Processing table {i}/{len(tables)}: {table_name}")
+                # Process each table in dependency order
+                for i, table_name in enumerate(final_table_order, 1):
+                    logger.info(f"Processing table {i}/{len(final_table_order)}: {table_name}")
                     
                     # Get table schema
                     schema = self.get_table_schema(table_name)
