@@ -3,7 +3,8 @@
 Database Backup Script for MPI Backend (Python-based)
 
 This script creates a complete backup of the PostgreSQL database using Python libraries
-instead of PostgreSQL client tools (pg_dump).
+instead of PostgreSQL client tools (pg_dump). It always creates only one backup file
+and overwrites the previous one.
 
 Usage:
     python scripts/backup_database_python.py
@@ -184,12 +185,17 @@ class PythonDatabaseBackup:
     
     def create_backup(self):
         """Create a complete database backup using Python."""
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_filename = f"mpi_backend_db_backup_{timestamp}.sql"
+        # Always use the same filename - overwrites previous backup
+        backup_filename = "mpi_backend_db_backup.sql"
         backup_path = self.backup_dir / backup_filename
         
         logger.info(f"Starting database backup: {backup_filename}")
         logger.info(f"Database: {self.db_name} on {self.db_host}:{self.db_port}")
+        
+        # Remove existing backup file if it exists
+        if backup_path.exists():
+            backup_path.unlink()
+            logger.info("Removed previous backup file")
         
         try:
             # Get list of tables
@@ -257,25 +263,6 @@ class PythonDatabaseBackup:
             logger.error(f"Error during backup: {e}")
             return False
     
-    def cleanup_old_backups(self, keep_days=7):
-        """Clean up old backup files, keeping only recent ones."""
-        logger.info(f"Cleaning up backups older than {keep_days} days...")
-        
-        cutoff_date = datetime.datetime.now() - datetime.timedelta(days=keep_days)
-        deleted_count = 0
-        
-        for backup_file in self.backup_dir.glob("mpi_backend_db_backup_*.sql"):
-            try:
-                file_time = datetime.datetime.fromtimestamp(backup_file.stat().st_mtime)
-                if file_time < cutoff_date:
-                    backup_file.unlink()
-                    deleted_count += 1
-                    logger.info(f"Deleted old backup: {backup_file.name}")
-            except Exception as e:
-                logger.warning(f"Could not delete {backup_file.name}: {e}")
-        
-        logger.info(f"Cleanup completed. Deleted {deleted_count} old backup files.")
-    
     def run(self):
         """Main backup process."""
         logger.info("=" * 60)
@@ -297,9 +284,6 @@ class PythonDatabaseBackup:
             logger.error("Backup creation failed. Exiting.")
             return False
         
-        # Cleanup old backups
-        self.cleanup_old_backups()
-        
         logger.info("=" * 60)
         logger.info("Database backup process completed successfully!")
         logger.info("=" * 60)
@@ -314,9 +298,10 @@ def main():
         
         if success:
             print("\n✅ Database backup completed successfully!")
-            print("📁 Backup files are saved in the 'backups' directory")
-            print("📄 Latest backup is also saved as 'mpi_backend_db_copy.sql'")
+            print("📁 Backup file: backups/mpi_backend_db_backup.sql")
+            print("📄 Latest backup copy: mpi_backend_db_copy.sql")
             print("🐍 This backup was created using Python libraries (no pg_dump required)")
+            print("🔄 Previous backup was overwritten")
             sys.exit(0)
         else:
             print("\n❌ Database backup failed!")
