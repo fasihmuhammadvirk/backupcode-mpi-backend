@@ -164,7 +164,14 @@ class InvoiceItemController:
                     if values and len(values) > 0:
                         attr = getattr(InvoiceItem, column, None)
                         if attr is not None:
-                            query = query.filter(attr.in_(values))
+                            # Strip spaces from filter values for consistent comparison
+                            cleaned_values = []
+                            for value in values:
+                                if isinstance(value, str):
+                                    cleaned_values.append(value.strip())
+                                else:
+                                    cleaned_values.append(value)
+                            query = query.filter(attr.in_(cleaned_values))
             
             # Apply comparison filters
             if request.comparison_filters:
@@ -290,8 +297,15 @@ class InvoiceItemController:
         if request.filters:
             for column, values in request.filters.items():
                 if values and len(values) > 0:
+                    # Strip spaces from filter values for consistent comparison
+                    cleaned_values = []
+                    for value in values:
+                        if isinstance(value, str):
+                            cleaned_values.append(value.strip())
+                        else:
+                            cleaned_values.append(value)
                     # Use ANY for better performance with indexes
-                    placeholders = ','.join([f"'{v}'" for v in values])
+                    placeholders = ','.join([f"'{v}'" for v in cleaned_values])
                     where_conditions.append(f"{column} = ANY(ARRAY[{placeholders}])")
         
         if request.comparison_filters:
@@ -382,7 +396,14 @@ class InvoiceItemController:
                 for column, values in request.filters.items():
                     if values:
                         attr = getattr(InvoiceItem, column)
-                        query = query.filter(attr.in_(values))
+                        # Strip spaces from filter values for consistent comparison
+                        cleaned_values = []
+                        for value in values:
+                            if isinstance(value, str):
+                                cleaned_values.append(value.strip())
+                            else:
+                                cleaned_values.append(value)
+                        query = query.filter(attr.in_(cleaned_values))
             
             total = query.count()
             items = query.offset((page - 1) * size).limit(size).all()
@@ -454,17 +475,25 @@ class InvoiceItemController:
                 # No need to remove suffixes anymore
                 pass
             
+            # Strip spaces from filter values for consistent comparison
+            cleaned_values = []
+            for value in values:
+                if isinstance(value, str):
+                    cleaned_values.append(value.strip())
+                else:
+                    cleaned_values.append(value)
+            
             # Optimize large IN clauses
-            if len(values) > 1000:
+            if len(cleaned_values) > 1000:
                 # Split into smaller batches for better database performance
                 batch_conditions = []
                 batch_size = 1000
-                for i in range(0, len(values), batch_size):
-                    batch_values = values[i:i + batch_size]
+                for i in range(0, len(cleaned_values), batch_size):
+                    batch_values = cleaned_values[i:i + batch_size]
                     batch_conditions.append(column.in_(batch_values))
                 query = query.filter(or_(*batch_conditions))
             else:
-                query = query.filter(column.in_(values))
+                query = query.filter(column.in_(cleaned_values))
         
         # Apply comparison filters
         for comp_filter in request.comparison_filters:
@@ -1179,17 +1208,25 @@ class InvoiceItemController:
                 
             filter_column = getattr(InvoiceItem, filter_col_name)
             
+            # Strip spaces from filter values for consistent comparison
+            cleaned_values = []
+            for value in values:
+                if isinstance(value, str):
+                    cleaned_values.append(value.strip())
+                else:
+                    cleaned_values.append(value)
+            
             # Use more efficient IN clause with batch processing for large value lists
-            if len(values) > 1000:  # For very large filter lists, use batch processing
+            if len(cleaned_values) > 1000:  # For very large filter lists, use batch processing
                 # Split into smaller batches to avoid SQL query limits
                 batch_conditions = []
                 batch_size = 1000
-                for i in range(0, len(values), batch_size):
-                    batch_values = values[i:i + batch_size]
+                for i in range(0, len(cleaned_values), batch_size):
+                    batch_values = cleaned_values[i:i + batch_size]
                     batch_conditions.append(filter_column.in_(batch_values))
                 query = query.filter(or_(*batch_conditions))
             else:
-                query = query.filter(filter_column.in_(values))
+                query = query.filter(filter_column.in_(cleaned_values))
                 
         return query
     
@@ -1238,7 +1275,7 @@ class InvoiceItemController:
             logger.info(f"Getting price history for item: {request.item_number}, "
                        f"vendor: {request.vendor}")
             
-            # Clean and prepare search terms
+            # Clean and prepare search terms - strip spaces from both item and vendor
             original_item = request.item_number.strip()
             original_vendor = request.vendor.strip()
             
@@ -1340,7 +1377,16 @@ class InvoiceItemController:
                 raise HTTPException(status_code=400, detail=f"Invalid column name: {column_name}")
 
             column = getattr(InvoiceItem, column_name)
-            query = query.filter(column.in_(values))
+            
+            # Strip spaces from filter values for consistent comparison
+            cleaned_values = []
+            for value in values:
+                if isinstance(value, str):
+                    cleaned_values.append(value.strip())
+                else:
+                    cleaned_values.append(value)
+            
+            query = query.filter(column.in_(cleaned_values))
 
         # applying comparison (>,<= etc) filters
         for comp_filter in request.comparison_filters:

@@ -168,7 +168,8 @@ class MonthlyComparisonController:
         """
         try:
             db = self._get_db_session()
-            search_term = (search_term or '').upper().strip()
+            # Strip spaces from search term and convert to uppercase
+            search_term = (search_term or '').strip().upper()
             
             if not search_term or len(search_term) < 1:
                 return PaginatedItemInfoResponse(

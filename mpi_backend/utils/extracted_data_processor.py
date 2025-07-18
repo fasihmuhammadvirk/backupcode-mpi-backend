@@ -202,7 +202,7 @@ def search_replace(row, temp_items, item_mappings, db):
     """
     from mpi_backend.utils.mapping_validators import is_temporary_mapping
 
-    original_item = row['Item']  # Clean supplier_item_ids from invoice
+    original_item = row['Item'].strip()  # Clean supplier_item_ids from invoice and strip spaces
     supplier_id, _ = extract_supplier_id(row['Vendor'])
 
     # FIRST: Search in permanent mappings (supplier_item_mappings table)

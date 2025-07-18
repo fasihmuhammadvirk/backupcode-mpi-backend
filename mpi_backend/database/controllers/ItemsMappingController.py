@@ -129,6 +129,9 @@ class ItemsMappingController:
         try:
             matches = []
             
+            # Strip spaces from the search term
+            clean_item = clean_item.strip()
+            
             # Use the new session method instead of checking callable
             db = self._get_db_session()
             # Get only valid permanent mappings from all suppliers (exclude temporary ones)

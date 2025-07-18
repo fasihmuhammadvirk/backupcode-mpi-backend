@@ -83,7 +83,7 @@ def search_replace(row, temp_items, item_mappings):
     
     Note: Invoice data is clean, but database mapping data has suffixes that need cleaning.
     """
-    original_item = row['Item']  # This is the CLEAN supplier_item_ids from invoice
+    original_item = row['Item'].strip()  # This is the CLEAN supplier_item_ids from invoice, strip spaces
     supplier_id, _ = extract_supplier_id(row['Vendor'])
     
     # Searching in temp_items (temporary_item_mappings table)
