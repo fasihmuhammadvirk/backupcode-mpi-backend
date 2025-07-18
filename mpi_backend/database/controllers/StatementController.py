@@ -1,7 +1,7 @@
 from datetime import datetime, date
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, select
 from math import ceil
 import pandas as pd
 # Setup temporary directory for reprocessing
@@ -1547,12 +1547,9 @@ class StatementController:
                 if supplier_conditions:
                     system_query = system_query.filter(or_(*supplier_conditions))
             
-            # Exclude system invoices that are already in statement data to avoid duplicates
-            statement_invoice_numbers = [plumbing_invoice.invoice_number for plumbing_invoice, _, _ in statement_results]
-            if statement_invoice_numbers:
-                system_query = system_query.filter(
-                    ~InvoiceItem.ref_no.in_(statement_invoice_numbers)
-                )
+            # Exclude invoices that exist in statement data (PlumbingInvoice)
+            subquery = self.db.query(PlumbingInvoice.invoice_number).subquery()
+            system_query = system_query.filter(~InvoiceItem.ref_no.in_(select(subquery.c.invoice_number)))
             
             # Get system results
             system_results = system_query.all()
@@ -1706,7 +1703,7 @@ class StatementController:
             
             # Exclude invoices that exist in statement data (PlumbingInvoice)
             subquery = self.db.query(PlumbingInvoice.invoice_number).subquery()
-            query = query.filter(~InvoiceItem.ref_no.in_(subquery))
+            query = query.filter(~InvoiceItem.ref_no.in_(select(subquery.c.invoice_number)))
             
             # Get total count for pagination
             total_count = query.count()

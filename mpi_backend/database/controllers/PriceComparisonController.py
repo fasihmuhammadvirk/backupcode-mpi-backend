@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, desc, asc, func
+from sqlalchemy import and_, or_, desc, asc, func, text
 from typing import List, Optional, Dict, Any, Union
 from datetime import date, datetime
 import logging
@@ -362,7 +362,7 @@ class PriceComparisonController:
                 )
             
             # Use optimized SQL query to get all price data at once
-            price_query = func.text("""
+            price_query = text("""
                 WITH supplier_prices AS (
                     SELECT 
                         ii.mpi_item,

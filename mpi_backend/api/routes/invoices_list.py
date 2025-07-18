@@ -54,7 +54,9 @@ def get_invoices(
         )
         # Safely log the number of invoices
         try:
-            if hasattr(invoices, 'items') and invoices.items is not None:
+            if isinstance(invoices, dict) and 'items' in invoices:
+                invoice_count = len(invoices['items'])
+            elif hasattr(invoices, 'items') and not callable(invoices.items):
                 invoice_count = len(invoices.items)
             elif hasattr(invoices, '__len__'):
                 invoice_count = len(invoices)
