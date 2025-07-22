@@ -747,131 +747,126 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
     update_progress(operation_id, "aggregating", 70,
                     "Aggregating data for QuickBooks export")
 
-    # CRITICAL FIX: ONE ROW PER INVOICE ONLY
-    # Group by ref_no ONLY to ensure single row per invoice
-    agg_start = time.time()
-
-    # STEP 1: Determine the primary account for each invoice
-    # Use the account with the highest total amount as primary account
-    account_totals = df.groupby(['ref_no', 'account'])['amount'].sum().reset_index()
-    
-    # Find the account with max amount for each invoice
-    primary_accounts = account_totals.loc[
-        account_totals.groupby('ref_no')['amount'].idxmax()
-    ][['ref_no', 'account']].set_index('ref_no')['account'].to_dict()
-    
-    # STEP 2: Aggregate by ref_no ONLY (one row per invoice)
-    batch_entry = df.groupby('ref_no', as_index=False).agg({
-        'amount': 'sum',  # Sum ALL amounts for the invoice
-        'tax_amount': 'first',  # Tax is per invoice
-        'date': 'first',
-        'vendor': 'first',
-        'memo': 'first',
-        'class_': 'first',
-        'customer_job': 'first'
-    })
-
-    # STEP 3: Assign primary account to each invoice
-    batch_entry['account'] = batch_entry['ref_no'].map(primary_accounts)
-    
-    # STEP 4: Add tax once per invoice (no proportional distribution needed)
-    batch_entry['amount'] = (
-        batch_entry['amount'] + batch_entry['tax_amount'])
-
-    # CLASS PRESERVATION LOGIC (ENSURES NO CLASS INFO IS LOST)
-    # This ensures that ANY class value from items within an invoice
-    # appears in the Excel Class column - NEVER leave it blank if ANY
-    # item has a class!
-
-    # Build comprehensive class mapping including tax items
-    invoice_to_classes = {}
-
-    # Get classes from regular items
-    for _, row in df.iterrows():
-        invoice_id = row['invoice_id']
-        class_val = row['class_']
-        if class_val and str(class_val).strip():
-            if invoice_id not in invoice_to_classes:
-                invoice_to_classes[invoice_id] = []
-            # Only add if not already present
-            if str(class_val).strip() not in invoice_to_classes[invoice_id]:
-                invoice_to_classes[invoice_id].append(str(class_val).strip())
-
-    # Add classes from tax items
-    for invoice_id, classes in tax_item_classes.items():
-        if invoice_id not in invoice_to_classes:
-            invoice_to_classes[invoice_id] = []
-        for class_val in classes:
-            if class_val and str(class_val).strip():
-                # Only add if not already present
-                class_str = str(class_val).strip()
-                if class_str not in invoice_to_classes[invoice_id]:
-                    invoice_to_classes[invoice_id].append(class_str)
-
-    # Apply class priority logic for final class column
-    # Priority: A > L > other classes (show multiple if different) > empty
-    def get_invoice_final_class(ref_no):
-        # Find invoice_id for this ref_no
-        matching_invoices = df[df['ref_no'] == ref_no]['invoice_id'].unique()
-        if len(matching_invoices) == 0:
-            return ''
-
-        invoice_id = matching_invoices[0]
-        classes = invoice_to_classes.get(invoice_id, [])
-
-        if not classes:
-            return ''
-
-        # Priority logic: A > L > show all other classes
-        if 'A' in classes:
-            return 'A'
-        elif 'L' in classes:
-            return 'L'
+    # --- NEW BUSINESS LOGIC START ---
+    # For each invoice, split by category (Material/Equipment) and class, allocate tax proportionally
+    result_rows = []
+    for invoice_id, invoice_items in df.groupby('invoice_id'):
+        ref_no = invoice_items['ref_no'].iloc[0]
+        date = invoice_items['date'].iloc[0]
+        vendor = invoice_items['vendor'].iloc[0]
+        memo = invoice_items['memo'].iloc[0]
+        customer_job = invoice_items['customer_job'].iloc[0]
+        tax_amount = invoice_items['tax_amount'].iloc[0]
+        # Fetch the authoritative invoice total (including tax) from the DB
+        from mpi_backend.database.models import Invoice
+        db_invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        if db_invoice and hasattr(db_invoice, 'amount') and db_invoice.amount is not None:
+            authoritative_total = float(db_invoice.amount)
         else:
-            # For other classes, show all of them (comma-separated)
-            # or pick the first one based on your preference
-            non_al_classes = [c for c in classes if c not in ['A', 'L']]
-            if non_al_classes:
-                # Option 1: Show all classes (comma-separated)
-                sorted_classes = sorted(set(non_al_classes))
-                return ', '.join(sorted_classes)
-                # Option 2: Show just the first one (uncomment below)
-                # return non_al_classes[0]
+            # Fallback: use item_total + tax_amount as before
+            authoritative_total = invoice_items['amount'].sum() + tax_amount
+        # For class preservation logic
+        all_classes = invoice_items['class_'].dropna().unique().tolist()
+        # Determine category for each item
+        def get_category(row):
+            sheet_name = row['sheet_name']
+            return classification_controller.get_classification(sheet_name)
+        invoice_items = invoice_items.copy()
+        invoice_items['category'] = invoice_items.apply(get_category, axis=1)
+        def cat_label(cat):
+            if 'Equipments' in cat or 'Equipment' in cat:
+                return 'E'
+            elif 'Material' in cat:
+                return 'M'
             else:
-                # Fallback: return first class found
-                return classes[0]
-
-    # Apply the class logic to batch_entry
-    batch_entry['class_'] = batch_entry['ref_no'].apply(
-        get_invoice_final_class)
-
-    # Log class preservation statistics
-    total_invoices = len(batch_entry)
-    invoices_with_classes = len(batch_entry[batch_entry['class_'] != ''])
-    logger.info(
-        f"Class preservation: {invoices_with_classes}/{total_invoices} "
-        f"invoices have class values preserved"
-    )
-
-    # FAST formatting
-    batch_entry['date'] = (
-        pd.to_datetime(batch_entry['date'], errors='coerce')
-        .dt.strftime('%m/%d/%Y')
-    )
-    batch_entry['terms'] = ''
-    batch_entry['bill due'] = ''
-
-    # Column mapping
-    final_batch_entry = batch_entry.rename(columns={
-        'date': 'Date', 'ref_no': 'Ref', 'amount': 'Amount',
-        'customer_job': 'Customer Job', 'class_': 'Class', 'memo': 'Memo'
-    })[[
+                return 'O'
+        invoice_items['cat_group'] = invoice_items['category'].apply(cat_label)
+        invoice_items = invoice_items[invoice_items['cat_group'].isin(['M', 'E'])]
+        group_cols = ['cat_group', 'class_']
+        grouped = list(invoice_items.groupby(group_cols))
+        item_total = invoice_items['amount'].sum()
+        tax_pct = (tax_amount / item_total) if item_total else 0
+        split_totals = []
+        for (cat, class_val), group in grouped:
+            group_amount = group['amount'].sum()
+            group_tax = group_amount * tax_pct
+            group_total = group_amount + group_tax
+            split_totals.append((cat, class_val, group, group_total))
+        invoice_lines = []
+        running_sum = 0
+        for i, (cat, class_val, group, group_total) in enumerate(split_totals):
+            group_account = ''
+            if class_val == 'A':
+                group_account = 'UnInvoiced JIP:Material:Additional Material'
+            elif class_val == 'L':
+                group_account = 'UnInvoiced JIP:Subcontractors Expense:Labor'
+            else:
+                sheet_accounts = group['sheet_name'].map(classification_cache.get).dropna().unique()
+                if len(sheet_accounts) > 0 and sheet_accounts[0]:
+                    group_account = sheet_accounts[0]
+                else:
+                    mpi_mappings = {
+                        'UIDI-Job Materials Purchased': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased',
+                        'UIDI-Job Equipment': 'UnInvoiced JIP:Cost Of Materials:Job Equipments Purchased',
+                        'UIDI-Sprinkler specialty item': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased',
+                        'UIDI-Drainage Material': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
+                    }
+                    mpi_items = group['mpi_item'].dropna().unique()
+                    found_mpi = False
+                    for mpi_item in mpi_items:
+                        if mpi_item in mpi_mappings:
+                            group_account = mpi_mappings[mpi_item]
+                            found_mpi = True
+                            break
+                    if not found_mpi:
+                        if cat == 'E':
+                            group_account = 'UnInvoiced JIP:Cost Of Materials:Job Equipments Purchased'
+                        elif cat == 'M':
+                            group_account = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
+            if i < len(split_totals) - 1:
+                rounded_total = round(group_total, 4)
+                running_sum += rounded_total
+            else:
+                rounded_total = round(authoritative_total - running_sum, 4)
+            invoice_lines.append({
+                'Date': pd.to_datetime(date, errors='coerce').strftime('%m/%d/%Y') if pd.notnull(date) else '',
+                'Ref': ref_no,
+                'vendor': vendor,
+                'terms': '',
+                'bill due': '',
+                'account': group_account,
+                'Amount': rounded_total,
+                'Memo': memo,
+                'Customer Job': customer_job,
+                'Class': class_val or '',
+            })
+        # If more than one account line, add total line
+        result_rows.extend(invoice_lines)
+        if len(invoice_lines) > 1:
+            result_rows.append({
+                'Date': pd.to_datetime(date, errors='coerce').strftime('%m/%d/%Y') if pd.notnull(date) else '',
+                'Ref': ref_no,
+                'vendor': vendor,
+                'terms': '',
+                'bill due': '',
+                'account': '',
+                'Amount': round(authoritative_total, 4),
+                'Memo': memo,
+                'Customer Job': customer_job,
+                'Class': '',
+            })
+    # Compose final DataFrame
+    final_batch_entry = pd.DataFrame(result_rows)[[
         'Date', 'Ref', 'vendor', 'terms', 'bill due',
         'account', 'Amount', 'Memo', 'Customer Job', 'Class'
     ]]
+    # --- NEW BUSINESS LOGIC END ---
+
+    # Remove obsolete batch_entry formatting and column mapping
+    # (No need to reformat final_batch_entry, it is already in correct format)
 
     logger.info(
-        f"Aggregation completed in {time.time() - agg_start:.3f}s for "
+        f"Aggregation completed in {time.time() - vectorized_start:.3f}s for "
         f"{len(final_batch_entry)} rows"
     )
 

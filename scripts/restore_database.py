@@ -12,7 +12,7 @@ Usage:
     python scripts/restore_database.py [--backup-file path/to/backup.sql] [--force]
 
 Options:
-    --backup-file: Path to the backup SQL file (default: backups/mpi_backend_db_backup.sql)
+    --backup-file: Path to the backup SQL file (default: database backups/mpi_backend_db_backup.sql)
     --force: Skip confirmation prompts
 """
 
@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 class DatabaseRestorer:
     def __init__(self, backup_file=None, force=False):
-        self.backup_file = backup_file or "backups/mpi_backend_db_backup.sql"
+        self.backup_file = backup_file or "database backups/mpi_backend_db_backup.sql"
         self.force = force
         
         # Database connection parameters
@@ -276,8 +276,8 @@ def main():
     parser = argparse.ArgumentParser(description="Restore MPI Backend database from backup")
     parser.add_argument(
         "--backup-file",
-        default="backups/mpi_backend_db_backup.sql",
-        help="Path to the backup SQL file (default: backups/mpi_backend_db_backup.sql)"
+        default="database backups/mpi_backend_db_backup.sql",
+        help="Path to the backup SQL file (default: database backups/mpi_backend_db_backup.sql)"
     )
     parser.add_argument(
         "--force",
