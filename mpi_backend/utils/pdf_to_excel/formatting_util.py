@@ -500,3 +500,27 @@ def export_price_history_to_excel(price_history, output_dir="mpi_backend/storage
         worksheet.autofilter(0, 0, len(df.index), len(df.columns))
 
     return file_path
+
+
+def save_ultra_fast_excel(final_df, output_path):
+    """
+    Ultra-fast Excel export: no formatting except invoice total rows (where 'account' is empty) get a distinct background color.
+    Args:
+        final_df: DataFrame to export
+        output_path: Output file path
+    """
+    try:
+        with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
+            final_df.to_excel(writer, sheet_name='Exported Data', index=False)
+            workbook = writer.book
+            worksheet = writer.sheets['Exported Data']
+            # Find rows where 'account' is empty (invoice total rows)
+            if 'account' in final_df.columns:
+                total_rows = final_df.index[final_df['account'] == ''].tolist()
+                if total_rows:
+                    total_format = workbook.add_format({'bg_color': '#FFD966'})  # Light yellow
+                    for row in total_rows:
+                        worksheet.set_row(row + 1, None, total_format)  # +1 for header
+    except Exception as e:
+        print(f"Error in ultra fast Excel export: {e}")
+        final_df.to_excel(output_path, index=False)

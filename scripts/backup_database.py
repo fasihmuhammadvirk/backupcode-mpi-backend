@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 class PythonDatabaseBackup:
     def __init__(self):
         self.project_root = project_root
-        self.backup_dir = project_root / 'backups'
+        self.backup_dir = project_root / 'database backups'
         self.logs_dir = project_root / 'logs'
         
         # Database configuration from environment
@@ -324,7 +324,7 @@ def main():
         
         if success:
             print("\n✅ Database backup completed successfully!")
-            print("📁 Backup file: backups/mpi_backend_db_backup.sql")
+            print("📁 Backup file: database backups/mpi_backend_db_backup.sql")
             print("📄 Latest backup copy: mpi_backend_db_copy.sql")
             print("🐍 This backup was created using Python libraries (no pg_dump required)")
             print("🔄 Previous backup was overwritten")

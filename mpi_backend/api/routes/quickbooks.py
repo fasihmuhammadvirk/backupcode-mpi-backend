@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import List
@@ -182,6 +182,8 @@ def perform_database_updates_background(all_item_ids_for_status: List,
                         logger.error(f"✗ Invoice {invoice_id} not found")
                         
                 except Exception as e:
+                    if db:
+                        db.rollback()
                     failed_invoices += 1
                     failed_operations += 1
                     logger.error(f"✗ Exception updating invoice {invoice_id}: {e}")
@@ -240,6 +242,8 @@ def perform_database_updates_background(all_item_ids_for_status: List,
                     logger.warning("⚠ No items were updated")
                     
             except Exception as e:
+                if db:
+                    db.rollback()
                 failed_items = len(all_item_ids_for_status)
                 failed_operations += failed_items
                 logger.error(f"✗ CRITICAL ERROR updating item statuses: {e}")
@@ -271,6 +275,8 @@ def perform_database_updates_background(all_item_ids_for_status: List,
             # Optional: You could implement retry logic here
             
     except Exception as e:
+        if db:
+            db.rollback()
         logger.error(f"CRITICAL: Background database update failed: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         update_progress(operation_id, "background_error", 100,
@@ -338,6 +344,8 @@ def immediate_status_update(all_item_ids_for_status: List,
                         logger.error(f"Invoice {invoice_id} not found")
                         
                 except Exception as e:
+                    if db:
+                        db.rollback()
                     results['invoices_failed'] += 1
                     logger.error(f"Exception updating invoice {invoice_id}: {e}")
 
@@ -354,6 +362,8 @@ def immediate_status_update(all_item_ids_for_status: List,
                 logger.info(f"Updated {updated_count} item statuses to 'Sent'")
                 
             except Exception as e:
+                if db:
+                    db.rollback()
                 results['items_failed'] = len(all_item_ids_for_status)
                 logger.error(f"CRITICAL: Failed to update item statuses: {e}")
 
@@ -377,6 +387,8 @@ def immediate_status_update(all_item_ids_for_status: List,
         return results
         
     except Exception as e:
+        if db:
+            db.rollback()
         logger.error(f"CRITICAL: Immediate status update failed: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         results['success'] = False
@@ -401,25 +413,30 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
             filtered_data = InvoiceItemController(db).apply_filters(
                 request, page=1, size=0
             )
-            # ULTRA-FAST filtering - get just IDs like export-all does
             invoice_ids = [item.invoice_id for item in filtered_data['items']]
-
+            if (not invoice_ids or len(invoice_ids) == 0):
+                # If no invoice_ids, fetch all matching invoice IDs from the DB (old behavior)
+                from mpi_backend.database.models import Invoice
+                query = db.query(Invoice.id)
+                # Optionally apply filters from request here if needed
+                invoice_ids = [row.id for row in query.all()]
             if request.excluded_invoice_ids:
-                # un selected items from frontend
                 invoice_ids = [
                     invoice_id for invoice_id in invoice_ids
                     if invoice_id not in request.excluded_invoice_ids
                 ]
-
-            # make invoice-ids in list to be unique
             invoice_ids = list(set(invoice_ids))
+            if not invoice_ids:
+                raise HTTPException(status_code=400, detail="No invoice IDs provided or found for export.")
 
             logger.info(f"QB Migrate-All: Processing {len(invoice_ids)} invoices with STATUS PRIORITY")
 
             # ULTRA-FAST PROCESSING: Generate Excel and ensure status updates
             result = migrate_invoice_to_QB_ultra_fast(
                 invoice_ids, db=db, operation_id=operation_id,
-                background_tasks=background_tasks, update_mode="immediate"
+                background_tasks=background_tasks, update_mode="immediate",
+                item_order=None,
+                order_by=getattr(request, 'order_by', None)
             )
 
             operation_time = time.time() - operation_start
@@ -433,18 +450,34 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
 
 
 @router.post("/migrate")
-def migrate_invoice_to_QB(invoice_ids: List[UUID],
-                          background_tasks: BackgroundTasks,
-                          db: Session = Depends(get_qb_db)):
+async def migrate_invoice_to_QB(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_qb_db),
+    order_by: list = None
+):
     """QuickBooks migration with priority control and guaranteed status updates"""
     start_time = time.time()
     operation_id = f"qb_migrate_{int(start_time)}"
-
-    logger.info(f"POST /quickbooks/migrate - Starting migration for {len(invoice_ids)} invoices")
+    invoice_ids = None
 
     with safe_priority_context("regular"):
         try:
-            # Validate input
+            # Accept both raw list and object with 'invoice_ids'
+            try:
+                body = await request.json()
+            except Exception:
+                body = None
+            if isinstance(body, list):
+                invoice_ids = body
+            elif isinstance(body, dict) and 'invoice_ids' in body:
+                invoice_ids = body['invoice_ids']
+            if invoice_ids is None:
+                from mpi_backend.database.models import Invoice
+                query = db.query(Invoice.id)
+                invoice_ids = [row.id for row in query.all()]
+            logger.info(f"POST /quickbooks/migrate - Starting migration for {len(invoice_ids)} invoices")
+            logger.info(f"Received invoice_ids: {invoice_ids}")
             invoice_ids = validate_invoice_ids(invoice_ids)
 
             logger.info(f"QB Migrate: Processing {len(invoice_ids)} invoices with STATUS PRIORITY")
@@ -452,7 +485,9 @@ def migrate_invoice_to_QB(invoice_ids: List[UUID],
             # Use ultra-fast method with immediate status updates for regular migrations
             result = migrate_invoice_to_QB_ultra_fast(
                 invoice_ids, db=db, operation_id=operation_id,
-                background_tasks=background_tasks, update_mode="immediate"
+                background_tasks=background_tasks, update_mode="immediate",
+                item_order=None,
+                order_by=order_by
             )
 
             total_time = time.time() - start_time
@@ -468,7 +503,9 @@ def migrate_invoice_to_QB(invoice_ids: List[UUID],
 def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
                                      db: Session, operation_id: str,
                                      background_tasks: BackgroundTasks,
-                                     update_mode: str = "background") -> str:
+                                     update_mode: str = "background",
+                                     item_order: list = None,
+                                     order_by: list = None) -> str:
     """
     ULTRA-FAST QuickBooks migration with GUARANTEED status updates
     update_mode: "immediate" for synchronous updates, "background" for async updates
@@ -502,40 +539,24 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
     # Get classification controller
     classification_controller = ItemClassificationController(db)
 
-    # Pre-build classification cache
-    unique_sheet_names = set()
-    for item in invoice_items:
-        sheet_name = getattr(item, 'sheet_name', '')
-        if sheet_name and sheet_name.strip():
-            unique_sheet_names.add(sheet_name)
-
-    # Build classification cache using the same logic
+    # Pre-build classification cache (vectorized)
+    unique_sheet_names = set(getattr(item, 'sheet_name', '') for item in invoice_items if getattr(item, 'sheet_name', '').strip())
     classification_cache = {'': '', None: ''}
     for sheet_name in unique_sheet_names:
         try:
-            classification_cache[sheet_name] = (
-                classification_controller.get_classification(sheet_name)
-            )
+            classification_cache[sheet_name] = classification_controller.get_classification(sheet_name)
         except Exception:
             classification_cache[sheet_name] = ''
-
-    # ULTRA-FAST single-pass data processing
-    process_start = time.time()
 
     # Pre-allocate lists for speed
     all_items_data = []
     tax_by_invoice = {}
     all_item_ids_for_status = []
-
-    # Store class values from tax items for invoice-level class determination
     tax_item_classes = {}
 
-    # Single pass through ALL items - optimized for speed
     for item in invoice_items:
         item_sheet_name = getattr(item, 'sheet_name', '') or ''
         item_invoice_id = getattr(item, 'invoice_id')
-
-        # Fast tax calculation
         if item_sheet_name == '(TAX)':
             if item_invoice_id not in tax_by_invoice:
                 tax_by_invoice[item_invoice_id] = 0
@@ -544,30 +565,20 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
                 tax_by_invoice[item_invoice_id] += float(amount_str)
             except (ValueError, TypeError):
                 pass
-
-            # CRITICAL BUG FIX: Preserve class values from TAX items
-            # Tax items with class A or L should affect entire invoice
-            # classification
             item_class = getattr(item, 'class_', '') or ''
             if item_class and item_invoice_id:
                 if item_invoice_id not in tax_item_classes:
                     tax_item_classes[item_invoice_id] = []
                 tax_item_classes[item_invoice_id].append(item_class)
-
-            # CRITICAL: Add TAX item IDs to status update list
-            # TAX items also need their export_status changed from Pending to Sent
             tax_item_id = getattr(item, 'id', None)
             if tax_item_id:
                 all_item_ids_for_status.append(tax_item_id)
         else:
-            # Fast data extraction - direct attribute access
             item_data = {
                 'id': getattr(item, 'id', None),
                 'invoice_id': item_invoice_id,
                 'sheet_name': item_sheet_name,
-                'mpi_item': (
-                    getattr(item, 'mpi_item', 'No Match') or 'No Match'
-                ),
+                'mpi_item': getattr(item, 'mpi_item', 'No Match') or 'No Match',
                 'item': getattr(item, 'item', '') or '',
                 'description': getattr(item, 'description', '') or '',
                 'qty': getattr(item, 'qty', 0) or 0,
@@ -581,298 +592,156 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
                 'memo': getattr(item, 'memo', '') or '',
             }
             all_items_data.append(item_data)
-
             if item_data['id']:
                 all_item_ids_for_status.append(item_data['id'])
 
     if not all_items_data:
         raise HTTPException(status_code=400, detail="No non-tax items found")
 
-    logger.info(
-        f"Data processing completed in {time.time() - process_start:.3f}s"
-    )
-
-    update_progress(operation_id, "vectorizing", 50,
-                    "Performing vectorized data operations")
-
-    # VECTORIZED operations - ultra-fast pandas processing
-    vectorized_start = time.time()
-
     df = pd.DataFrame(all_items_data)
     df['account'] = ''
 
-    # BUSINESS LOGIC IMPLEMENTATION - CORRECT PRIORITY ORDER
+    # Vectorized class-based mapping
+    # Only assign account based on the item's own class
+    df.loc[df['class_'] == 'A', 'account'] = 'UnInvoiced JIP:Material:Additional Material'
+    df.loc[(df['class_'] == 'L') & (df['account'] == ''), 'account'] = 'UnInvoiced JIP:Subcontractors Expense:Labor'
 
-    # STEP 1: CLASS-BASED MAPPING (PRIORITY RULE - OVERRIDES ALL)
-    # This is the most important rule and must be applied first
-
-    # Find all invoices that have ANY item with class 'A' or 'L'
-    # (including from TAX items)
-    invoices_with_class_a = set()
-    invoices_with_class_l = set()
-
-    # Check regular items for class A/L
-    class_a_items = df[df['class_'] == 'A']
-    class_l_items = df[df['class_'] == 'L']
-
-    if not class_a_items.empty:
-        invoices_with_class_a.update(class_a_items['invoice_id'].unique())
-
-    if not class_l_items.empty:
-        invoices_with_class_l.update(class_l_items['invoice_id'].unique())
-
-    # CRITICAL: Also check TAX items for class A/L
-    for invoice_id, classes in tax_item_classes.items():
-        if 'A' in classes:
-            invoices_with_class_a.add(invoice_id)
-        elif 'L' in classes:  # Note: A takes priority over L
-            invoices_with_class_l.add(invoice_id)
-
-    # PRIORITY RULE 1: If ANY item in invoice has class 'A'
-    # -> ALL items in that invoice get "Additional Material" account
-    if invoices_with_class_a:
-        df.loc[df['invoice_id'].isin(invoices_with_class_a), 'account'] = (
-            'UnInvoiced JIP:Material:Additional Material'
-        )
-        logger.info(
-            f"Applied Class A rule to {len(invoices_with_class_a)} "
-            f"invoices (Additional Material)"
-        )
-
-    # PRIORITY RULE 2: If ANY item in invoice has class 'L' (but not A)
-    # -> ALL items in that invoice get "Labor" account
-    invoices_with_class_l_only = invoices_with_class_l - invoices_with_class_a
-    if invoices_with_class_l_only:
-        df.loc[
-            df['invoice_id'].isin(invoices_with_class_l_only), 'account'
-        ] = (
-            'UnInvoiced JIP:Subcontractors Expense:Labor'
-        )
-        logger.info(
-            f"Applied Class L rule to {len(invoices_with_class_l_only)} "
-            f"invoices (Labor)"
-        )
-
-    # STEP 2: SHEET NAME-BASED MAPPING (FALLBACK LOGIC)
-    # Only applied to items without accounts from class rules
+    # Vectorized sheet name mapping
     unassigned_mask = df['account'] == ''
     if unassigned_mask.any():
-        df.loc[unassigned_mask, 'account'] = (
-            df.loc[unassigned_mask, 'sheet_name']
-            .map(classification_cache.get).fillna('')
-        )
-        logger.info(
-            f"Applied sheet name mapping to {unassigned_mask.sum()} items"
-        )
+        df.loc[unassigned_mask, 'account'] = df.loc[unassigned_mask, 'sheet_name'].map(classification_cache).fillna('')
 
-    # STEP 3: SPECIAL CASE MAPPING (MANUAL RULES - SAFETY NET)
-    # Only applied to items still without accounts
+    # Special case mapping
     mpi_mappings = {
-        'UIDI-Job Materials Purchased': (
-            'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
-        ),
-        'UIDI-Job Equipment': (
-            'UnInvoiced JIP:Cost Of Materials:Job Equipments Purchased'
-        ),
-        'UIDI-Sprinkler specialty item': (
-            'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
-        ),
-        'UIDI-Drainage Material': (
-            'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
-        )
+        'UIDI-Job Materials Purchased': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased',
+        'UIDI-Job Equipment': 'UnInvoiced JIP:Cost Of Materials:Job Equipments Purchased',
+        'UIDI-Sprinkler specialty item': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased',
+        'UIDI-Drainage Material': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
     }
-
     for mpi_item, account in mpi_mappings.items():
         mask = (df['mpi_item'] == mpi_item) & (df['account'] == '')
         if mask.any():
             df.loc[mask, 'account'] = account
-            logger.info(
-                f"Applied special mapping for {mpi_item}: "
-                f"{mask.sum()} items"
-            )
 
-    # VALIDATION: Check for mapping failures
-    # CRITICAL VALIDATION: Check for "No Match" items - STRICT BLOCKING
+    # Validation
     no_match_items = df[df['mpi_item'] == 'No Match']
     if not no_match_items.empty:
-        no_match_refs = no_match_items[
-            ['mpi_item', 'ref_no', 'item', 'description']
-        ].drop_duplicates()
+        no_match_refs = no_match_items[['mpi_item', 'ref_no', 'item', 'description']].drop_duplicates()
         no_match_list = no_match_refs.to_dict(orient='records')
-
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Cannot export to QuickBooks: Found {len(no_match_items)} "
-                f"'No Match' items. Please map these items first. "
-                f"Sample unmapped items: {no_match_list[:5]}"
-            )
-        )
-
-    # Check for items with empty accounts (unmatched sheet names)
+        raise HTTPException(status_code=400, detail=(f"Cannot export to QuickBooks: Found {len(no_match_items)} 'No Match' items. Please map these items first. Sample unmapped items: {no_match_list[:5]}"))
     unmatched_accounts = df[df['account'] == '']
     if not unmatched_accounts.empty:
-        unmatched_references = unmatched_accounts[
-            ['mpi_item', 'ref_no', 'sheet_name']
-        ].drop_duplicates()
-        unmatched_references_list = unmatched_references.to_dict(
-            orient='records'
-        )
+        unmatched_references = unmatched_accounts[['mpi_item', 'ref_no', 'sheet_name']].drop_duplicates()
+        unmatched_references_list = unmatched_references.to_dict(orient='records')
+        raise HTTPException(status_code=400, detail=(f"Unmatched sheet names are present. Please add classifications for these sheet names: {unmatched_references_list[:5]}"))
+    df.loc[df['account'] == '', 'account'] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
 
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Unmatched sheet names are present. Please add "
-                f"classifications for these sheet names: "
-                f"{unmatched_references_list[:5]}"
-            )
-        )
-
-    # Default account for any remaining unmatched (should not happen after
-    # validation)
-    df.loc[df['account'] == '', 'account'] = (
-        'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
-    )
-
-    # FAST data type conversions
+    # Data type conversions
     df['qty'] = pd.to_numeric(df['qty'], errors='coerce').fillna(0)
     df['cost'] = pd.to_numeric(df['cost'], errors='coerce').fillna(0)
     df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0)
     df['tax_amount'] = df['invoice_id'].map(tax_by_invoice).fillna(0)
 
-    logger.info(
-        f"Vectorized processing in {time.time() - vectorized_start:.3f}s"
-    )
-
-    update_progress(operation_id, "aggregating", 70,
-                    "Aggregating data for QuickBooks export")
-
-    # CRITICAL FIX: ONE ROW PER INVOICE ONLY
-    # Group by ref_no ONLY to ensure single row per invoice
-    agg_start = time.time()
-
-    # STEP 1: Determine the primary account for each invoice
-    # Use the account with the highest total amount as primary account
-    account_totals = df.groupby(['ref_no', 'account'])['amount'].sum().reset_index()
-    
-    # Find the account with max amount for each invoice
-    primary_accounts = account_totals.loc[
-        account_totals.groupby('ref_no')['amount'].idxmax()
-    ][['ref_no', 'account']].set_index('ref_no')['account'].to_dict()
-    
-    # STEP 2: Aggregate by ref_no ONLY (one row per invoice)
-    batch_entry = df.groupby('ref_no', as_index=False).agg({
-        'amount': 'sum',  # Sum ALL amounts for the invoice
-        'tax_amount': 'first',  # Tax is per invoice
-        'date': 'first',
-        'vendor': 'first',
-        'memo': 'first',
-        'class_': 'first',
-        'customer_job': 'first'
-    })
-
-    # STEP 3: Assign primary account to each invoice
-    batch_entry['account'] = batch_entry['ref_no'].map(primary_accounts)
-    
-    # STEP 4: Add tax once per invoice (no proportional distribution needed)
-    batch_entry['amount'] = (
-        batch_entry['amount'] + batch_entry['tax_amount'])
-
-    # CLASS PRESERVATION LOGIC (ENSURES NO CLASS INFO IS LOST)
-    # This ensures that ANY class value from items within an invoice
-    # appears in the Excel Class column - NEVER leave it blank if ANY
-    # item has a class!
-
-    # Build comprehensive class mapping including tax items
-    invoice_to_classes = {}
-
-    # Get classes from regular items
-    for _, row in df.iterrows():
-        invoice_id = row['invoice_id']
-        class_val = row['class_']
-        if class_val and str(class_val).strip():
-            if invoice_id not in invoice_to_classes:
-                invoice_to_classes[invoice_id] = []
-            # Only add if not already present
-            if str(class_val).strip() not in invoice_to_classes[invoice_id]:
-                invoice_to_classes[invoice_id].append(str(class_val).strip())
-
-    # Add classes from tax items
-    for invoice_id, classes in tax_item_classes.items():
-        if invoice_id not in invoice_to_classes:
-            invoice_to_classes[invoice_id] = []
-        for class_val in classes:
-            if class_val and str(class_val).strip():
-                # Only add if not already present
-                class_str = str(class_val).strip()
-                if class_str not in invoice_to_classes[invoice_id]:
-                    invoice_to_classes[invoice_id].append(class_str)
-
-    # Apply class priority logic for final class column
-    # Priority: A > L > other classes (show multiple if different) > empty
-    def get_invoice_final_class(ref_no):
-        # Find invoice_id for this ref_no
-        matching_invoices = df[df['ref_no'] == ref_no]['invoice_id'].unique()
-        if len(matching_invoices) == 0:
-            return ''
-
-        invoice_id = matching_invoices[0]
-        classes = invoice_to_classes.get(invoice_id, [])
-
-        if not classes:
-            return ''
-
-        # Priority logic: A > L > show all other classes
-        if 'A' in classes:
-            return 'A'
-        elif 'L' in classes:
-            return 'L'
+    # --- Sorting to match frontend order or by id/order_by ---
+    if item_order is not None and len(item_order) > 0 and 'id' in df.columns:
+        df['__order'] = pd.Categorical(df['id'], categories=item_order, ordered=True)
+        df = df.sort_values(['invoice_id', '__order']).drop(columns='__order')
+    elif order_by is not None and isinstance(order_by, list) and len(order_by) > 0:
+        # order_by may be a list of dicts or Pydantic objects
+        sort_cols = []
+        ascending = []
+        for o in order_by:
+            # Try dict-style first
+            col = None
+            ord_val = 'asc'
+            try:
+                col = o['column']
+                ord_val = o.get('order', 'asc')
+            except (TypeError, KeyError):
+                # Fallback to attribute access (Pydantic model)
+                col = getattr(o, 'column', None)
+                ord_val = getattr(o, 'order', 'asc')
+            if col and col in df.columns:
+                sort_cols.append(col)
+                ascending.append(str(ord_val).lower() != 'desc')
+        if sort_cols:
+            df = df.sort_values(sort_cols, ascending=ascending)
         else:
-            # For other classes, show all of them (comma-separated)
-            # or pick the first one based on your preference
-            non_al_classes = [c for c in classes if c not in ['A', 'L']]
-            if non_al_classes:
-                # Option 1: Show all classes (comma-separated)
-                sorted_classes = sorted(set(non_al_classes))
-                return ', '.join(sorted_classes)
-                # Option 2: Show just the first one (uncomment below)
-                # return non_al_classes[0]
+            df = df.sort_values(['id'])
+    else:
+        df = df.sort_values(['id'])
+
+    # --- Output account lines and total line for each invoice ---
+    result_rows = []
+    for invoice_id, invoice_items in df.groupby('invoice_id', sort=False):
+        ref_no = invoice_items['ref_no'].iloc[0]
+        date = invoice_items['date'].iloc[0]
+        vendor = invoice_items['vendor'].iloc[0]
+        memo = invoice_items['memo'].iloc[0]
+        customer_job = invoice_items['customer_job'].iloc[0]
+        tax_amount = invoice_items['tax_amount'].iloc[0]
+        from mpi_backend.database.models import Invoice
+        db_invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        if db_invoice and hasattr(db_invoice, 'amount') and db_invoice.amount is not None:
+            authoritative_total = float(db_invoice.amount)
+        else:
+            authoritative_total = invoice_items['amount'].sum() + tax_amount
+        # Group by account/class for account lines
+        group_cols = ['account', 'class_']
+        grouped = invoice_items.groupby(group_cols, sort=False)
+        item_total = invoice_items['amount'].sum()
+        tax_pct = (tax_amount / item_total) if item_total else 0
+        split_totals = []
+        for (account, class_val), group in grouped:
+            group_amount = group['amount'].sum()
+            group_tax = group_amount * tax_pct
+            group_total = group_amount + group_tax
+            split_totals.append((account, class_val, group, group_total))
+        invoice_lines = []
+        running_sum = 0
+        for i, (account, class_val, group, group_total) in enumerate(split_totals):
+            if i < len(split_totals) - 1:
+                rounded_total = round(group_total, 4)
+                running_sum += rounded_total
             else:
-                # Fallback: return first class found
-                return classes[0]
-
-    # Apply the class logic to batch_entry
-    batch_entry['class_'] = batch_entry['ref_no'].apply(
-        get_invoice_final_class)
-
-    # Log class preservation statistics
-    total_invoices = len(batch_entry)
-    invoices_with_classes = len(batch_entry[batch_entry['class_'] != ''])
-    logger.info(
-        f"Class preservation: {invoices_with_classes}/{total_invoices} "
-        f"invoices have class values preserved"
-    )
-
-    # FAST formatting
-    batch_entry['date'] = (
-        pd.to_datetime(batch_entry['date'], errors='coerce')
-        .dt.strftime('%m/%d/%Y')
-    )
-    batch_entry['terms'] = ''
-    batch_entry['bill due'] = ''
-
-    # Column mapping
-    final_batch_entry = batch_entry.rename(columns={
-        'date': 'Date', 'ref_no': 'Ref', 'amount': 'Amount',
-        'customer_job': 'Customer Job', 'class_': 'Class', 'memo': 'Memo'
-    })[[
+                rounded_total = round(authoritative_total - running_sum, 4)
+            invoice_lines.append({
+                'Date': pd.to_datetime(date, errors='coerce').strftime('%m/%d/%Y') if pd.notnull(date) else '',
+                'Ref': ref_no,
+                'vendor': vendor,
+                'terms': '',
+                'bill due': '',
+                'account': account,
+                'Amount': rounded_total,
+                'Memo': memo,
+                'Customer Job': customer_job,
+                'Class': class_val or '',
+            })
+        result_rows.extend(invoice_lines)
+        # Always add a total line for each invoice
+        result_rows.append({
+            'Date': pd.to_datetime(date, errors='coerce').strftime('%m/%d/%Y') if pd.notnull(date) else '',
+            'Ref': ref_no,
+            'vendor': vendor,
+            'terms': '',
+            'bill due': '',
+            'account': '',
+            'Amount': round(authoritative_total, 4),
+            'Memo': memo,
+            'Customer Job': customer_job,
+            'Class': '',
+        })
+    final_batch_entry = pd.DataFrame(result_rows)[[
         'Date', 'Ref', 'vendor', 'terms', 'bill due',
         'account', 'Amount', 'Memo', 'Customer Job', 'Class'
     ]]
+    # --- NEW BUSINESS LOGIC END ---
+
+    # Remove obsolete batch_entry formatting and column mapping
+    # (No need to reformat final_batch_entry, it is already in correct format)
 
     logger.info(
-        f"Aggregation completed in {time.time() - agg_start:.3f}s for "
-        f"{len(final_batch_entry)} rows"
+        f"Aggregation completed for {len(final_batch_entry)} rows"
     )
 
     update_progress(operation_id, "generating_excel", 85,
@@ -885,7 +754,7 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
     # Use same fast method as export-all
     try:
         from mpi_backend.utils.pdf_to_excel.formatting_util import (
-            save_final_data_fast
+            save_ultra_fast_excel
         )
         from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
         from datetime import datetime
@@ -901,7 +770,7 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
             os.makedirs(upload_folder)
 
         # FAST Excel save
-        save_final_data_fast(final_batch_entry, file_path)
+        save_ultra_fast_excel(final_batch_entry, file_path)
 
         # FAST S3 upload
         upload_file(file_path, file_key=f'Exports/{filename}',
