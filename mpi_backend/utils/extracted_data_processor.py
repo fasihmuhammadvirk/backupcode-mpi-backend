@@ -30,11 +30,12 @@ logger = logging.getLogger(__name__)
 db = contextmanager(get_db)
 
 
-def process_extracted_data(converted_files, failed_files,
-                           existing_invoice_id=None):
+def process_extracted_data(converted_files, failed_files, existing_invoice_id=None):
     """Process extracted data with proper database session management"""
     logger.info(f"Starting to process {len(converted_files)} converted files "
                 f"and {len(failed_files)} failed files")
+
+    results = []
 
     # If reprocessing, log the invoice ID we're preserving
     if existing_invoice_id:
@@ -56,14 +57,20 @@ def process_extracted_data(converted_files, failed_files,
 
         for file in converted_files:
             try:
-                process_single_file(file, temp_items, item_mappings,
+                result = process_single_file(file, temp_items, item_mappings,
                                     customer_job_mappings, database,
                                     existing_invoice_id)
+                results.append(result)
                 # Only use existing_invoice_id for the first file
                 existing_invoice_id = None
             except Exception as e:
                 logger.error(f"Failed to process file {file}: {str(e)}")
                 failed_files.append(file)
+                results.append({
+                    "status": "error",
+                    "message": str(e),
+                    "file": file
+                })
 
         # Process failed files
         for file in failed_files:
@@ -72,11 +79,12 @@ def process_extracted_data(converted_files, failed_files,
             except Exception as e:
                 logger.error(f"Failed to process failed file {file}: "
                              f"{str(e)}")
+    return results
 
 
 def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
                         db, existing_invoice_id=None):
-    """Process a single converted file"""
+    """Process a single converted file and return status/result dict"""
     try:
         excel_file = file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
         extracted_data = pd.read_excel(excel_file)
@@ -84,25 +92,86 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
                     f"items")
     except FileNotFoundError:
         logger.error(f'Invoice ->{file} does not exists')
-        raise
+        return {"status": "error", "message": f"File not found: {file}", "file": file}
     except Exception as e:
         logger.error(f'Error reading Excel file {excel_file}: {str(e)}')
-        raise
+        return {"status": "error", "message": str(e), "file": file}
 
     try:
         supplier_id = SupplierController(db).get_supplier_name(
             extracted_data['Vendor'][0]
         )
 
-        # Check if invoice already exists (by reference number)
-        if InvoiceItemController(db).invoice_exists(
-            str(extracted_data['Ref NO'][0]),
-            str(extracted_data['Vendor'][0])
-        ):
-            logger.warning(f'Invoice with REF-NO-> '
-                           f'{str(extracted_data["Ref NO"][0])} '
-                           f'already processed and is being skipped!')
-            return
+        # Enhanced duplicate detection with three-tiered logic
+        ref_no = str(extracted_data['Ref NO'][0])
+        vendor = str(extracted_data['Vendor'][0])
+        date_str = str(extracted_data['Date'][0])
+        try:
+            invoice_date = datetime.strptime(date_str, '%m/%d/%Y').date()
+        except ValueError:
+            try:
+                invoice_date = datetime.strptime(date_str, '%m/%d/%y').date()
+            except ValueError:
+                logger.error(f"Could not parse date: {date_str}")
+                return {"status": "error", "message": f"Could not parse date: {date_str}", "file": file}
+
+        # Calculate total invoice amount by summing all items
+        try:
+            # Convert Amount column to numeric, handling any non-numeric values
+            amounts = pd.to_numeric(extracted_data['Amount'], errors='coerce').fillna(0)
+            total_invoice_amount = amounts.sum()
+            invoice_amount = str(total_invoice_amount)
+            logger.info(f"Calculated total invoice amount: {invoice_amount} from {len(amounts)} items")
+        except Exception as e:
+            logger.error(f"Error calculating total invoice amount: {str(e)}")
+            # Fallback to first row amount if calculation fails
+            invoice_amount = str(extracted_data['Amount'][0]) if len(extracted_data) > 0 else "0"
+        
+        # For reprocessing, skip duplicate detection and directly update existing invoice
+        if existing_invoice_id:
+            logger.info(f"Reprocessing mode: Updating existing invoice {existing_invoice_id}")
+            duplicate_status = {
+                'status': 'updated_invoice',
+                'existing_invoice_id': existing_invoice_id,
+                'message': f'Reprocessing existing invoice {existing_invoice_id}'
+            }
+        else:
+            # Normal processing - check for duplicates
+            duplicate_status = InvoiceItemController(db).check_invoice_duplicate_status(
+                ref_no, vendor, invoice_date, invoice_amount
+            )
+        
+        # Handle different duplicate scenarios
+        if duplicate_status['status'] == 'exact_duplicate':
+            logger.warning(duplicate_status['message'])
+            return {
+                "status": "skipped",
+                "ref_no": ref_no,
+                "vendor": vendor,
+                "date": str(invoice_date),
+                "message": duplicate_status['message']
+            }
+        elif duplicate_status['status'] == 'updated_invoice':
+            logger.info(duplicate_status['message'])
+            # Continue processing to update the existing invoice
+            existing_invoice_id = duplicate_status['existing_invoice_id']
+        elif duplicate_status['status'] == 'new_invoice':
+            logger.info(duplicate_status['message'])
+            # Continue processing to add as new invoice
+            existing_invoice_id = None
+        elif duplicate_status['status'] == 'not_found':
+            logger.info(duplicate_status['message'])
+            # Continue processing to add as new invoice
+            existing_invoice_id = None
+        else:
+            logger.error(f"Error in duplicate detection: {duplicate_status['message']}")
+            return {
+                "status": "error",
+                "ref_no": ref_no,
+                "vendor": vendor,
+                "date": str(invoice_date),
+                "message": duplicate_status['message']
+            }
 
         # Add required columns
         extracted_data.insert(0, 'Sheet Name', '')
@@ -130,42 +199,73 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
             'Date': datetime.today().strftime('%m/%d/%Y')
         })
 
-        # Create invoice record using the same pattern as old code
-        if existing_invoice_id:
-            # For reprocessing, use existing invoice ID (simplified approach)
-            invoice_record = InvoiceController(db).insert_invoice(
-                extracted_data['Date'][0], file.rsplit('/')[-1],
-                supplier_id, 'PROCESSING', file, existing_invoice_id
+        # Handle different processing scenarios
+        if duplicate_status['status'] == 'updated_invoice':
+            # Update existing invoice with new data
+            success = InvoiceItemController(db).update_existing_invoice_items(
+                existing_invoice_id, extracted_data, file.rsplit('/')[-1]
             )
-            logger.info(f"Reprocessing: Created invoice with existing ID "
-                        f"{existing_invoice_id}")
+            if success:
+                logger.info(f'Successfully updated invoice {existing_invoice_id} with {len(extracted_data)} items')
+                return {
+                    "status": "updated",
+                    "invoice_id": existing_invoice_id,
+                    "ref_no": ref_no,
+                    "vendor": vendor,
+                    "date": str(invoice_date),
+                    "message": duplicate_status['message']
+                }
+            else:
+                logger.error(f'Failed to update invoice {existing_invoice_id}')
+                return {
+                    "status": "error",
+                    "invoice_id": existing_invoice_id,
+                    "ref_no": ref_no,
+                    "vendor": vendor,
+                    "date": str(invoice_date),
+                    "message": f'Failed to update invoice {existing_invoice_id}'
+                }
         else:
-            # For new uploads, let the database generate a new ID
-            invoice_record = InvoiceController(db).insert_invoice(
-                extracted_data['Date'][0], file.rsplit('/')[-1],
-                supplier_id, 'PROCESSING', file
-            )
+            # Create new invoice record
+            if existing_invoice_id:
+                # For reprocessing, use existing invoice ID
+                invoice_record = InvoiceController(db).insert_invoice(
+                    extracted_data['Date'][0], file.rsplit('/')[-1],
+                    supplier_id, 'PROCESSING', file, existing_invoice_id
+                )
+                logger.info(f"Reprocessing: Created invoice with existing ID {existing_invoice_id}")
+            else:
+                # For new uploads, let the database generate a new ID
+                invoice_record = InvoiceController(db).insert_invoice(
+                    extracted_data['Date'][0], file.rsplit('/')[-1],
+                    supplier_id, 'PROCESSING', file
+                )
 
-        # Mark invoice as processed (same as old code)
-        InvoiceController(db).set_status_to_processed(invoice_record.id)
+            # Mark invoice as processed
+            InvoiceController(db).set_status_to_processed(invoice_record.id)
 
-        # Upload to S3 (same as old code)
-        upload_file(file_name=file,
-                    file_key=f'{extracted_data["Vendor"][0]}/'
-                             f'{invoice_record.id}')
+            # Upload to S3
+            upload_file(file_name=file,
+                        file_key=f'{extracted_data["Vendor"][0]}/{invoice_record.id}')
 
-        # Store invoice items (same as old code)
-        for index, row in extracted_data.iterrows():
-            InvoiceItemController(db).insert_invoice_items(
-                row, file.rsplit('/')[-1], invoice_record.id
-            )
+            # Store invoice items
+            for index, row in extracted_data.iterrows():
+                InvoiceItemController(db).insert_invoice_items(
+                    row, file.rsplit('/')[-1], invoice_record.id
+                )
 
-        logger.info(f'Successfully processed invoice '
-                    f'{file.rsplit("/")[-1]} with {len(extracted_data)} items')
-
+            logger.info(f'Successfully processed invoice {file.rsplit("/")[-1]} with {len(extracted_data)} items')
+            return {
+                "status": "created",
+                "invoice_id": invoice_record.id,
+                "ref_no": ref_no,
+                "vendor": vendor,
+                "date": str(invoice_date),
+                "message": "Invoice created successfully"
+            }
     except Exception as e:
         logger.error(f"Error processing file {file}: {str(e)}")
-        raise
+        return {"status": "error", "message": str(e), "file": file}
 
 
 def process_failed_file(file, db):
