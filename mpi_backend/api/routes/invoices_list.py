@@ -170,21 +170,50 @@ async def upload_and_process_invoice(
                 detail=f"Failed to convert invoice: {failed_files}"
             )
 
-        # Process extracted data
-        process_extracted_data(converted_files, failed_files)
-
-        # Get the created invoice for S3 upload
-        from mpi_backend.database.models.Invoice import Invoice
-        created_invoice = db.query(Invoice).filter_by(
-            filename=file.filename, 
-            supplier_id=supplier_id
-        ).order_by(Invoice.id.desc()).first()
-        
-        if not created_invoice:
-            logger.error(f"POST /invoice/upload - Failed to retrieve created invoice record for: {file.filename}")
+        # Process extracted data and get result
+        results = process_extracted_data(converted_files, failed_files)
+        result = results[0] if results else None
+        if not result:
+            logger.error(f"POST /invoice/upload - No result from processing for: {file.filename}")
             raise HTTPException(
                 status_code=500, 
-                detail="Failed to retrieve created invoice record"
+                detail="No result from invoice processing"
+            )
+
+        from mpi_backend.database.models.Invoice import Invoice
+        created_invoice = None
+        invoice_id = result.get("invoice_id")
+        status = result.get("status")
+        message = result.get("message")
+        ref_no = result.get("ref_no")
+        vendor = result.get("vendor")
+        date = result.get("date")
+
+        if status == "skipped":
+            logger.warning(f"POST /invoice/upload - {message}")
+            return {
+                "status": "skipped",
+                "message": message,
+                "filename": file.filename,
+                "supplier": supplier
+            }
+        elif status in ("updated", "created") and invoice_id:
+            created_invoice = db.query(Invoice).filter_by(id=invoice_id).first()
+        elif status == "error":
+            logger.error(f"POST /invoice/upload - {message}")
+            raise HTTPException(status_code=500, detail=message)
+        # Fallback: try to fetch by filename (legacy)
+        if not created_invoice:
+            created_invoice = db.query(Invoice).filter_by(
+                filename=file.filename, 
+                supplier_id=supplier_id
+            ).order_by(Invoice.id.desc()).first()
+
+        if not created_invoice:
+            logger.error(f"POST /invoice/upload - Failed to retrieve invoice record for: {file.filename}")
+            raise HTTPException(
+                status_code=500, 
+                detail="Failed to retrieve invoice record"
             )
 
         # Upload to S3
@@ -197,10 +226,14 @@ async def upload_and_process_invoice(
 
         logger.info(f"POST /invoice/upload - Successfully uploaded and processed invoice: {file.filename}")
         return {
-            "status": "success",
-            "message": f"Invoice '{file.filename}' uploaded and processed successfully.",
+            "status": status,
+            "message": message,
             "filename": file.filename,
-            "supplier": supplier
+            "supplier": supplier,
+            "invoice_id": str(created_invoice.id),
+            "ref_no": ref_no,
+            "vendor": vendor,
+            "date": date
         }
 
     except HTTPException:
@@ -270,10 +303,6 @@ async def process_again(
                 detail=response.text
             )
 
-        # Delete existing invoice data
-        InvoiceItemController(db).delete_invoice_items(invoice_id, db)
-        InvoiceController(db).delete_invoice(invoice_id, db)
-
         # Convert and process the invoice
         converted_files, failed_files = convert_single_invoice(
             file_path, supplier
@@ -286,6 +315,8 @@ async def process_again(
             )
 
         # Process extracted data with existing invoice ID
+        # The enhanced duplicate detection logic will handle updating existing invoice items
+        # without deleting the invoice record itself
         process_extracted_data(
             converted_files, failed_files, existing_invoice_id=invoice_id
         )

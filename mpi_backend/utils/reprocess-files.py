@@ -44,9 +44,54 @@ def process_extracted_data(converted_files, id):
     item_mappings = ItemsMappingController(db).get_items_mappings()
     for file in converted_files:
         extracted_data = pd.read_excel(file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
-        if InvoiceItemController(db).invoice_exists(str(extracted_data['Ref NO'][0]), str(extracted_data['Vendor'][0])):
-            print(f'Invoice with REF-NO-> {str(extracted_data["Ref NO"][0])} already processed and is being skipped!')
+        
+        # Enhanced duplicate detection with three-tiered logic
+        ref_no = str(extracted_data['Ref NO'][0])
+        vendor = str(extracted_data['Vendor'][0])
+        date_str = str(extracted_data['Date'][0])
+        
+        # Parse date
+        try:
+            invoice_date = datetime.strptime(date_str, '%m/%d/%Y').date()
+        except ValueError:
+            try:
+                invoice_date = datetime.strptime(date_str, '%m/%d/%y').date()
+            except ValueError:
+                print(f"Could not parse date: {date_str}, using today's date")
+                invoice_date = datetime.today().date()
+        
+        # Calculate total invoice amount by summing all items
+        try:
+            amounts = pd.to_numeric(extracted_data['Amount'], errors='coerce').fillna(0)
+            total_invoice_amount = amounts.sum()
+            invoice_amount = str(total_invoice_amount)
+            print(f"Calculated total invoice amount: {invoice_amount} from {len(amounts)} items")
+        except Exception as e:
+            print(f"Error calculating total invoice amount: {str(e)}")
+            invoice_amount = str(extracted_data['Amount'][0]) if len(extracted_data) > 0 else "0"
+        
+        # Check duplicate status using enhanced logic
+        duplicate_status = InvoiceItemController(db).check_invoice_duplicate_status(
+            ref_no, vendor, invoice_date, invoice_amount
+        )
+        
+        # Handle different duplicate scenarios
+        if duplicate_status['status'] == 'exact_duplicate':
+            print(f'Invoice with REF-NO-> {ref_no} already exists (exact duplicate). Skipping!')
             continue
+        elif duplicate_status['status'] == 'updated_invoice':
+            print(f'Invoice with REF-NO-> {ref_no} found as updated invoice. Processing as update.')
+            # Continue processing to update the existing invoice
+        elif duplicate_status['status'] == 'new_invoice':
+            print(f'Invoice with REF-NO-> {ref_no} found as new invoice with same ref_no. Processing as new.')
+            # Continue processing to add as new invoice
+        elif duplicate_status['status'] == 'not_found':
+            print(f'Invoice with REF-NO-> {ref_no} not found. Processing as new invoice.')
+            # Continue processing to add as new invoice
+        else:
+            print(f'Error in duplicate detection for REF-NO-> {ref_no}: {duplicate_status["message"]}')
+            continue
+        
         extracted_data.insert(0, 'Sheet Name', '')
         extracted_data['MpiItem'] = 'No Match'
         extracted_data['MpiDescription'] = 'No Match'

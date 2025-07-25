@@ -602,7 +602,18 @@ class InvoiceItemController:
     def insert_invoice_items(self, row, filename, invoice_id):
         # Add proper suffix to item code based on vendor
         item_with_suffix = self._add_suffix_to_item(row['Item'], row['Vendor'])
-        
+
+        # Robust date parsing
+        date_str = str(row['Date'])
+        try:
+            parsed_date = datetime.strptime(date_str, '%m/%d/%Y')
+        except ValueError:
+            try:
+                parsed_date = datetime.strptime(date_str, '%m/%d/%y')
+            except ValueError:
+                logger.error(f"Could not parse date: {date_str}")
+                parsed_date = None
+
         new_item = InvoiceItem(
             filename=filename,
             sheet_name=row['Sheet Name'],
@@ -614,7 +625,7 @@ class InvoiceItemController:
             qty=row['Qty'],
             cost=row['Cost'],
             amount=row['Amount'],
-            date=datetime.strptime(row['Date'], '%m/%d/%Y'),
+            date=parsed_date,
             ref_no=row['Ref NO'],
             po_number=row['PO #'],
             customer_job=row['Customer Job'],
@@ -632,6 +643,146 @@ class InvoiceItemController:
     def invoice_exists(self, reference_no, vendor):
         matched_invoice = self.db.query(InvoiceItem).filter_by(ref_no=reference_no, vendor=vendor).first()
         return matched_invoice is not None
+
+    def check_invoice_duplicate_status(self, reference_no, vendor, date, amount):
+        """
+        Enhanced duplicate detection with three-tiered logic:
+        1. Exact Duplicate: Same ref_no, date, and total amount (within tolerance) -> Skip
+        2. Updated Invoice: Same ref_no and date, different total amount -> Refresh
+        3. New Invoice: Same ref_no but different date/total amount -> Add as New
+        
+        Args:
+            reference_no: Invoice reference number
+            vendor: Vendor name
+            date: Invoice date
+            amount: Total invoice amount (sum of all items)
+            
+        Returns:
+            Dict with status and details:
+            {
+                'status': 'exact_duplicate' | 'updated_invoice' | 'new_invoice' | 'not_found',
+                'existing_invoice_id': UUID or None,
+                'existing_amount': str or None,
+                'existing_date': date or None,
+                'message': str
+            }
+        """
+        try:
+            # Normalize inputs
+            ref_no = str(reference_no).strip() if reference_no else ""
+            vendor_str = str(vendor).strip() if vendor else ""
+            date_obj = date if hasattr(date, 'date') else date
+            amount_str = str(amount).strip() if amount else ""
+            
+            # Convert amounts to float for comparison with tolerance
+            try:
+                new_amount_float = float(amount_str) if amount_str else 0.0
+            except (ValueError, TypeError):
+                new_amount_float = 0.0
+                logger.warning(f"Could not convert new amount '{amount_str}' to float, using 0.0")
+            
+            if not ref_no or not vendor_str:
+                return {
+                    'status': 'not_found',
+                    'existing_invoice_id': None,
+                    'existing_amount': None,
+                    'existing_date': None,
+                    'message': 'Missing reference number or vendor'
+                }
+            
+            # Query for existing invoices with same ref_no and vendor
+            existing_items = self.db.query(InvoiceItem).filter(
+                InvoiceItem.ref_no == ref_no,
+                InvoiceItem.vendor == vendor_str,
+                InvoiceItem.is_active == True
+            ).all()
+            
+            if not existing_items:
+                return {
+                    'status': 'not_found',
+                    'existing_invoice_id': None,
+                    'existing_amount': None,
+                    'existing_date': None,
+                    'message': f'No existing invoice found for RefNo: {ref_no}, Vendor: {vendor_str}'
+                }
+            
+            # Group items by invoice_id to calculate total amounts per invoice
+            invoice_totals = {}
+            invoice_dates = {}
+            
+            for item in existing_items:
+                invoice_id = item.invoice_id
+                if invoice_id not in invoice_totals:
+                    invoice_totals[invoice_id] = 0
+                    invoice_dates[invoice_id] = item.date
+                
+                # Add item amount to invoice total
+                try:
+                    item_amount = float(item.amount) if item.amount else 0
+                    invoice_totals[invoice_id] += item_amount
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid amount value for item {item.id}: {item.amount}")
+                    continue
+            
+            # Find the most recent invoice (by date_added, then by ID)
+            most_recent_item = max(existing_items, key=lambda item: (item.date_added or date.min, item.id))
+            most_recent_invoice_id = most_recent_item.invoice_id
+            
+            # Get the total amount and date for the most recent invoice
+            existing_total_amount = invoice_totals.get(most_recent_invoice_id, 0)
+            existing_date = invoice_dates.get(most_recent_invoice_id)
+            
+            # Convert to float for comparison
+            existing_amount_float = float(existing_total_amount)
+            
+            # Define tolerance for floating-point comparison (0.01 cents)
+            tolerance = 0.01
+            
+            # Check if amounts are within tolerance
+            amount_difference = abs(new_amount_float - existing_amount_float)
+            amounts_equal = amount_difference <= tolerance
+            
+            logger.info(f"Comparing invoice totals - New: {new_amount_float}, Existing: {existing_amount_float}, Difference: {amount_difference}, Tolerance: {tolerance}, Equal: {amounts_equal}")
+            
+            # Check for exact duplicate (same ref_no, date, and total amount within tolerance)
+            if (existing_date == date_obj and amounts_equal):
+                return {
+                    'status': 'exact_duplicate',
+                    'existing_invoice_id': most_recent_invoice_id,
+                    'existing_amount': str(existing_amount_float),
+                    'existing_date': existing_date,
+                    'message': f'Invoice with RefNo: {ref_no}, Date: {date_obj}, Total Amount: {new_amount_float} already exists (within tolerance). Skipping.'
+                }
+            
+            # Check for updated invoice (same ref_no and date, different total amount)
+            elif existing_date == date_obj and not amounts_equal:
+                return {
+                    'status': 'updated_invoice',
+                    'existing_invoice_id': most_recent_invoice_id,
+                    'existing_amount': str(existing_amount_float),
+                    'existing_date': existing_date,
+                    'message': f'Invoice with RefNo: {ref_no} and Date: {date_obj} found with updated total amount (Old: {existing_amount_float}, New: {new_amount_float}, Difference: {amount_difference}). Refreshing invoice.'
+                }
+            
+            # New invoice with same ref_no but different date/total amount
+            else:
+                return {
+                    'status': 'new_invoice',
+                    'existing_invoice_id': None,
+                    'existing_amount': str(existing_amount_float),
+                    'existing_date': existing_date,
+                    'message': f'New invoice with existing RefNo: {ref_no} but different Date/Total Amount. Treating as a new invoice.'
+                }
+                
+        except Exception as e:
+            logger.error(f"Error in check_invoice_duplicate_status: {str(e)}")
+            return {
+                'status': 'error',
+                'existing_invoice_id': None,
+                'existing_amount': None,
+                'existing_date': None,
+                'message': f'Error checking duplicate status: {str(e)}'
+            }
 
     def get_invoice_items(self, invoice_id=None):
         query = self.db.query(InvoiceItem)
@@ -2086,3 +2237,75 @@ class InvoiceItemController:
                 break
         
         return clean_item
+
+    def update_existing_invoice_items(self, invoice_id, new_data_rows, filename):
+        """
+        Update existing invoice items for an updated invoice
+        
+        Args:
+            invoice_id: UUID of the existing invoice to update
+            new_data_rows: DataFrame rows with new invoice data
+            filename: New filename for the updated invoice
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # First, mark all existing items as inactive
+            existing_items = self.db.query(InvoiceItem).filter(
+                InvoiceItem.invoice_id == invoice_id
+            ).all()
+            
+            for item in existing_items:
+                item.is_active = False
+            
+            # Add new items with the updated data
+            for index, row in new_data_rows.iterrows():
+                # Add proper suffix to item code based on vendor
+                item_with_suffix = self._add_suffix_to_item(row['Item'], row['Vendor'])
+
+                # Robust date parsing
+                date_str = str(row['Date'])
+                try:
+                    parsed_date = datetime.strptime(date_str, '%m/%d/%Y')
+                except ValueError:
+                    try:
+                        parsed_date = datetime.strptime(date_str, '%m/%d/%y')
+                    except ValueError:
+                        logger.error(f"Could not parse date: {date_str}")
+                        parsed_date = None
+
+                new_item = InvoiceItem(
+                    filename=filename,
+                    sheet_name=row['Sheet Name'],
+                    invoice_id=invoice_id,
+                    mpi_item=row['MpiItem'],
+                    mpi_description=row['MpiDescription'],
+                    item=item_with_suffix,
+                    description=row['Description'],
+                    qty=row['Qty'],
+                    cost=row['Cost'],
+                    amount=row['Amount'],
+                    date=parsed_date,
+                    ref_no=row['Ref NO'],
+                    po_number=row['PO #'],
+                    customer_job=row['Customer Job'],
+                    bill=row['Bill'],
+                    vendor=row['Vendor'],
+                    class_=row['Class'],
+                    memo=row['Memo'],
+                    buyer=row['Buyer'],
+                    date_added=row['email_date'],
+                    export_status="Pending",
+                    is_active=True
+                )
+                self.db.add(new_item)
+            
+            self.db.commit()
+            logger.info(f'Successfully updated invoice {invoice_id} with {len(new_data_rows)} new items')
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error updating existing invoice items: {str(e)}")
+            self.db.rollback()
+            return False

@@ -73,7 +73,6 @@ EMAIL_SEARCH_TIMEOUT = 30  # Timeout for email operations in seconds
 MAX_EMAILS_PER_INVOICE = 10  # Maximum emails to check per invoice
 
 
-
 # Setup recovery tracking
 def log_recovery_attempt(invoice_number: str, supplier_name: str, search_date: str, result: str, details: str = ""):
     """Log recovery attempts to the centralized missing log"""
@@ -120,6 +119,139 @@ def login():
         if mail:
             mail.logout()
         raise
+
+def fetch_email_thread(mail, email_id):
+    """
+    Fetch the full conversation thread for a given email
+    
+    Args:
+        mail: IMAP connection
+        email_id: Email UID to fetch thread for
+    
+    Returns:
+        List of email messages in the thread (including the original email)
+    """
+    try:
+        # First, get the original email to extract thread information
+        result, response = mail.uid('fetch', email_id, '(BODY.PEEK[HEADER.FIELDS (SUBJECT IN-REPLY-TO REFERENCES MESSAGE-ID)])')
+        
+        if result != 'OK' or not response or not response[0]:
+            logger.warning(f"Failed to fetch headers for email UID {email_id}")
+            return []
+        
+        raw_email = response[0][1]
+        msg = email.message_from_bytes(raw_email)
+        
+        # Extract thread identifiers
+        in_reply_to = msg.get('In-Reply-To', '').strip()
+        references = msg.get('References', '').strip()
+        message_id = msg.get('Message-ID', '').strip()
+        
+        logger.debug(f"Thread info for UID {email_id}: In-Reply-To={in_reply_to}, References={references}, Message-ID={message_id}")
+        
+        # If no thread information, return just the original email
+        if not in_reply_to and not references:
+            logger.debug(f"No thread information found for UID {email_id}, returning original email only")
+            return [email_id]
+        
+        # Build search criteria for thread emails
+        search_criteria = []
+        
+        # Add Message-ID to search criteria
+        if message_id:
+            # Remove angle brackets if present
+            clean_message_id = message_id.strip('<>')
+            search_criteria.append(f'HEADER Message-ID "{clean_message_id}"')
+        
+        # Add In-Reply-To to search criteria
+        if in_reply_to:
+            # Remove angle brackets if present
+            clean_in_reply_to = in_reply_to.strip('<>')
+            search_criteria.append(f'HEADER In-Reply-To "{clean_in_reply_to}"')
+        
+        # Add References to search criteria
+        if references:
+            # References can contain multiple message IDs, split and search for each
+            ref_ids = re.findall(r'<[^>]+>', references)
+            for ref_id in ref_ids:
+                clean_ref_id = ref_id.strip('<>')
+                search_criteria.append(f'HEADER References "{clean_ref_id}"')
+        
+        # If we have search criteria, search for related emails
+        thread_email_ids = [email_id]  # Always include the original email
+        
+        if search_criteria:
+            # Search for emails matching any of the criteria
+            search_string = f'({" ".join(search_criteria)})'
+            logger.debug(f"Searching for thread emails with criteria: {search_string}")
+            
+            result, data = mail.uid('search', None, search_string)
+            
+            if result == 'OK' and data[0]:
+                found_ids = data[0].split()
+                for found_id in found_ids:
+                    found_id = found_id.decode('utf-8') if isinstance(found_id, bytes) else found_id
+                    if found_id != email_id and found_id not in thread_email_ids:
+                        thread_email_ids.append(found_id)
+                        logger.debug(f"Found thread email UID: {found_id}")
+        
+        logger.info(f"Thread for UID {email_id} contains {len(thread_email_ids)} emails")
+        return thread_email_ids
+        
+    except Exception as e:
+        logger.error(f"Error fetching email thread for UID {email_id}: {str(e)}")
+        return [email_id]  # Return original email only on error
+
+def download_invoice_attachments_from_thread(mail, thread_email_ids, base_folder_path, target_invoice_number: str):
+    """
+    Download invoice attachments from all emails in a thread
+    
+    Args:
+        mail: IMAP connection
+        thread_email_ids: List of email UIDs in the thread
+        base_folder_path: Base folder for downloads
+        target_invoice_number: The invoice number being recovered
+    
+    Returns:
+        Tuple of (total_attachments_found, total_attachments_downloaded)
+    """
+    total_attachments_found = 0
+    total_attachments_downloaded = 0
+    
+    logger.info(f"Processing thread with {len(thread_email_ids)} emails for invoice {target_invoice_number}")
+    
+    for thread_idx, thread_email_id in enumerate(thread_email_ids, 1):
+        try:
+            logger.debug(f"Processing thread email {thread_idx}/{len(thread_email_ids)} - UID: {thread_email_id}")
+            
+            # Fetch the full email
+            result, response = mail.uid('fetch', thread_email_id, '(BODY.PEEK[])')
+            
+            if result != 'OK' or not response or not response[0]:
+                logger.warning(f"Failed to fetch thread email UID {thread_email_id}")
+                continue
+            
+            try:
+                raw_email = response[0][1].decode('utf-8')
+            except UnicodeDecodeError:
+                raw_email = response[0][1].decode('latin-1')
+            
+            email_message = email.message_from_string(raw_email)
+            
+            # Process attachments from this thread email
+            found, downloaded = download_email_attachments(email_message, base_folder_path, target_invoice_number)
+            total_attachments_found += found
+            total_attachments_downloaded += downloaded
+            
+            if downloaded > 0:
+                logger.info(f"Downloaded {downloaded} attachments from thread email UID {thread_email_id}")
+            
+        except Exception as e:
+            logger.error(f"Error processing thread email UID {thread_email_id}: {str(e)}")
+            continue
+    
+    logger.info(f"Thread processing complete: {total_attachments_found} attachments found, {total_attachments_downloaded} downloaded")
+    return total_attachments_found, total_attachments_downloaded
 
 def search_emails_for_invoice(mail, invoice_number: str, supplier_name: str, invoice_date: Optional[date] = None) -> List[str]:
     """
@@ -545,28 +677,90 @@ def process_invoice_batch(batch: List[Dict], mail, base_folder_path: Path) -> Li
                 try:
                     logger.debug(f"Processing email {email_idx}/{len(matching_email_ids)} for invoice {invoice_number} - UID: {e_id}")
                     
-                    result, response = mail.uid('fetch', e_id, '(BODY.PEEK[])')
+                    # First, check if this email has invoice keywords in subject
+                    result, response = mail.uid('fetch', e_id, '(BODY.PEEK[HEADER.FIELDS (SUBJECT)])')
                     
                     if result != 'OK' or not response or not response[0]:
-                        logger.error(f"Failed to fetch email UID {e_id}")
+                        logger.error(f"Failed to fetch subject for email UID {e_id}")
                         continue
                     
-                    try:
-                        raw_email = response[0][1].decode('utf-8')
-                    except UnicodeDecodeError:
-                        raw_email = response[0][1].decode('latin-1')
+                    raw_email = response[0][1]
+                    msg = email.message_from_bytes(raw_email)
+                    subject = (msg.get('Subject', '') or '').lower()
+                    
+                    # Check for invoice keywords
+                    has_invoice_keyword = any(kw in subject
+                                            for kw in ['invoice', 'invoices', 'invoice(s)'])
+                    
+                    if has_invoice_keyword:
+                        logger.info(f"Email UID {e_id} contains invoice keywords, processing thread for invoice {invoice_number}")
+                        
+                        # Fetch the full conversation thread
+                        thread_email_ids = fetch_email_thread(mail, e_id)
+                        
+                        if len(thread_email_ids) > 1:
+                            logger.info(f"Found thread with {len(thread_email_ids)} emails for UID {e_id}")
+                            # Process the entire thread for attachments
+                            thread_found, thread_downloaded = download_invoice_attachments_from_thread(
+                                mail, thread_email_ids, base_folder_path, invoice_number
+                            )
+                            
+                            if thread_downloaded > 0:
+                                invoice_processed = True
+                                logger.info(f"Successfully processed thread for email UID {e_id} with {thread_downloaded} attachments")
+                                break  # Found and processed the invoice, no need to check other emails
+                            else:
+                                logger.warning(f"Thread for email UID {e_id} had no attachments")
+                        else:
+                            logger.info(f"Email UID {e_id} has no thread, processing as single email")
+                            # Process as single email (existing logic)
+                            result, response = mail.uid('fetch', e_id, '(BODY.PEEK[])')
+                            
+                            if result != 'OK' or not response or not response[0]:
+                                logger.error(f"Failed to fetch email UID {e_id}")
+                                continue
+                            
+                            try:
+                                raw_email = response[0][1].decode('utf-8')
+                            except UnicodeDecodeError:
+                                raw_email = response[0][1].decode('latin-1')
 
-                    email_message = email.message_from_string(raw_email)
-                    
-                    # Download attachments for this specific invoice
-                    download_success = download_email_attachments(email_message, base_folder_path, invoice_number)
-                    
-                    if download_success:
-                        invoice_processed = True
-                        logger.info(f"Successfully processed email UID {e_id} for invoice {invoice_number}")
-                        break  # Found and processed the invoice, no need to check other emails
+                            email_message = email.message_from_string(raw_email)
+                            
+                            # Download attachments for this specific invoice
+                            download_success = download_email_attachments(email_message, base_folder_path, invoice_number)
+                            
+                            if download_success:
+                                invoice_processed = True
+                                logger.info(f"Successfully processed email UID {e_id} for invoice {invoice_number}")
+                                break  # Found and processed the invoice, no need to check other emails
+                            else:
+                                logger.warning(f"Email UID {e_id} for invoice {invoice_number} had no attachments")
                     else:
-                        logger.warning(f"Email UID {e_id} for invoice {invoice_number} had no attachments")
+                        logger.info(f"Email UID {e_id} does not contain invoice keywords, processing as single email")
+                        # Process as single email (existing logic)
+                        result, response = mail.uid('fetch', e_id, '(BODY.PEEK[])')
+                        
+                        if result != 'OK' or not response or not response[0]:
+                            logger.error(f"Failed to fetch email UID {e_id}")
+                            continue
+                        
+                        try:
+                            raw_email = response[0][1].decode('utf-8')
+                        except UnicodeDecodeError:
+                            raw_email = response[0][1].decode('latin-1')
+
+                        email_message = email.message_from_string(raw_email)
+                        
+                        # Download attachments for this specific invoice
+                        download_success = download_email_attachments(email_message, base_folder_path, invoice_number)
+                        
+                        if download_success:
+                            invoice_processed = True
+                            logger.info(f"Successfully processed email UID {e_id} for invoice {invoice_number}")
+                            break  # Found and processed the invoice, no need to check other emails
+                        else:
+                            logger.warning(f"Email UID {e_id} for invoice {invoice_number} had no attachments")
                         
                 except Exception as email_error:
                     logger.error(f"Failed to process email UID {e_id} for invoice {invoice_number}: {str(email_error)}")
