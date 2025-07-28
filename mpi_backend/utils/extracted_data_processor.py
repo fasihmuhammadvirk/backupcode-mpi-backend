@@ -293,22 +293,23 @@ def process_failed_file(file, db):
 
 def search_replace(row, temp_items, item_mappings, db):
     """
-    Search for item mappings with direct comparison (no suffix cleaning).
+    Search for item mappings with exact comparison.
     Maps original_item (supplier_item_ids) to mpi_code.
 
     Prioritizes permanent mappings over temporary ones to ensure valid
     mappings override UIDI.
-    Note: With suffix standardization, we use direct comparisons.
+    Uses exact matching only to avoid business logic issues.
+    Also handles mappings without sheet names.
     """
     from mpi_backend.utils.mapping_validators import is_temporary_mapping
 
     original_item = row['Item'].strip()  # Clean supplier_item_ids from invoice and strip spaces
-    supplier_id, _ = extract_supplier_id(row['Vendor'])
 
     # FIRST: Search in permanent mappings (supplier_item_mappings table)
     # This ensures permanent mappings override temporary ones
+    # Also handles mappings without sheet names
     if 'supplier_item_ids' in item_mappings.columns:
-        # With suffix standardization, we only do exact matches
+        # Exact match only - no suffix variations to avoid business logic issues
         mapping_match = item_mappings[
             item_mappings['supplier_item_ids'] == original_item
         ]
@@ -317,22 +318,24 @@ def search_replace(row, temp_items, item_mappings, db):
             mpi_code = mapping_match.iloc[0]['mpi_code']
             description = mapping_match.iloc[0]['description']
 
-            # Validate that this is not a temporary mapping that slipped
-            # through
+            # Validate that this is not a temporary mapping that slipped through
             if not is_temporary_mapping(mpi_code, description):
                 row['MpiItem'] = mpi_code  # This is the target mpi_code
                 row['MpiDescription'] = description
                 sheet_name = mapping_match.iloc[0]['google_sheet_name']
-                row['Sheet Name'] = sheet_name
-                logger.debug(f"Applied permanent mapping: {original_item} "
-                             f"-> {mpi_code}")
+                row['Sheet Name'] = sheet_name or ""  # Handle empty sheet names
+                
+                # Log if this is a mapping without sheet name
+                if not sheet_name or sheet_name.strip() == "":
+                    logger.debug(f"Applied permanent mapping (no sheet): {original_item} -> {mpi_code}")
+                else:
+                    logger.debug(f"Applied permanent mapping: {original_item} -> {mpi_code}")
                 return row
             else:
-                logger.warning(f"Found temporary mapping in permanent table, "
-                               f"skipping: {mpi_code}")
+                logger.warning(f"Found temporary mapping in permanent table, skipping: {mpi_code}")
 
     # SECOND: If no permanent mapping found, check temporary mappings
-    # With suffix standardization, we only do exact matches
+    # Exact match only - no suffix variations to avoid business logic issues
     temp_match = temp_items[
         temp_items['original_item'] == original_item
     ]
@@ -343,20 +346,18 @@ def search_replace(row, temp_items, item_mappings, db):
         row['MpiItem'] = 'No Match'  # Keep as No Match - temporary mappings don't provide MPI codes
         row['MpiDescription'] = temp_match.iloc[0]['original_description'] or 'No Match'
         row['Sheet Name'] = temp_match.iloc[0]['sheet_name']
-        logger.debug(f"Applied temporary mapping: {original_item} -> "
-                     f"sheet: {temp_match.iloc[0]['sheet_name']}")
+        logger.debug(f"Applied temporary mapping: {original_item} -> sheet: {temp_match.iloc[0]['sheet_name']}")
         return row
 
     # THIRD: If no mapping found at all, add to unmapped items
-    if not UnmappedItemsController(db).is_item_code_present(row['Item'],
-                                                            supplier_id):
+    supplier_id, _ = extract_supplier_id(row['Vendor'])
+    if not UnmappedItemsController(db).is_item_code_present(row['Item'], supplier_id):
         UnmappedItemsController(db).insert_unmapped_item(
             row['Item'], row['Description'], supplier_id
         )
         logger.debug(f"Added unmapped item: {row['Item']}")
 
-    # Return with default "No Match" - this will be set by the calling
-    # function
+    # Return with default "No Match" - this will be set by the calling function
     return row
 
 

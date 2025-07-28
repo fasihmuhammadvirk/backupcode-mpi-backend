@@ -44,7 +44,8 @@ class TemporaryMappingExtractor:
         Detect the temporary mapping section in a DataFrame.
         
         Criteria:
-        - Any of the first 10 rows must contain headers: 'Original Item' and 'Original Description'
+        - Any of the first 10 rows must contain header: 'Original Item' (required)
+        - 'Original Description' is optional
         
         Args:
             df: DataFrame to check for temporary mapping section
@@ -57,8 +58,11 @@ class TemporaryMappingExtractor:
                 row_values = [str(val).strip().lower() if not pd.isna(val) else "" for val in df.iloc[row_idx]]
                 has_original_item = any("original item" in val for val in row_values)
                 has_original_description = any("original description" in val for val in row_values)
-                if has_original_item and has_original_description:
+                # Only "Original Item" is required - "Original Description" is optional
+                if has_original_item:
                     self.logger.info(f"Temporary mapping section detected starting at row {row_idx+1}")
+                    if not has_original_description:
+                        self.logger.info(f"  - 'Original Description' header not found, will use default descriptions")
                     return row_idx
             except Exception as e:
                 self.logger.error(f"Error scanning row {row_idx} for header: {str(e)}")
@@ -108,9 +112,13 @@ class TemporaryMappingExtractor:
                 elif "original description" in header_lower:
                     original_description_col = i
             
-            if original_item_col is None or original_description_col is None:
-                self.logger.warning(f"Required headers not found in sheet: {sheet_name}")
+            if original_item_col is None:
+                self.logger.warning(f"Required 'Original Item' header not found in sheet: {sheet_name}")
                 return []
+            
+            # Original Description is optional - if not found, we'll use a default description
+            if original_description_col is None:
+                self.logger.info(f"'Original Description' header not found in sheet: {sheet_name} - will use default descriptions")
             
             # Extract data rows (start from the row after headers)
             data_start_row = header_row_idx + 1
@@ -129,12 +137,11 @@ class TemporaryMappingExtractor:
                         # With suffix standardization, preserve the original item form
                         # No suffix cleaning needed - items are stored with full suffixes
                     
-                    if original_description_col < len(row_data):
+                    if original_description_col is not None and original_description_col < len(row_data):
                         original_description = str(row_data.iloc[original_description_col]).strip() if not pd.isna(row_data.iloc[original_description_col]) else ""
-                    
-                    # Skip empty rows
-                    if not original_item and not original_description:
-                        continue
+                    else:
+                        # If no description column, use a default description
+                        original_description = f"Temporary item: {original_item}"
                     
                     # Skip if original_item is empty (required field)
                     if not original_item:
