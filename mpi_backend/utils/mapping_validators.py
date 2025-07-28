@@ -77,9 +77,18 @@ def validate_mapping_for_permanent_storage(mapping_data: Dict) -> Tuple[bool, Li
             f"Temporary mapping detected: '{mpi_code}' should not be stored as permanent mapping"
         )
     
-    # Validate required fields
+    # Modified validation: Allow empty MPI code if there's a valid description and supplier_item_ids
+    # This handles cases like FLUX9-F where MPI code is empty but item_code and description exist
     if not mpi_code:
-        errors.append("MPI code is required and cannot be empty")
+        # Only require MPI code if there's no description or supplier_item_ids
+        if not description or not supplier_item_ids:
+            errors.append("MPI code is required when description or supplier item IDs are missing")
+    else:
+        # If MPI code exists, validate its format
+        if len(mpi_code.strip()) < 2:
+            errors.append(
+                f"MPI code too short: '{mpi_code}' - may be placeholder"
+            )
     
     if not supplier_item_ids:
         errors.append("Supplier item IDs are required and cannot be empty")
@@ -90,12 +99,6 @@ def validate_mapping_for_permanent_storage(mapping_data: Dict) -> Tuple[bool, Li
     ):
         errors.append(
             f"Supplier item IDs contain temporary placeholders: '{supplier_item_ids}'"
-        )
-    
-    # Validate MPI code format (should follow some structure)
-    if mpi_code and len(mpi_code.strip()) < 2:
-        errors.append(
-            f"MPI code too short: '{mpi_code}' - may be placeholder"
         )
     
     return len(errors) == 0, errors

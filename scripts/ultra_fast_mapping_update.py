@@ -194,19 +194,11 @@ class UltraFastMappingUpdater:
             suffix_hits = 0
             
             for item_id, item_code, vendor in uidi_items:
-                # Try exact match first (fastest - O(1) lookup)
+                # Try exact match only - no suffix variations to avoid business logic issues
                 if item_code in mappings_lookup:
                     mpi_code, description, sheet_name = mappings_lookup[item_code]
                     updates.append((item_id, mpi_code, description, sheet_name))
                     exact_hits += 1
-                else:
-                    # Try suffix-cleaned match
-                    supplier_id = self._fast_supplier_lookup(vendor)
-                    suffix_key = f"{item_code}|{supplier_id}"
-                    if suffix_key in mappings_lookup:
-                        mpi_code, description, sheet_name = mappings_lookup[suffix_key]
-                        updates.append((item_id, mpi_code, description, sheet_name))
-                        suffix_hits += 1
             
             # Execute single bulk update for all matches
             updated_count = self._execute_bulk_updates(db, updates)
@@ -246,28 +238,13 @@ class UltraFastMappingUpdater:
         
         # Build lookup dictionary - key: item, value: (mpi_code, description, sheet_name)
         lookup = {}
-        suffix_lookup = defaultdict(dict)  # suffix_lookup[supplier_id][cleaned_item] = mapping
         
         for row in result:
             item = row.supplier_item_ids.strip()
             mapping = (row.mpi_code, row.description or "", row.sheet_name)
             
-            # Exact match lookup
+            # Exact match lookup only - no suffix variations to avoid business logic issues
             lookup[item] = mapping
-            
-            # Suffix-cleaned lookup for faster suffix matching
-            supplier_id = row.supplier_id or 1
-            if supplier_id in self.suffix_patterns:
-                suffix = self.suffix_patterns[supplier_id]
-                if item.endswith(suffix):
-                    cleaned_item = item[:-len(suffix)]
-                    suffix_lookup[supplier_id][cleaned_item] = mapping
-        
-        # Merge suffix lookups into main lookup with special keys
-        for supplier_id, cleaned_items in suffix_lookup.items():
-            for cleaned_item, mapping in cleaned_items.items():
-                key = f"{cleaned_item}|{supplier_id}"
-                lookup[key] = mapping
         
         return lookup
     

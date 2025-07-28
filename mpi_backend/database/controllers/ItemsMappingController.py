@@ -582,7 +582,7 @@ class ItemsMappingController:
                 
             logger.info(f"Found {len(no_match_items)} items with No Match / UIDI for update")
                 
-            # Get ONLY valid permanent mappings for UIDI update
+            # Get valid permanent mappings for UIDI update (including those without sheet names)
             # We want real mappings, not temporary placeholders
             valid_mappings = db.query(ItemsMapping).filter(
                 ~ItemsMapping.mpi_code.like("UIDI%"),
@@ -601,111 +601,149 @@ class ItemsMappingController:
                 
             logger.info(f"Found {len(valid_mappings)} valid permanent mappings for matching")
             
-            # Create lookup dictionaries for faster matching
-            # Group mappings by supplier for more efficient lookup
-            supplier_mappings = {}
+            # Get temporary mappings for additional matching
+            from mpi_backend.database.models.TemporaryItemMapping import TempItemMapping
+            temp_mappings = db.query(TempItemMapping).all()
+            logger.info(f"Found {len(temp_mappings)} temporary mappings for additional matching")
+            
+            # Create lookup dictionary for faster matching - PERMANENT MAPPINGS FIRST
+            mappings_lookup = {}
+            mappings_without_sheet = {}  # Track mappings without sheet names
+            
             for mapping in valid_mappings:
                 # Validate this is truly a permanent mapping
                 if is_temporary_mapping(mapping.mpi_code, mapping.description):
                     logger.warning(f"Skipping temporary mapping in permanent table: {mapping.mpi_code}")
                     continue
                 
-                supplier_id = mapping.supplier_id
-                if supplier_id not in supplier_mappings:
-                    supplier_mappings[supplier_id] = []
-                supplier_mappings[supplier_id].append(mapping)
+                clean_mapping_item = mapping.supplier_item_ids.strip()
+                if clean_mapping_item:
+                    # Store the mapping with the clean item as key - exact match only
+                    mappings_lookup[clean_mapping_item] = mapping
+                    
+                    # Track mappings without sheet names for special handling
+                    if not mapping.google_sheet_name or mapping.google_sheet_name.strip() == "":
+                        mappings_without_sheet[clean_mapping_item] = mapping
             
-            logger.info(f"Organized mappings across {len(supplier_mappings)} suppliers")
+            # Add temporary mappings to lookup (lower priority than permanent)
+            temp_lookup = {}
+            for temp_mapping in temp_mappings:
+                # Handle None values safely
+                if temp_mapping.original_item is None:
+                    continue
+                    
+                clean_temp_item = temp_mapping.original_item.strip()
+                if clean_temp_item and clean_temp_item not in mappings_lookup:  # Don't override permanent mappings
+                    temp_lookup[clean_temp_item] = temp_mapping
+            
+            logger.info(f"Created lookup with {len(mappings_lookup)} permanent mappings and {len(temp_lookup)} temporary mappings")
+            logger.info(f"Found {len(mappings_without_sheet)} permanent mappings without sheet names")
             
             # Update No Match / UIDI items if valid mappings are found
             updated_count = 0
             no_match_found_count = 0
+            updated_from_permanent = 0
+            updated_from_temp = 0
+            updated_from_no_sheet = 0
             
             for item in no_match_items:
-                # Find matching mapping using supplier-specific suffix cleaning
-                matched = False
-                
-                # Extract supplier_id from the invoice item's supplier/vendor
-                supplier_id, supplier_name = self._extract_supplier_id(item.vendor)
-                
-                # Get mappings for this specific supplier
-                mappings_for_supplier = supplier_mappings.get(supplier_id, [])
-                
-                if not mappings_for_supplier:
-                    logger.debug(f"No mappings available for supplier {supplier_name} (ID: {supplier_id})")
-                    continue
-                
                 # Clean the invoice item for comparison
                 clean_invoice_item = str(item.item).strip()
                 
+                if not clean_invoice_item:
+                    continue
+                
                 # Log the item we're trying to match
-                logger.debug(f"Attempting to match item: '{clean_invoice_item}' from supplier {supplier_name}")
+                logger.debug(f"Attempting to match item: '{clean_invoice_item}'")
                 
-                for mapping in mappings_for_supplier:
-                    supplier_item_ids = mapping.supplier_item_ids
-                    if not supplier_item_ids:
-                        continue
-                    
-                    # Clean the mapping item
-                    clean_mapping_item = supplier_item_ids.strip()
-                    
-                    # First try exact match
-                    if clean_invoice_item == clean_mapping_item:
-                        old_status = item.mpi_item or "Empty"
-                        item.mpi_item = mapping.mpi_code
-                        item.mpi_description = mapping.description
-                        item.sheet_name = mapping.google_sheet_name or ""
-                        updated_count += 1
-                        matched = True
-                        
-                        if old_status.startswith("UIDI"):
-                            logger.info(f"UIDI override (exact): {clean_invoice_item} | {old_status} -> {mapping.mpi_code}")
-                        elif old_status == "No Match":
-                            logger.info(f"No Match override (exact): {clean_invoice_item} | No Match -> {mapping.mpi_code}")
-                        else:
-                            logger.info(f"Item update (exact): {clean_invoice_item} | {old_status} -> {mapping.mpi_code}")
-                        break
-                    
-                    # With suffix standardization, we only do exact matches
-                    # No need for suffix cleaning anymore
-                    if clean_invoice_item == clean_mapping_item:
-                        old_status = item.mpi_item or "Empty"
-                        item.mpi_item = mapping.mpi_code
-                        item.mpi_description = mapping.description
-                        item.sheet_name = mapping.google_sheet_name or ""
-                        updated_count += 1
-                        matched = True
-                        
-                        if old_status.startswith("UIDI"):
-                            logger.info(f"UIDI override: {clean_invoice_item} == {clean_mapping_item} | {old_status} -> {mapping.mpi_code}")
-                        elif old_status == "No Match":
-                            logger.info(f"No Match override: {clean_invoice_item} == {clean_mapping_item} | No Match -> {mapping.mpi_code}")
-                        else:
-                            logger.info(f"Item update: {clean_invoice_item} == {clean_mapping_item} | {old_status} -> {mapping.mpi_code}")
+                # Try to find a match - PRIORITY ORDER:
+                # 1. Permanent mappings (with or without sheet names)
+                # 2. Temporary mappings (only if no permanent mapping exists)
+                matched_mapping = None
+                match_source = None
                 
-                # Log when no match is found for debugging
-                if not matched:
+                # First: Check permanent mappings (exact match only)
+                if clean_invoice_item in mappings_lookup:
+                    matched_mapping = mappings_lookup[clean_invoice_item]
+                    match_source = "permanent"
+                    
+                    # Check if this is a mapping without sheet name
+                    if clean_invoice_item in mappings_without_sheet:
+                        match_source = "permanent_no_sheet"
+                
+                # Second: If no permanent mapping, check temporary mappings (exact match only)
+                elif clean_invoice_item in temp_lookup:
+                    matched_mapping = temp_lookup[clean_invoice_item]
+                    match_source = "temporary"
+                
+                if matched_mapping:
+                    old_status = item.mpi_item or "Empty"
+                    
+                    if match_source == "permanent" or match_source == "permanent_no_sheet":
+                        # Apply permanent mapping
+                        item.mpi_item = matched_mapping.mpi_code
+                        item.mpi_description = matched_mapping.description
+                        item.sheet_name = matched_mapping.google_sheet_name or ""
+                        
+                        if match_source == "permanent_no_sheet":
+                            updated_from_no_sheet += 1
+                            logger.info(f"UIDI override (no sheet): {clean_invoice_item} -> {matched_mapping.mpi_code}")
+                        else:
+                            updated_from_permanent += 1
+                            logger.info(f"UIDI override: {clean_invoice_item} -> {matched_mapping.mpi_code}")
+                    
+                    elif match_source == "temporary":
+                        # Apply temporary mapping (keep as No Match but assign sheet name)
+                        item.mpi_item = "No Match"  # Temporary mappings don't provide MPI codes
+                        item.mpi_description = matched_mapping.original_description or "No Match"
+                        item.sheet_name = matched_mapping.sheet_name or ""
+                        updated_from_temp += 1
+                        logger.info(f"UIDI override (temp): {clean_invoice_item} -> sheet: {matched_mapping.sheet_name}")
+                    
+                    updated_count += 1
+                    
+                    # Log the update based on mapping type
+                    if match_source == "temporary":
+                        if old_status.startswith("UIDI"):
+                            logger.info(f"UIDI override (temp): {clean_invoice_item} -> sheet: {matched_mapping.sheet_name}")
+                        elif old_status == "No Match":
+                            logger.info(f"No Match override (temp): {clean_invoice_item} -> sheet: {matched_mapping.sheet_name}")
+                        else:
+                            logger.info(f"Item update (temp): {clean_invoice_item} -> sheet: {matched_mapping.sheet_name}")
+                    else:
+                        # Permanent mapping
+                        if old_status.startswith("UIDI"):
+                            logger.info(f"UIDI override: {clean_invoice_item} -> {matched_mapping.mpi_code}")
+                        elif old_status == "No Match":
+                            logger.info(f"No Match override: {clean_invoice_item} -> {matched_mapping.mpi_code}")
+                        else:
+                            logger.info(f"Item update: {clean_invoice_item} -> {matched_mapping.mpi_code}")
+                else:
                     no_match_found_count += 1
-                    logger.debug(f"No mapping found for item: '{clean_invoice_item}' from supplier {supplier_name}")
+                    logger.debug(f"No mapping found for item: '{clean_invoice_item}'")
                     
             db.commit()
             
             logger.info(f"UIDI update completed: {updated_count} items updated, {no_match_found_count} items remain unmatched")
+            logger.info(f"Breakdown: {updated_from_permanent} from permanent mappings, {updated_from_temp} from temporary mappings, {updated_from_no_sheet} from mappings without sheet names")
             
             return {
                 "status": "success",
                 "message": f"Updated {updated_count} items with No Match / UIDI mappings",
                 "updated_count": updated_count,
                 "unmatched_count": no_match_found_count,
-                "total_processed": len(no_match_items)
+                "total_processed": len(no_match_items),
+                "updated_from_permanent": updated_from_permanent,
+                "updated_from_temp": updated_from_temp,
+                "updated_from_no_sheet": updated_from_no_sheet
             }
             
         except Exception as e:
+            logger.error(f"Error in UIDI update: {str(e)}")
             db.rollback()
-            logger.error(f"Failed to update No Match / UIDI mappings: {str(e)}")
             return {
                 "status": "error",
-                "message": f"Failed to update No Match / UIDI mappings: {str(e)}"
+                "message": f"Error in UIDI update: {str(e)}"
             }
 
     def _extract_supplier_id(self, vendor_name):
@@ -771,8 +809,6 @@ class ItemsMappingController:
     def _perform_all_mappings_update(self, db):
         """Helper method to perform the actual all mappings update"""
         try:
-            # With suffix standardization, we use direct item code comparisons
-            
             # Fetch ALL mappings from supplier table - this should apply everything in the mapping table
             # Note: We include ALL mappings because "Update All" means apply whatever is in the mapping table
             all_mappings = db.query(ItemsMapping).all()
@@ -804,6 +840,10 @@ class ItemsMappingController:
                     "message": "No valid mappings found to apply after filtering"
                 }
             
+            # Get all invoice items for efficient processing
+            all_invoice_items = db.query(InvoiceItem).all()
+            logger.info(f"Processing {len(valid_mappings)} mappings against {len(all_invoice_items)} invoice items")
+            
             # Process each mapping to update related invoice items
             total_updated_count = 0
             total_mappings_processed = 0
@@ -811,53 +851,51 @@ class ItemsMappingController:
             for mapping in valid_mappings:
                 total_mappings_processed += 1
                 try:
-                    # Get vendor name from supplier_id
-                    from mpi_backend.database.models import Supplier
-                    supplier = db.query(Supplier).filter_by(
-                        id=mapping.supplier_id
-                    ).first()
-                    
-                    if not supplier:
-                        logger.warning(
-                            f"Supplier with ID {mapping.supplier_id} not found"
-                        )
-                        continue
-                        
-                    # Find all invoice items that match this item number and supplier
-                    # Note: Invoice items are clean, but mapping.supplier_item_ids may have suffixes
-                    all_supplier_items = db.query(InvoiceItem).filter(
-                        InvoiceItem.vendor.contains(supplier.supplier_name)
-                    ).all()
-                    
-                    # Find matches using direct comparison (no suffix cleaning needed)
-                    matching_items = []
                     # Strip whitespace from mapping item
                     clean_mapping_item = mapping.supplier_item_ids.strip()
                     
-                    for invoice_item in all_supplier_items:
+                    if not clean_mapping_item:
+                        logger.warning(f"Skipping mapping with empty supplier_item_ids: {mapping.mpi_code}")
+                        continue
+                    
+                    # Find matches using exact comparison
+                    matching_items = []
+                    
+                    for invoice_item in all_invoice_items:
                         # Clean the invoice item by stripping whitespace
                         clean_invoice_item = invoice_item.item.strip()
                         
-                        # With suffix standardization, we only do exact matches
+                        if not clean_invoice_item:
+                            continue
+                        
+                        # Exact match only - no suffix variations to avoid business logic issues
                         if clean_invoice_item == clean_mapping_item:
                             matching_items.append(invoice_item)
                     
                     if not matching_items:
+                        logger.debug(f"No matching items found for mapping: {clean_mapping_item}")
                         continue
                         
                     # Update all matching items
                     item_updated_count = 0
                     for item in matching_items:
                         # Apply the mapping from supplier table
+                        old_mpi_item = item.mpi_item or "Empty"
+                        old_sheet_name = item.sheet_name or "Empty"
+                        
                         item.mpi_item = mapping.mpi_code
                         item.mpi_description = mapping.description
                         item.sheet_name = mapping.google_sheet_name or ""
                         item_updated_count += 1
+                        
+                        logger.debug(f"Updated item {item.id}: item='{item.item}', "
+                                   f"mpi_item: '{old_mpi_item}' -> '{mapping.mpi_code}', "
+                                   f"sheet_name: '{old_sheet_name}' -> '{mapping.google_sheet_name}'")
                     
                     total_updated_count += item_updated_count
                     logger.info(
                         f"Updated {item_updated_count} items for mapping "
-                        f"{mapping.supplier_item_ids}"
+                        f"{mapping.supplier_item_ids} -> {mapping.mpi_code}"
                     )
                     
                     # Commit after each mapping batch to avoid large transactions
@@ -890,13 +928,12 @@ class ItemsMappingController:
     def _propagate_mapping_changes(self, db, supplier_id, item_number, 
                                   new_mpi_code, new_description, sheet_name):
         """
-        Propagate mapping changes to all matching InvoiceItems with suffix cleaning.
+        Propagate mapping changes to all matching InvoiceItems with exact matching.
         Now includes validation to ensure we don't propagate temporary mappings.
         
         Updates all InvoiceItem records that:
-        1. Have the same item number (item field) - with suffix cleaning comparison
-        2. Belong to the same supplier (determined from vendor field)
-        3. Only if the new mapping is NOT a temporary placeholder
+        1. Have the same item number (item field) - with exact comparison
+        2. Only if the new mapping is NOT a temporary placeholder
         
         Args:
             db: Database session
@@ -912,29 +949,27 @@ class ItemsMappingController:
                 logger.warning(f"Skipping propagation of temporary mapping: {new_mpi_code}")
                 return
             
-            # Get vendor name from supplier_id
-            from mpi_backend.database.models import Supplier
-            supplier = db.query(Supplier).filter_by(id=supplier_id).first()
+            # Get all invoice items for matching
+            all_invoice_items = db.query(InvoiceItem).all()
             
-            if not supplier:
-                logger.warning(f"Supplier with ID {supplier_id} not found")
+            # Clean the mapping item
+            clean_mapping_item = item_number.strip()
+            
+            if not clean_mapping_item:
+                logger.warning(f"Cannot propagate mapping changes: empty item_number")
                 return
             
-            # Find all invoice items that match this item number and supplier
-            # Note: Invoice items are clean, but mapping item_number may have suffixes
-            all_invoice_items = db.query(InvoiceItem).filter(
-                InvoiceItem.vendor.contains(supplier.supplier_name)
-            ).all()
-            
+            # Find matching items using exact comparison
             matching_items = []
-            # Strip whitespace from mapping item
-            clean_mapping_item = item_number.strip()
             
             for invoice_item in all_invoice_items:
                 # Clean the invoice item by stripping whitespace
                 clean_invoice_item = invoice_item.item.strip()
                 
-                # With suffix standardization, we only do exact matches
+                if not clean_invoice_item:
+                    continue
+                
+                # Exact match only - no suffix variations to avoid business logic issues
                 if clean_invoice_item == clean_mapping_item:
                     matching_items.append(invoice_item)
             
