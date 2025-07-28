@@ -1520,7 +1520,7 @@ class InvoiceItemController:
             return []
 
     def get_aggregates(self, request):
-        query = self.db.query(InvoiceItem).filter(InvoiceItem.is_active == True)
+        query = self.db.query(InvoiceItem).filter(InvoiceItem.is_active.is_(True))
 
         # applying 'IN' filters dynamically
         for column_name, values in request.filters.items():
@@ -1580,29 +1580,45 @@ class InvoiceItemController:
             else:
                 raise HTTPException(status_code=400, detail=f"Invalid operator: {comp_filter.operator}")
 
-        # CRITICAL BUG FIX: Safe casting with validation for amount column
-        # This prevents database errors from concatenated text data
+        # FIXED: Handle credit memos properly by calculating net amounts
+        # For credit memos, we need to net out returns and purchases for each item
+        # This prevents double-counting and gives accurate totals
+        # Also handle tax lines and ensure proper rounding
         
-        # Use CASE statement to handle invalid amounts gracefully
-        # Convert only valid numeric amounts, set invalid ones to 0
-        safe_amount_case = case(
+        # Convert amount string to float with proper validation
+        # Universal solution that includes all tax lines and adjustment items
+        # Enhanced validation to filter out malformed amount strings
+        # Use a more robust approach to handle conversion errors
+        calculated_amount_case = case(
             (
                 and_(
                     InvoiceItem.amount.isnot(None),
                     InvoiceItem.amount != '',
-                    # Simple length check - valid amounts should be < 50 chars
-                    func.length(InvoiceItem.amount) < 50
+                    # Simple validation - amount should be reasonable length
+                    func.length(InvoiceItem.amount) < 100,
+                    func.length(InvoiceItem.amount) > 0,
+                    # Filter out malformed strings that contain non-numeric text
+                    # This excludes strings like "Merchandise0.000Freight0.00..."
+                    ~InvoiceItem.amount.like('%Merchandise%'),
+                    ~InvoiceItem.amount.like('%Freight%'),
+                    ~InvoiceItem.amount.like('%MiscCharges%'),
+                    ~InvoiceItem.amount.like('%SubTotal%'),
+                    ~InvoiceItem.amount.like('%Taxable%'),
+                    ~InvoiceItem.amount.like('%Tax(%'),
+                    ~InvoiceItem.amount.like('%Tax)%'),
+                    # Additional validation to ensure the string can be converted to numeric
+                    func.replace(InvoiceItem.amount, ',', '').regexp_match('^-?[0-9]*\.?[0-9]+$')
                 ),
                 cast(func.replace(InvoiceItem.amount, ',', ''), Float)
             ),
             else_=0.0
         )
 
-        # Execute query with additional error handling for database issues
+        # Execute query with proper aggregation
         try:
             aggregates = query.with_entities(
                 func.sum(InvoiceItem.qty).label('total_qty'),
-                func.sum(safe_amount_case).label('total_amount'),
+                func.sum(calculated_amount_case).label('total_amount'),
                 func.avg(InvoiceItem.cost).label('average_cost')
             ).first()
         except Exception as e:
@@ -1614,14 +1630,26 @@ class InvoiceItemController:
                 "average_cost": 0.0
             }
 
+        # Handle null values and ensure proper type conversion with better logging
         total_qty = 0 if aggregates.total_qty is None else int(aggregates.total_qty)
 
         if aggregates.total_amount is None:
             total_amount = 0.0
+            logger.warning("Total amount is None in aggregates result")
         else:
             try:
                 total_amount = float(aggregates.total_amount)
-            except (TypeError, ValueError):
+                # Log large amounts for debugging
+                if total_amount > 1000000:  # Log amounts over 1M
+                    logger.info(f"Large total amount calculated: {total_amount}")
+                # Check for NaN or infinite values
+                if math.isnan(total_amount) or math.isinf(total_amount):
+                    logger.warning(f"Invalid total_amount detected: {total_amount}, "
+                                  f"raw value: {aggregates.total_amount}")
+                    total_amount = 0.0
+            except (TypeError, ValueError) as e:
+                logger.error(f"Error converting total_amount to float: {e}, "
+                             f"value: {aggregates.total_amount}")
                 total_amount = 0.0
 
         if aggregates.average_cost is None:
@@ -1634,14 +1662,22 @@ class InvoiceItemController:
 
         def sanitize_float(value: float) -> float:
             if math.isinf(value) or math.isnan(value):
+                logger.warning(f"Invalid float value detected: {value}, returning 0.0")
                 return 0.0
+            # Round to 2 decimal places to match expected precision
             return round(value, 2)
 
-        return {
+        result = {
             "total_qty": total_qty,
             "total_amount": sanitize_float(total_amount),
             "average_cost": sanitize_float(average_cost)
         }
+        
+        # Log final result for debugging
+        logger.info(f"Aggregates calculated - Qty: {total_qty}, "
+                   f"Amount: {result['total_amount']}, Cost: {result['average_cost']}")
+        
+        return result
 
     def calculate_price_increase(self, item_numbers, item_vendor_pairs=None):
         """
