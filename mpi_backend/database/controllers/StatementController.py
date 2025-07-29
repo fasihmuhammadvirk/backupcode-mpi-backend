@@ -1321,8 +1321,8 @@ class StatementController:
                     from_date=from_date,
                     to_date=to_date,
                     supplier_names=supplier_names,
-                    page=page,
-                    page_size=page_size
+                    page=1,  # Get all data for filtering
+                    page_size=200000  # Large page size to get all data
                 )
                 
                 # Filter by search term with priority for "starts with" matches
@@ -1341,8 +1341,24 @@ class StatementController:
                         return 1
                     
                     filtered_data.sort(key=sort_key)
-                    unlisted_results['data'] = filtered_data
-                    unlisted_results['pagination']['total_results'] = len(filtered_data)
+                    
+                    # Apply pagination to filtered results
+                    total_count = len(filtered_data)
+                    offset = (page - 1) * page_size
+                    paginated_data = filtered_data[offset:offset + page_size]
+                    
+                    # Calculate pagination metadata from filtered results
+                    total_pages = ceil(total_count / page_size) if page_size > 0 else 1
+                    
+                    unlisted_results['data'] = paginated_data
+                    unlisted_results['pagination'] = {
+                        'current_page': page,
+                        'page_size': page_size,
+                        'total_results': total_count,
+                        'total_pages': total_pages,
+                        'has_next': page < total_pages,
+                        'has_previous': page > 1
+                    }
                     unlisted_results['filters_applied']['search'] = search
                 
                 return unlisted_results
@@ -1355,8 +1371,8 @@ class StatementController:
                     from_date=from_date,
                     to_date=to_date,
                     supplier_names=supplier_names,
-                    page=page,
-                    page_size=page_size
+                    page=1,  # Get all data for filtering
+                    page_size=200000  # Large page size to get all data
                 )
                 
                 # Filter by search term with priority for "starts with" matches
@@ -1376,8 +1392,24 @@ class StatementController:
                         return 1
                     
                     filtered_data.sort(key=sort_key)
-                    missing_results['data'] = filtered_data
-                    missing_results['pagination']['total_results'] = len(filtered_data)
+                    
+                    # Apply pagination to filtered results
+                    total_count = len(filtered_data)
+                    offset = (page - 1) * page_size
+                    paginated_data = filtered_data[offset:offset + page_size]
+                    
+                    # Calculate pagination metadata from filtered results
+                    total_pages = ceil(total_count / page_size) if page_size > 0 else 1
+                    
+                    missing_results['data'] = paginated_data
+                    missing_results['pagination'] = {
+                        'current_page': page,
+                        'page_size': page_size,
+                        'total_results': total_count,
+                        'total_pages': total_pages,
+                        'has_next': page < total_pages,
+                        'has_previous': page > 1
+                    }
                     missing_results['filters_applied']['search'] = search
                 
                 return missing_results
@@ -1388,8 +1420,8 @@ class StatementController:
                     from_date=from_date,
                     to_date=to_date,
                     supplier_names=supplier_names,
-                    page=page,
-                    page_size=page_size
+                    page=1,  # Get all data for filtering
+                    page_size=200000  # Large page size to get all data
                 )
                 
                 # Filter by search term with priority for "starts with" matches
@@ -1409,9 +1441,41 @@ class StatementController:
                         return 1
                     
                     filtered_data.sort(key=sort_key)
-                    all_results['data'] = filtered_data
-                    all_results['pagination']['total_results'] = len(filtered_data)
+                    
+                    # Apply pagination to filtered results
+                    total_count = len(filtered_data)
+                    offset = (page - 1) * page_size
+                    paginated_data = filtered_data[offset:offset + page_size]
+                    
+                    # Calculate pagination metadata from filtered results
+                    total_pages = ceil(total_count / page_size) if page_size > 0 else 1
+                    
+                    # Calculate summary from filtered results
+                    status_counts = {}
+                    for item in filtered_data:
+                        status = item['status']
+                        status_counts[status] = status_counts.get(status, 0) + 1
+                    
+                    all_results['data'] = paginated_data
+                    all_results['pagination'] = {
+                        'current_page': page,
+                        'page_size': page_size,
+                        'total_results': total_count,
+                        'total_pages': total_pages,
+                        'has_next': page < total_pages,
+                        'has_previous': page > 1
+                    }
                     all_results['filters_applied']['search'] = search
+                    all_results['summary'] = {
+                        'total_all_categories': total_count,
+                        'missing_system_count': status_counts.get('Missing System', 0),
+                        'missing_statement_count': status_counts.get('Missing Statement', 0),
+                        'unlisted_count': status_counts.get('Unlisted', 0),
+                        'processed_count': status_counts.get('Processed', 0),
+                        'failed_count': status_counts.get('Failed', 0),
+                        'system_source_count': len([item for item in filtered_data if item['source'] == 'system']),
+                        'statement_source_count': len([item for item in filtered_data if item['source'] == 'statement'])
+                    }
                 
                 return all_results
 
