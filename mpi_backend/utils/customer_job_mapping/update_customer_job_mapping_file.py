@@ -1,3 +1,4 @@
+from mpi_backend.config.logging_config import setup_logging
 import pandas as pd
 import json
 import logging
@@ -7,7 +8,6 @@ from pathlib import Path
 # Add the parent directory to the path so we can import mpi_backend
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
-from mpi_backend.config.logging_config import setup_logging
 
 # Setup centralized logging
 setup_logging()
@@ -51,9 +51,11 @@ def update_customer_job_mappings_json(excel_file, json_file="mpi_backend/storage
 
         # Step 4: Select and clean relevant columns
         try:
-            df_cleaned = df_raw[['Customer Job', 'Updated Customer Job']].dropna()
+            df_cleaned = df_raw[['Customer Job',
+                                 'Updated Customer Job']].dropna()
         except KeyError as ke:
-            raise ValueError("Excel file must contain 'Customer Job' and 'Updated Customer Job' columns.") from ke
+            raise ValueError(
+                "Excel file must contain 'Customer Job' and 'Updated Customer Job' columns.") from ke
 
         # Step 5: Rename columns for consistency
         df_cleaned = df_cleaned.rename(columns={
@@ -77,10 +79,12 @@ def update_customer_job_mappings_json(excel_file, json_file="mpi_backend/storage
     except FileNotFoundError:
         existing_data = []
     except json.JSONDecodeError:
-        raise ValueError("Existing JSON file is corrupted or contains invalid JSON.")
+        raise ValueError(
+            "Existing JSON file is corrupted or contains invalid JSON.")
 
     # Create a set of existing pairs for fast lookup
-    existing_set = {(item['customer_job'], item['updated_customer_job']) for item in existing_data}
+    existing_set = {(item['customer_job'], item['updated_customer_job'])
+                    for item in existing_data}
 
     # Collect only new mappings
     new_entries = []

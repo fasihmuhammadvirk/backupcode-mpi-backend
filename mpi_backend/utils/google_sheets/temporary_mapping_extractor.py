@@ -434,10 +434,10 @@ class TemporaryMappingExtractor:
             )
             output_path = os.path.normpath(output_path)
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            # Write to JSON file (only mappings, no statistics)
-            with open(output_path, 'w') as f:
+            # Write to JSON file (only mappings, no statistics) with UTF-8 encoding for Windows compatibility
+            with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(
-                    valid_temp_mappings_dicts, f, indent=2
+                    valid_temp_mappings_dicts, f, indent=2, ensure_ascii=False
                 )
             self.logger.info(
                 f"Exported {len(valid_temp_mappings_dicts)} valid temporary mappings to {output_path}"

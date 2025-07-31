@@ -1,0 +1,28 @@
+{
+  "temp_mapping_stats": {
+    "total_mappings": 0,
+    "unique_sheets": 0,
+    "sheet_names": [],
+    "mappings_per_sheet": {},
+    "last_updated": null,
+    "last_sync_time": null
+  },
+  "item_mapping_stats": {
+    "total_mappings": 0,
+    "unique_sheets": 0,
+    "sheet_names": [],
+    "mappings_per_sheet": {},
+    "permanent_mappings": 0,
+    "temporary_mappings": 0,
+    "invalid_mappings": 0,
+    "last_updated": null,
+    "last_sync_time": null
+  },
+  "overall_stats": {
+    "total_items": 0,
+    "total_sheets_processed": 0,
+    "last_full_sync": null,
+    "last_uidi_update": null,
+    "last_all_update": null
+  }
+}

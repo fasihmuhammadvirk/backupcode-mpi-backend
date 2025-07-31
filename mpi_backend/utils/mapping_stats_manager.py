@@ -74,8 +74,8 @@ class MappingStatsManager:
     def _write_stats(self, stats: Dict[str, Any]):
         """Write statistics to JSON file."""
         try:
-            with open(self.stats_file_path, 'w') as f:
-                json.dump(stats, f, indent=2, default=str)
+            with open(self.stats_file_path, 'w', encoding='utf-8') as f:
+                json.dump(stats, f, indent=2, default=str, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Error writing stats file: {e}")
             raise

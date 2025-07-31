@@ -1122,9 +1122,12 @@ class EnhancedGoogleSheetDataExtractor:
                     f"Error processing sheet {sheet['title']}: {str(e)}")
 
         # Categorize items based on their mapping_type
-        permanent_items = [item for item in self.all_items if item.get("mapping_type") == "permanent"]
-        temporary_items = [item for item in self.all_items if item.get("mapping_type") == "temporary"]
-        invalid_items = [item for item in self.all_items if item.get("mapping_type") == "invalid"]
+        permanent_items = [item for item in self.all_items if item.get(
+            "mapping_type") == "permanent"]
+        temporary_items = [item for item in self.all_items if item.get(
+            "mapping_type") == "temporary"]
+        invalid_items = [item for item in self.all_items if item.get(
+            "mapping_type") == "invalid"]
 
         # Update statistics based on actual extracted items
         self.extraction_stats["total_extracted"] = len(self.all_items)
@@ -1144,9 +1147,9 @@ class EnhancedGoogleSheetDataExtractor:
         # Validate JSON structure before saving
         self._validate_json_structure(output_data)
 
-        # Save to file with proper formatting
+        # Save to file with proper formatting and UTF-8 encoding for Windows compatibility
         try:
-            with open(self.output_file, 'w') as f:
+            with open(self.output_file, 'w', encoding='utf-8') as f:
                 json.dump(output_data, f, indent=2, ensure_ascii=False)
             logger.info(f"JSON data saved successfully to {self.output_file}")
         except Exception as e:
