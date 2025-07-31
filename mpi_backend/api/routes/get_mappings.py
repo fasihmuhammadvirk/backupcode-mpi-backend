@@ -18,22 +18,23 @@ def update_item_mappings(request: UpdateMappingRequest, db: Session = Depends(ge
         results = []
         permanent_count = 0
         temporary_redirected = 0
-        
+
         for mapping in request.mapping:
-            result = ItemsMappingController(db).update_mapping(request.supplier_id, mapping)
+            result = ItemsMappingController(db).update_mapping(
+                request.supplier_id, mapping)
             results.append(result)
-            
+
             if result.get("status") == "success":
                 permanent_count += 1
             elif result.get("status") == "redirected_to_temporary":
                 temporary_redirected += 1
-        
+
         message = f"Processing completed: {permanent_count} permanent mappings"
         if temporary_redirected > 0:
             message += f", {temporary_redirected} redirected to temporary storage"
-            
+
         return {
-            "success": True, 
+            "success": True,
             "message": message,
             "details": {
                 "permanent_mappings": permanent_count,
@@ -42,27 +43,29 @@ def update_item_mappings(request: UpdateMappingRequest, db: Session = Depends(ge
             }
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update item mapping : {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to update item mapping : {e}")
 
 
 @router.get("/search-item")
 def search_item_mapping(
-    item: str = Query(..., description="Clean item code from invoice to search for"),
-    db: Session = Depends(get_db), 
+    item: str = Query(...,
+                      description="Clean item code from invoice to search for"),
+    db: Session = Depends(get_db),
     token: str = Depends(JWTBearer())
 ):
     """
     Search for item mappings by clean item code across all suppliers.
-    
+
     This endpoint:
     - Takes a clean item code (from invoice)
     - Searches across ALL suppliers
     - Uses suffix cleaning to compare against database items
     - Returns all matching mappings found
-    
+
     Args:
         item (str): The clean item code from invoice
-        
+
     Returns:
         Dict containing:
         - found: boolean indicating if any mappings were found
@@ -76,14 +79,15 @@ def search_item_mapping(
         )
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to search item mapping: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to search item mapping: {e}")
 
 
 @router.get("/mpi_types")
 def get_mapping_by_mpi_type(db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
     """
     Get all MPI type mappings.
-    
+
     Returns:
         Dict: Dictionary with MPI codes as keys and mapping details as values
     """
@@ -91,7 +95,8 @@ def get_mapping_by_mpi_type(db: Session = Depends(get_db), token: str = Depends(
         mappings = ItemsMappingController(db).get_items_mappings_by_mpi_type()
         return mappings
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch item mapping by MPI type: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to fetch item mapping by MPI type: {e}")
 
 
 @router.get("/{supplier_id}", response_model=List[ItemMappingsResponse])
@@ -123,7 +128,8 @@ def get_mapping_by_supplier_id(
         offset = 0
 
         while True:
-            batch = ItemsMappingController(db).get_items_mappings_by_supplier_id(supplier_id, limit=batch_size, offset=offset)
+            batch = ItemsMappingController(db).get_items_mappings_by_supplier_id(
+                supplier_id, limit=batch_size, offset=offset)
             if not batch:
                 break
             mappings.extend(batch)
@@ -132,4 +138,5 @@ def get_mapping_by_supplier_id(
         return mappings
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch item mapping: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to fetch item mapping: {e}")

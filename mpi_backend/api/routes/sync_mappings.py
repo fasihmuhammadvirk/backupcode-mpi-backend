@@ -23,22 +23,22 @@ def sync_mapping(
 ):
     """
     Manually trigger enhanced synchronization of mappings from Google Sheets.
-    
+
     If a sync task is already running, returns a message indicating that.
     Otherwise, starts the enhanced sync process in the background.
-    
+
     Returns:
         SyncMappingsResponse: Success status, message, and timestamp
     """
     # Use enhanced sync controller for better temporary/permanent mapping handling
     sync_controller = GoogleSheetSyncController(db)
     status = sync_controller.get_sync_status()
-    
+
     if status["is_running"]:
         # Get detailed job information
         operation = status["current_operation"]
         sub_operation = status["current_sub_operation"]
-        
+
         # Determine what's currently running
         if operation == "update_no_match_uidi":
             if sub_operation == "syncing_google_sheets":
@@ -58,16 +58,17 @@ def sync_mapping(
             blocking_job = "Google Sheets Sync"
         else:
             blocking_job = operation or "Unknown operation"
-        
+
         return SyncMappingsResponse(
             success=False,
             message=f"Cannot start sync: {blocking_job} is currently running",
             timestamp=datetime.now()
         )
-    
-    # Start enhanced sync in the background
-    background_tasks.add_task(GoogleSheetSyncController.execute_sync_task, db, 'sync')
-    
+
+    # Start enhanced sync in the background using the worker method
+    background_tasks.add_task(
+        GoogleSheetSyncController._execute_sync_task_worker, db, 'sync')
+
     return SyncMappingsResponse(
         success=True,
         message="Sync task started manually",
@@ -82,43 +83,47 @@ def sync_status(
 ):
     """
     Check the status of synchronization tasks.
-    
+
     Returns:
         dict: Current sync status including running operations and timestamps
     """
     sync_controller = GoogleSheetSyncController(db)
     status = sync_controller.get_sync_status()
-    
+
     # Determine detailed current operation description
     current_operation = "No operation in progress"
-    
+
     if status["is_running"]:
         operation = status["current_operation"]
         sub_operation = status["current_sub_operation"]
-        
+
         # Create detailed operation descriptions based on operation and sub-operation
         if operation == "sync":
             current_operation = "Synchronizing Google Sheets"
-                
+
         elif operation == "update_no_match_uidi":
             if sub_operation == "syncing_google_sheets":
-                current_operation = "Updating No Match / UIDI Mappings (Step 1/2: Syncing Google Sheets)"
+                current_operation = "Updating No Match / UIDI Mappings (Step 1/3: Syncing Google Sheets)"
+            elif sub_operation == "syncing_temporary_mappings":
+                current_operation = "Updating No Match / UIDI Mappings (Step 2/3: Syncing Temporary Mappings)"
             elif sub_operation == "updating_uidi_items":
-                current_operation = "Updating No Match / UIDI Mappings (Step 2/2: Updating UIDI Items)"
+                current_operation = "Updating No Match / UIDI Mappings (Step 3/3: Updating UIDI Items)"
             else:
                 current_operation = "Updating No Match / UIDI Mappings"
-                
+
         elif operation == "update_all":
             if sub_operation == "syncing_google_sheets":
-                current_operation = "Updating All Mappings (Step 1/2: Syncing Google Sheets)"
+                current_operation = "Updating All Mappings (Step 1/3: Syncing Google Sheets)"
+            elif sub_operation == "syncing_temporary_mappings":
+                current_operation = "Updating All Mappings (Step 2/3: Syncing Temporary Mappings)"
             elif sub_operation == "updating_all_items":
-                current_operation = "Updating All Mappings (Step 2/2: Updating All Items)"
+                current_operation = "Updating All Mappings (Step 3/3: Updating All Items)"
             else:
                 current_operation = "Updating All Mappings"
         else:
             # Fallback for unknown operations
             current_operation = operation or "Unknown operation"
-    
+
     return {
         "status": "running" if status["is_running"] else "idle",
         "current_operation": current_operation,
@@ -126,6 +131,7 @@ def sync_status(
         "last_no_match_uidi_update": status["last_update_no_match_uidi_time"],
         "last_full_update": status["last_update_all_time"]
     }
+
 
 @router.post("/update-no-match-uidi-mappings")
 def update_no_match_uidi_mappings(
@@ -135,7 +141,7 @@ def update_no_match_uidi_mappings(
 ):
     """
     Syncs mappings from Google Sheets, then updates No Match / UIDI mappings.
-    
+
     Update all items with No Match / UIDI mappings by finding matches in the
     ItemsMapping table.
 
@@ -157,27 +163,31 @@ def update_no_match_uidi_mappings(
         # Get detailed job information
         operation = status["current_operation"]
         sub_operation = status["current_sub_operation"]
-        
+
         # Determine what's currently running
         if operation == "update_no_match_uidi":
             if sub_operation == "syncing_google_sheets":
-                blocking_job = "UIDI Update (Step 1/2: Syncing Google Sheets)"
+                blocking_job = "UIDI Update (Step 1/3: Syncing Google Sheets)"
+            elif sub_operation == "syncing_temporary_mappings":
+                blocking_job = "UIDI Update (Step 2/3: Syncing Temporary Mappings)"
             elif sub_operation == "updating_uidi_items":
-                blocking_job = "UIDI Update (Step 2/2: Updating UIDI items)"
+                blocking_job = "UIDI Update (Step 3/3: Updating UIDI items)"
             else:
                 blocking_job = "UIDI Update"
         elif operation == "update_all":
             if sub_operation == "syncing_google_sheets":
-                blocking_job = "Full Update (Step 1/2: Syncing Google Sheets)"
+                blocking_job = "Full Update (Step 1/3: Syncing Google Sheets)"
+            elif sub_operation == "syncing_temporary_mappings":
+                blocking_job = "Full Update (Step 2/3: Syncing Temporary Mappings)"
             elif sub_operation == "updating_all_items":
-                blocking_job = "Full Update (Step 2/2: Updating all items)"
+                blocking_job = "Full Update (Step 3/3: Updating all items)"
             else:
                 blocking_job = "Full Update"
         elif operation == "sync":
             blocking_job = "Google Sheets Sync"
         else:
             blocking_job = operation or "Unknown operation"
-        
+
         return {
             "status": "error",
             "message": f"Cannot start UIDI update: {blocking_job} is currently running",
@@ -185,13 +195,13 @@ def update_no_match_uidi_mappings(
         }
 
     try:
-        # Start sync with update_no_match_uidi operation
+        # Start sync with update_no_match_uidi operation using the worker method
         background_tasks.add_task(
-            GoogleSheetSyncController.execute_sync_task,
-            db, 
+            GoogleSheetSyncController._execute_sync_task_worker,
+            db,
             'update_no_match_uidi'
         )
-        
+
         return {
             "status": "success",
             "message": "No Match / UIDI update task has been started in the background",
@@ -204,6 +214,7 @@ def update_no_match_uidi_mappings(
             "message": f"Failed to start No Match / UIDI update: {str(e)}",
             "timestamp": datetime.now().isoformat()
         }
+
 
 @router.post("/update-all-mappings")
 def update_all_mappings(
@@ -232,20 +243,24 @@ def update_all_mappings(
         # Get detailed job information
         operation = status["current_operation"]
         sub_operation = status["current_sub_operation"]
-        
+
         # Determine what's currently running
         if operation == "update_no_match_uidi":
             if sub_operation == "syncing_google_sheets":
-                blocking_job = "UIDI Update (Step 1/2: Syncing Google Sheets)"
+                blocking_job = "UIDI Update (Step 1/3: Syncing Google Sheets)"
+            elif sub_operation == "syncing_temporary_mappings":
+                blocking_job = "UIDI Update (Step 2/3: Syncing Temporary Mappings)"
             elif sub_operation == "updating_uidi_items":
-                blocking_job = "UIDI Update (Step 2/2: Updating UIDI items)"
+                blocking_job = "UIDI Update (Step 3/3: Updating UIDI items)"
             else:
                 blocking_job = "UIDI Update"
         elif operation == "update_all":
             if sub_operation == "syncing_google_sheets":
-                blocking_job = "Full Update (Step 1/2: Syncing Google Sheets)"
+                blocking_job = "Full Update (Step 1/3: Syncing Google Sheets)"
+            elif sub_operation == "syncing_temporary_mappings":
+                blocking_job = "Full Update (Step 2/3: Syncing Temporary Mappings)"
             elif sub_operation == "updating_all_items":
-                blocking_job = "Full Update (Step 2/2: Updating all items)"
+                blocking_job = "Full Update (Step 3/3: Updating all items)"
             else:
                 blocking_job = "Full Update"
         elif operation == "sync":
@@ -260,9 +275,9 @@ def update_all_mappings(
         }
 
     try:
-        # Start sync with update_all operation
+        # Start sync with update_all operation using the worker method
         background_tasks.add_task(
-            GoogleSheetSyncController.execute_sync_task,
+            GoogleSheetSyncController._execute_sync_task_worker,
             db,
             'update_all'
         )

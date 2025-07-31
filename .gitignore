@@ -173,3 +173,5 @@ mpi_backend/storage/*
 mpi-backend/.vscode/
 
 .cursor/
+
+.vscode/
