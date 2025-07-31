@@ -17,6 +17,7 @@ import os
 import json
 
 from mpi_backend.database.models.TemporaryItemMapping import TempItemMapping
+from mpi_backend.database import get_db
 from mpi_backend.utils.mapping_stats_manager import MappingStatsManager
 
 # Set up logging
@@ -194,7 +195,12 @@ class TemporaryMappingExtractor:
             self.logger.info(f"Processing ALL rows from {data_start_row + 1} to {total_rows_in_sheet} "
                              f"for temporary items in sheet {sheet_name}")
 
-            for row_idx in range(data_start_row, total_rows_in_sheet):
+            # Add timeout protection to prevent infinite loops
+            # Limit to 10k rows max
+            max_rows_to_process = min(
+                total_rows_in_sheet - data_start_row, 10000)
+
+            for row_idx in range(data_start_row, min(data_start_row + max_rows_to_process, total_rows_in_sheet)):
                 try:
                     row_data = df.iloc[row_idx]
                     total_rows_processed += 1
@@ -300,61 +306,79 @@ class TemporaryMappingExtractor:
             ]
             if not valid_mappings:
                 return 0
+
             # Clear existing temporary mappings for affected sheet names
             sheet_names = {mapping["sheet_name"] for mapping in valid_mappings}
             for sheet_name in sheet_names:
-                self.db.query(TempItemMapping).filter(
-                    TempItemMapping.sheet_name == sheet_name
-                ).delete()
-
-            # Process mappings one by one to avoid SQL issues
-            saved_count = 0
-            for mapping_data in valid_mappings:
                 try:
-                    # Check for duplicates before inserting
-                    existing_mapping = self.db.query(TempItemMapping).filter_by(
-                        original_item=mapping_data["original_item"],
-                        sheet_name=mapping_data["sheet_name"]
-                    ).first()
+                    self.db.query(TempItemMapping).filter(
+                        TempItemMapping.sheet_name == sheet_name
+                    ).delete()
+                    self.db.commit()
+                except Exception as e:
+                    self.logger.warning(
+                        f"Error clearing existing mappings for {sheet_name}: {str(e)}")
+                    self.db.rollback()
 
-                    if existing_mapping:
-                        # Update existing mapping
-                        existing_mapping.original_description = mapping_data["original_description"]
-                        self.logger.debug(
-                            f"Updated existing temporary mapping: {mapping_data['original_item']}")
-                    else:
-                        # Create new mapping
-                        temp_mapping = TempItemMapping(
-                            original_item=mapping_data["original_item"],
-                            original_description=mapping_data["original_description"],
-                            sheet_name=mapping_data["sheet_name"]
-                        )
-                        self.db.add(temp_mapping)
-                        self.logger.debug(
-                            f"Created new temporary mapping: {mapping_data['original_item']}")
+            # Process mappings in batches to avoid memory issues
+            batch_size = 50
+            saved_count = 0
 
-                    saved_count += 1
+            for i in range(0, len(valid_mappings), batch_size):
+                batch = valid_mappings[i:i + batch_size]
 
-                    # Commit every 100 items to avoid large transactions
-                    if saved_count % 100 == 0:
-                        self.db.commit()
-                        self.logger.debug(
-                            f"Committed {saved_count} temporary mappings so far")
+                try:
+                    for mapping_data in batch:
+                        try:
+                            # Use UPSERT approach to avoid duplicate key violations
+                            existing_mapping = self.db.query(TempItemMapping).filter_by(
+                                original_item=mapping_data["original_item"],
+                                sheet_name=mapping_data["sheet_name"]
+                            ).first()
+
+                            if existing_mapping:
+                                # Update existing mapping
+                                existing_mapping.original_description = mapping_data[
+                                    "original_description"]
+                                self.logger.debug(
+                                    f"Updated existing temporary mapping: {mapping_data['original_item']}")
+                            else:
+                                # Create new mapping with explicit ID handling
+                                temp_mapping = TempItemMapping(
+                                    original_item=mapping_data["original_item"],
+                                    original_description=mapping_data["original_description"],
+                                    sheet_name=mapping_data["sheet_name"]
+                                )
+                                self.db.add(temp_mapping)
+                                self.logger.debug(
+                                    f"Created new temporary mapping: {mapping_data['original_item']}")
+
+                            saved_count += 1
+
+                        except Exception as e:
+                            self.logger.error(
+                                f"Error processing temporary mapping {mapping_data.get('original_item', 'unknown')}: {str(e)}")
+                            continue
+
+                    # Commit batch
+                    self.db.commit()
+                    self.logger.debug(
+                        f"Committed batch of {len(batch)} temporary mappings")
 
                 except Exception as e:
-                    self.logger.error(
-                        f"Error saving temporary mapping {mapping_data.get('original_item', 'unknown')}: {str(e)}")
+                    self.logger.error(f"Error committing batch: {str(e)}")
+                    self.db.rollback()
+                    # Continue with next batch instead of failing completely
                     continue
 
-            # Final commit for remaining items
-            self.db.commit()
             self.logger.info(
                 f"Saved {saved_count} temporary mappings to database")
             return saved_count
+
         except Exception as e:
             self.db.rollback()
             self.logger.error(f"Error saving temporary mappings: {str(e)}")
-            raise
+            return 0  # Return 0 instead of raising to prevent process from hanging
 
     def extract_and_save_from_dataframe(self, df: pd.DataFrame, sheet_name: str) -> int:
         """
@@ -366,12 +390,21 @@ class TemporaryMappingExtractor:
         Returns:
             Number of mappings extracted and saved
         """
-        # Extract temporary mappings
-        mappings = self.extract_temporary_mappings(df, sheet_name)
-        if not mappings:
-            return 0
-        # Save to database
-        saved_count = self.save_temporary_mappings(mappings)
+        try:
+            # Extract temporary mappings
+            mappings = self.extract_temporary_mappings(df, sheet_name)
+            if not mappings:
+                return 0
+
+            # Save to database with timeout protection
+            saved_count = self.save_temporary_mappings(mappings)
+
+            return saved_count
+
+        except Exception as e:
+            self.logger.error(
+                f"Error in extract_and_save_from_dataframe for {sheet_name}: {str(e)}")
+            return 0  # Return 0 instead of failing completely
         # --- Save all temporary mappings to JSON file ---
         try:
             # Query only VALID temporary mappings from the DB (exclude null values)

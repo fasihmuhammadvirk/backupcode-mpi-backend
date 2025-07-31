@@ -3,7 +3,7 @@ import pandas as pd
 import logging
 import re
 from typing import Dict, Any, List, Optional
-from sqlalchemy import or_
+from sqlalchemy import or_, and_
 from sqlalchemy.orm import Session
 
 from mpi_backend.utils.quickbooks_priority import is_qb_export_active
@@ -821,6 +821,255 @@ class ItemsMappingController:
                 "status": "error",
                 "message": f"Error in UIDI update: {str(e)}"
             }
+
+    def update_all_unmapped_items(self) -> Dict[str, Any]:
+        """
+        Comprehensive update for ALL unmapped items.
+
+        This method will:
+        1. Find ALL items that are unmapped (regardless of their current status)
+        2. First try to match with permanent mappings (exact match)
+        3. Then try to match with temporary mappings (exact match)
+        4. Update items with the best available mapping
+
+        Returns:
+            Dict with comprehensive update operation details
+        """
+        from mpi_backend.database.controllers import GoogleSheetSyncController
+
+        # Check if a sync task is already running
+        status = GoogleSheetSyncController.get_sync_status()
+        if status["is_running"] and status["current_operation"] != "update_all_unmapped":
+            operation_display = {
+                "sync": "Synchronization",
+                "update_no_match_uidi": "No Match / UIDI Update",
+                "update_all": "Full Update",
+                "update_all_unmapped": "All Unmapped Items Update"
+            }.get(status['current_operation'], status['current_operation'])
+
+            logger.info(
+                f"Cannot start operation: {operation_display} is already in progress")
+            return {
+                "status": "error",
+                "message": f"Cannot start operation: {operation_display} is already in progress"
+            }
+
+        db = self._get_db_session()
+        return self._perform_comprehensive_unmapped_update(db)
+
+    def _perform_comprehensive_unmapped_update(self, db):
+        """Helper method to perform comprehensive unmapped items update"""
+        try:
+            # Get ALL items that are unmapped - comprehensive query
+            unmapped_items = db.query(InvoiceItem).filter(
+                or_(
+                    # Items with no MPI item assigned
+                    InvoiceItem.mpi_item.is_(None),
+                    InvoiceItem.mpi_item == "",
+                    InvoiceItem.mpi_item == "No Match",
+                    InvoiceItem.mpi_item.like("UIDI%"),
+                    # Items with no sheet name (even if they have MPI item)
+                    InvoiceItem.sheet_name.is_(None),
+                    InvoiceItem.sheet_name == "",
+                    # Items that might have sheet name but no proper MPI mapping
+                    and_(
+                        InvoiceItem.sheet_name.isnot(None),
+                        InvoiceItem.sheet_name != "",
+                        or_(
+                            InvoiceItem.mpi_item.is_(None),
+                            InvoiceItem.mpi_item == "",
+                            InvoiceItem.mpi_item == "No Match",
+                            InvoiceItem.mpi_item.like("UIDI%")
+                        )
+                    )
+                )
+            ).all()
+
+            if not unmapped_items:
+                logger.info("No unmapped items found for comprehensive update")
+                return {
+                    "status": "success",
+                    "message": "No unmapped items found"
+                }
+
+            logger.info(
+                f"Found {len(unmapped_items)} unmapped items for comprehensive update")
+
+            # Get valid permanent mappings
+            valid_mappings = db.query(ItemsMapping).filter(
+                ~ItemsMapping.mpi_code.like("UIDI%"),
+                ItemsMapping.mpi_code != "No Match",
+                ItemsMapping.mpi_code != "No Match / UIDI",
+                ItemsMapping.mpi_code.isnot(None),
+                ItemsMapping.mpi_code != ""
+            ).all()
+
+            if not valid_mappings:
+                logger.info(
+                    "No valid permanent mappings available for comprehensive update")
+                return {
+                    "status": "error",
+                    "message": "No valid permanent mappings available"
+                }
+
+            logger.info(
+                f"Found {len(valid_mappings)} valid permanent mappings for matching")
+
+            # Get temporary mappings
+            from mpi_backend.database.models.TemporaryItemMapping import TempItemMapping
+            temp_mappings = db.query(TempItemMapping).all()
+            logger.info(
+                f"Found {len(temp_mappings)} temporary mappings for additional matching")
+
+            # Create comprehensive lookup dictionaries
+            permanent_lookup = {}
+            temp_lookup = {}
+            mappings_without_sheet = {}
+
+            # Build permanent mappings lookup
+            for mapping in valid_mappings:
+                # Validate this is truly a permanent mapping
+                if is_temporary_mapping(mapping.mpi_code, mapping.description):
+                    logger.warning(
+                        f"Skipping temporary mapping in permanent table: {mapping.mpi_code}")
+                    continue
+
+                clean_mapping_item = mapping.supplier_item_ids.strip()
+                if clean_mapping_item:
+                    permanent_lookup[clean_mapping_item] = mapping
+
+                    # Track mappings without sheet names
+                    if not mapping.google_sheet_name or mapping.google_sheet_name.strip() == "":
+                        mappings_without_sheet[clean_mapping_item] = mapping
+
+            # Build temporary mappings lookup (don't override permanent)
+            for temp_mapping in temp_mappings:
+                if temp_mapping.original_item is None:
+                    continue
+
+                clean_temp_item = temp_mapping.original_item.strip()
+                if clean_temp_item and clean_temp_item not in permanent_lookup:
+                    temp_lookup[clean_temp_item] = temp_mapping
+
+            logger.info(
+                f"Created comprehensive lookup: {len(permanent_lookup)} permanent, {len(temp_lookup)} temporary mappings")
+            logger.info(
+                f"Found {len(mappings_without_sheet)} permanent mappings without sheet names")
+
+            # Process ALL unmapped items
+            updated_count = 0
+            updated_from_permanent = 0
+            updated_from_temp = 0
+            updated_from_no_sheet = 0
+            no_match_found_count = 0
+            items_with_sheet_but_no_mpi = 0
+
+            for item in unmapped_items:
+                # Clean the invoice item for comparison
+                clean_invoice_item = str(item.item).strip()
+
+                if not clean_invoice_item:
+                    continue
+
+                # Track original state for logging
+                original_mpi = item.mpi_item or "Empty"
+                original_sheet = item.sheet_name or "Empty"
+                had_sheet_but_no_mpi = (original_sheet != "Empty" and
+                                        (original_mpi == "Empty" or original_mpi == "No Match" or original_mpi.startswith("UIDI")))
+
+                # Try to find a match - PRIORITY ORDER:
+                # 1. Permanent mappings (with or without sheet names)
+                # 2. Temporary mappings (only if no permanent mapping exists)
+                matched_mapping = None
+                match_source = None
+
+                # First: Check permanent mappings (exact match only)
+                if clean_invoice_item in permanent_lookup:
+                    matched_mapping = permanent_lookup[clean_invoice_item]
+                    match_source = "permanent"
+
+                    # Check if this is a mapping without sheet name
+                    if clean_invoice_item in mappings_without_sheet:
+                        match_source = "permanent_no_sheet"
+
+                # Second: If no permanent mapping, check temporary mappings (exact match only)
+                elif clean_invoice_item in temp_lookup:
+                    matched_mapping = temp_lookup[clean_invoice_item]
+                    match_source = "temporary"
+
+                if matched_mapping:
+                    # Apply the mapping based on source
+                    if match_source == "permanent" or match_source == "permanent_no_sheet":
+                        # Apply permanent mapping
+                        item.mpi_item = matched_mapping.mpi_code
+                        item.mpi_description = matched_mapping.description
+                        item.sheet_name = matched_mapping.google_sheet_name or ""
+
+                        if match_source == "permanent_no_sheet":
+                            updated_from_no_sheet += 1
+                            logger.info(
+                                f"Comprehensive update (no sheet): {clean_invoice_item} -> {matched_mapping.mpi_code}")
+                        else:
+                            updated_from_permanent += 1
+                            logger.info(
+                                f"Comprehensive update (permanent): {clean_invoice_item} -> {matched_mapping.mpi_code}")
+
+                    elif match_source == "temporary":
+                        # Apply temporary mapping (keep as No Match but assign sheet name)
+                        item.mpi_item = "No Match"  # Temporary mappings don't provide MPI codes
+                        item.mpi_description = matched_mapping.original_description or "No Match"
+                        item.sheet_name = matched_mapping.sheet_name or ""
+                        updated_from_temp += 1
+                        logger.info(
+                            f"Comprehensive update (temp): {clean_invoice_item} -> sheet: {matched_mapping.sheet_name}")
+
+                    updated_count += 1
+
+                    # Special logging for items that had sheet but no MPI
+                    if had_sheet_but_no_mpi:
+                        items_with_sheet_but_no_mpi += 1
+                        logger.info(
+                            f"Fixed item with sheet but no MPI: {clean_invoice_item} (had sheet: {original_sheet})")
+
+                else:
+                    no_match_found_count += 1
+                    if had_sheet_but_no_mpi:
+                        items_with_sheet_but_no_mpi += 1
+                        logger.debug(
+                            f"No mapping found for item with sheet but no MPI: {clean_invoice_item} (sheet: {original_sheet})")
+
+            # Commit all changes
+            try:
+                db.commit()
+                logger.info(
+                    f"Comprehensive update completed: {updated_count} items updated, {no_match_found_count} items remain unmatched")
+                logger.info(
+                    f"Breakdown: {updated_from_permanent} from permanent mappings, {updated_from_temp} from temporary mappings, {updated_from_no_sheet} from mappings without sheet names")
+                logger.info(
+                    f"Items with sheet but no MPI: {items_with_sheet_but_no_mpi}")
+
+                return {
+                    "status": "success",
+                    "message": f"Comprehensive update completed: {updated_count} items updated, {no_match_found_count} items remain unmatched",
+                    "updated_count": updated_count,
+                    "no_match_found_count": no_match_found_count,
+                    "updated_from_permanent": updated_from_permanent,
+                    "updated_from_temp": updated_from_temp,
+                    "updated_from_no_sheet": updated_from_no_sheet,
+                    "items_with_sheet_but_no_mpi": items_with_sheet_but_no_mpi
+                }
+
+            except Exception as commit_error:
+                db.rollback()
+                logger.error(
+                    f"Failed to commit comprehensive update: {str(commit_error)}")
+                raise
+
+        except Exception as e:
+            db.rollback()
+            logger.error(
+                f"Failed to perform comprehensive unmapped update: {str(e)}")
+            raise
 
     def _extract_supplier_id(self, vendor_name):
         """Helper method to extract supplier ID from vendor name"""

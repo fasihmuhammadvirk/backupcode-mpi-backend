@@ -386,7 +386,8 @@ class EnhancedGoogleSheetDataExtractor:
     def detect_supplier_columns(
         self,
         df_head: pd.DataFrame,
-        df_full: pd.DataFrame
+        df_full: pd.DataFrame,
+        sheet_title: str = ""
     ) -> Dict[str, List[int]]:
         """
         Detect supplier columns using the Zero Skipped Items Approach.
@@ -421,27 +422,59 @@ class EnhancedGoogleSheetDataExtractor:
                 row2_value = df_full.iloc[1, col_idx] if col_idx < len(
                     df_full.columns) else None
 
-                # Check if both Row 1 and Row 2 are empty (potential temporary items block)
+                # Check if both Row 1 and Row 2 are empty (potential header column)
                 row1_empty = pd.isna(row1_value) or str(
                     row1_value).strip() == ""
                 row2_empty = pd.isna(row2_value) or str(
                     row2_value).strip() == ""
 
                 if row1_empty and row2_empty:
-                    # Check if Row 3 contains "Original Item" header to confirm this is the temporary items block
+                    # Check if Row 3 contains header-like content to confirm this is NOT a supplier column
                     if len(df_full) > 2:
                         row3_value = df_full.iloc[2, col_idx] if col_idx < len(
                             df_full.columns) else None
                         row3_str = str(row3_value).strip(
                         ).lower() if pd.notna(row3_value) else ""
 
+                        # Special handling for "Original Item" - automatically detect next 4 columns as temporary mappings
                         if "original item" in row3_str:
                             logger.info(
-                                f"Found temporary items block at column {col_idx} (confirmed by 'Original Item' header), skipping this column but continuing to scan for supplier columns")
-                            continue  # Skip this column but continue scanning for supplier columns
+                                f"Found 'Original Item' header at column {col_idx}, automatically detecting next 4 columns as temporary mappings")
+
+                            # Automatically add the next 4 columns as temporary mappings
+                            temp_mapping_columns = [
+                                "Original Item", "Original Description", "Total Qty", "Unit Cost", "Total Amount"]
+
+                            for i, header_name in enumerate(temp_mapping_columns):
+                                temp_col_idx = col_idx + i
+                                if temp_col_idx < len(df_full.columns):
+                                    if "Temporary" not in supplier_columns:
+                                        supplier_columns["Temporary"] = []
+                                    supplier_columns["Temporary"].append(
+                                        temp_col_idx)
+                                    logger.info(
+                                        f"Added temporary mapping column {temp_col_idx} as '{header_name}'")
+
+                            # Skip the next 4 columns since we've already processed them
+                            col_idx += 4
+                            continue
+
+                        # Define other header terms that indicate this is NOT a supplier column
+                        other_header_indicators = [
+                            "original description", "item code", "mpi code", "description",
+                            "size", "supplier", "cost", "price", "amount", "quantity", "qty",
+                            "part number", "sku", "model", "type", "category",
+                            "group", "class", "division", "section", "view",
+                            "ready for", "gave for", "date", "all", "item2", "item4", "item6", "item7"
+                        ]
+
+                        if any(indicator in row3_str for indicator in other_header_indicators):
+                            logger.info(
+                                f"Column {col_idx} identified as header column (Row 1&2 empty, Row 3='{row3_str}'), skipping supplier detection")
+                            continue  # Skip this column - it's a header, not a supplier column
                         else:
                             logger.debug(
-                                f"Column {col_idx} has empty Row 1 & 2 but no 'Original Item' header, continuing to scan")
+                                f"Column {col_idx} has empty Row 1 & 2 but Row 3='{row3_str}' doesn't match header patterns, continuing to scan")
                     else:
                         logger.debug(
                             f"Column {col_idx} has empty Row 1 & 2 but not enough rows to check header, continuing to scan")
@@ -477,10 +510,20 @@ class EnhancedGoogleSheetDataExtractor:
                                     break
 
                     if has_valid_data:
-                        # Assign to "Unknown" supplier to ensure these items are extracted
-                        supplier_identifier = f"Unknown_{col_idx}"
-                        logger.info(
-                            f"Column {col_idx} has valid item data but no supplier identifier, assigning to Unknown supplier")
+                        # Enhanced logic: Dynamically detect supplier based on item patterns in the column
+                        # This ensures no columns are missed and works for any supplier
+                        detected_supplier = self._detect_supplier_from_item_patterns(
+                            df_full, col_idx, sheet_title)
+
+                        if detected_supplier:
+                            supplier_identifier = detected_supplier
+                            logger.info(
+                                f"Column {col_idx} detected as {detected_supplier} based on item patterns")
+                        else:
+                            # Assign to "Unknown" supplier to ensure these items are extracted
+                            supplier_identifier = f"Unknown_{col_idx}"
+                            logger.info(
+                                f"Column {col_idx} has valid item data but no supplier identifier, assigning to Unknown supplier")
 
                 if not supplier_identifier:
                     logger.debug(
@@ -581,6 +624,7 @@ class EnhancedGoogleSheetDataExtractor:
     def _get_single_row_supplier_identifier(self, row1_value, row2_value) -> str:
         """
         Get supplier identifier from a single row (Row 1 if available, otherwise Row 2).
+        Smart logic to prefer valid supplier names over invalid item codes.
 
         Args:
             row1_value: Value from Row 1
@@ -592,16 +636,92 @@ class EnhancedGoogleSheetDataExtractor:
         row1_str = str(row1_value).strip() if pd.notna(row1_value) else ""
         row2_str = str(row2_value).strip() if pd.notna(row2_value) else ""
 
-        # If Row 1 has data, use it
-        if row1_str:
-            return row1_str
+        # Define known supplier names and keywords
+        supplier_keywords = [
+            "bmw", "world wide", "wwp", "y&s", "ys", "supreme", "pyramid",
+            "abc", "opus", "park", "gotham", "flow mark", "flowmark",
+            "plumbing exchange", "pex", "af supply", "lion", "hvac",
+            "bruce", "ferguson", "fw webb", "webb"
+        ]
 
-        # If Row 1 is empty but Row 2 has data, use Row 2
-        if not row1_str and row2_str:
+        # Check if row1 looks like a valid supplier name
+        row1_lower = row1_str.lower()
+        row1_is_supplier = any(
+            keyword in row1_lower for keyword in supplier_keywords)
+
+        # Check if row2 looks like a valid supplier name
+        row2_lower = row2_str.lower()
+        row2_is_supplier = any(
+            keyword in row2_lower for keyword in supplier_keywords)
+
+        # Smart logic: prefer supplier names over item codes
+        if row1_is_supplier:
+            return row1_str
+        elif row2_is_supplier:
+            return row2_str
+        elif row1_str:  # If row1 has data but not a supplier name, use it
+            return row1_str
+        elif row2_str:  # If row2 has data but not a supplier name, use it
             return row2_str
 
         # If both are empty, return empty (column will be skipped)
         return ""
+
+    def _detect_supplier_from_item_patterns(
+        self,
+        df_full: pd.DataFrame,
+        col_idx: int,
+        sheet_title: str
+    ) -> Optional[str]:
+        """
+        Dynamically detect supplier based on item patterns in the column.
+
+        Args:
+            df_full: Full DataFrame
+            col_idx: Column index to check
+            sheet_title: Sheet title for context
+
+        Returns:
+            Supplier name if detected, None otherwise
+        """
+        # Define supplier patterns based on item suffixes and keywords
+        supplier_patterns = {
+            "BMW Plumbing Supplies": ["-B", "bmw"],
+            "World Wide Plumbing": ["-W", "wwp", "worldwide"],
+            "Y & S Plumbing Supply": ["-Y", "y&s", "ys"],
+            "Supreme Plumbing Supply": ["-S", "supreme"],
+            "Pyramid Plumbing": ["-P", "pyramid"],
+            "ABC Opus Services": ["-A", "abc", "opus"],
+            "Park Plumbing Supply": ["-P", "park"],  # Corrected to -P
+            "Gotham Plumbing Supply": ["-G", "gotham"],
+            "FW Webb Plumbing Supply": ["-F", "fw", "webb"],
+            "Flow Mark Plumbing Supply": ["-FM", "flowmark", "flow mark"],
+            "Plumbing Exchange": ["-PE", "pex", "plumbing exchange"],
+            "AF Supply": ["-AF", "af supply"],
+            "Lion Hvac Supplies": ["-L", "lion", "hvac"],
+            "Bruce": ["-BF", "bruce"],
+            "Ferguson": ["-F", "ferguson"]
+        }
+
+        # Scan column for item patterns
+        for row_idx in range(3, min(20, len(df_full))):
+            if row_idx < len(df_full) and col_idx < len(df_full.columns):
+                cell_value = df_full.iloc[row_idx, col_idx]
+                if pd.notna(cell_value):
+                    cell_str = str(cell_value).strip()
+                    if len(cell_str) >= 2:
+                        # Check each supplier pattern
+                        for supplier, patterns in supplier_patterns.items():
+                            for pattern in patterns:
+                                if (pattern.lower() in cell_str.lower() or
+                                        cell_str.lower().endswith(pattern.lower())):
+                                    logger.debug(
+                                        f"Found pattern '{pattern}' in '{cell_str}' "
+                                        f"for supplier '{supplier}' in column {col_idx}"
+                                    )
+                                    return supplier
+
+        return None
 
     def _validate_first_two_rows_have_supplier_data(
         self,
@@ -664,7 +784,8 @@ class EnhancedGoogleSheetDataExtractor:
                 return []
 
             # Detect supplier columns
-            supplier_columns = self.detect_supplier_columns(df.head(), df)
+            supplier_columns = self.detect_supplier_columns(
+                df.head(), df, sheet_title)
 
             # Log detected supplier columns
             if supplier_columns:
@@ -812,7 +933,32 @@ class EnhancedGoogleSheetDataExtractor:
                             if not supplier_value or supplier_value.lower() in ['nan', 'none', '']:
                                 continue
 
-                            # Validate that supplier_value is actually an item code, not a description or amount
+                            # Special handling for Temporary columns (Original Item, Original Description, etc.)
+                            if supplier == "Temporary":
+                                # For temporary columns, we don't validate as item codes
+                                # These are temporary mappings that should go to temporary storage
+                                mapping_data = {
+                                    'sheet_title': sheet_title,
+                                    'google_sheet_name': sheet_title,
+                                    'mpi_code': mpi_code,
+                                    'description': mpi_description,
+                                    'supplier': 'Temporary',
+                                    'supplier_id': 0,  # No specific supplier ID for temporary
+                                    'supplier_item_ids': supplier_value,
+                                    'original_supplier_item_id': supplier_value,
+                                    'row_number': actual_row,
+                                    'column_index': col_idx + 1,
+                                    'extraction_timestamp': datetime.now().isoformat(),
+                                    'mapping_type': 'temporary',
+                                    'validation_status': 'valid_temporary'
+                                }
+
+                                logger.debug(
+                                    f"Created temporary mapping for '{supplier_value}' in column {col_idx} (row {actual_row})")
+                                extracted_items.append(mapping_data)
+                                continue
+
+                            # For regular supplier columns, validate that supplier_value is actually an item code
                             if not self._is_valid_item_code(supplier_value):
                                 logger.debug(
                                     f"Skipping invalid item code '{supplier_value}' in column {col_idx} (row {actual_row})")
@@ -890,7 +1036,7 @@ class EnhancedGoogleSheetDataExtractor:
             cleaned_data = clean_mapping_data(mapping_data)
 
             # Check if this is a temporary mapping
-            if is_temporary_mapping(cleaned_data.get("mpi_code"), cleaned_data.get("description")):
+            if is_temporary_mapping(cleaned_data.get("mpi_code"), cleaned_data.get("description"), cleaned_data.get("supplier")):
                 # This is a temporary mapping
                 return {
                     **cleaned_data,
@@ -975,11 +1121,10 @@ class EnhancedGoogleSheetDataExtractor:
                 logger.error(
                     f"Error processing sheet {sheet['title']}: {str(e)}")
 
-        # All items returned are permanent mappings now (temporary items are handled separately)
-        permanent_items = self.all_items
-        temporary_items = []  # Temporary items are not mixed with permanent mappings anymore
-        invalid_items = [item for item in self.all_items if item.get(
-            "mapping_type") == "invalid"]
+        # Categorize items based on their mapping_type
+        permanent_items = [item for item in self.all_items if item.get("mapping_type") == "permanent"]
+        temporary_items = [item for item in self.all_items if item.get("mapping_type") == "temporary"]
+        invalid_items = [item for item in self.all_items if item.get("mapping_type") == "invalid"]
 
         # Update statistics based on actual extracted items
         self.extraction_stats["total_extracted"] = len(self.all_items)
