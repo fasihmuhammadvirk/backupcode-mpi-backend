@@ -442,7 +442,7 @@ class GoogleSheetSyncController:
 
             for idx, mapping in enumerate(permanent_mappings, 1):
                 try:
-                    # Validate mapping data before processing
+                    # Validate mapping data before processing (only for permanent mappings)
                     if not self._validate_mapping_data(mapping):
                         permanent_errors += 1
                         self.logger.warning(
@@ -851,6 +851,7 @@ class GoogleSheetSyncController:
     def _validate_mapping_data(self, mapping: Dict[str, Any]) -> bool:
         """
         Validate mapping data before processing to ensure all required fields are present.
+        This method is specifically for permanent mappings (not temporary ones).
 
         Args:
             mapping: Mapping data to validate
@@ -859,6 +860,11 @@ class GoogleSheetSyncController:
             True if valid, False otherwise
         """
         try:
+            # Check if this is a temporary mapping (supplier_id = 0)
+            if mapping.get("supplier_id") == 0:
+                # This is a temporary mapping, skip validation
+                return True
+
             required_fields = [
                 "mpi_code", "description", "supplier_item_ids",
                 "supplier_id", "google_sheet_name"
@@ -875,7 +881,7 @@ class GoogleSheetSyncController:
                         f"Empty required field '{field}' in mapping")
                     return False
 
-            # Validate supplier_id is a valid integer
+            # Validate supplier_id is a valid integer (for permanent mappings)
             try:
                 supplier_id = int(mapping["supplier_id"])
                 if supplier_id <= 0:

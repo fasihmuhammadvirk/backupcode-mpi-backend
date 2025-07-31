@@ -72,7 +72,7 @@ def save_final_data(final_df, supplier, output_path):
                                             'format': bolded_column_format})
 
 
-    writer.save()
+    writer.close()
 
 
 def save_final_data_fast(final_df, output_path):
@@ -285,7 +285,7 @@ def save_opus_services(extracted_data, output_path):
                                                         'format': date_format})
 
     worksheet.ignore_errors({'number_stored_as_text': f"B1:F{number_rows}"})
-    writer.save()
+    writer.close()
 
 
 def apply_format_on_cell( worksheet,cell,format):

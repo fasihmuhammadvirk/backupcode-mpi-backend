@@ -25,7 +25,7 @@ class TemporaryMappingSync:
     def __init__(self, db: Session):
         """
         Initialize the TemporaryMappingSync.
-        
+
         Args:
             db: SQLAlchemy database session
         """
@@ -35,19 +35,19 @@ class TemporaryMappingSync:
         self.logger = logging.getLogger(f"{__name__}")
 
     def extract_temporary_mappings_from_sheets(
-        self, 
-        sheet_id: str, 
-        api_key: str = None, 
+        self,
+        sheet_id: str,
+        api_key: str = None,
         skip_sheets: List[str] = None
     ) -> Dict[str, Any]:
         """
         Extract temporary mappings from all sheets in Google Sheets.
-        
+
         Args:
             sheet_id: Google Sheet ID
             api_key: Google API key
             skip_sheets: List of sheet names to skip
-            
+
         Returns:
             Dictionary with extraction results
         """
@@ -60,72 +60,87 @@ class TemporaryMappingSync:
                 batch_size=100,
                 fuzzy_threshold=75
             )
-            
+
             # Get list of sheets
             sheets = extractor.get_sheet_list()
-            
+
             if not sheets:
-                self.logger.warning("No sheets found for temporary mapping extraction")
+                self.logger.warning(
+                    "No sheets found for temporary mapping extraction")
                 return {
                     "success": True,
                     "message": "No sheets found",
                     "total_mappings_extracted": 0,
                     "sheets_processed": 0
                 }
-            
+
             total_mappings = 0
             sheets_processed = 0
-            
+
             # Process each sheet for temporary mappings
             for sheet in sheets:
                 try:
                     sheet_title = sheet['title']
                     gid = sheet['gid']
-                    
+
                     # Skip sheets that are in the skip list
                     if any(skip_name in sheet_title for skip_name in (skip_sheets or [])):
-                        self.logger.debug(f"Skipping sheet {sheet_title} (in skip list)")
+                        self.logger.debug(
+                            f"Skipping sheet {sheet_title} (in skip list)")
                         continue
-                    
+
                     # Get sheet data
                     df = self._get_sheet_dataframe(sheet_id, gid)
-                    
+
                     if df is None or df.empty:
-                        self.logger.debug(f"Sheet {sheet_title} is empty or could not be loaded")
+                        self.logger.debug(
+                            f"Sheet {sheet_title} is empty or could not be loaded")
                         continue
-                    
+
                     # Extract clean sheet name for classification
-                    clean_sheet_name = extractor._extract_clean_sheet_name(sheet_title)
-                    
-                    # Extract temporary mappings from this sheet
-                    mappings_count = self.temp_extractor.extract_and_save_from_dataframe(
-                        df, clean_sheet_name
-                    )
-                    
-                    if mappings_count > 0:
-                        total_mappings += mappings_count
-                        sheets_processed += 1
-                        self.logger.info(
-                            f"Extracted {mappings_count} temporary mappings from sheet: {sheet_title}"
+                    clean_sheet_name = extractor._extract_clean_sheet_name(
+                        sheet_title)
+
+                    # Extract temporary mappings from this sheet with timeout protection
+                    try:
+                        mappings_count = self.temp_extractor.extract_and_save_from_dataframe(
+                            df, clean_sheet_name
                         )
-                
+
+                        if mappings_count > 0:
+                            total_mappings += mappings_count
+                            sheets_processed += 1
+                            self.logger.info(
+                                f"Extracted {mappings_count} temporary mappings from sheet: {sheet_title}"
+                            )
+                        else:
+                            self.logger.debug(
+                                f"No temporary mappings found in sheet: {sheet_title}")
+
+                    except Exception as e:
+                        self.logger.error(
+                            f"Error extracting temporary mappings from {sheet_title}: {str(e)}")
+                        # Continue with next sheet instead of failing completely
+                        continue
+
                 except Exception as e:
-                    self.logger.error(f"Error processing sheet {sheet['title']}: {str(e)}")
+                    self.logger.error(
+                        f"Error processing sheet {sheet['title']}: {str(e)}")
                     continue
-            
+
             result = {
                 "success": True,
                 "message": f"Extracted {total_mappings} temporary mappings from {sheets_processed} sheets",
                 "total_mappings_extracted": total_mappings,
                 "sheets_processed": sheets_processed
             }
-            
+
             self.logger.info(
                 f"Temporary mapping extraction complete: {total_mappings} mappings from {sheets_processed} sheets"
             )
-            
+
             return result
-            
+
         except Exception as e:
             self.logger.error(f"Error extracting temporary mappings: {str(e)}")
             return {
@@ -138,11 +153,11 @@ class TemporaryMappingSync:
     def _get_sheet_dataframe(self, sheet_id: str, gid: str) -> pd.DataFrame:
         """
         Get a DataFrame for a specific sheet.
-        
+
         Args:
             sheet_id: Google Sheet ID
             gid: Sheet GID
-            
+
         Returns:
             DataFrame or None if error
         """
@@ -152,7 +167,7 @@ class TemporaryMappingSync:
                 f"https://docs.google.com/spreadsheets/d/{sheet_id}/export"
                 f"?format=csv&gid={gid}"
             )
-            
+
             # Try to load the sheet
             try:
                 # First attempt with standard URL
@@ -164,9 +179,9 @@ class TemporaryMappingSync:
                     f"gviz/tq?tqx=out:csv&gid={gid}"
                 )
                 df = pd.read_csv(alternate_url)
-            
+
             return df
-            
+
         except Exception as e:
             self.logger.error(f"Error loading sheet {gid}: {str(e)}")
             return None
@@ -174,25 +189,27 @@ class TemporaryMappingSync:
     def update_invoice_items_with_temporary_mappings(self) -> Dict[str, Any]:
         """
         Update invoice items using temporary mappings.
-        
+
         Returns:
             Dictionary with update results
         """
         try:
-            self.logger.info("Starting invoice item updates using temporary mappings")
-            
+            self.logger.info(
+                "Starting invoice item updates using temporary mappings")
+
             result = self.temp_updater.update_invoice_items_with_temporary_mappings()
-            
+
             if result["success"]:
                 self.logger.info(
                     f"Successfully updated {result['items_updated']} invoice items "
                     f"out of {result['total_items_checked']} checked"
                 )
             else:
-                self.logger.error(f"Failed to update invoice items: {result['message']}")
-            
+                self.logger.error(
+                    f"Failed to update invoice items: {result['message']}")
+
             return result
-            
+
         except Exception as e:
             self.logger.error(f"Error updating invoice items: {str(e)}")
             return {
@@ -203,30 +220,30 @@ class TemporaryMappingSync:
             }
 
     def perform_complete_temporary_mapping_sync(
-        self, 
-        sheet_id: str, 
-        api_key: str = None, 
+        self,
+        sheet_id: str,
+        api_key: str = None,
         skip_sheets: List[str] = None
     ) -> Dict[str, Any]:
         """
         Perform complete temporary mapping sync: extract mappings and update invoice items.
-        
+
         Args:
             sheet_id: Google Sheet ID
             api_key: Google API key
             skip_sheets: List of sheet names to skip
-            
+
         Returns:
             Dictionary with complete sync results
         """
         try:
             self.logger.info("Starting complete temporary mapping sync")
-            
+
             # Step 1: Extract temporary mappings from Google Sheets
             extract_result = self.extract_temporary_mappings_from_sheets(
                 sheet_id, api_key, skip_sheets
             )
-            
+
             if not extract_result["success"]:
                 return {
                     "success": False,
@@ -234,10 +251,10 @@ class TemporaryMappingSync:
                     "extraction_result": extract_result,
                     "update_result": None
                 }
-            
+
             # Step 2: Update invoice items using temporary mappings
             update_result = self.update_invoice_items_with_temporary_mappings()
-            
+
             # Combine results
             result = {
                 "success": extract_result["success"] and update_result["success"],
@@ -248,7 +265,7 @@ class TemporaryMappingSync:
                 "extraction_result": extract_result,
                 "update_result": update_result
             }
-            
+
             if result["success"]:
                 self.logger.info(
                     f"Complete temporary mapping sync successful: "
@@ -257,11 +274,12 @@ class TemporaryMappingSync:
                 )
             else:
                 self.logger.error("Complete temporary mapping sync failed")
-            
+
             return result
-            
+
         except Exception as e:
-            self.logger.error(f"Error in complete temporary mapping sync: {str(e)}")
+            self.logger.error(
+                f"Error in complete temporary mapping sync: {str(e)}")
             return {
                 "success": False,
                 "message": f"Complete sync failed: {str(e)}",
@@ -272,7 +290,7 @@ class TemporaryMappingSync:
     def get_temporary_mapping_stats(self) -> Dict[str, Any]:
         """
         Get statistics about temporary mappings and potential updates.
-        
+
         Returns:
             Dictionary with statistics
         """
@@ -280,11 +298,12 @@ class TemporaryMappingSync:
             stats = self.temp_updater.get_update_stats()
             self.logger.info(f"Temporary mapping stats: {stats}")
             return stats
-            
+
         except Exception as e:
-            self.logger.error(f"Error getting temporary mapping stats: {str(e)}")
+            self.logger.error(
+                f"Error getting temporary mapping stats: {str(e)}")
             return {
                 "total_unmapped_items": 0,
                 "total_temporary_mappings": 0,
                 "potential_matches": 0
-            } 
+            }
