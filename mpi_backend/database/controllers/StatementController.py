@@ -2469,6 +2469,9 @@ class StatementController:
             # Check if amount contains alphabetic characters (invalid)
             if any(char.isalpha() for char in amount_str):
                 return True
+            # Check for malformed concatenated strings (no spaces, mixed content)
+            if re.search(r'\$[a-z]+\d+[a-z]+\d+', amount_str.lower()):
+                return True
             float(amount_str)
         except (ValueError, TypeError):
             return True
@@ -2496,6 +2499,9 @@ class StatementController:
         if invoice.description:
             desc_str = str(invoice.description).lower()
             if "tax" in desc_str:
+                # Check for malformed concatenated strings (no spaces, mixed content)
+                if re.search(r'\$[a-z]+\d+[a-z]+\d+', desc_str):
+                    return True
                 # Check for various invalid tax formats
                 # Pattern 1: Text followed by tax followed by numbers and $
                 if re.search(r'[a-zA-Z]+\s+tax\s+\d+\s*\$', desc_str):
@@ -2507,10 +2513,13 @@ class StatementController:
                 if re.search(r'tax.*[^0-9\-\+\.\,\s\$]', desc_str):
                     return True
                 # Pattern 4: Tax amount that can't be converted to float
-                tax_match = re.search(r'tax.*?(\d+[\.\d]*)\s*\$', desc_str)
+                # Updated regex to handle negative amounts and $ before or after the number
+                tax_match = re.search(
+                    r'tax.*?(\-?\$?\d+[\.\d]*\$?)\s*', desc_str)
                 if tax_match:
                     try:
-                        tax_amount = tax_match.group(1).replace(',', '')
+                        tax_amount = tax_match.group(
+                            1).replace(',', '').replace('$', '')
                         if any(char.isalpha() for char in tax_amount):
                             return True
                         float(tax_amount)
@@ -2539,6 +2548,9 @@ class StatementController:
             amount_str = str(invoice.original_amount).strip().replace(',', '')
             # Check if amount contains alphabetic characters (invalid)
             if any(char.isalpha() for char in amount_str):
+                return True
+            # Check for malformed concatenated strings (no spaces, mixed content)
+            if re.search(r'\$[a-z]+\d+[a-z]+\d+', amount_str.lower()):
                 return True
             float(amount_str)
         except (ValueError, TypeError):
@@ -2584,6 +2596,9 @@ class StatementController:
                 if any(char.isalpha() for char in amount_str):
                     issues.append(
                         "Invalid Amount Format")
+                # Check for malformed concatenated strings (no spaces, mixed content)
+                elif re.search(r'\$[a-z]+\d+[a-z]+\d+', amount_str.lower()):
+                    issues.append("Invalid Amount Format")
                 else:
                     float(amount_str)
             except (ValueError, TypeError):
@@ -2612,9 +2627,12 @@ class StatementController:
         if hasattr(invoice, 'description') and invoice.description:
             desc_str = str(invoice.description).lower()
             if "tax" in desc_str:
+                # Check for malformed concatenated strings (no spaces, mixed content)
+                if re.search(r'\$[a-z]+\d+[a-z]+\d+', desc_str):
+                    issues.append("Invalid Tax Format")
                 # Check for various invalid tax formats
                 # Pattern 1: Text followed by tax followed by numbers and $
-                if re.search(r'[a-zA-Z]+\s+tax\s+\d+\s*\$', desc_str):
+                elif re.search(r'[a-zA-Z]+\s+tax\s+\d+\s*\$', desc_str):
                     issues.append("Invalid Tax Format - Text Before Tax")
                 # Pattern 2: Tax with alphabetic characters mixed with numbers
                 elif re.search(r'tax.*[a-zA-Z].*\d+.*\$', desc_str):
@@ -2624,10 +2642,13 @@ class StatementController:
                     issues.append("Invalid Tax Format")
                 # Pattern 4: Tax amount that can't be converted to float
                 else:
-                    tax_match = re.search(r'tax.*?(\d+[\.\d]*)\s*\$', desc_str)
+                    # Updated regex to handle negative amounts and $ before or after the number
+                    tax_match = re.search(
+                        r'tax.*?(\-?\$?\d+[\.\d]*\$?)\s*', desc_str)
                     if tax_match:
                         try:
-                            tax_amount = tax_match.group(1).replace(',', '')
+                            tax_amount = tax_match.group(
+                                1).replace(',', '').replace('$', '')
                             if any(char.isalpha() for char in tax_amount):
                                 issues.append(
                                     "Invalid Tax Format")
