@@ -2583,7 +2583,7 @@ class StatementController:
                 # Check if amount contains alphabetic characters (invalid)
                 if any(char.isalpha() for char in amount_str):
                     issues.append(
-                        "Invalid Amount Format - Contains Alphabetic Characters")
+                        "Invalid Amount Format")
                 else:
                     float(amount_str)
             except (ValueError, TypeError):
@@ -2602,7 +2602,7 @@ class StatementController:
                 ref_no_str.startswith("invoice #") or
                 ref_no_str.startswith("inv#") or
                     " # " in ref_no_str):
-                issues.append("Invalid Invoice Number Format")
+                issues.append("Invalid Invoice Number")
 
         # Validate item description (system invoices only)
         if hasattr(invoice, 'item') and (not invoice.item or str(invoice.item).strip() == ""):
@@ -2618,10 +2618,10 @@ class StatementController:
                     issues.append("Invalid Tax Format - Text Before Tax")
                 # Pattern 2: Tax with alphabetic characters mixed with numbers
                 elif re.search(r'tax.*[a-zA-Z].*\d+.*\$', desc_str):
-                    issues.append("Invalid Tax Format - Mixed Characters")
+                    issues.append("Invalid Tax Format")
                 # Pattern 3: Tax with invalid characters (not just numbers, decimal, minus, plus)
                 elif re.search(r'tax.*[^0-9\-\+\.\,\s\$]', desc_str):
-                    issues.append("Invalid Tax Format - Invalid Characters")
+                    issues.append("Invalid Tax Format")
                 # Pattern 4: Tax amount that can't be converted to float
                 else:
                     tax_match = re.search(r'tax.*?(\d+[\.\d]*)\s*\$', desc_str)
@@ -2630,12 +2630,12 @@ class StatementController:
                             tax_amount = tax_match.group(1).replace(',', '')
                             if any(char.isalpha() for char in tax_amount):
                                 issues.append(
-                                    "Invalid Tax Format - Alphabetic Characters in Amount")
+                                    "Invalid Tax Format")
                             else:
                                 float(tax_amount)
                         except (ValueError, TypeError):
                             issues.append(
-                                "Invalid Tax Format - Non-Numeric Amount")
+                                "Invalid Tax Format")
 
         return issues
 
@@ -2661,7 +2661,7 @@ class StatementController:
                 # Check if amount contains alphabetic characters (invalid)
                 if any(char.isalpha() for char in amount_str):
                     issues.append(
-                        "Invalid Amount Format - Contains Alphabetic Characters")
+                        "Invalid Amount Format")
                 else:
                     float(amount_str)
             except (ValueError, TypeError):
