@@ -84,88 +84,30 @@ class MappingStatsManager:
         """Get default statistics structure."""
         return {
             "temp_mapping_stats": {
-                "current": {
-                    "total_mappings": 0,
-                    "unique_sheets": 0,
-                    "sheet_names": [],
-                    "mappings_per_sheet": {},
-                    "last_updated": None,
-                    "last_sync_time": None
-                },
-                "previous": {
-                    "total_mappings": 0,
-                    "unique_sheets": 0,
-                    "sheet_names": [],
-                    "mappings_per_sheet": {},
-                    "last_updated": None,
-                    "last_sync_time": None
-                },
-                "changes": {
-                    "mappings_added": 0,
-                    "mappings_removed": 0,
-                    "net_change": 0,
-                    "sheets_added": 0,
-                    "sheets_removed": 0,
-                    "last_change_timestamp": None
-                }
+                "total_mappings": 0,
+                "unique_sheets": 0,
+                "sheet_names": [],
+                "mappings_per_sheet": {},
+                "last_updated": None,
+                "last_sync_time": None
             },
             "item_mapping_stats": {
-                "current": {
-                    "total_mappings": 0,
-                    "unique_sheets": 0,
-                    "sheet_names": [],
-                    "mappings_per_sheet": {},
-                    "permanent_mappings": 0,
-                    "temporary_mappings": 0,
-                    "invalid_mappings": 0,
-                    "last_updated": None,
-                    "last_sync_time": None
-                },
-                "previous": {
-                    "total_mappings": 0,
-                    "unique_sheets": 0,
-                    "sheet_names": [],
-                    "mappings_per_sheet": {},
-                    "permanent_mappings": 0,
-                    "temporary_mappings": 0,
-                    "invalid_mappings": 0,
-                    "last_updated": None,
-                    "last_sync_time": None
-                },
-                "changes": {
-                    "mappings_added": 0,
-                    "mappings_removed": 0,
-                    "net_change": 0,
-                    "permanent_added": 0,
-                    "permanent_removed": 0,
-                    "temporary_added": 0,
-                    "temporary_removed": 0,
-                    "sheets_added": 0,
-                    "sheets_removed": 0,
-                    "last_change_timestamp": None
-                }
+                "total_mappings": 0,
+                "unique_sheets": 0,
+                "sheet_names": [],
+                "mappings_per_sheet": {},
+                "permanent_mappings": 0,
+                "temporary_mappings": 0,
+                "invalid_mappings": 0,
+                "last_updated": None,
+                "last_sync_time": None
             },
             "overall_stats": {
-                "current": {
-                    "total_items": 0,
-                    "total_sheets_processed": 0,
-                    "last_full_sync": None,
-                    "last_uidi_update": None,
-                    "last_all_update": None
-                },
-                "previous": {
-                    "total_items": 0,
-                    "total_sheets_processed": 0,
-                    "last_full_sync": None,
-                    "last_uidi_update": None,
-                    "last_all_update": None
-                },
-                "changes": {
-                    "items_added": 0,
-                    "items_removed": 0,
-                    "net_change": 0,
-                    "last_change_timestamp": None
-                }
+                "total_items": 0,
+                "total_sheets_processed": 0,
+                "last_full_sync": None,
+                "last_uidi_update": None,
+                "last_all_update": None
             }
         }
 
@@ -178,29 +120,13 @@ class MappingStatsManager:
         """
         current_stats = self._read_stats()
 
-        # Store current stats as previous before updating
-        current_stats["temp_mapping_stats"]["previous"] = current_stats["temp_mapping_stats"]["current"].copy()
-
-        # Update current stats
-        current_stats["temp_mapping_stats"]["current"].update(stats)
-        current_stats["temp_mapping_stats"]["current"]["last_updated"] = datetime.now(
+        # Update stats directly (flat structure)
+        current_stats["temp_mapping_stats"].update(stats)
+        current_stats["temp_mapping_stats"]["last_updated"] = datetime.now(
         ).isoformat()
 
-        # Calculate changes
-        previous = current_stats["temp_mapping_stats"]["previous"]
-        current = current_stats["temp_mapping_stats"]["current"]
-
-        current_stats["temp_mapping_stats"]["changes"] = {
-            "mappings_added": max(0, current["total_mappings"] - previous["total_mappings"]),
-            "mappings_removed": max(0, previous["total_mappings"] - current["total_mappings"]),
-            "net_change": current["total_mappings"] - previous["total_mappings"],
-            "sheets_added": max(0, current["unique_sheets"] - previous["unique_sheets"]),
-            "sheets_removed": max(0, previous["unique_sheets"] - current["unique_sheets"]),
-            "last_change_timestamp": datetime.now().isoformat()
-        }
-
         self._write_stats(current_stats)
-        logger.info("Updated temp mapping statistics with change tracking")
+        logger.info("Updated temp mapping statistics")
 
     def update_item_mapping_stats(self, stats: Dict[str, Any]):
         """
@@ -211,33 +137,13 @@ class MappingStatsManager:
         """
         current_stats = self._read_stats()
 
-        # Store current stats as previous before updating
-        current_stats["item_mapping_stats"]["previous"] = current_stats["item_mapping_stats"]["current"].copy()
-
-        # Update current stats
-        current_stats["item_mapping_stats"]["current"].update(stats)
-        current_stats["item_mapping_stats"]["current"]["last_updated"] = datetime.now(
+        # Update stats directly (flat structure)
+        current_stats["item_mapping_stats"].update(stats)
+        current_stats["item_mapping_stats"]["last_updated"] = datetime.now(
         ).isoformat()
 
-        # Calculate changes
-        previous = current_stats["item_mapping_stats"]["previous"]
-        current = current_stats["item_mapping_stats"]["current"]
-
-        current_stats["item_mapping_stats"]["changes"] = {
-            "mappings_added": max(0, current["total_mappings"] - previous["total_mappings"]),
-            "mappings_removed": max(0, previous["total_mappings"] - current["total_mappings"]),
-            "net_change": current["total_mappings"] - previous["total_mappings"],
-            "permanent_added": max(0, current["permanent_mappings"] - previous["permanent_mappings"]),
-            "permanent_removed": max(0, previous["permanent_mappings"] - current["permanent_mappings"]),
-            "temporary_added": max(0, current["temporary_mappings"] - previous["temporary_mappings"]),
-            "temporary_removed": max(0, previous["temporary_mappings"] - current["temporary_mappings"]),
-            "sheets_added": max(0, current["unique_sheets"] - previous["unique_sheets"]),
-            "sheets_removed": max(0, previous["unique_sheets"] - current["unique_sheets"]),
-            "last_change_timestamp": datetime.now().isoformat()
-        }
-
         self._write_stats(current_stats)
-        logger.info("Updated item mapping statistics with change tracking")
+        logger.info("Updated item mapping statistics")
 
     def update_overall_stats(self, stats: Dict[str, Any]):
         """
@@ -248,25 +154,11 @@ class MappingStatsManager:
         """
         current_stats = self._read_stats()
 
-        # Store current stats as previous before updating
-        current_stats["overall_stats"]["previous"] = current_stats["overall_stats"]["current"].copy()
-
-        # Update current stats
-        current_stats["overall_stats"]["current"].update(stats)
-
-        # Calculate changes
-        previous = current_stats["overall_stats"]["previous"]
-        current = current_stats["overall_stats"]["current"]
-
-        current_stats["overall_stats"]["changes"] = {
-            "items_added": max(0, current["total_items"] - previous["total_items"]),
-            "items_removed": max(0, previous["total_items"] - current["total_items"]),
-            "net_change": current["total_items"] - previous["total_items"],
-            "last_change_timestamp": datetime.now().isoformat()
-        }
+        # Update stats directly (flat structure)
+        current_stats["overall_stats"].update(stats)
 
         self._write_stats(current_stats)
-        logger.info("Updated overall statistics with change tracking")
+        logger.info("Updated overall statistics")
 
     def get_temp_mapping_stats(self) -> Dict[str, Any]:
         """Get temporary mapping statistics."""
@@ -286,17 +178,17 @@ class MappingStatsManager:
     def get_current_temp_mapping_stats(self) -> Dict[str, Any]:
         """Get current temporary mapping statistics only."""
         stats = self._read_stats()
-        return stats.get("temp_mapping_stats", {}).get("current", {})
+        return stats.get("temp_mapping_stats", {})
 
     def get_current_item_mapping_stats(self) -> Dict[str, Any]:
         """Get current item mapping statistics only."""
         stats = self._read_stats()
-        return stats.get("item_mapping_stats", {}).get("current", {})
+        return stats.get("item_mapping_stats", {})
 
     def get_current_overall_stats(self) -> Dict[str, Any]:
         """Get current overall statistics only."""
         stats = self._read_stats()
-        return stats.get("overall_stats", {}).get("current", {})
+        return stats.get("overall_stats", {})
 
     def get_temp_mapping_changes(self) -> Dict[str, Any]:
         """Get temporary mapping changes."""
@@ -333,23 +225,23 @@ class MappingStatsManager:
         current_stats = self._read_stats()
 
         if operation == "full_sync":
-            current_stats["overall_stats"]["current"]["last_full_sync"] = (
+            current_stats["overall_stats"]["last_full_sync"] = (
                 timestamp.isoformat()
             )
         elif operation == "uidi_update":
-            current_stats["overall_stats"]["current"]["last_uidi_update"] = (
+            current_stats["overall_stats"]["last_uidi_update"] = (
                 timestamp.isoformat()
             )
         elif operation == "all_update":
-            current_stats["overall_stats"]["current"]["last_all_update"] = (
+            current_stats["overall_stats"]["last_all_update"] = (
                 timestamp.isoformat()
             )
         elif operation == "temp_sync":
-            current_stats["temp_mapping_stats"]["current"]["last_sync_time"] = (
+            current_stats["temp_mapping_stats"]["last_sync_time"] = (
                 timestamp.isoformat()
             )
         elif operation == "item_sync":
-            current_stats["item_mapping_stats"]["current"]["last_sync_time"] = (
+            current_stats["item_mapping_stats"]["last_sync_time"] = (
                 timestamp.isoformat()
             )
 

@@ -319,6 +319,9 @@ class TemporaryMappingExtractor:
                     self.logger.warning(
                         f"Error clearing existing mappings for {sheet_name}: {str(e)}")
                     self.db.rollback()
+                    # Create a new session to avoid transaction issues
+                    from mpi_backend.database import get_db
+                    self.db = next(get_db())
 
             # Process mappings in batches to avoid memory issues
             batch_size = 50
@@ -368,6 +371,9 @@ class TemporaryMappingExtractor:
                 except Exception as e:
                     self.logger.error(f"Error committing batch: {str(e)}")
                     self.db.rollback()
+                    # Create a new session to avoid transaction issues
+                    from mpi_backend.database import get_db
+                    self.db = next(get_db())
                     # Continue with next batch instead of failing completely
                     continue
 
@@ -399,69 +405,69 @@ class TemporaryMappingExtractor:
             # Save to database with timeout protection
             saved_count = self.save_temporary_mappings(mappings)
 
+            # --- Save all temporary mappings to JSON file ---
+            try:
+                # Query only VALID temporary mappings from the DB (exclude null values)
+                valid_temp_mappings = self.db.query(TempItemMapping).filter(
+                    TempItemMapping.original_item.isnot(None),
+                    TempItemMapping.sheet_name.isnot(None)
+                ).all()
+
+                valid_temp_mappings_dicts = [
+                    {
+                        "original_item": m.original_item,
+                        "original_description": m.original_description,
+                        "sheet_name": m.sheet_name,
+                        "created_at": (
+                            m.created_at.isoformat() if m.created_at else None
+                        ),
+                        "updated_at": (
+                            m.updated_at.isoformat() if m.updated_at else None
+                        )
+                    }
+                    for m in valid_temp_mappings
+                ]
+                # Ensure the directory exists
+                output_path = os.path.join(
+                    os.path.dirname(__file__),
+                    '../../storage/fixtures/temp-item-mapping.json'
+                )
+                output_path = os.path.normpath(output_path)
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                # Write to JSON file (only mappings, no statistics) with UTF-8 encoding for Windows compatibility
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    json.dump(
+                        valid_temp_mappings_dicts, f, indent=2, ensure_ascii=False
+                    )
+                self.logger.info(
+                    f"Exported {len(valid_temp_mappings_dicts)} valid temporary mappings to {output_path}"
+                )
+
+                # Update statistics in the separate stats file
+                try:
+                    stats_manager = MappingStatsManager()
+                    stats_manager.update_temp_mapping_stats({
+                        "total_mappings": len(valid_temp_mappings_dicts),
+                        "unique_sheets": len(set(m.sheet_name for m in valid_temp_mappings if m.sheet_name)),
+                        "sheet_names": list(set(m.sheet_name for m in valid_temp_mappings if m.sheet_name)),
+                        "mappings_per_sheet": {}
+                    })
+                    stats_manager.update_sync_times("temp_sync")
+                    self.logger.info(
+                        "Updated temp mapping statistics in stats file")
+                except Exception as stats_error:
+                    self.logger.error(
+                        f"Error updating stats file: {str(stats_error)}")
+                    # Don't raise here as the main operation succeeded
+
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to export temporary mappings to JSON: {e}"
+                )
+
             return saved_count
 
         except Exception as e:
             self.logger.error(
                 f"Error in extract_and_save_from_dataframe for {sheet_name}: {str(e)}")
             return 0  # Return 0 instead of failing completely
-        # --- Save all temporary mappings to JSON file ---
-        try:
-            # Query only VALID temporary mappings from the DB (exclude null values)
-            valid_temp_mappings = self.db.query(TempItemMapping).filter(
-                TempItemMapping.original_item.isnot(None),
-                TempItemMapping.sheet_name.isnot(None)
-            ).all()
-
-            valid_temp_mappings_dicts = [
-                {
-                    "original_item": m.original_item,
-                    "original_description": m.original_description,
-                    "sheet_name": m.sheet_name,
-                    "created_at": (
-                        m.created_at.isoformat() if m.created_at else None
-                    ),
-                    "updated_at": (
-                        m.updated_at.isoformat() if m.updated_at else None
-                    )
-                }
-                for m in valid_temp_mappings
-            ]
-            # Ensure the directory exists
-            output_path = os.path.join(
-                os.path.dirname(__file__),
-                '../../storage/fixtures/temp-item-mapping.json'
-            )
-            output_path = os.path.normpath(output_path)
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            # Write to JSON file (only mappings, no statistics) with UTF-8 encoding for Windows compatibility
-            with open(output_path, 'w', encoding='utf-8') as f:
-                json.dump(
-                    valid_temp_mappings_dicts, f, indent=2, ensure_ascii=False
-                )
-            self.logger.info(
-                f"Exported {len(valid_temp_mappings_dicts)} valid temporary mappings to {output_path}"
-            )
-
-            # Update statistics in the separate stats file
-            try:
-                stats_manager = MappingStatsManager()
-                stats_manager.update_temp_mapping_stats({
-                    "total_mappings": len(valid_temp_mappings_dicts),
-                    "unique_sheets": len(set(m.sheet_name for m in valid_temp_mappings if m.sheet_name)),
-                    "sheet_names": list(set(m.sheet_name for m in valid_temp_mappings if m.sheet_name)),
-                    "mappings_per_sheet": {}
-                })
-                stats_manager.update_sync_times("temp_sync")
-                self.logger.info(
-                    "Updated temp mapping statistics in stats file")
-            except Exception as stats_error:
-                self.logger.error(
-                    f"Error updating stats file: {str(stats_error)}")
-                # Don't raise here as the main operation succeeded
-
-        except Exception as e:
-            self.logger.error(
-                f"Failed to export temporary mappings to JSON: {e}"
-            )
-        return saved_count
