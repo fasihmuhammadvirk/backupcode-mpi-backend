@@ -2052,11 +2052,16 @@ class StatementController:
             # Process and filter system invoices efficiently (no Python-level deduplication needed due to DISTINCT)
             missing_system_invoices = []
             for inv in system_invoices:
-                # Use optimized validation helper
-                if self._has_validation_issues_system(inv):
-                    # Get detailed issues for response
-                    issues = self._get_detailed_issues_system(inv)
+                # Get detailed issues for response first
+                issues = self._get_detailed_issues_system(inv)
 
+                # Debug logging for invoice 185606
+                if inv.invoice_number == '185606':
+                    logger.info(
+                        f"DEBUG Invoice 185606 - Amount: {inv.original_amount}, Description: {getattr(inv, 'description', 'N/A')}, Issues: {issues}")
+
+                # Only add to missing list if there are validation issues
+                if issues:
                     missing_system_invoices.append({
                         'invoice_number': inv.invoice_number or "MISSING",
                         'invoice_date': inv.invoice_date.isoformat() if inv.invoice_date else None,
@@ -2079,11 +2084,11 @@ class StatementController:
             # Process and filter statement invoices efficiently (no Python-level deduplication needed due to DISTINCT)
             missing_statement_invoices = []
             for inv in statement_invoices:
-                # Use optimized validation helper
-                if self._has_validation_issues_statement(inv):
-                    # Get detailed issues for response
-                    issues = self._get_detailed_issues_statement(inv)
+                # Get detailed issues for response first
+                issues = self._get_detailed_issues_statement(inv)
 
+                # Only add to missing list if there are validation issues
+                if issues:
                     missing_statement_invoices.append({
                         'invoice_number': inv.invoice_number or "MISSING",
                         'invoice_date': inv.invoice_date.isoformat() if inv.invoice_date else None,
@@ -2106,12 +2111,13 @@ class StatementController:
             # Combine and sort all missing invoices
             all_missing_invoices = missing_system_invoices + missing_statement_invoices
 
-            # Sort by invoice_date (most recent first)
-            all_missing_invoices.sort(key=lambda x:
-                                      datetime.fromisoformat(x['invoice_date']) if x.get(
-                                          'invoice_date') else datetime.min,
-                                      reverse=True
-                                      )
+            # Sort by invoice_date (most recent first) with stable sorting
+            all_missing_invoices.sort(key=lambda x: (
+                datetime.fromisoformat(x['invoice_date']) if x.get(
+                    'invoice_date') else datetime.min,
+                x.get('invoice_number', ''),
+                x.get('supplier_name', '')
+            ), reverse=True)
 
             # Apply pagination
             total_count = len(all_missing_invoices)
@@ -2629,7 +2635,7 @@ class StatementController:
             if "tax" in desc_str:
                 # Check for malformed concatenated strings (no spaces, mixed content)
                 if re.search(r'\$[a-z]+\d+[a-z]+\d+', desc_str):
-                    issues.append("Invalid Tax Format")
+                    issues.append("Invalid Tax Format - Malformed Description")
                 # Check for various invalid tax formats
                 # Pattern 1: Text followed by tax followed by numbers and $
                 elif re.search(r'[a-zA-Z]+\s+tax\s+\d+\s*\$', desc_str):
