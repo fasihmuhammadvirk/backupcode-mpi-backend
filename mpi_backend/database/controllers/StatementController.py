@@ -2042,9 +2042,22 @@ class StatementController:
             statement_query = statement_query.order_by(
                 PlumbingInvoice.invoice_date.desc())
 
-            # Execute both queries
+            # Execute both queries with consistent ordering
             system_invoices = system_query.all()
             statement_invoices = statement_query.all()
+
+            # Ensure consistent ordering of raw data
+            system_invoices = sorted(system_invoices, key=lambda x: (
+                x.invoice_date or datetime.min,
+                x.invoice_number or '',
+                getattr(x, 'supplier_name', '') or ''
+            ))
+
+            statement_invoices = sorted(statement_invoices, key=lambda x: (
+                x.invoice_date or datetime.min,
+                x.invoice_number or '',
+                getattr(x, 'supplier_name', '') or ''
+            ))
 
             logger.info(
                 f"Missing/Invalid - Retrieved {len(system_invoices)} system invoices and {len(statement_invoices)} statement invoices")
@@ -2062,6 +2075,8 @@ class StatementController:
 
                 # Only add to missing list if there are validation issues
                 if issues:
+                    # Sort issues for consistent ordering
+                    issues.sort()
                     missing_system_invoices.append({
                         'invoice_number': inv.invoice_number or "MISSING",
                         'invoice_date': inv.invoice_date.isoformat() if inv.invoice_date else None,
@@ -2089,6 +2104,8 @@ class StatementController:
 
                 # Only add to missing list if there are validation issues
                 if issues:
+                    # Sort issues for consistent ordering
+                    issues.sort()
                     missing_statement_invoices.append({
                         'invoice_number': inv.invoice_number or "MISSING",
                         'invoice_date': inv.invoice_date.isoformat() if inv.invoice_date else None,
@@ -2598,6 +2615,12 @@ class StatementController:
             try:
                 amount_str = str(
                     invoice.original_amount).strip().replace(',', '')
+
+                # Debug logging for amount validation
+                if '$370.93' in str(invoice.original_amount):
+                    logger.info(
+                        f"DEBUG Amount validation for $370.93 - Amount: {invoice.original_amount}, Amount_str: {amount_str}")
+
                 # Check if amount contains alphabetic characters (invalid)
                 if any(char.isalpha() for char in amount_str):
                     issues.append(
@@ -2633,6 +2656,11 @@ class StatementController:
         if hasattr(invoice, 'description') and invoice.description:
             desc_str = str(invoice.description).lower()
             if "tax" in desc_str:
+                # Debug logging for tax validation
+                if '$370.93' in str(invoice.description):
+                    logger.info(
+                        f"DEBUG Tax validation for $370.93 - Description: {invoice.description}")
+
                 # Check for malformed concatenated strings (no spaces, mixed content)
                 if re.search(r'\$[a-z]+\d+[a-z]+\d+', desc_str):
                     issues.append("Invalid Tax Format - Malformed Description")
@@ -2659,7 +2687,9 @@ class StatementController:
                                 issues.append(
                                     "Invalid Tax Format")
                             else:
+                                # Try to convert to float - if it works, it's valid
                                 float(tax_amount)
+                                # If we get here, the tax amount is valid, so don't add an issue
                         except (ValueError, TypeError):
                             issues.append(
                                 "Invalid Tax Format")
