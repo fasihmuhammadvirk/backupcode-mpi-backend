@@ -658,6 +658,10 @@ class InvoiceItemController:
         }
 
     def insert_invoice_items(self, row, filename, invoice_id):
+        """
+        Insert invoice item with duplicate checking.
+        Checks if an item with the same invoice_id, ref_no, vendor, date, and amount already exists.
+        """
         # Add proper suffix to item code based on vendor
         item_with_suffix = self._add_suffix_to_item(row['Item'], row['Vendor'])
 
@@ -671,6 +675,21 @@ class InvoiceItemController:
             except ValueError:
                 logger.error(f"Could not parse date: {date_str}")
                 parsed_date = None
+
+        # Check for existing item with same invoice_id, ref_no, vendor, date, and amount
+        existing_item = self.db.query(InvoiceItem).filter(
+            InvoiceItem.invoice_id == invoice_id,
+            InvoiceItem.ref_no == row['Ref NO'],
+            InvoiceItem.vendor == row['Vendor'],
+            InvoiceItem.date == parsed_date,
+            InvoiceItem.amount == row['Amount'],
+            InvoiceItem.is_active == True
+        ).first()
+
+        if existing_item:
+            logger.warning(
+                f"Item already exists for invoice_id: {invoice_id}, ref_no: {row['Ref NO']}, vendor: {row['Vendor']}, date: {parsed_date}, amount: {row['Amount']}. Skipping insertion.")
+            return
 
         new_item = InvoiceItem(
             filename=filename,
@@ -699,16 +718,247 @@ class InvoiceItemController:
         self.db.commit()
 
     def invoice_exists(self, reference_no, vendor):
+        """
+        Check if an invoice exists with the given reference number and vendor.
+        This is a simple check that doesn't consider date and amount.
+        For comprehensive duplicate detection, use check_invoice_duplicate_status().
+        """
         matched_invoice = self.db.query(InvoiceItem).filter_by(
             ref_no=reference_no, vendor=vendor).first()
         return matched_invoice is not None
 
+    def find_duplicate_invoices(self, reference_no, vendor, date, amount):
+        """
+        Find all duplicate invoices with the same ref_no, vendor, date, and amount.
+        This method helps identify existing duplicates that need to be cleaned up.
+
+        Args:
+            reference_no: Invoice reference number
+            vendor: Vendor name
+            date: Invoice date
+            amount: Total invoice amount
+
+        Returns:
+            List of duplicate invoice IDs
+        """
+        try:
+            # Normalize inputs
+            ref_no = str(reference_no).strip() if reference_no else ""
+            vendor_str = str(vendor).strip() if vendor else ""
+            date_obj = date if hasattr(date, 'date') else date
+            amount_str = str(amount).strip() if amount else ""
+
+            # Convert amounts to float for comparison with tolerance
+            try:
+                target_amount_float = float(amount_str) if amount_str else 0.0
+            except (ValueError, TypeError):
+                target_amount_float = 0.0
+
+            if not ref_no or not vendor_str:
+                return []
+
+            # Query for existing invoices with same ref_no and vendor
+            existing_items = self.db.query(InvoiceItem).filter(
+                InvoiceItem.ref_no == ref_no,
+                InvoiceItem.vendor == vendor_str,
+                InvoiceItem.is_active == True
+            ).all()
+
+            if not existing_items:
+                return []
+
+            # Group items by invoice_id to calculate total amounts per invoice
+            invoice_totals = {}
+            invoice_dates = {}
+
+            for item in existing_items:
+                invoice_id = item.invoice_id
+                if invoice_id not in invoice_totals:
+                    invoice_totals[invoice_id] = 0
+                    invoice_dates[invoice_id] = item.date
+
+                # Add item amount to invoice total
+                try:
+                    item_amount = float(item.amount) if item.amount else 0
+                    invoice_totals[invoice_id] += item_amount
+                except (ValueError, TypeError):
+                    continue
+
+            # Define tolerance for floating-point comparison (0.01 cents)
+            tolerance = 0.01
+
+            # Find duplicates with same date and amount
+            duplicate_invoice_ids = []
+            for invoice_id, total_amount in invoice_totals.items():
+                existing_amount_float = float(total_amount)
+                existing_date = invoice_dates[invoice_id]
+
+                # Check if amounts are within tolerance and dates match
+                amount_difference = abs(
+                    target_amount_float - existing_amount_float)
+                amounts_equal = amount_difference <= tolerance
+                dates_equal = existing_date == date_obj
+
+                if dates_equal and amounts_equal:
+                    duplicate_invoice_ids.append(invoice_id)
+
+            return duplicate_invoice_ids
+
+        except Exception as e:
+            logger.error(f"Error finding duplicate invoices: {str(e)}")
+            return []
+
+    def cleanup_duplicate_invoices(self, reference_no, vendor, date, amount, keep_most_recent=True):
+        """
+        Clean up duplicate invoices by keeping only the most recent one and marking others as inactive.
+
+        Args:
+            reference_no: Invoice reference number
+            vendor: Vendor name
+            date: Invoice date
+            amount: Total invoice amount
+            keep_most_recent: If True, keep the most recent invoice; if False, keep the oldest
+
+        Returns:
+            Dict with cleanup results
+        """
+        try:
+            duplicate_ids = self.find_duplicate_invoices(
+                reference_no, vendor, date, amount)
+
+            if len(duplicate_ids) <= 1:
+                return {
+                    'status': 'no_duplicates',
+                    'message': f'No duplicates found for RefNo: {reference_no}, Vendor: {vendor}',
+                    'kept_invoice_id': duplicate_ids[0] if duplicate_ids else None,
+                    'removed_count': 0
+                }
+
+            # Get the invoice to keep (most recent or oldest)
+            if keep_most_recent:
+                # Find the most recent invoice by date_added
+                most_recent_item = self.db.query(InvoiceItem).filter(
+                    InvoiceItem.invoice_id.in_(duplicate_ids)
+                ).order_by(InvoiceItem.date_added.desc(), InvoiceItem.id.desc()).first()
+
+                keep_invoice_id = most_recent_item.invoice_id if most_recent_item else duplicate_ids[
+                    0]
+            else:
+                # Find the oldest invoice by date_added
+                oldest_item = self.db.query(InvoiceItem).filter(
+                    InvoiceItem.invoice_id.in_(duplicate_ids)
+                ).order_by(InvoiceItem.date_added.asc(), InvoiceItem.id.asc()).first()
+
+                keep_invoice_id = oldest_item.invoice_id if oldest_item else duplicate_ids[0]
+
+            # Mark other duplicates as inactive
+            removed_count = self.db.query(InvoiceItem).filter(
+                InvoiceItem.invoice_id.in_(duplicate_ids),
+                InvoiceItem.invoice_id != keep_invoice_id
+            ).update({'is_active': False})
+
+            self.db.commit()
+
+            logger.info(
+                f'Cleaned up {removed_count} duplicate invoices for RefNo: {reference_no}, Vendor: {vendor}. Kept invoice: {keep_invoice_id}')
+
+            return {
+                'status': 'cleaned',
+                'message': f'Cleaned up {removed_count} duplicate invoices',
+                'kept_invoice_id': keep_invoice_id,
+                'removed_count': removed_count,
+                'total_duplicates': len(duplicate_ids)
+            }
+
+        except Exception as e:
+            logger.error(f"Error cleaning up duplicate invoices: {str(e)}")
+            self.db.rollback()
+            return {
+                'status': 'error',
+                'message': f'Error cleaning up duplicates: {str(e)}',
+                'kept_invoice_id': None,
+                'removed_count': 0
+            }
+
+    def delete_duplicate_invoices(self, reference_no, vendor, date, amount, keep_most_recent=True):
+        """
+        Delete duplicate invoices with the same ref_no, vendor, date, and amount.
+        This method permanently deletes the duplicate records from the database.
+
+        Args:
+            reference_no: Invoice reference number
+            vendor: Vendor name
+            date: Invoice date
+            amount: Total invoice amount
+            keep_most_recent: If True, keep the most recent invoice; if False, keep the oldest
+
+        Returns:
+            Dict with deletion results
+        """
+        try:
+            duplicate_ids = self.find_duplicate_invoices(
+                reference_no, vendor, date, amount)
+
+            if len(duplicate_ids) <= 1:
+                return {
+                    'status': 'no_duplicates',
+                    'message': f'No duplicates found for RefNo: {reference_no}, Vendor: {vendor}',
+                    'kept_invoice_id': duplicate_ids[0] if duplicate_ids else None,
+                    'removed_count': 0
+                }
+
+            # Get the invoice to keep (most recent or oldest)
+            if keep_most_recent:
+                # Find the most recent invoice by date_added
+                most_recent_item = self.db.query(InvoiceItem).filter(
+                    InvoiceItem.invoice_id.in_(duplicate_ids)
+                ).order_by(InvoiceItem.date_added.desc(), InvoiceItem.id.desc()).first()
+
+                keep_invoice_id = most_recent_item.invoice_id if most_recent_item else duplicate_ids[
+                    0]
+            else:
+                # Find the oldest invoice by date_added
+                oldest_item = self.db.query(InvoiceItem).filter(
+                    InvoiceItem.invoice_id.in_(duplicate_ids)
+                ).order_by(InvoiceItem.date_added.asc(), InvoiceItem.id.asc()).first()
+
+                keep_invoice_id = oldest_item.invoice_id if oldest_item else duplicate_ids[0]
+
+            # Delete other duplicates permanently
+            deleted_count = self.db.query(InvoiceItem).filter(
+                InvoiceItem.invoice_id.in_(duplicate_ids),
+                InvoiceItem.invoice_id != keep_invoice_id
+            ).delete(synchronize_session=False)
+
+            self.db.commit()
+
+            logger.info(
+                f'Deleted {deleted_count} duplicate invoices for RefNo: {reference_no}, Vendor: {vendor}. Kept invoice: {keep_invoice_id}')
+
+            return {
+                'status': 'deleted',
+                'message': f'Deleted {deleted_count} duplicate invoices',
+                'kept_invoice_id': keep_invoice_id,
+                'removed_count': deleted_count,
+                'total_duplicates': len(duplicate_ids)
+            }
+
+        except Exception as e:
+            logger.error(f"Error deleting duplicate invoices: {str(e)}")
+            self.db.rollback()
+            return {
+                'status': 'error',
+                'message': f'Error deleting duplicates: {str(e)}',
+                'kept_invoice_id': None,
+                'removed_count': 0
+            }
+
     def check_invoice_duplicate_status(self, reference_no, vendor, date, amount):
         """
-        Enhanced duplicate detection with three-tiered logic:
-        1. Exact Duplicate: Same ref_no, date, and total amount (within tolerance) -> Skip
-        2. Updated Invoice: Same ref_no and date, different total amount -> Refresh
-        3. New Invoice: Same ref_no but different date/total amount -> Add as New
+        Enhanced duplicate detection with comprehensive logic to prevent multiple invoices:
+        1. Exact Duplicate: Same ref_no, vendor, date, and total amount (within tolerance) -> Skip
+        2. Updated Invoice: Same ref_no, vendor, and date, different total amount -> Refresh
+        3. New Invoice: Same ref_no and vendor but different date/total amount -> Add as New
 
         Args:
             reference_no: Invoice reference number
@@ -769,12 +1019,14 @@ class InvoiceItemController:
             # Group items by invoice_id to calculate total amounts per invoice
             invoice_totals = {}
             invoice_dates = {}
+            invoice_date_added = {}
 
             for item in existing_items:
                 invoice_id = item.invoice_id
                 if invoice_id not in invoice_totals:
                     invoice_totals[invoice_id] = 0
                     invoice_dates[invoice_id] = item.date
+                    invoice_date_added[invoice_id] = item.date_added
 
                 # Add item amount to invoice total
                 try:
@@ -785,58 +1037,104 @@ class InvoiceItemController:
                         f"Invalid amount value for item {item.id}: {item.amount}")
                     continue
 
-            # Find the most recent invoice (by date_added, then by ID)
+            # Define tolerance for floating-point comparison (0.01 cents)
+            tolerance = 0.01
+
+            # Check for EXACT duplicates first (same ref_no, vendor, date, and amount)
+            exact_duplicates = []
+            for invoice_id, total_amount in invoice_totals.items():
+                existing_amount_float = float(total_amount)
+                existing_date = invoice_dates[invoice_id]
+
+                # Check if amounts are within tolerance
+                amount_difference = abs(
+                    new_amount_float - existing_amount_float)
+                amounts_equal = amount_difference <= tolerance
+
+                # Check if dates match
+                dates_equal = existing_date == date_obj
+
+                if dates_equal and amounts_equal:
+                    exact_duplicates.append({
+                        'invoice_id': invoice_id,
+                        'amount': existing_amount_float,
+                        'date': existing_date,
+                        'date_added': invoice_date_added[invoice_id]
+                    })
+
+            # If we found exact duplicates, return the most recent one
+            if exact_duplicates:
+                # Sort by date_added (most recent first), then by invoice_id
+                exact_duplicates.sort(key=lambda x: (
+                    x['date_added'] or date.min, x['invoice_id']), reverse=True)
+                most_recent_duplicate = exact_duplicates[0]
+
+                logger.warning(
+                    f"Found {len(exact_duplicates)} exact duplicate(s) for RefNo: {ref_no}, Vendor: {vendor_str}, Date: {date_obj}, Amount: {new_amount_float}. Using most recent: {most_recent_duplicate['invoice_id']}")
+
+                return {
+                    'status': 'exact_duplicate',
+                    'existing_invoice_id': most_recent_duplicate['invoice_id'],
+                    'existing_amount': str(most_recent_duplicate['amount']),
+                    'existing_date': most_recent_duplicate['date'],
+                    'message': f'Found {len(exact_duplicates)} exact duplicate(s) for RefNo: {ref_no}, Vendor: {vendor_str}, Date: {date_obj}, Amount: {new_amount_float}. Using most recent invoice {most_recent_duplicate["invoice_id"]}.'
+                }
+
+            # Check for updated invoice (same ref_no, vendor, and date, different total amount)
+            updated_invoices = []
+            for invoice_id, total_amount in invoice_totals.items():
+                existing_amount_float = float(total_amount)
+                existing_date = invoice_dates[invoice_id]
+
+                # Check if dates match but amounts differ
+                dates_equal = existing_date == date_obj
+                amount_difference = abs(
+                    new_amount_float - existing_amount_float)
+                amounts_different = amount_difference > tolerance
+
+                if dates_equal and amounts_different:
+                    updated_invoices.append({
+                        'invoice_id': invoice_id,
+                        'amount': existing_amount_float,
+                        'date': existing_date,
+                        'date_added': invoice_date_added[invoice_id],
+                        'difference': amount_difference
+                    })
+
+            # If we found updated invoices, return the most recent one
+            if updated_invoices:
+                # Sort by date_added (most recent first), then by invoice_id
+                updated_invoices.sort(key=lambda x: (
+                    x['date_added'] or date.min, x['invoice_id']), reverse=True)
+                most_recent_updated = updated_invoices[0]
+
+                logger.info(
+                    f"Found {len(updated_invoices)} updated invoice(s) for RefNo: {ref_no}, Vendor: {vendor_str}, Date: {date_obj}. Using most recent: {most_recent_updated['invoice_id']}")
+
+                return {
+                    'status': 'updated_invoice',
+                    'existing_invoice_id': most_recent_updated['invoice_id'],
+                    'existing_amount': str(most_recent_updated['amount']),
+                    'existing_date': most_recent_updated['date'],
+                    'message': f'Found {len(updated_invoices)} updated invoice(s) for RefNo: {ref_no}, Vendor: {vendor_str}, Date: {date_obj}. Using most recent invoice {most_recent_updated["invoice_id"]} with amount difference: {most_recent_updated["difference"]:.2f}.'
+                }
+
+            # New invoice with same ref_no and vendor but different date/total amount
+            # Find the most recent invoice for reference
             most_recent_item = max(existing_items, key=lambda item: (
                 item.date_added or date.min, item.id))
             most_recent_invoice_id = most_recent_item.invoice_id
-
-            # Get the total amount and date for the most recent invoice
             existing_total_amount = invoice_totals.get(
                 most_recent_invoice_id, 0)
             existing_date = invoice_dates.get(most_recent_invoice_id)
 
-            # Convert to float for comparison
-            existing_amount_float = float(existing_total_amount)
-
-            # Define tolerance for floating-point comparison (0.01 cents)
-            tolerance = 0.01
-
-            # Check if amounts are within tolerance
-            amount_difference = abs(new_amount_float - existing_amount_float)
-            amounts_equal = amount_difference <= tolerance
-
-            logger.info(
-                f"Comparing invoice totals - New: {new_amount_float}, Existing: {existing_amount_float}, Difference: {amount_difference}, Tolerance: {tolerance}, Equal: {amounts_equal}")
-
-            # Check for exact duplicate (same ref_no, date, and total amount within tolerance)
-            if (existing_date == date_obj and amounts_equal):
-                return {
-                    'status': 'exact_duplicate',
-                    'existing_invoice_id': most_recent_invoice_id,
-                    'existing_amount': str(existing_amount_float),
-                    'existing_date': existing_date,
-                    'message': f'Invoice with RefNo: {ref_no}, Date: {date_obj}, Total Amount: {new_amount_float} already exists (within tolerance). Skipping.'
-                }
-
-            # Check for updated invoice (same ref_no and date, different total amount)
-            elif existing_date == date_obj and not amounts_equal:
-                return {
-                    'status': 'updated_invoice',
-                    'existing_invoice_id': most_recent_invoice_id,
-                    'existing_amount': str(existing_amount_float),
-                    'existing_date': existing_date,
-                    'message': f'Invoice with RefNo: {ref_no} and Date: {date_obj} found with updated total amount (Old: {existing_amount_float}, New: {new_amount_float}, Difference: {amount_difference}). Refreshing invoice.'
-                }
-
-            # New invoice with same ref_no but different date/total amount
-            else:
-                return {
-                    'status': 'new_invoice',
-                    'existing_invoice_id': None,
-                    'existing_amount': str(existing_amount_float),
-                    'existing_date': existing_date,
-                    'message': f'New invoice with existing RefNo: {ref_no} but different Date/Total Amount. Treating as a new invoice.'
-                }
+            return {
+                'status': 'new_invoice',
+                'existing_invoice_id': None,
+                'existing_amount': str(existing_total_amount),
+                'existing_date': existing_date,
+                'message': f'New invoice with existing RefNo: {ref_no} and Vendor: {vendor_str} but different Date/Total Amount. Treating as a new invoice.'
+            }
 
         except Exception as e:
             logger.error(f"Error in check_invoice_duplicate_status: {str(e)}")

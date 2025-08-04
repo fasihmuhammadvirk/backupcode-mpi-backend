@@ -58,8 +58,8 @@ def process_extracted_data(converted_files, failed_files, existing_invoice_id=No
         for file in converted_files:
             try:
                 result = process_single_file(file, temp_items, item_mappings,
-                                    customer_job_mappings, database,
-                                    existing_invoice_id)
+                                             customer_job_mappings, database,
+                                             existing_invoice_id)
                 results.append(result)
                 # Only use existing_invoice_id for the first file
                 existing_invoice_id = None
@@ -118,18 +118,22 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
         # Calculate total invoice amount by summing all items
         try:
             # Convert Amount column to numeric, handling any non-numeric values
-            amounts = pd.to_numeric(extracted_data['Amount'], errors='coerce').fillna(0)
+            amounts = pd.to_numeric(
+                extracted_data['Amount'], errors='coerce').fillna(0)
             total_invoice_amount = amounts.sum()
             invoice_amount = str(total_invoice_amount)
-            logger.info(f"Calculated total invoice amount: {invoice_amount} from {len(amounts)} items")
+            logger.info(
+                f"Calculated total invoice amount: {invoice_amount} from {len(amounts)} items")
         except Exception as e:
             logger.error(f"Error calculating total invoice amount: {str(e)}")
             # Fallback to first row amount if calculation fails
-            invoice_amount = str(extracted_data['Amount'][0]) if len(extracted_data) > 0 else "0"
-        
+            invoice_amount = str(extracted_data['Amount'][0]) if len(
+                extracted_data) > 0 else "0"
+
         # For reprocessing, skip duplicate detection and directly update existing invoice
         if existing_invoice_id:
-            logger.info(f"Reprocessing mode: Updating existing invoice {existing_invoice_id}")
+            logger.info(
+                f"Reprocessing mode: Updating existing invoice {existing_invoice_id}")
             duplicate_status = {
                 'status': 'updated_invoice',
                 'existing_invoice_id': existing_invoice_id,
@@ -140,7 +144,27 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
             duplicate_status = InvoiceItemController(db).check_invoice_duplicate_status(
                 ref_no, vendor, invoice_date, invoice_amount
             )
-        
+
+            # Additional check: Look for any existing invoice with same ref_no and vendor
+            # This catches cases where the same invoice might be processed multiple times
+            existing_invoice_check = InvoiceItemController(
+                db).invoice_exists(ref_no, vendor)
+            if existing_invoice_check:
+                logger.warning(
+                    f"Found existing invoice with ref_no: {ref_no}, vendor: {vendor}. This might be a duplicate processing attempt.")
+                # Log additional details for debugging
+                existing_items = db.query(InvoiceItem).filter(
+                    InvoiceItem.ref_no == ref_no,
+                    InvoiceItem.vendor == vendor,
+                    InvoiceItem.is_active == True
+                ).all()
+                if existing_items:
+                    logger.warning(
+                        f"Found {len(existing_items)} existing items for ref_no: {ref_no}, vendor: {vendor}")
+                    for item in existing_items[:3]:  # Log first 3 items
+                        logger.warning(
+                            f"  - Item ID: {item.id}, Invoice ID: {item.invoice_id}, Date: {item.date}, Amount: {item.amount}")
+
         # Handle different duplicate scenarios
         if duplicate_status['status'] == 'exact_duplicate':
             logger.warning(duplicate_status['message'])
@@ -164,7 +188,8 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
             # Continue processing to add as new invoice
             existing_invoice_id = None
         else:
-            logger.error(f"Error in duplicate detection: {duplicate_status['message']}")
+            logger.error(
+                f"Error in duplicate detection: {duplicate_status['message']}")
             return {
                 "status": "error",
                 "ref_no": ref_no,
@@ -206,7 +231,8 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
                 existing_invoice_id, extracted_data, file.rsplit('/')[-1]
             )
             if success:
-                logger.info(f'Successfully updated invoice {existing_invoice_id} with {len(extracted_data)} items')
+                logger.info(
+                    f'Successfully updated invoice {existing_invoice_id} with {len(extracted_data)} items')
                 return {
                     "status": "updated",
                     "invoice_id": existing_invoice_id,
@@ -233,7 +259,8 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
                     extracted_data['Date'][0], file.rsplit('/')[-1],
                     supplier_id, 'PROCESSING', file, existing_invoice_id
                 )
-                logger.info(f"Reprocessing: Created invoice with existing ID {existing_invoice_id}")
+                logger.info(
+                    f"Reprocessing: Created invoice with existing ID {existing_invoice_id}")
             else:
                 # For new uploads, let the database generate a new ID
                 invoice_record = InvoiceController(db).insert_invoice(
@@ -254,7 +281,8 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
                     row, file.rsplit('/')[-1], invoice_record.id
                 )
 
-            logger.info(f'Successfully processed invoice {file.rsplit("/")[-1]} with {len(extracted_data)} items')
+            logger.info(
+                f'Successfully processed invoice {file.rsplit("/")[-1]} with {len(extracted_data)} items')
             return {
                 "status": "created",
                 "invoice_id": invoice_record.id,
@@ -303,7 +331,8 @@ def search_replace(row, temp_items, item_mappings, db):
     """
     from mpi_backend.utils.mapping_validators import is_temporary_mapping
 
-    original_item = row['Item'].strip()  # Clean supplier_item_ids from invoice and strip spaces
+    # Clean supplier_item_ids from invoice and strip spaces
+    original_item = row['Item'].strip()
 
     # FIRST: Search in permanent mappings (supplier_item_mappings table)
     # This ensures permanent mappings override temporary ones
@@ -323,16 +352,20 @@ def search_replace(row, temp_items, item_mappings, db):
                 row['MpiItem'] = mpi_code  # This is the target mpi_code
                 row['MpiDescription'] = description
                 sheet_name = mapping_match.iloc[0]['google_sheet_name']
-                row['Sheet Name'] = sheet_name or ""  # Handle empty sheet names
-                
+                # Handle empty sheet names
+                row['Sheet Name'] = sheet_name or ""
+
                 # Log if this is a mapping without sheet name
                 if not sheet_name or sheet_name.strip() == "":
-                    logger.debug(f"Applied permanent mapping (no sheet): {original_item} -> {mpi_code}")
+                    logger.debug(
+                        f"Applied permanent mapping (no sheet): {original_item} -> {mpi_code}")
                 else:
-                    logger.debug(f"Applied permanent mapping: {original_item} -> {mpi_code}")
+                    logger.debug(
+                        f"Applied permanent mapping: {original_item} -> {mpi_code}")
                 return row
             else:
-                logger.warning(f"Found temporary mapping in permanent table, skipping: {mpi_code}")
+                logger.warning(
+                    f"Found temporary mapping in permanent table, skipping: {mpi_code}")
 
     # SECOND: If no permanent mapping found, check temporary mappings
     # Exact match only - no suffix variations to avoid business logic issues
@@ -343,10 +376,12 @@ def search_replace(row, temp_items, item_mappings, db):
     if not temp_match.empty:
         # For temporary mappings, we assign the sheet name but keep "No Match" for the MPI item
         # The temporary mapping system assigns items to sheets for later processing
-        row['MpiItem'] = 'No Match'  # Keep as No Match - temporary mappings don't provide MPI codes
+        # Keep as No Match - temporary mappings don't provide MPI codes
+        row['MpiItem'] = 'No Match'
         row['MpiDescription'] = temp_match.iloc[0]['original_description'] or 'No Match'
         row['Sheet Name'] = temp_match.iloc[0]['sheet_name']
-        logger.debug(f"Applied temporary mapping: {original_item} -> sheet: {temp_match.iloc[0]['sheet_name']}")
+        logger.debug(
+            f"Applied temporary mapping: {original_item} -> sheet: {temp_match.iloc[0]['sheet_name']}")
         return row
 
     # THIRD: If no mapping found at all, add to unmapped items
