@@ -91,7 +91,7 @@ def cleanup_duplicates(db, duplicates):
         print(f"   Date: {dup['date']}")
         print(f"   Total Amount: {dup['total_amount']}")
         print(f"   Invoice Count: {dup['count']}")
-        print(f"   Invoice IDs: {', '.join(dup['invoice_ids'])}")
+        print(f"   Invoice IDs: {', '.join(str(id) for id in dup['invoice_ids'])}")
         print()
     
     # Ask for confirmation
