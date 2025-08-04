@@ -48,21 +48,21 @@ class InvoiceItemController:
                 ))
                 .where(InvoiceItem.is_active == True)
             )
-            
+
             # Cache count query
             self._compiled_queries['count_active'] = (
                 select(func.count(InvoiceItem.id))
                 .where(InvoiceItem.is_active == True)
             )
-            
+
             logger.info("Query cache initialized successfully")
         except Exception as e:
             logger.error(f"Failed to setup query cache: {e}")
 
     @lru_cache(maxsize=256)
     def _get_distinct_values_ultra_optimized(
-        self, 
-        column: str, 
+        self,
+        column: str,
         filter_hash: str
     ) -> List[str]:
         """
@@ -70,7 +70,7 @@ class InvoiceItemController:
         Handles 50,000+ records in milliseconds.
         """
         start_time = time.time()
-        
+
         try:
             # Use raw SQL for maximum performance
             if column == 'item':
@@ -101,27 +101,27 @@ class InvoiceItemController:
                     ORDER BY {column}
                     LIMIT 2000
                 """)
-            
+
             # Execute with result streaming for memory efficiency
             result = self.db.execute(raw_query)
-            
+
             # Stream results to avoid memory overload
             values = []
             for row in result:
                 values.append(row[0])
                 if len(values) >= 2000:  # Safety limit
                     break
-            
+
             # Force garbage collection for large datasets
             if len(values) > 500:
                 gc.collect()
-            
+
             logger.info(f"Ultra-optimized distinct values for '{column}' "
-                       f"took {time.time() - start_time:.3f}s, "
-                       f"returned {len(values)} values")
-            
+                        f"took {time.time() - start_time:.3f}s, "
+                        f"returned {len(values)} values")
+
             return values
-            
+
         except Exception as e:
             logger.error(f"Error in ultra-optimized distinct values: {e}")
             # Fallback to simple query
@@ -137,7 +137,7 @@ class InvoiceItemController:
                 .distinct()
                 .limit(1000)
             )
-            
+
             return [str(row[0]) for row in query.all()]
         except Exception as e:
             logger.error(f"Fallback query failed: {e}")
@@ -157,7 +157,7 @@ class InvoiceItemController:
                     InvoiceItem.mpi_item, InvoiceItem.class_, InvoiceItem.export_status
                 ))
             )
-            
+
             # Apply filters efficiently
             if request.filters:
                 for column, values in request.filters.items():
@@ -171,8 +171,26 @@ class InvoiceItemController:
                                     cleaned_values.append(value.strip())
                                 else:
                                     cleaned_values.append(value)
-                            query = query.filter(attr.in_(cleaned_values))
-            
+
+                            # For string columns, use case-insensitive and trimmed comparison
+                            if column in ['ref_no', 'vendor', 'item', 'description', 'customer_job', 'po_number', 'bill', 'buyer', 'memo', 'class_']:
+                                # Use func.trim() and ilike for case-insensitive, trimmed comparison
+                                from sqlalchemy import func
+                                conditions = []
+                                for cleaned_value in cleaned_values:
+                                    if isinstance(cleaned_value, str):
+                                        # Trim both database value and filter value, then do case-insensitive comparison
+                                        conditions.append(func.trim(attr).ilike(
+                                            func.trim(cleaned_value)))
+                                    else:
+                                        conditions.append(
+                                            attr == cleaned_value)
+                                if conditions:
+                                    query = query.filter(or_(*conditions))
+                            else:
+                                # For non-string columns, use exact match
+                                query = query.filter(attr.in_(cleaned_values))
+
             # Apply comparison filters
             if request.comparison_filters:
                 for comp_filter in request.comparison_filters:
@@ -188,21 +206,22 @@ class InvoiceItemController:
                             query = query.filter(attr <= comp_filter.value)
                         elif comp_filter.operator == 'eq':
                             query = query.filter(attr == comp_filter.value)
-            
+
             # Add ordering for consistent results
-            query = query.order_by(InvoiceItem.date.desc(), InvoiceItem.id.desc())
-            
+            query = query.order_by(
+                InvoiceItem.date.desc(), InvoiceItem.id.desc())
+
             return query
-            
+
         except Exception as e:
             logger.error(f"Error building ultra-optimized query: {e}")
             # Fallback to simple query
             return self.db.query(InvoiceItem).filter(InvoiceItem.is_active == True)
 
     def _execute_ultra_fast_filter_query(
-        self, 
-        request: FilterRequest, 
-        page: int, 
+        self,
+        request: FilterRequest,
+        page: int,
         size: int
     ) -> Tuple[List[InvoiceItem], int]:
         """
@@ -210,19 +229,19 @@ class InvoiceItemController:
         Handles massive datasets with streaming and memory management.
         """
         start_time = time.time()
-        
+
         try:
             # Build optimized base query
             base_query = self._build_ultra_optimized_query(request)
-            
+
             # Get total count with optimized counting
             count_start = time.time()
             total_count = self._get_optimized_count(base_query)
             logger.info(f"Count query took {time.time() - count_start:.3f}s")
-            
+
             # Apply pagination with offset optimization
             offset = (page - 1) * size
-            
+
             # Use raw SQL for maximum performance on large datasets
             if total_count > 5000:
                 paginated_query = self._build_raw_paginated_query(
@@ -238,31 +257,31 @@ class InvoiceItemController:
                     .limit(size)
                     .options(load_only(
                         InvoiceItem.id, InvoiceItem.item, InvoiceItem.vendor,
-                        InvoiceItem.customer_job, InvoiceItem.cost, 
+                        InvoiceItem.customer_job, InvoiceItem.cost,
                         InvoiceItem.qty, InvoiceItem.date, InvoiceItem.amount,
                         InvoiceItem.description, InvoiceItem.mpi_item,
                         InvoiceItem.class_, InvoiceItem.export_status
                     ))
                 )
                 items = paginated_query.all()
-            
+
             # Apply item suffix transformation efficiently
             for item in items:
                 if hasattr(item, 'vendor') and hasattr(item, 'item'):
                     item.display_item = self._calculate_item_suffix_fast(
                         item.item, item.vendor
                     )
-            
+
             # Memory cleanup for large results
             if len(items) > 100:
                 gc.collect()
-            
+
             logger.info(f"Ultra-fast filter query took "
-                       f"{time.time() - start_time:.3f}s, "
-                       f"returned {len(items)}/{total_count} items")
-            
+                        f"{time.time() - start_time:.3f}s, "
+                        f"returned {len(items)}/{total_count} items")
+
             return items, total_count
-            
+
         except Exception as e:
             logger.error(f"Ultra-fast filter query failed: {e}")
             traceback.print_exc()
@@ -270,13 +289,13 @@ class InvoiceItemController:
             return self._fallback_filter_query(request, page, size)
 
     def _build_raw_paginated_query(
-        self, 
-        request: FilterRequest, 
-        offset: int, 
+        self,
+        request: FilterRequest,
+        offset: int,
         size: int
     ) -> text:
         """Build raw SQL query for maximum performance on large datasets."""
-        
+
         # Base SELECT with essential columns only
         select_clause = """
             SELECT id, item, vendor, customer_job, cost, qty, date, amount,
@@ -290,10 +309,10 @@ class InvoiceItemController:
             FROM invoice_items 
             WHERE is_active = true
         """
-        
+
         # Build WHERE conditions
         where_conditions = []
-        
+
         if request.filters:
             for column, values in request.filters.items():
                 if values and len(values) > 0:
@@ -306,29 +325,34 @@ class InvoiceItemController:
                             cleaned_values.append(value)
                     # Use ANY for better performance with indexes
                     placeholders = ','.join([f"'{v}'" for v in cleaned_values])
-                    where_conditions.append(f"{column} = ANY(ARRAY[{placeholders}])")
-        
+                    where_conditions.append(
+                        f"{column} = ANY(ARRAY[{placeholders}])")
+
         if request.comparison_filters:
             for comp_filter in request.comparison_filters:
                 if comp_filter.operator == 'gt':
-                    where_conditions.append(f"{comp_filter.column} > {comp_filter.value}")
+                    where_conditions.append(
+                        f"{comp_filter.column} > {comp_filter.value}")
                 elif comp_filter.operator == 'lt':
-                    where_conditions.append(f"{comp_filter.column} < {comp_filter.value}")
+                    where_conditions.append(
+                        f"{comp_filter.column} < {comp_filter.value}")
                 elif comp_filter.operator == 'gte':
-                    where_conditions.append(f"{comp_filter.column} >= {comp_filter.value}")
+                    where_conditions.append(
+                        f"{comp_filter.column} >= {comp_filter.value}")
                 elif comp_filter.operator == 'lte':
-                    where_conditions.append(f"{comp_filter.column} <= {comp_filter.value}")
-        
+                    where_conditions.append(
+                        f"{comp_filter.column} <= {comp_filter.value}")
+
         # Combine conditions
         if where_conditions:
             select_clause += " AND " + " AND ".join(where_conditions)
-        
+
         # Add ordering and pagination
         select_clause += f"""
             ORDER BY date DESC, id DESC
             LIMIT {size} OFFSET {offset}
         """
-        
+
         return text(select_clause)
 
     @staticmethod
@@ -336,7 +360,7 @@ class InvoiceItemController:
         """Ultra-fast item suffix calculation with minimal string operations."""
         if not item or not vendor:
             return item or ""
-        
+
         vendor_upper = vendor.upper()
         if 'BMW' in vendor_upper:
             return f"{item}-B"
@@ -347,7 +371,7 @@ class InvoiceItemController:
     def _row_to_invoice_item(self, row) -> InvoiceItem:
         """Convert raw SQL row to InvoiceItem object efficiently."""
         item = InvoiceItem()
-        
+
         # Map only essential fields for performance
         field_mapping = {
             'id': 0, 'item': 1, 'vendor': 2, 'customer_job': 3,
@@ -355,13 +379,13 @@ class InvoiceItemController:
             'description': 8, 'mpi_item': 9, 'class_': 10,
             'export_status': 11, 'display_item': 12
         }
-        
+
         for field, index in field_mapping.items():
             try:
                 setattr(item, field, row[index] if len(row) > index else None)
             except (IndexError, AttributeError):
                 setattr(item, field, None)
-        
+
         return item
 
     def _get_optimized_count(self, query) -> int:
@@ -383,15 +407,16 @@ class InvoiceItemController:
                 return 0
 
     def _fallback_filter_query(
-        self, 
-        request: FilterRequest, 
-        page: int, 
+        self,
+        request: FilterRequest,
+        page: int,
         size: int
     ) -> Tuple[List[InvoiceItem], int]:
         """Fallback method if ultra-optimizations fail."""
         try:
-            query = self.db.query(InvoiceItem).filter(InvoiceItem.is_active == True)
-            
+            query = self.db.query(InvoiceItem).filter(
+                InvoiceItem.is_active == True)
+
             if request.filters:
                 for column, values in request.filters.items():
                     if values:
@@ -404,18 +429,18 @@ class InvoiceItemController:
                             else:
                                 cleaned_values.append(value)
                         query = query.filter(attr.in_(cleaned_values))
-            
+
             total = query.count()
             items = query.offset((page - 1) * size).limit(size).all()
-            
+
             return items, total
         except Exception as e:
             logger.error(f"Fallback filter query failed: {e}")
             return [], 0
 
     def get_data_by_column_name(
-        self, 
-        column_name: str, 
+        self,
+        column_name: str,
         filter_context: Optional[Dict] = None,
         comparison_filters: Optional[List] = None
     ) -> List[str]:
@@ -424,28 +449,32 @@ class InvoiceItemController:
         Now handles 10,000+ records efficiently while preserving ALL business logic.
         """
         start_time = time.time()
-        
+
         # Create cache keys for filter context and comparison filters
-        filter_hash, comparison_hash = self._create_filter_hash(filter_context, comparison_filters or [])
-        
+        filter_hash, comparison_hash = self._create_filter_hash(
+            filter_context, comparison_filters or [])
+
         # For frequently accessed columns, use caching
-        cacheable_columns = ['vendor', 'customer_job', 'class_', 'export_status']
+        cacheable_columns = [
+            'vendor', 'customer_job', 'class_', 'export_status']
         if column_name in cacheable_columns and not filter_context and not comparison_filters:
             try:
                 return self._get_cached_distinct_values(column_name, filter_hash, comparison_hash)
             except:
                 pass  # Fall back to non-cached version if caching fails
-        
+
         # Use the optimized implementation
-        result = self._get_distinct_values_optimized(column_name, filter_context, comparison_filters or [])
-        
-        logging.info(f"get_data_by_column_name for '{column_name}' took {time.time() - start_time:.2f}s")
+        result = self._get_distinct_values_optimized(
+            column_name, filter_context, comparison_filters or [])
+
+        logging.info(
+            f"get_data_by_column_name for '{column_name}' took {time.time() - start_time:.2f}s")
         return result
 
     def apply_filters(
-        self, 
-        request: FilterRequest, 
-        page: int = 1, 
+        self,
+        request: FilterRequest,
+        page: int = 1,
         size: int = 10,
         col_param: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -455,26 +484,26 @@ class InvoiceItemController:
         Supports col_param for getting specific column values (used by export).
         """
         start_time = time.time()
-        
+
         # Build base query with proper filtering
         query = self.db.query(InvoiceItem)
-        
+
         # Apply empty item filter
         query = self._apply_empty_item_filter(query)
-        
+
         # Apply 'IN' filters dynamically
         for column_name, values in request.filters.items():
             if not hasattr(InvoiceItem, column_name):
                 continue  # Skip invalid columns
-                
+
             column = getattr(InvoiceItem, column_name)
-            
+
             # Special handling for 'item' column - with suffix standardization, use values as-is
             if column_name == "item":
                 # With suffix standardization, we use the full item codes as stored
                 # No need to remove suffixes anymore
                 pass
-            
+
             # Strip spaces from filter values for consistent comparison
             cleaned_values = []
             for value in values:
@@ -482,43 +511,74 @@ class InvoiceItemController:
                     cleaned_values.append(value.strip())
                 else:
                     cleaned_values.append(value)
-            
-            # Optimize large IN clauses
-            if len(cleaned_values) > 1000:
-                # Split into smaller batches for better database performance
-                batch_conditions = []
-                batch_size = 1000
-                for i in range(0, len(cleaned_values), batch_size):
-                    batch_values = cleaned_values[i:i + batch_size]
-                    batch_conditions.append(column.in_(batch_values))
-                query = query.filter(or_(*batch_conditions))
+
+            # For string columns, use case-insensitive and trimmed comparison
+            if column_name in ['ref_no', 'vendor', 'item', 'description',
+                               'customer_job', 'po_number', 'bill', 'buyer',
+                               'memo', 'class_']:
+                # Use func.trim() and ilike for case-insensitive, trimmed comparison
+                from sqlalchemy import func
+                conditions = []
+                for cleaned_value in cleaned_values:
+                    if isinstance(cleaned_value, str):
+                        # Trim both database value and filter value, then do case-insensitive comparison
+                        conditions.append(func.trim(column).ilike(
+                            func.trim(cleaned_value)))
+                    else:
+                        conditions.append(column == cleaned_value)
+                if conditions:
+                    # Optimize large conditions
+                    if len(conditions) > 1000:
+                        # Split into smaller batches for better database performance
+                        batch_conditions = []
+                        batch_size = 1000
+                        for i in range(0, len(conditions), batch_size):
+                            batch_conditions.append(
+                                or_(*conditions[i:i + batch_size]))
+                        query = query.filter(or_(*batch_conditions))
+                    else:
+                        query = query.filter(or_(*conditions))
             else:
-                query = query.filter(column.in_(cleaned_values))
-        
+                # For non-string columns, use exact match
+                # Optimize large IN clauses
+                if len(cleaned_values) > 1000:
+                    # Split into smaller batches for better database performance
+                    batch_conditions = []
+                    batch_size = 1000
+                    for i in range(0, len(cleaned_values), batch_size):
+                        batch_values = cleaned_values[i:i + batch_size]
+                        batch_conditions.append(column.in_(batch_values))
+                    query = query.filter(or_(*batch_conditions))
+                else:
+                    query = query.filter(column.in_(cleaned_values))
+
         # Apply comparison filters
         for comp_filter in request.comparison_filters:
             if not hasattr(InvoiceItem, comp_filter.column):
                 continue  # Skip invalid columns
-                
+
             column = getattr(InvoiceItem, comp_filter.column)
-            
+
             # Special handling for 'amount' column (string to float conversion)
             if comp_filter.column == "amount":
                 column = cast(column, Float)
-            
+
             try:
-                value = self._convert_filter_value(comp_filter.__dict__, column)
-                query = self._apply_operator_filter(query, column, comp_filter.operator, value)
+                value = self._convert_filter_value(
+                    comp_filter.__dict__, column)
+                query = self._apply_operator_filter(
+                    query, column, comp_filter.operator, value)
             except (ValueError, TypeError):
                 continue  # Skip invalid values
-        
+
         # Handle col_param for specific column extraction (used by export)
         if col_param and size == 0:
             if not hasattr(InvoiceItem, col_param):
-                raise HTTPException(status_code=400, detail=f"Invalid column name: {col_param}")
-            
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid column name: {col_param}")
+
             column_attr = getattr(InvoiceItem, col_param)
-            
+
             # Apply sorting if specified
             if request.order_by:
                 for order_filter in request.order_by:
@@ -531,24 +591,25 @@ class InvoiceItemController:
                         query = query.order_by(order_column.desc())
             else:
                 # Default sorting
-                query = query.order_by(InvoiceItem.date.desc(), InvoiceItem.id.desc())
-            
+                query = query.order_by(
+                    InvoiceItem.date.desc(), InvoiceItem.id.desc())
+
             # Execute query to get specific column values
             results = query.with_entities(column_attr).all()
             column_values = [row[0] for row in results if row[0] is not None]
-            
+
             execution_time = time.time() - start_time
             logger.info(f"apply_filters with col_param='{col_param}' completed in {execution_time:.3f}s: "
-                       f"returned {len(column_values)} values")
-            
+                        f"returned {len(column_values)} values")
+
             return column_values
-        
+
         # Apply sorting
         if request.order_by:
             for order_filter in request.order_by:
                 if not hasattr(InvoiceItem, order_filter.column):
                     continue
-                    
+
                 column = getattr(InvoiceItem, order_filter.column)
                 if order_filter.order == "asc":
                     query = query.order_by(column.asc())
@@ -556,18 +617,19 @@ class InvoiceItemController:
                     query = query.order_by(column.desc())
         else:
             # Default sorting by date descending
-            query = query.order_by(InvoiceItem.date.desc(), InvoiceItem.id.desc())
-        
+            query = query.order_by(
+                InvoiceItem.date.desc(), InvoiceItem.id.desc())
+
         # Get total count efficiently
         total = query.count()
-        
+
         # Apply pagination if size > 0
         if size > 0:
             query = query.limit(size).offset((page - 1) * size)
-        
+
         # Execute query and get results
         items = query.all()
-        
+
         # Process results for display
         invoices_items = []
         for item in items:
@@ -575,16 +637,16 @@ class InvoiceItemController:
             # Use the full item code as stored in database
             item_dict['item'] = item.item
             invoices_items.append(InvoiceItemsResponse(**item_dict))
-        
+
         # Calculate pagination metadata
         total_pages = (total + size - 1) // size if size > 0 else 1
         has_next = page < total_pages if size > 0 else False
         has_prev = page > 1 if size > 0 else False
-        
+
         execution_time = time.time() - start_time
         logger.info(f"apply_filters completed in {execution_time:.3f}s: "
-                   f"total={total}, returned={len(invoices_items)}")
-        
+                    f"total={total}, returned={len(invoices_items)}")
+
         return {
             "items": invoices_items,
             "total": total,
@@ -594,10 +656,6 @@ class InvoiceItemController:
             "has_next": has_next,
             "has_prev": has_prev
         }
-
-
-
-
 
     def insert_invoice_items(self, row, filename, invoice_id):
         # Add proper suffix to item code based on vendor
@@ -641,7 +699,8 @@ class InvoiceItemController:
         self.db.commit()
 
     def invoice_exists(self, reference_no, vendor):
-        matched_invoice = self.db.query(InvoiceItem).filter_by(ref_no=reference_no, vendor=vendor).first()
+        matched_invoice = self.db.query(InvoiceItem).filter_by(
+            ref_no=reference_no, vendor=vendor).first()
         return matched_invoice is not None
 
     def check_invoice_duplicate_status(self, reference_no, vendor, date, amount):
@@ -650,13 +709,13 @@ class InvoiceItemController:
         1. Exact Duplicate: Same ref_no, date, and total amount (within tolerance) -> Skip
         2. Updated Invoice: Same ref_no and date, different total amount -> Refresh
         3. New Invoice: Same ref_no but different date/total amount -> Add as New
-        
+
         Args:
             reference_no: Invoice reference number
             vendor: Vendor name
             date: Invoice date
             amount: Total invoice amount (sum of all items)
-            
+
         Returns:
             Dict with status and details:
             {
@@ -673,14 +732,15 @@ class InvoiceItemController:
             vendor_str = str(vendor).strip() if vendor else ""
             date_obj = date if hasattr(date, 'date') else date
             amount_str = str(amount).strip() if amount else ""
-            
+
             # Convert amounts to float for comparison with tolerance
             try:
                 new_amount_float = float(amount_str) if amount_str else 0.0
             except (ValueError, TypeError):
                 new_amount_float = 0.0
-                logger.warning(f"Could not convert new amount '{amount_str}' to float, using 0.0")
-            
+                logger.warning(
+                    f"Could not convert new amount '{amount_str}' to float, using 0.0")
+
             if not ref_no or not vendor_str:
                 return {
                     'status': 'not_found',
@@ -689,14 +749,14 @@ class InvoiceItemController:
                     'existing_date': None,
                     'message': 'Missing reference number or vendor'
                 }
-            
+
             # Query for existing invoices with same ref_no and vendor
             existing_items = self.db.query(InvoiceItem).filter(
                 InvoiceItem.ref_no == ref_no,
                 InvoiceItem.vendor == vendor_str,
                 InvoiceItem.is_active == True
             ).all()
-            
+
             if not existing_items:
                 return {
                     'status': 'not_found',
@@ -705,45 +765,49 @@ class InvoiceItemController:
                     'existing_date': None,
                     'message': f'No existing invoice found for RefNo: {ref_no}, Vendor: {vendor_str}'
                 }
-            
+
             # Group items by invoice_id to calculate total amounts per invoice
             invoice_totals = {}
             invoice_dates = {}
-            
+
             for item in existing_items:
                 invoice_id = item.invoice_id
                 if invoice_id not in invoice_totals:
                     invoice_totals[invoice_id] = 0
                     invoice_dates[invoice_id] = item.date
-                
+
                 # Add item amount to invoice total
                 try:
                     item_amount = float(item.amount) if item.amount else 0
                     invoice_totals[invoice_id] += item_amount
                 except (ValueError, TypeError):
-                    logger.warning(f"Invalid amount value for item {item.id}: {item.amount}")
+                    logger.warning(
+                        f"Invalid amount value for item {item.id}: {item.amount}")
                     continue
-            
+
             # Find the most recent invoice (by date_added, then by ID)
-            most_recent_item = max(existing_items, key=lambda item: (item.date_added or date.min, item.id))
+            most_recent_item = max(existing_items, key=lambda item: (
+                item.date_added or date.min, item.id))
             most_recent_invoice_id = most_recent_item.invoice_id
-            
+
             # Get the total amount and date for the most recent invoice
-            existing_total_amount = invoice_totals.get(most_recent_invoice_id, 0)
+            existing_total_amount = invoice_totals.get(
+                most_recent_invoice_id, 0)
             existing_date = invoice_dates.get(most_recent_invoice_id)
-            
+
             # Convert to float for comparison
             existing_amount_float = float(existing_total_amount)
-            
+
             # Define tolerance for floating-point comparison (0.01 cents)
             tolerance = 0.01
-            
+
             # Check if amounts are within tolerance
             amount_difference = abs(new_amount_float - existing_amount_float)
             amounts_equal = amount_difference <= tolerance
-            
-            logger.info(f"Comparing invoice totals - New: {new_amount_float}, Existing: {existing_amount_float}, Difference: {amount_difference}, Tolerance: {tolerance}, Equal: {amounts_equal}")
-            
+
+            logger.info(
+                f"Comparing invoice totals - New: {new_amount_float}, Existing: {existing_amount_float}, Difference: {amount_difference}, Tolerance: {tolerance}, Equal: {amounts_equal}")
+
             # Check for exact duplicate (same ref_no, date, and total amount within tolerance)
             if (existing_date == date_obj and amounts_equal):
                 return {
@@ -753,7 +817,7 @@ class InvoiceItemController:
                     'existing_date': existing_date,
                     'message': f'Invoice with RefNo: {ref_no}, Date: {date_obj}, Total Amount: {new_amount_float} already exists (within tolerance). Skipping.'
                 }
-            
+
             # Check for updated invoice (same ref_no and date, different total amount)
             elif existing_date == date_obj and not amounts_equal:
                 return {
@@ -763,7 +827,7 @@ class InvoiceItemController:
                     'existing_date': existing_date,
                     'message': f'Invoice with RefNo: {ref_no} and Date: {date_obj} found with updated total amount (Old: {existing_amount_float}, New: {new_amount_float}, Difference: {amount_difference}). Refreshing invoice.'
                 }
-            
+
             # New invoice with same ref_no but different date/total amount
             else:
                 return {
@@ -773,7 +837,7 @@ class InvoiceItemController:
                     'existing_date': existing_date,
                     'message': f'New invoice with existing RefNo: {ref_no} but different Date/Total Amount. Treating as a new invoice.'
                 }
-                
+
         except Exception as e:
             logger.error(f"Error in check_invoice_duplicate_status: {str(e)}")
             return {
@@ -788,7 +852,7 @@ class InvoiceItemController:
         query = self.db.query(InvoiceItem)
         if invoice_id:
             query = query.filter(InvoiceItem.invoice_id == invoice_id)
-        
+
         # Apply empty item filter
         query = self._apply_empty_item_filter(query)
         query = query.order_by(InvoiceItem.id.desc())
@@ -808,7 +872,8 @@ class InvoiceItemController:
                                      page: int = 1, page_size: int = 10):
         query = self.db.query(InvoiceItem)
 
-        if supplier is not None and 'All' not in supplier:  # only apply supplier filter if it's provided.
+        # only apply supplier filter if it's provided.
+        if supplier is not None and 'All' not in supplier:
             query = query.filter(InvoiceItem.vendor.in_(supplier))
 
         if job_location:
@@ -887,18 +952,18 @@ class InvoiceItemController:
         """
         Optimized method for exporting invoice items with minimal memory overhead.
         Returns raw database tuples instead of full objects for better performance.
-        
+
         Args:
             ids: List of invoice item IDs
             columns: List of column names to include (optional)
             order_by: List of OrderByFilter objects (optional)
-            
+
         Returns:
             List of tuples with selected data
         """
         if not ids:
             return []
-        
+
         # Define columns mapping
         available_columns = {
             'item': InvoiceItem.item,
@@ -921,7 +986,7 @@ class InvoiceItemController:
             'mpi_description': InvoiceItem.mpi_description,
             'date_added': InvoiceItem.date_added
         }
-        
+
         # Determine which columns to select
         if columns:
             # Map display column names back to database columns
@@ -946,7 +1011,7 @@ class InvoiceItemController:
                 'MPI Description': 'mpi_description',
                 'Date Added': 'date_added'
             }
-            
+
             selected_columns = []
             column_names = []
             for col in columns:
@@ -956,20 +1021,21 @@ class InvoiceItemController:
                     column_names.append(db_col)
         else:
             # Default columns for export - match the original convert_items_to_dataframe output
-            default_cols = ['item', 'description', 'qty', 'cost', 'amount', 'date', 
-                          'ref_no', 'po_number', 'customer_job', 'bill', 'vendor', 'class_', 'memo',
-                          'buyer', 'filename', 'sheet_name', 'mpi_item', 'mpi_description', 'date_added']
+            default_cols = ['item', 'description', 'qty', 'cost', 'amount', 'date',
+                            'ref_no', 'po_number', 'customer_job', 'bill', 'vendor', 'class_', 'memo',
+                            'buyer', 'filename', 'sheet_name', 'mpi_item', 'mpi_description', 'date_added']
             selected_columns = [available_columns[col] for col in default_cols]
             column_names = default_cols
-        
+
         # Always include vendor for suffix calculation
         if 'vendor' not in column_names:
             selected_columns.append(InvoiceItem.vendor)
             column_names.append('vendor')
-        
+
         # Build and execute query
-        query = self.db.query(*selected_columns).filter(InvoiceItem.id.in_(ids))
-        
+        query = self.db.query(
+            *selected_columns).filter(InvoiceItem.id.in_(ids))
+
         # Apply ordering if provided
         if order_by:
             for order_filter in order_by:
@@ -979,7 +1045,7 @@ class InvoiceItemController:
                         query = query.order_by(column.asc())
                     elif order_filter.order == "desc":
                         query = query.order_by(column.desc())
-        
+
         return query.all(), column_names
 
     def set_export_status_to_sent(self, ids):
@@ -1005,24 +1071,27 @@ class InvoiceItemController:
             # Process IDs in batches
             for i in range(0, len(ids), batch_size):
                 batch_ids = ids[i:i+batch_size]
-                logger.debug(f"Processing batch {i//batch_size + 1} with {len(batch_ids)} items")
+                logger.debug(
+                    f"Processing batch {i//batch_size + 1} with {len(batch_ids)} items")
 
                 # Use direct SQL for better performance with large batches
-                query = self.db.query(InvoiceItem).filter(InvoiceItem.id.in_(batch_ids))
-                updated_count = query.update({"export_status": "Sent"}, synchronize_session='fetch')
+                query = self.db.query(InvoiceItem).filter(
+                    InvoiceItem.id.in_(batch_ids))
+                updated_count = query.update(
+                    {"export_status": "Sent"}, synchronize_session='fetch')
                 total_updated += updated_count
 
                 # Commit after each batch to avoid large transactions
                 self.db.commit()
 
-            logger.info(f"Updated export status for {total_updated} invoice items")
+            logger.info(
+                f"Updated export status for {total_updated} invoice items")
             return total_updated
 
         except Exception as e:
             self.db.rollback()
             logger.error(f"Error updating export status: {str(e)}")
             raise
-
 
     def is_exported(self, invoice_id):
         """
@@ -1040,21 +1109,22 @@ class InvoiceItemController:
             total_count = self.db.query(func.count(InvoiceItem.id))\
                 .filter(InvoiceItem.invoice_id == invoice_id)\
                 .scalar()
-                
+
             if total_count == 0:
                 return False
-                
+
             # Count items with 'Sent' status
             sent_count = self.db.query(func.count(InvoiceItem.id))\
                 .filter(InvoiceItem.invoice_id == invoice_id)\
                 .filter(InvoiceItem.export_status == "Sent")\
                 .scalar()
-                
+
             # All items are exported if counts match
             return sent_count == total_count
-            
+
         except Exception as e:
-            logger.error(f"Error checking export status for invoice {invoice_id}: {str(e)}")
+            logger.error(
+                f"Error checking export status for invoice {invoice_id}: {str(e)}")
             return False
 
     def delete_invoice_items(self, invoice_id, db):
@@ -1097,29 +1167,33 @@ class InvoiceItemController:
         for item_data in items:
             item_id = item_data.get('id')
             if not item_id:
-                raise HTTPException(status_code=400, detail="ID is required for updating invoice item")
+                raise HTTPException(
+                    status_code=400, detail="ID is required for updating invoice item")
 
-            item = self.db.query(InvoiceItem).filter(InvoiceItem.id == item_id).first()
+            item = self.db.query(InvoiceItem).filter(
+                InvoiceItem.id == item_id).first()
             if not item:
-                raise HTTPException(status_code=404, detail=f"Invoice item with ID {item_id} not found")
-            
+                raise HTTPException(
+                    status_code=404, detail=f"Invoice item with ID {item_id} not found")
+
             # Get the new MPI item value, defaulting to current value if not in request
             new_mpi_item = item_data.get('mpi_item', item.mpi_item)
-            
+
             # Check if it's a valid MPI item (not "No Match" and not starting with "UIDI")
-            is_valid_mpi = (new_mpi_item and 
-                            new_mpi_item.lower() != "no match" and 
+            is_valid_mpi = (new_mpi_item and
+                            new_mpi_item.lower() != "no match" and
                             not new_mpi_item.startswith("UIDI"))
-            
+
             # Get sheet_name from request, defaulting to current value if not provided
             new_sheet_name = item_data.get('sheet_name', item.sheet_name)
-            
+
             # Only validate sheet_name for valid MPI items
             if is_valid_mpi and not new_sheet_name and new_mpi_item != item.mpi_item:
                 # Debug logging to see what's causing the issue
-                logger.error(f"Validation failed: mpi_item={new_mpi_item}, sheet_name={new_sheet_name}, data={item_data}")
+                logger.error(
+                    f"Validation failed: mpi_item={new_mpi_item}, sheet_name={new_sheet_name}, data={item_data}")
                 raise HTTPException(
-                    status_code=400, 
+                    status_code=400,
                     detail=f"Sheet name is required when updating to a valid MPI item '{new_mpi_item}'. Please provide a sheet name for item {item_data.get('item')}."
                 )
 
@@ -1127,31 +1201,32 @@ class InvoiceItemController:
             # Process MPI item updates if changed
             if 'mpi_item' in item_data and item_data['mpi_item'] != item.mpi_item:
                 background_tasks.add_task(self.update_mpi_field, item_data['item'], 'mpi_item',
-                                        item_data['mpi_item'])
-            
+                                          item_data['mpi_item'])
+
             # Process MPI description updates if changed
             if 'mpi_description' in item_data and item_data['mpi_description'] != item.mpi_description:
                 background_tasks.add_task(self.update_mpi_field, item_data['item'], 'mpi_description',
-                                        item_data['mpi_description'])
+                                          item_data['mpi_description'])
 
             # Process sheet_name updates if changed
             if 'sheet_name' in item_data and item_data['sheet_name'] != item.sheet_name:
                 background_tasks.add_task(self.update_mpi_field, item_data['item'], 'sheet_name',
-                                        item_data['sheet_name'])
-            
+                                          item_data['sheet_name'])
+
             # Update mappings table with all the data
             if ('mpi_item' in item_data and item_data['mpi_item'] != item.mpi_item) or \
                ('sheet_name' in item_data and item_data['sheet_name'] != item.sheet_name):
                 # Ensure item_data has the sheet_name from either the request or the current item
                 if 'sheet_name' not in item_data:
                     item_data['sheet_name'] = item.sheet_name
-                    
-                background_tasks.add_task(self.update_mappings_table, item_data)
+
+                background_tasks.add_task(
+                    self.update_mappings_table, item_data)
 
             # Process customer job updates
             if 'customer_job' in item_data and item_data['customer_job'] != item.customer_job:
                 background_tasks.add_task(self.update_customer_job, item.customer_job, 'customer_job',
-                                         item_data['customer_job'])
+                                          item_data['customer_job'])
                 CustomerJobMappingController(self.db).update_mappings_table(
                     old_customer_job=item.customer_job,
                     new_customer_job=item_data['customer_job']
@@ -1166,7 +1241,8 @@ class InvoiceItemController:
         self.db.commit()
 
     def update_mpi_field(self, item_value: str, field_name: str, new_value: str):
-        self.db.query(InvoiceItem).filter(InvoiceItem.item == item_value).update({field_name: new_value})
+        self.db.query(InvoiceItem).filter(InvoiceItem.item ==
+                                          item_value).update({field_name: new_value})
         self.db.commit()
 
     def update_customer_job(self, item_value: str, field_name: str, new_value: str):
@@ -1176,21 +1252,23 @@ class InvoiceItemController:
 
     def update_mappings_table(self, updated_values: dict):
         try:
-            supplier_id, _ = extract_supplier_id(updated_values.get('vendor', ''))
-            
+            supplier_id, _ = extract_supplier_id(
+                updated_values.get('vendor', ''))
+
             # Get the MPI item code
             mpi_item = updated_values.get('mpi_item', '')
-            
+
             # Check if it's a valid MPI item
-            is_valid_mpi = (mpi_item and 
-                           mpi_item.lower() != "no match" and 
-                           not mpi_item.startswith("UIDI"))
-            
+            is_valid_mpi = (mpi_item and
+                            mpi_item.lower() != "no match" and
+                            not mpi_item.startswith("UIDI"))
+
             # For valid MPI items, ensure sheet_name is provided
             if is_valid_mpi and not updated_values.get('sheet_name'):
-                logger.error(f"Cannot update mapping - sheet_name missing for valid MPI item: {updated_values}")
+                logger.error(
+                    f"Cannot update mapping - sheet_name missing for valid MPI item: {updated_values}")
                 return  # Skip the mapping update
-            
+
             # Create mapping data with all available fields
             mapping_data = {
                 "supplier_item_ids": updated_values.get('item', ''),
@@ -1198,18 +1276,20 @@ class InvoiceItemController:
                 "mpi_code": updated_values.get('mpi_item', ''),
                 "google_sheet_name": updated_values.get('sheet_name', '')
             }
-            
+
             # Log what we're about to do
             logger.info(f"Updating mapping with data: {mapping_data}")
-            
+
             # Only update the mapping if we have a supplier_id and supplier_item_ids
             if supplier_id and mapping_data["supplier_item_ids"]:
                 # Lazy import to avoid circular imports
                 from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
-                ItemsMappingController(self.db).update_mapping(supplier_id, mapping_data)
+                ItemsMappingController(self.db).update_mapping(
+                    supplier_id, mapping_data)
             else:
-                logger.error(f"Missing required data for mapping update: supplier_id={supplier_id}, item={mapping_data['supplier_item_ids']}")
-        
+                logger.error(
+                    f"Missing required data for mapping update: supplier_id={supplier_id}, item={mapping_data['supplier_item_ids']}")
+
         except Exception as e:
             # Log any errors that occur
             logger.error(f"Error in update_mappings_table: {str(e)}")
@@ -1244,93 +1324,100 @@ class InvoiceItemController:
         # Parse the hashes back to original data (in production, you might want a more sophisticated cache)
         # For now, we'll implement the core optimization without relying on the hash parsing
         return self._get_distinct_values_ultra_optimized(column_name, filter_context_hash)
-    
+
     def _create_filter_hash(self, filter_context: Dict, comparison_filters: List) -> tuple:
         """Create a hash from filter context and comparison filters for caching."""
         filter_str = json.dumps(filter_context or {}, sort_keys=True)
         comparison_str = json.dumps([
-            {k: v for k, v in f.items() if k in ['column', 'operator', 'value']} 
+            {k: v for k, v in f.items() if k in [
+                'column', 'operator', 'value']}
             for f in (comparison_filters or [])
         ], sort_keys=True)
-        
+
         filter_hash = hashlib.md5(filter_str.encode()).hexdigest()
         comparison_hash = hashlib.md5(comparison_str.encode()).hexdigest()
         return filter_hash, comparison_hash
-    
+
     def _get_distinct_values_optimized(self, column_name: str, filter_context: Dict, comparison_filters: List):
         """
         Optimized version of distinct value fetching with better query performance.
         """
         start_time = time.time()
-        
+
         # Special handling for 'item' column to return suffixed values efficiently
         if column_name == "item":
             # Use a more efficient query that only selects needed columns
             query = self.db.query(InvoiceItem.item, InvoiceItem.vendor)
-            
+
             # Apply filters more efficiently
-            query = self._apply_comparison_filters_optimized(query, comparison_filters)
-            query = self._apply_context_filters_optimized(query, filter_context)
-            
+            query = self._apply_comparison_filters_optimized(
+                query, comparison_filters)
+            query = self._apply_context_filters_optimized(
+                query, filter_context)
+
             # Execute query and process results in batches to reduce memory usage
             batch_size = 5000
             all_suffixed_items = set()
             offset = 0
-            
+
             while True:
                 batch_query = query.limit(batch_size).offset(offset)
                 batch_results = batch_query.all()
-                
+
                 if not batch_results:
                     break
-                    
+
                 # Process batch to get items (with suffix standardization, use items as-is)
                 for item, vendor in batch_results:
                     if item:
                         # With suffix standardization, use the item as stored in database
                         all_suffixed_items.add(item)
-                
+
                 offset += batch_size
-                
+
                 # Break if we got fewer results than batch size (last batch)
                 if len(batch_results) < batch_size:
                     break
-            
+
             result = sorted(list(all_suffixed_items))
-            logging.info(f"Item column distinct values query took {time.time() - start_time:.2f}s, returned {len(result)} items")
+            logging.info(
+                f"Item column distinct values query took {time.time() - start_time:.2f}s, returned {len(result)} items")
             return result
-        
+
         # Optimized query for other columns
         column_attr = getattr(InvoiceItem, column_name)
-        
+
         # Use a more efficient distinct query with only the required column
         query = self.db.query(column_attr).distinct()
-        
+
         # Apply filters efficiently
-        query = self._apply_comparison_filters_optimized(query, comparison_filters)
+        query = self._apply_comparison_filters_optimized(
+            query, comparison_filters)
         query = self._apply_context_filters_optimized(query, filter_context)
-        
+
         # Use database-level ordering for better performance
         query = query.order_by(column_attr.asc())
-        
+
         # Execute query
         distinct_values = query.all()
-        result = [value[0] for value in distinct_values if value[0] is not None]
-        
-        logging.info(f"Column '{column_name}' distinct values query took {time.time() - start_time:.2f}s, returned {len(result)} values")
+        result = [value[0]
+                  for value in distinct_values if value[0] is not None]
+
+        logging.info(
+            f"Column '{column_name}' distinct values query took {time.time() - start_time:.2f}s, returned {len(result)} values")
         return result
-    
+
     def _apply_comparison_filters_optimized(self, query, comparison_filters: List):
         """
         Optimized version of comparison filter application.
         """
         if not comparison_filters:
             return query
-            
+
         for comp_filter in comparison_filters:
             if not hasattr(InvoiceItem, comp_filter['column']):
                 continue  # Skip invalid columns instead of raising exception for better performance
-                
+
             column = getattr(InvoiceItem, comp_filter['column'])
 
             # Special handling for 'amount' column (string to float conversion)
@@ -1340,25 +1427,26 @@ class InvoiceItemController:
             # Handle type casting for comparison filters with better error handling
             try:
                 value = self._convert_filter_value(comp_filter, column)
-                query = self._apply_operator_filter(query, column, comp_filter['operator'], value)
+                query = self._apply_operator_filter(
+                    query, column, comp_filter['operator'], value)
             except (ValueError, TypeError):
                 continue  # Skip invalid values instead of raising exception
-                
+
         return query
-    
+
     def _apply_context_filters_optimized(self, query, filter_context: Dict):
         """
         Optimized version of context filter application.
         """
         if not filter_context:
             return query
-            
+
         for filter_col_name, values in filter_context.items():
             if not hasattr(InvoiceItem, filter_col_name):
                 continue  # Skip invalid columns
-                
+
             filter_column = getattr(InvoiceItem, filter_col_name)
-            
+
             # Strip spaces from filter values for consistent comparison
             cleaned_values = []
             for value in values:
@@ -1366,21 +1454,50 @@ class InvoiceItemController:
                     cleaned_values.append(value.strip())
                 else:
                     cleaned_values.append(value)
-            
-            # Use more efficient IN clause with batch processing for large value lists
-            if len(cleaned_values) > 1000:  # For very large filter lists, use batch processing
-                # Split into smaller batches to avoid SQL query limits
-                batch_conditions = []
-                batch_size = 1000
-                for i in range(0, len(cleaned_values), batch_size):
-                    batch_values = cleaned_values[i:i + batch_size]
-                    batch_conditions.append(filter_column.in_(batch_values))
-                query = query.filter(or_(*batch_conditions))
+
+            # For string columns, use case-insensitive and trimmed comparison
+            if filter_col_name in ['ref_no', 'vendor', 'item', 'description',
+                                   'customer_job', 'po_number', 'bill', 'buyer',
+                                   'memo', 'class_']:
+                # Use func.trim() and ilike for case-insensitive, trimmed comparison
+                from sqlalchemy import func
+                conditions = []
+                for cleaned_value in cleaned_values:
+                    if isinstance(cleaned_value, str):
+                        # Trim both database value and filter value, then do case-insensitive comparison
+                        conditions.append(func.trim(filter_column).ilike(
+                            func.trim(cleaned_value)))
+                    else:
+                        conditions.append(filter_column == cleaned_value)
+                if conditions:
+                    # Use more efficient batch processing for large value lists
+                    if len(conditions) > 1000:
+                        # Split into smaller batches to avoid SQL query limits
+                        batch_conditions = []
+                        batch_size = 1000
+                        for i in range(0, len(conditions), batch_size):
+                            batch_conditions.append(
+                                or_(*conditions[i:i + batch_size]))
+                        query = query.filter(or_(*batch_conditions))
+                    else:
+                        query = query.filter(or_(*conditions))
             else:
-                query = query.filter(filter_column.in_(cleaned_values))
-                
+                # For non-string columns, use exact match
+                # Use more efficient IN clause with batch processing for large value lists
+                if len(cleaned_values) > 1000:  # For very large filter lists, use batch processing
+                    # Split into smaller batches to avoid SQL query limits
+                    batch_conditions = []
+                    batch_size = 1000
+                    for i in range(0, len(cleaned_values), batch_size):
+                        batch_values = cleaned_values[i:i + batch_size]
+                        batch_conditions.append(
+                            filter_column.in_(batch_values))
+                    query = query.filter(or_(*batch_conditions))
+                else:
+                    query = query.filter(filter_column.in_(cleaned_values))
+
         return query
-    
+
     def _convert_filter_value(self, comp_filter: Dict, column):
         """
         Optimized value conversion with better error handling.
@@ -1395,7 +1512,7 @@ class InvoiceItemController:
             elif column.type.python_type == date:
                 return date.fromisoformat(comp_filter['value'])
         return comp_filter['value']
-    
+
     def _apply_operator_filter(self, query, column, operator: str, value):
         """
         Optimized operator filter application.
@@ -1407,7 +1524,7 @@ class InvoiceItemController:
             "lte": column <= value,
             "eq": column == value
         }
-        
+
         if operator in operator_map:
             return query.filter(operator_map[operator])
         return query
@@ -1415,30 +1532,30 @@ class InvoiceItemController:
     def get_price_history(self, request):
         """
         Get price history for a specific item and vendor.
-        
+
         Args:
             request: PriceHistoryRequest with item_number, vendor, and description
-            
+
         Returns:
             List[PriceHistoryResponse]: Price history records sorted by date (newest first)
         """
         try:
             logger.info(f"Getting price history for item: {request.item_number}, "
-                       f"vendor: {request.vendor}")
-            
+                        f"vendor: {request.vendor}")
+
             # Clean and prepare search terms - strip spaces from both item and vendor
             original_item = request.item_number.strip()
             original_vendor = request.vendor.strip()
-            
+
             # With suffix standardization, use direct item matching
             # No need for suffix variations anymore
-            
+
             # Build query with direct item matching
             query = self.db.query(InvoiceItem)
-            
+
             # Direct item matching - search for the exact item code
             query = query.filter(InvoiceItem.item.ilike(f"%{original_item}%"))
-            
+
             # More flexible vendor matching - case insensitive and partial
             vendor_filter = or_(
                 InvoiceItem.vendor.ilike(f"%{original_vendor}%"),
@@ -1446,7 +1563,7 @@ class InvoiceItemController:
                 InvoiceItem.vendor == original_vendor
             )
             query = query.filter(vendor_filter)
-            
+
             # Apply basic filters (not the restrictive empty item filter)
             query = query.filter(
                 InvoiceItem.item.isnot(None),
@@ -1454,28 +1571,28 @@ class InvoiceItemController:
                 InvoiceItem.vendor.isnot(None),
                 InvoiceItem.vendor != ""
             )
-            
+
             # Filter out items with invalid costs
             query = query.filter(
                 InvoiceItem.cost.isnot(None),
                 InvoiceItem.cost > 0
             )
-            
+
             # Order by date descending (newest first)
             query = query.order_by(InvoiceItem.date.desc())
-            
+
             matched_items = query.all()
-            
+
             logger.info(f"Found {len(matched_items)} price history records")
-            
+
             if not matched_items:
                 logger.warning(f"No price history found for item: "
-                              f"{request.item_number}, vendor: {request.vendor}")
-                
+                               f"{request.item_number}, vendor: {request.vendor}")
+
                 # Additional debugging - try to find similar items
                 debug_query = self.db.query(
-                    InvoiceItem.item, 
-                    InvoiceItem.vendor, 
+                    InvoiceItem.item,
+                    InvoiceItem.vendor,
                     func.count().label('count')
                 ).filter(
                     or_(
@@ -1483,52 +1600,55 @@ class InvoiceItemController:
                         InvoiceItem.vendor.ilike(f"%{original_vendor}%")
                     )
                 ).group_by(InvoiceItem.item, InvoiceItem.vendor).limit(5).all()
-                
+
                 logger.info(f"Similar items found in database: "
-                           f"{[(item, vendor, count) for item, vendor, count in debug_query]}")
+                            f"{[(item, vendor, count) for item, vendor, count in debug_query]}")
                 return []
-            
+
             response = []
             for item in matched_items:
                 try:
                     # Validate required fields
                     if not item.ref_no or not item.date:
                         logger.warning(f"Skipping item with missing ref_no or "
-                                      f"date: {item.id}")
+                                       f"date: {item.id}")
                         continue
-                        
+
                     price_record = PriceHistoryResponse(
                         ref_no=item.ref_no,
                         date=item.date.strftime("%m-%d-%Y"),
                         cost=float(item.cost) if item.cost else 0.0,
                         qty=int(item.qty) if item.qty else 0,
-                        invoice_id=str(item.invoice_id) if item.invoice_id else ""
+                        invoice_id=str(
+                            item.invoice_id) if item.invoice_id else ""
                     )
                     response.append(price_record)
                 except Exception as e:
                     logger.error(f"Error processing price history item "
-                                f"{item.id}: {str(e)}")
+                                 f"{item.id}: {str(e)}")
                     continue
-            
+
             logger.info(f"Successfully processed {len(response)} "
-                       f"price history records")
+                        f"price history records")
             return response
-            
+
         except Exception as e:
             logger.error(f"Error in get_price_history: {str(e)}")
             # Return empty list instead of raising exception
             return []
 
     def get_aggregates(self, request):
-        query = self.db.query(InvoiceItem).filter(InvoiceItem.is_active.is_(True))
+        query = self.db.query(InvoiceItem).filter(
+            InvoiceItem.is_active.is_(True))
 
         # applying 'IN' filters dynamically
         for column_name, values in request.filters.items():
             if not hasattr(InvoiceItem, column_name):
-                raise HTTPException(status_code=400, detail=f"Invalid column name: {column_name}")
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid column name: {column_name}")
 
             column = getattr(InvoiceItem, column_name)
-            
+
             # Strip spaces from filter values for consistent comparison
             cleaned_values = []
             for value in values:
@@ -1536,13 +1656,14 @@ class InvoiceItemController:
                     cleaned_values.append(value.strip())
                 else:
                     cleaned_values.append(value)
-            
+
             query = query.filter(column.in_(cleaned_values))
 
         # applying comparison (>,<= etc) filters
         for comp_filter in request.comparison_filters:
             if not hasattr(InvoiceItem, comp_filter.column):
-                raise HTTPException(status_code=400, detail=f"Invalid column name: {comp_filter.column}")
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid column name: {comp_filter.column}")
 
             column = getattr(InvoiceItem, comp_filter.column)
 
@@ -1555,7 +1676,8 @@ class InvoiceItemController:
                     try:
                         value = float(comp_filter.value.replace(",", ""))
                     except ValueError:
-                        raise HTTPException(status_code=400, detail=f"Invalid amount format: {comp_filter.value}")
+                        raise HTTPException(
+                            status_code=400, detail=f"Invalid amount format: {comp_filter.value}")
                 elif column.type.python_type == int:
                     value = int(comp_filter.value)
                 elif column.type.python_type == float:
@@ -1565,7 +1687,8 @@ class InvoiceItemController:
                 else:
                     value = comp_filter.value
             except (ValueError, TypeError):
-                raise HTTPException(status_code=400, detail=f"Invalid value type for column: {comp_filter.column}")
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid value type for column: {comp_filter.column}")
 
             if comp_filter.operator == "gt":
                 query = query.filter(column > value)
@@ -1578,13 +1701,14 @@ class InvoiceItemController:
             elif comp_filter.operator == "eq":
                 query = query.filter(column == value)
             else:
-                raise HTTPException(status_code=400, detail=f"Invalid operator: {comp_filter.operator}")
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid operator: {comp_filter.operator}")
 
         # FIXED: Handle credit memos properly by calculating net amounts
         # For credit memos, we need to net out returns and purchases for each item
         # This prevents double-counting and gives accurate totals
         # Also handle tax lines and ensure proper rounding
-        
+
         # Convert amount string to float with proper validation
         # Universal solution that includes all tax lines and adjustment items
         # Enhanced validation to filter out malformed amount strings
@@ -1607,7 +1731,8 @@ class InvoiceItemController:
                     ~InvoiceItem.amount.like('%Tax(%'),
                     ~InvoiceItem.amount.like('%Tax)%'),
                     # Additional validation to ensure the string can be converted to numeric
-                    func.replace(InvoiceItem.amount, ',', '').regexp_match('^-?[0-9]*\.?[0-9]+$')
+                    func.replace(InvoiceItem.amount, ',', '').regexp_match(
+                        '^-?[0-9]*\.?[0-9]+$')
                 ),
                 cast(func.replace(InvoiceItem.amount, ',', ''), Float)
             ),
@@ -1631,7 +1756,8 @@ class InvoiceItemController:
             }
 
         # Handle null values and ensure proper type conversion with better logging
-        total_qty = 0 if aggregates.total_qty is None else int(aggregates.total_qty)
+        total_qty = 0 if aggregates.total_qty is None else int(
+            aggregates.total_qty)
 
         if aggregates.total_amount is None:
             total_amount = 0.0
@@ -1641,11 +1767,12 @@ class InvoiceItemController:
                 total_amount = float(aggregates.total_amount)
                 # Log large amounts for debugging
                 if total_amount > 1000000:  # Log amounts over 1M
-                    logger.info(f"Large total amount calculated: {total_amount}")
+                    logger.info(
+                        f"Large total amount calculated: {total_amount}")
                 # Check for NaN or infinite values
                 if math.isnan(total_amount) or math.isinf(total_amount):
                     logger.warning(f"Invalid total_amount detected: {total_amount}, "
-                                  f"raw value: {aggregates.total_amount}")
+                                   f"raw value: {aggregates.total_amount}")
                     total_amount = 0.0
             except (TypeError, ValueError) as e:
                 logger.error(f"Error converting total_amount to float: {e}, "
@@ -1662,7 +1789,8 @@ class InvoiceItemController:
 
         def sanitize_float(value: float) -> float:
             if math.isinf(value) or math.isnan(value):
-                logger.warning(f"Invalid float value detected: {value}, returning 0.0")
+                logger.warning(
+                    f"Invalid float value detected: {value}, returning 0.0")
                 return 0.0
             # Round to 2 decimal places to match expected precision
             return round(value, 2)
@@ -1672,11 +1800,11 @@ class InvoiceItemController:
             "total_amount": sanitize_float(total_amount),
             "average_cost": sanitize_float(average_cost)
         }
-        
+
         # Log final result for debugging
         logger.info(f"Aggregates calculated - Qty: {total_qty}, "
-                   f"Amount: {result['total_amount']}, Cost: {result['average_cost']}")
-        
+                    f"Amount: {result['total_amount']}, Cost: {result['average_cost']}")
+
         return result
 
     def calculate_price_increase(self, item_numbers, item_vendor_pairs=None):
@@ -1685,7 +1813,7 @@ class InvoiceItemController:
         price with the price from 1 year before the most recent purchase date.
         Uses efficient SQL queries and database-level aggregations for better 
         performance.
-        
+
         Performance improvements:
         - Uses SQL window functions for efficient date-based aggregations
         - Processes items in batches to reduce memory usage
@@ -1702,9 +1830,9 @@ class InvoiceItemController:
         """
         import time
         start_time = time.time()
-        
+
         result = []
-        
+
         # Check if we have either item_numbers or item_vendor_pairs
         if not item_numbers and not item_vendor_pairs:
             return result
@@ -1714,9 +1842,10 @@ class InvoiceItemController:
         if item_numbers:
             unique_items = list(dict.fromkeys(item_numbers))
             logger.info(f"Calculating price increase for {len(unique_items)} unique "
-                       f"items (total: {len(item_numbers)})")
+                        f"items (total: {len(item_numbers)})")
         elif item_vendor_pairs:
-            logger.info(f"Calculating supplier-specific price increase for {len(item_vendor_pairs)} item-vendor pairs")
+            logger.info(
+                f"Calculating supplier-specific price increase for {len(item_vendor_pairs)} item-vendor pairs")
 
         try:
             # Determine if we should use supplier-specific comparison
@@ -1782,15 +1911,15 @@ class InvoiceItemController:
                         END as percentage_increase
                     FROM price_comparison
                 """)
-                
+
                 # Execute with separate item and vendor lists
                 items_list = [pair[0] for pair in item_vendor_pairs]
                 vendors_list = [pair[1] for pair in item_vendor_pairs]
                 query_result = self.db.execute(price_increase_query, {
-                    "items": items_list, 
+                    "items": items_list,
                     "vendors": vendors_list
                 }).fetchall()
-                
+
             else:
                 # Use original SQL query (backward compatibility)
                 price_increase_query = text("""
@@ -1843,32 +1972,36 @@ class InvoiceItemController:
                         END as percentage_increase
                     FROM price_comparison
                 """)
-                
+
                 # Execute query with item list
-                query_result = self.db.execute(price_increase_query, {"items": unique_items}).fetchall()
+                query_result = self.db.execute(
+                    price_increase_query, {"items": unique_items}).fetchall()
 
             # Create lookup dictionary for O(1) access
             price_lookup = {}
-            
+
             if item_vendor_pairs:
                 # Process supplier-specific results
                 for row in query_result:
                     item, vendor, baseline_price, peak_price, percentage_increase = row
-                    
+
                     if percentage_increase is not None:
-                        price_lookup[(item, vendor)] = f"{percentage_increase}%"
+                        price_lookup[(item, vendor)
+                                     ] = f"{percentage_increase}%"
                     else:
                         price_lookup[(item, vendor)] = "N/A"
 
                 # Process results in original order (preserving duplicates)
                 for item_vendor_pair in item_vendor_pairs:
-                    percentage_increase = price_lookup.get(item_vendor_pair, "N/A")
-                    result.append((item_vendor_pair[0], percentage_increase))  # Return just the item code
+                    percentage_increase = price_lookup.get(
+                        item_vendor_pair, "N/A")
+                    # Return just the item code
+                    result.append((item_vendor_pair[0], percentage_increase))
             else:
                 # Process original results (backward compatibility)
                 for row in query_result:
                     item, baseline_price, peak_price, percentage_increase = row
-                    
+
                     if percentage_increase is not None:
                         price_lookup[item] = f"{percentage_increase}%"
                     else:
@@ -1880,19 +2013,22 @@ class InvoiceItemController:
                     result.append((item_number, percentage_increase))
 
             processing_time = time.time() - start_time
-            
+
             # Log appropriate message based on input type
             if item_vendor_pairs:
-                logger.info(f"Price increase calculation completed in {processing_time:.2f}s for {len(item_vendor_pairs)} item-vendor pairs")
+                logger.info(
+                    f"Price increase calculation completed in {processing_time:.2f}s for {len(item_vendor_pairs)} item-vendor pairs")
             else:
-                logger.info(f"Price increase calculation completed in {processing_time:.2f}s for {len(item_numbers or [])} items")
-            
+                logger.info(
+                    f"Price increase calculation completed in {processing_time:.2f}s for {len(item_numbers or [])} items")
+
             return result
 
         except Exception as e:
-            logger.error(f"Error in optimized price increase calculation: {str(e)}")
+            logger.error(
+                f"Error in optimized price increase calculation: {str(e)}")
             logger.info("Falling back to legacy method...")
-            
+
             # Fallback to original method if SQL optimization fails
             return self._calculate_price_increase_legacy(item_numbers)
 
@@ -1925,33 +2061,39 @@ class InvoiceItemController:
                 items = grouped_items[item_number]
                 if items:
                     # Filter valid items with cost > 0
-                    valid_items = [item for item in items if item.cost is not None and item.cost > 0]
-                    
+                    valid_items = [
+                        item for item in items if item.cost is not None and item.cost > 0]
+
                     if len(valid_items) >= 1:
                         # Sort by date to get chronological order
                         valid_items.sort(key=lambda x: x.date)
-                        
+
                         # Find this item's most recent date
                         most_recent_date = valid_items[-1].date
-                        
+
                         # Calculate 1 year back from the most recent date
                         one_year_back = most_recent_date - timedelta(days=365)
-                        
+
                         # Filter items to only include those within the last year
-                        items_within_year = [item for item in valid_items if item.date >= one_year_back]
-                        
+                        items_within_year = [
+                            item for item in valid_items if item.date >= one_year_back]
+
                         if len(items_within_year) >= 1:
                             # Use earliest price within the year as baseline
-                            baseline_price = items_within_year[0].cost  # Earliest in the year window
+                            # Earliest in the year window
+                            baseline_price = items_within_year[0].cost
                             # Use highest price within the year as peak
-                            peak_price = max(item.cost for item in items_within_year)  # Highest in year
-                            
+                            # Highest in year
+                            peak_price = max(
+                                item.cost for item in items_within_year)
+
                             # Calculate percentage increase using baseline vs peak
                             if baseline_price is None or baseline_price == 0:
                                 percentage_increase = "∞%"
                             else:
-                                percentage_value = ((peak_price - baseline_price) / baseline_price) * 100
-                                
+                                percentage_value = (
+                                    (peak_price - baseline_price) / baseline_price) * 100
+
                                 # Show percentage increase (can be positive or negative)
                                 percentage_increase = f"{round(percentage_value, 1)}%"
                         else:
@@ -1969,38 +2111,38 @@ class InvoiceItemController:
         """
         Get invoice items as raw SQLAlchemy objects for QuickBooks export.
         This avoids Pydantic conversion issues that can cause missing fields in DataFrames.
-        
+
         Args:
             invoice_id: Optional invoice ID to filter by
             batch_size: Number of records to fetch in each batch
-            
+
         Returns:
             List of SQLAlchemy objects
         """
         logger.debug(f"Getting raw invoice items for invoice_id: {invoice_id}")
-        
+
         # Explicitly query all columns to avoid any lazy loading issues
         query = self.db.query(InvoiceItem)
-        
+
         if invoice_id:
             query = query.filter(InvoiceItem.invoice_id == invoice_id)
-            
+
         # Apply empty item filter
         query = self._apply_empty_item_filter(query)
-            
+
         # Use only the columns we need for better performance
         query = query.options(
             # Load only the columns we need for QuickBooks export
             # This reduces memory usage and improves performance
             sqlalchemy.orm.load_only(
-                InvoiceItem.id, 
+                InvoiceItem.id,
                 InvoiceItem.invoice_id,
-                InvoiceItem.sheet_name, 
+                InvoiceItem.sheet_name,
                 InvoiceItem.mpi_item,
-                InvoiceItem.item, 
+                InvoiceItem.item,
                 InvoiceItem.description,
-                InvoiceItem.qty, 
-                InvoiceItem.cost, 
+                InvoiceItem.qty,
+                InvoiceItem.cost,
                 InvoiceItem.amount,
                 InvoiceItem.date,
                 InvoiceItem.ref_no,
@@ -2010,10 +2152,10 @@ class InvoiceItemController:
                 InvoiceItem.memo
             )
         )
-        
+
         # Order by ID for consistent results
         query = query.order_by(InvoiceItem.id.desc())
-        
+
         # For large datasets, use batched loading to reduce memory usage
         if batch_size and batch_size > 0:
             items = []
@@ -2028,28 +2170,30 @@ class InvoiceItemController:
                     break
         else:
             items = query.all()
-            
-        logger.debug(f"Retrieved {len(items)} items for invoice_id: {invoice_id}")
-        
+
+        logger.debug(
+            f"Retrieved {len(items)} items for invoice_id: {invoice_id}")
+
         return items
 
     def get_invoice_items_by_invoice_ids(self, invoice_ids, batch_size=1000):
         """
         Get invoice items by a list of invoice IDs for QuickBooks export.
         This method gets all invoice items that belong to the specified invoices.
-        
+
         Args:
             invoice_ids: List of invoice IDs (can be UUID objects or strings)
             batch_size: Number of records to fetch in each batch for large datasets
-            
+
         Returns:
             List of InvoiceItem objects with necessary attributes loaded
         """
-        logger.debug(f"Getting invoice items for {len(invoice_ids) if invoice_ids else 0} invoices")
-        
+        logger.debug(
+            f"Getting invoice items for {len(invoice_ids) if invoice_ids else 0} invoices")
+
         if not invoice_ids:
             return []
-        
+
         # Convert UUID objects to strings if needed for database query
         processed_invoice_ids = []
         for invoice_id in invoice_ids:
@@ -2057,15 +2201,15 @@ class InvoiceItemController:
                 processed_invoice_ids.append(str(invoice_id))
             else:
                 processed_invoice_ids.append(invoice_id)
-        
+
         # Build query to get all invoice items for the specified invoices
         query = self.db.query(InvoiceItem).filter(
             InvoiceItem.invoice_id.in_(processed_invoice_ids)
         )
-        
+
         # Apply empty item filter
         query = self._apply_empty_item_filter(query)
-        
+
         # Use optimized loading for QuickBooks export - only load necessary columns
         query = query.options(
             sqlalchemy.orm.load_only(
@@ -2087,10 +2231,10 @@ class InvoiceItemController:
                 InvoiceItem.export_status
             )
         )
-        
+
         # Order by invoice_id and then by id for consistent results
         query = query.order_by(InvoiceItem.invoice_id, InvoiceItem.id)
-        
+
         # For large datasets, use batched loading to reduce memory usage
         if batch_size and batch_size > 0 and len(processed_invoice_ids) > 10:
             items = []
@@ -2105,30 +2249,32 @@ class InvoiceItemController:
                     break
         else:
             items = query.all()
-        
-        logger.debug(f"Retrieved {len(items)} invoice items for {len(processed_invoice_ids)} invoices")
+
+        logger.debug(
+            f"Retrieved {len(items)} invoice items for {len(processed_invoice_ids)} invoices")
         return items
 
     def get_suppliers_by_ids(self, supplier_ids):
         """
         Get suppliers by a list of supplier IDs for QuickBooks export.
-        
+
         Args:
             supplier_ids: List of supplier IDs
-            
+
         Returns:
             List of Supplier objects
         """
         if not supplier_ids:
             return []
-        
+
         from mpi_backend.database.models.Suppliers import Supplier
-        
+
         suppliers = self.db.query(Supplier).filter(
             Supplier.id.in_(supplier_ids)
         ).all()
-        
-        logger.debug(f"Retrieved {len(suppliers)} suppliers for {len(supplier_ids)} supplier IDs")
+
+        logger.debug(
+            f"Retrieved {len(suppliers)} suppliers for {len(supplier_ids)} supplier IDs")
         return suppliers
 
     def _apply_empty_item_filter(self, query):
@@ -2137,7 +2283,7 @@ class InvoiceItemController:
         Items with empty item codes, dots, or whitespace-only codes are excluded.
         """
         from mpi_backend.database.models.InvoiceItems import InvoiceItem
-        
+
         # Filter out empty, null, or just dot item codes
         query = query.filter(
             InvoiceItem.item.isnot(None),
@@ -2146,48 +2292,48 @@ class InvoiceItemController:
             func.trim(InvoiceItem.item) != "",
             func.trim(InvoiceItem.item) != "."
         )
-        
+
         return query
-    
+
     def _add_suffix_to_item(self, item_code: str, vendor: str) -> str:
         """
         Add the correct suffix to an item code based on vendor information.
-        
+
         Args:
             item_code: The original item code from the invoice
             vendor: The vendor/supplier name
-            
+
         Returns:
             Item code with proper suffix added
         """
         if not item_code or not vendor:
             return item_code
-        
+
         # Extract supplier ID from vendor name
         supplier_id, _ = self._extract_supplier_id(vendor)
         if not supplier_id:
             return item_code
-        
+
         # Get suffix for this supplier
         suffix = self._get_supplier_suffix(supplier_id)
         if not suffix:
             return item_code
-        
+
         # Check if item should be skipped from suffix processing
         if self._should_skip_item(item_code):
             return item_code
-        
+
         # Clean any existing suffixes first
         clean_item = self._clean_existing_suffixes(item_code)
-        
+
         # Add the correct suffix
         return f"{clean_item}-{suffix}"
-    
+
     def _extract_supplier_id(self, vendor_name: str) -> tuple:
         """Extract supplier ID and name from vendor string."""
         if not vendor_name:
             return None, None
-        
+
         # Supplier name to ID mapping
         supplier_mapping = {
             "BMW Plumbing Supplies": 1,
@@ -2205,18 +2351,18 @@ class InvoiceItemController:
             "Lion Hvac Supplies": 13,
             "Bruce Ferguson": 14
         }
-        
+
         for supplier_name, supplier_id in supplier_mapping.items():
             if supplier_name.lower() in vendor_name.lower():
                 return supplier_id, supplier_name
-        
+
         return None, None
-    
+
     def _get_supplier_suffix(self, supplier_id: int) -> str:
         """Get suffix for a supplier ID."""
         suffix_map = {
             1: 'B',   # BMW Plumbing Supplies
-            2: 'W',   # World Wide Plumbing  
+            2: 'W',   # World Wide Plumbing
             3: 'Y',   # Y & S Plumbing Supply
             4: 'S',   # Supreme Plumbing Supply
             5: 'P',   # Pyramid Plumbing
@@ -2225,42 +2371,42 @@ class InvoiceItemController:
             8: 'G',   # Gotham Plumbing Supply
             9: 'F',   # FW Webb Plumbing Supply
             10: 'F',  # Flow Mark Plumbing Supply (same as FW Webb)
-            11: None, # Plumbing Exchange (no specific suffix)
+            11: None,  # Plumbing Exchange (no specific suffix)
             12: 'A',  # AF Supply (same as ABC Opus)
-            13: None, # Lion Hvac Supplies (no specific suffix)
+            13: None,  # Lion Hvac Supplies (no specific suffix)
             14: 'F',  # Bruce Ferguson
         }
         return suffix_map.get(supplier_id)
-    
+
     def _should_skip_item(self, item_code: str) -> bool:
         """Check if item should be skipped from suffix processing."""
         if not item_code:
             return True
-        
+
         item_str = str(item_code).strip()
-        
+
         # Exclude tax and administrative items from getting suffixes
         excluded_items = [
             "tax", "freight", "shipping", "handling", "subtotal", "total"
         ]
-        
+
         if (item_str.lower().startswith("tax") or
-                item_str.startswith("10 Materials") or 
+                item_str.startswith("10 Materials") or
                 item_str.lower() in excluded_items):
             return True
-        
+
         return False
-    
+
     def _clean_existing_suffixes(self, item_code: str) -> str:
         """Remove all existing suffixes from item code."""
         if not item_code:
             return item_code
-        
+
         clean_item = str(item_code).strip()
-        
+
         # Remove ALL existing suffixes first (including double suffixes)
         all_suffixes = ['B', 'W', 'Y', 'S', 'P', 'A', 'G', 'F']
-        
+
         # Keep removing suffixes until none are found
         while True:
             found_suffix = False
@@ -2271,18 +2417,18 @@ class InvoiceItemController:
                     break
             if not found_suffix:
                 break
-        
+
         return clean_item
 
     def update_existing_invoice_items(self, invoice_id, new_data_rows, filename):
         """
         Update existing invoice items for an updated invoice
-        
+
         Args:
             invoice_id: UUID of the existing invoice to update
             new_data_rows: DataFrame rows with new invoice data
             filename: New filename for the updated invoice
-            
+
         Returns:
             bool: True if successful, False otherwise
         """
@@ -2291,14 +2437,15 @@ class InvoiceItemController:
             existing_items = self.db.query(InvoiceItem).filter(
                 InvoiceItem.invoice_id == invoice_id
             ).all()
-            
+
             for item in existing_items:
                 item.is_active = False
-            
+
             # Add new items with the updated data
             for index, row in new_data_rows.iterrows():
                 # Add proper suffix to item code based on vendor
-                item_with_suffix = self._add_suffix_to_item(row['Item'], row['Vendor'])
+                item_with_suffix = self._add_suffix_to_item(
+                    row['Item'], row['Vendor'])
 
                 # Robust date parsing
                 date_str = str(row['Date'])
@@ -2336,11 +2483,12 @@ class InvoiceItemController:
                     is_active=True
                 )
                 self.db.add(new_item)
-            
+
             self.db.commit()
-            logger.info(f'Successfully updated invoice {invoice_id} with {len(new_data_rows)} new items')
+            logger.info(
+                f'Successfully updated invoice {invoice_id} with {len(new_data_rows)} new items')
             return True
-            
+
         except Exception as e:
             logger.error(f"Error updating existing invoice items: {str(e)}")
             self.db.rollback()
