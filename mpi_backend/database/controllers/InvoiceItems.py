@@ -1657,7 +1657,25 @@ class InvoiceItemController:
                 else:
                     cleaned_values.append(value)
 
-            query = query.filter(column.in_(cleaned_values))
+            # For string columns, use case-insensitive and trimmed comparison
+            if column_name in ['ref_no', 'vendor', 'item', 'description',
+                               'customer_job', 'po_number', 'bill', 'buyer',
+                               'memo', 'class_']:
+                # Use func.trim() and ilike for case-insensitive, trimmed comparison
+                from sqlalchemy import func
+                conditions = []
+                for cleaned_value in cleaned_values:
+                    if isinstance(cleaned_value, str):
+                        # Trim both database value and filter value, then do case-insensitive comparison
+                        conditions.append(func.trim(column).ilike(
+                            func.trim(cleaned_value)))
+                    else:
+                        conditions.append(column == cleaned_value)
+                if conditions:
+                    query = query.filter(or_(*conditions))
+            else:
+                # For non-string columns, use exact match
+                query = query.filter(column.in_(cleaned_values))
 
         # applying comparison (>,<= etc) filters
         for comp_filter in request.comparison_filters:
