@@ -4,16 +4,18 @@ Script to identify and clean up duplicate invoices in the database.
 This script finds invoices with the same ref_no, vendor, date, and amount,
 and provides options to clean them up by keeping only the most recent one.
 """
-
-from datetime import datetime
-from sqlalchemy import func
-from mpi_backend.database import get_db
-from mpi_backend.database.models.InvoiceItems import InvoiceItem
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
-import logging
+from mpi_backend.database.models.InvoiceItems import InvoiceItem
+from mpi_backend.database import get_db
+from sqlalchemy import func
+from datetime import datetime
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import logging
+from pathlib import Path
+
+# Add the parent directory to the path so we can import mpi_backend
+sys.path.append(str(Path(__file__).parent.parent))
 
 
 # Set up logging
