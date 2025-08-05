@@ -197,7 +197,43 @@ def get_column_mappings():
 @router.get("/get-locations", response_model=List[str])
 def customer_job_filter(db: Session = Depends(get_db), 
                        token: str = Depends(JWTBearer())):
-    """ULTRA-FAST customer job locations with aggressive caching."""
+    """
+    Get unique customer job locations for filtering and dropdown population.
+    
+    **Summary:**
+        Returns a list of unique customer job names from active invoice items.
+        This endpoint is optimized for fast response times with aggressive caching
+        and is commonly used to populate dropdown filters in the frontend.
+        
+    **Authentication:**
+        - Requires valid JWT token in Authorization header
+        
+    **Returns:**
+        - **List[str]**: Array of unique customer job names, sorted alphabetically
+        
+    **Response Example:**
+    ```json
+    [
+        "Project Alpha",
+        "Project Beta", 
+        "Project Gamma",
+        "Site A Development",
+        "Site B Renovation"
+    ]
+    ```
+    
+    **Performance Features:**
+        - Aggressive caching with 5-minute TTL
+        - Ultra-fast raw SQL query optimization
+        - Limited to 200 results for performance
+        - Fallback to cached data on errors
+        
+    **Notes:**
+        - Only returns active invoice items (is_active = true)
+        - Excludes null and empty customer job values
+        - Results are sorted alphabetically for consistent ordering
+        - Cache is automatically warmed up on module load
+    """
     
     cache_key = "customer_job_locations_v2"
     cached_result = _get_cached_response(cache_key)
@@ -239,7 +275,55 @@ def customer_job_filter(db: Session = Depends(get_db),
 
 @router.get("/column-mapping")
 def column_mappings(token: str = Depends(JWTBearer())):
-    """INSTANT column mappings - pre-computed response."""
+    """
+    Get column mapping definitions for frontend display.
+    
+    **Summary:**
+        Returns a mapping of database column names to their display names
+        used in the frontend interface. This provides consistent column
+        labeling across the application.
+        
+    **Authentication:**
+        - Requires valid JWT token in Authorization header
+        
+    **Returns:**
+        - **Dict[str, str]**: Mapping of database column names to display names
+        
+    **Response Example:**
+    ```json
+    {
+        "filename": "Filename",
+        "sheet_name": "Sheet Name",
+        "mpi_item": "MPI Item Code",
+        "mpi_description": "MPI Description",
+        "item": "Item",
+        "description": "Description",
+        "qty": "Quantity",
+        "cost": "Cost",
+        "amount": "Amount",
+        "date": "Date",
+        "ref_no": "Reference Number",
+        "po_number": "PO Number",
+        "customer_job": "Customer Job",
+        "bill": "Bill",
+        "vendor": "Vendor",
+        "class_": "Class",
+        "memo": "Memo",
+        "buyer": "Buyer",
+        "date_added": "Date Added"
+    }
+    ```
+    
+    **Performance Features:**
+        - Pre-computed static response for microsecond response times
+        - No database queries required
+        - Cached at module load for instant access
+        
+    **Notes:**
+        - This mapping is used by the frontend to display proper column headers
+        - Database column names are mapped to user-friendly display names
+        - The response is static and rarely changes
+    """
     # Return pre-computed static response (microsecond speed)
     return create_optimized_response(static_responses["column_mappings"])
 
@@ -252,8 +336,49 @@ def get_column_data(
     payload: Optional[Dict] = Body(None, description="Filter context")
 ):
     """
-    ULTRA-FAST dropdown population - millisecond response times.
-    Same structure, lightning speed.
+    Get distinct values for a specific column to populate dropdown filters.
+    
+    **Summary:**
+        Returns unique values from a specified column in the invoice_items table.
+        This endpoint is optimized for fast response times and is commonly used
+        to populate dropdown filters in the frontend interface.
+        
+    **Query Parameters:**
+        - **column_name** (`str`, required): The database column name to get distinct values from
+        
+    **Request Body:**
+        - **payload** (`Dict`, optional): Additional filter context (currently unused)
+        
+    **Authentication:**
+        - Requires valid JWT token in Authorization header
+        
+    **Returns:**
+        - **List[str]**: Array of unique values from the specified column
+        
+    **Response Example:**
+    ```json
+    [
+        "Supplier A",
+        "Supplier B", 
+        "Supplier C",
+        "Supplier D"
+    ]
+    ```
+    
+    **Performance Features:**
+        - Aggressive caching with 5-minute TTL
+        - Ultra-fast database queries
+        - Pre-computed responses for common columns
+        - Fallback to empty array on errors
+        
+    **Supported Columns:**
+        - vendor, customer_job, item, description, po_number, ref_no, etc.
+        
+    **Notes:**
+        - Only returns distinct values from active invoice items
+        - Results are automatically sorted
+        - Cache keys are based on column name for optimal performance
+        - Returns empty array if column name is invalid or no data found
     """
     start_time = time.time()
     
@@ -295,7 +420,85 @@ def filter_data(
     size: int = Query(10)
 ):
     """
-    ULTRA-FAST main filter - same structure, millisecond speed.
+    Filter and paginate invoice items with advanced search capabilities.
+    
+    **Summary:**
+        Main filtering endpoint that allows complex queries on invoice items
+        with support for multiple filter types, comparison filters, and pagination.
+        This is the primary endpoint for searching and filtering invoice data.
+        
+    **Request Body:**
+        - **request** (`FilterRequest`): Complex filter request object containing:
+            - **filters** (`List[Filter]`, optional): Array of filter conditions
+            - **comparison_filters** (`List[ComparisonFilter]`, optional): Array of comparison filters
+            - **sort_by** (`str`, optional): Column to sort by
+            - **sort_order** (`str`, optional): Sort order ('asc' or 'desc')
+            
+    **Query Parameters:**
+        - **page** (`int`, default=1): Page number for pagination (1-based)
+        - **size** (`int`, default=10): Number of items per page
+        
+    **Authentication:**
+        - Requires valid JWT token in Authorization header
+        
+    **Returns:**
+        - **PaginatedInvoiceItemsResponse**: Paginated response containing:
+            - **items** (`List[InvoiceItem]`): Array of filtered invoice items
+            - **total** (`int`): Total number of items matching filters
+            - **page** (`int`): Current page number
+            - **size** (`int`): Items per page
+            - **total_pages** (`int`): Total number of pages
+            - **has_next** (`bool`): Whether there are more pages
+            - **has_prev** (`bool`): Whether there are previous pages
+            - **performance_metrics** (`Dict`): Performance statistics
+            
+    **Response Example:**
+    ```json
+    {
+        "items": [
+            {
+                "id": 123,
+                "item": "ABC123",
+                "description": "Pipe Fitting",
+                "cost": 15.50,
+                "amount": 155.00,
+                "vendor": "Supplier A",
+                "date": "2024-01-15"
+            }
+        ],
+        "total": 150,
+        "page": 1,
+        "size": 10,
+        "total_pages": 15,
+        "has_next": true,
+        "has_prev": false,
+        "performance_metrics": {
+            "execution_time_seconds": 0.045,
+            "total_records": 150,
+            "returned_records": 10,
+            "cache_hit": false,
+            "optimization_level": "ULTRA"
+        }
+    }
+    ```
+    
+    **Performance Features:**
+        - Aggressive caching for simple requests
+        - Ultra-fast database queries with optimization
+        - Performance metrics included in response
+        - Fallback error handling with structured responses
+        
+    **Filter Types:**
+        - **Standard Filters**: Exact matches, ranges, contains, etc.
+        - **Comparison Filters**: Compare values between columns
+        - **Date Filters**: Date range filtering
+        - **Numeric Filters**: Amount, cost, quantity ranges
+        
+    **Notes:**
+        - Only returns active invoice items (is_active = true)
+        - Supports complex nested filter conditions
+        - Cache is automatically managed for optimal performance
+        - Returns structured error responses on failures
     """
     start_time = time.time()
     
@@ -359,8 +562,62 @@ def get_price_difference(request: FilterRequest, db: Session = Depends(get_db),
                 page: int = Query(1, ge=1),
                 size: int = Query(10)):
     """
-    Get price difference calculations for filtered invoice items.
-    Now includes caching for improved performance on repeated requests.
+    Calculate price differences for filtered invoice items.
+    
+    **Summary:**
+        Analyzes price changes for items in the filtered results by comparing
+        current prices with historical data. This helps identify price increases
+        and trends for specific items and suppliers.
+        
+    **Request Body:**
+        - **request** (`FilterRequest`): Filter criteria to select items for analysis
+        
+    **Query Parameters:**
+        - **page** (`int`, default=1): Page number for pagination (1-based)
+        - **size** (`int`, default=10): Number of items per page
+        
+    **Authentication:**
+        - Currently disabled (commented out JWT token requirement)
+        
+    **Returns:**
+        - **List[Dict]**: Array of price difference calculations containing:
+            - **item** (`str`): Item code with supplier suffix
+            - **id** (`int`): Invoice item ID
+            - **percentage_increase** (`float`): Price increase percentage
+            
+    **Response Example:**
+    ```json
+    [
+        {
+            "item": "ABC123-B",
+            "id": 123,
+            "percentage_increase": 15.5
+        },
+        {
+            "item": "XYZ789-F", 
+            "id": 456,
+            "percentage_increase": -5.2
+        }
+    ]
+    ```
+    
+    **Performance Features:**
+        - Caching for repeated requests with 5-minute TTL
+        - Supplier-specific price comparison calculations
+        - Optimized database queries for large datasets
+        
+    **Calculation Method:**
+        - Compares current item prices with historical data
+        - Uses supplier-specific comparison for accuracy
+        - Calculates percentage increase/decrease
+        - Handles items with no historical data gracefully
+        
+    **Notes:**
+        - Positive percentage indicates price increase
+        - Negative percentage indicates price decrease
+        - Items without historical data may not appear in results
+        - Cache key is based on request parameters and pagination
+        - Returns empty array if no items found or calculation fails
     """
     import time
     start_time = time.time()
@@ -431,19 +688,63 @@ def get_price_difference(request: FilterRequest, db: Session = Depends(get_db),
         return []
 
 
-@router.post("/price-history",response_model=List[PriceHistoryResponse])
+@router.post("/price-history", response_model=List[PriceHistoryResponse])
 def get_price_history(request: PriceHistoryRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
     """
     Get price history for a specific item and vendor.
     
-    Args:
-        request: PriceHistoryRequest containing item_number, vendor, and description
+    **Summary:**
+        Retrieves historical price data for a specific item from a specific vendor.
+        This helps track price changes over time and identify pricing trends.
         
-    Returns:
-        List[PriceHistoryResponse]: List of price history records sorted by date
+    **Request Body:**
+        - **request** (`PriceHistoryRequest`): Object containing:
+            - **item_number** (`str`, required): The item code to get history for
+            - **vendor** (`str`, required): The vendor/supplier name
+            - **description** (`str`, optional): Item description for context
+            
+    **Authentication:**
+        - Requires valid JWT token in Authorization header
         
-    Raises:
-        HTTPException: If validation fails or no data found
+    **Returns:**
+        - **List[PriceHistoryResponse]**: Array of price history records containing:
+            - **date** (`str`): Date of the price record
+            - **price** (`float`): Price at that date
+            - **quantity** (`int`): Quantity purchased
+            - **amount** (`float`): Total amount for that transaction
+            
+    **Response Example:**
+    ```json
+    [
+        {
+            "date": "2024-01-15",
+            "price": 15.50,
+            "quantity": 10,
+            "amount": 155.00
+        },
+        {
+            "date": "2024-02-20", 
+            "price": 16.25,
+            "quantity": 5,
+            "amount": 81.25
+        }
+    ]
+    ```
+    
+    **Validation:**
+        - Both item_number and vendor are required and cannot be empty
+        - Returns 400 error for invalid input parameters
+        - Returns empty array if no price history found
+        
+    **Error Codes:**
+        - **400**: Invalid input parameters (missing or empty item_number/vendor)
+        - **500**: Internal server error during data retrieval
+        
+    **Notes:**
+        - Results are sorted by date (oldest first)
+        - Only returns records for the exact item_number and vendor combination
+        - Returns empty array instead of 404 for better frontend handling
+        - Logs detailed information for debugging purposes
     """
     try:
         # Validate input parameters
@@ -485,7 +786,54 @@ def get_price_history(request: PriceHistoryRequest, db: Session = Depends(get_db
         )
 
 @router.post("/download-price-history")
-def get_price_history(request: PriceHistoryRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+def download_price_history(request: PriceHistoryRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+    """
+    Export price history to Excel file and return download URL.
+    
+    **Summary:**
+        Retrieves price history for a specific item and vendor, exports it to
+        an Excel file, uploads it to S3, and returns a presigned download URL.
+        
+    **Request Body:**
+        - **request** (`PriceHistoryRequest`): Object containing:
+            - **item_number** (`str`, required): The item code to get history for
+            - **vendor** (`str`, required): The vendor/supplier name
+            - **description** (`str`, optional): Item description for context
+            
+    **Authentication:**
+        - Requires valid JWT token in Authorization header
+        
+    **Returns:**
+        - **str**: Presigned S3 URL for downloading the Excel file
+        
+    **Response Example:**
+    ```json
+    "https://s3.amazonaws.com/bucket/Exports/price_history_ABC123_SupplierA_2024-12-19.xlsx?AWSAccessKeyId=..."
+    ```
+    
+    **Excel File Contents:**
+        The Excel file will contain the following columns:
+        - Date
+        - Price
+        - Quantity
+        - Amount
+        - Item Number
+        - Vendor
+        - Description
+        
+    **Process Flow:**
+        1. Retrieves price history data from database
+        2. Exports data to Excel format
+        3. Uploads file to S3 bucket
+        4. Generates presigned download URL
+        5. Returns URL for immediate download
+        
+    **Notes:**
+        - File is stored in S3 with timestamp for uniqueness
+        - Presigned URL has limited expiration time
+        - Excel file includes all price history records for the item/vendor
+        - File is automatically cleaned up by S3 lifecycle policies
+    """
     price_history = InvoiceItemController(db).get_price_history(request)
 
     exported_file_path = export_price_history_to_excel(price_history)
@@ -501,7 +849,58 @@ def get_aggregates(
     db: Session = Depends(get_db), 
     token: str = Depends(JWTBearer())
 ):
-    """Optimized aggregates endpoint with caching and performance monitoring."""
+    """
+    Get aggregated statistics for filtered invoice items.
+    
+    **Summary:**
+        Calculates summary statistics (totals, averages, counts) for invoice items
+        that match the specified filter criteria. This provides quick insights into
+        the filtered dataset without loading all individual records.
+        
+    **Request Body:**
+        - **request** (`FilterRequest`): Filter criteria to select items for aggregation
+        
+    **Authentication:**
+        - Requires valid JWT token in Authorization header
+        
+    **Returns:**
+        - **Dict**: Aggregated statistics containing:
+            - **total_amount** (`float`): Sum of all amounts
+            - **total_quantity** (`int`): Sum of all quantities
+            - **average_cost** (`float`): Average cost per item
+            - **item_count** (`int`): Number of unique items
+            - **invoice_count** (`int`): Number of invoices
+            - **supplier_count** (`int`): Number of unique suppliers
+            
+    **Response Example:**
+    ```json
+    {
+        "total_amount": 125000.50,
+        "total_quantity": 1500,
+        "average_cost": 83.33,
+        "item_count": 45,
+        "invoice_count": 25,
+        "supplier_count": 8
+    }
+    ```
+    
+    **Performance Features:**
+        - Caching for repeated requests with 5-minute TTL
+        - Optimized database queries using aggregation functions
+        - Performance monitoring and logging
+        
+    **Aggregation Types:**
+        - **Sum**: Total amounts, quantities
+        - **Average**: Cost per item
+        - **Count**: Unique items, invoices, suppliers
+        - **Min/Max**: Price ranges, date ranges
+        
+    **Notes:**
+        - Only includes active invoice items (is_active = true)
+        - Cache key is based on request hash for optimal performance
+        - Returns structured error responses on calculation failures
+        - Performance metrics are logged for monitoring
+    """
     start_time = time.time()
     
     try:
@@ -534,7 +933,46 @@ def get_aggregates(
 # Add cache management endpoint for debugging
 @router.get("/cache-stats")
 def get_cache_stats(token: str = Depends(JWTBearer())):
-    """Get cache statistics for performance monitoring."""
+    """
+    Get cache statistics for performance monitoring and debugging.
+    
+    **Summary:**
+        Returns current cache statistics including entry counts, validity status,
+        and configuration details. This endpoint is useful for monitoring cache
+        performance and debugging cache-related issues.
+        
+    **Authentication:**
+        - Requires valid JWT token in Authorization header
+        
+    **Returns:**
+        - **Dict**: Cache statistics containing:
+            - **total_cache_entries** (`int`): Total number of cached entries
+            - **valid_cache_entries** (`int`): Number of entries still within TTL
+            - **cache_hit_ratio** (`str`): Cache hit ratio information
+            - **cache_ttl_seconds** (`int`): Time-to-live for cache entries
+            
+    **Response Example:**
+    ```json
+    {
+        "total_cache_entries": 25,
+        "valid_cache_entries": 20,
+        "cache_hit_ratio": "Available in production logs",
+        "cache_ttl_seconds": 300
+    }
+    ```
+    
+    **Cache Information:**
+        - **TTL**: 5 minutes (300 seconds) for all cache entries
+        - **Storage**: Dual cache system (cache_store + response_cache)
+        - **Cleanup**: Automatic cleanup of oldest entries when limit exceeded
+        - **Monitoring**: Performance metrics logged for analysis
+        
+    **Notes:**
+        - Used primarily for debugging and performance monitoring
+        - Cache hit ratios are available in production logs
+        - Invalid entries are automatically cleaned up
+        - Cache size is limited to 50 entries for optimal performance
+    """
     valid_entries = sum(1 for key in cache_store.keys() if _is_cache_valid(key))
     
     return create_optimized_response({
@@ -546,7 +984,45 @@ def get_cache_stats(token: str = Depends(JWTBearer())):
 
 @router.delete("/cache")
 def clear_cache(token: str = Depends(JWTBearer())):
-    """Clear all cached data."""
+    """
+    Clear all cached data for debugging and maintenance.
+    
+    **Summary:**
+        Removes all entries from the cache store, forcing fresh data retrieval
+        on subsequent requests. This is useful for debugging cache issues or
+        ensuring data freshness during maintenance.
+        
+    **Authentication:**
+        - Requires valid JWT token in Authorization header
+        
+    **Returns:**
+        - **Dict**: Confirmation message indicating cache was cleared
+        
+    **Response Example:**
+    ```json
+    {
+        "message": "Cache cleared successfully"
+    }
+    ```
+    
+    **Cache Clearing:**
+        - Clears both cache_store and response_cache
+        - Removes all cache timestamps
+        - Forces fresh data retrieval on next requests
+        - No impact on database or application data
+        
+    **Use Cases:**
+        - Debugging cache-related issues
+        - Ensuring data freshness after updates
+        - Performance testing with fresh cache
+        - Maintenance operations
+        
+    **Notes:**
+        - This operation is irreversible
+        - All cached responses will be regenerated
+        - May temporarily impact response times
+        - Cache will automatically repopulate with new requests
+    """
     global cache_store, cache_timestamps
     cache_store.clear()
     cache_timestamps.clear()

@@ -280,35 +280,115 @@ Based on item numbers, it provides price history for specified items. It gives i
 ### Migrate All Invoices to QB
 **POST** `/quickbooks/migrate-all`
 
-Originally the endpoint was supposed to be interfaced to QuickBooks. Its current implementation gets all the invoices meeting the filtering criteria, fetches all their invoice items and determines whether they are job equipment or job material based on the assigned sheet name. Then groups them together based on ref-no (which is invoice number), Assigned Category (Job Equipment or Job Material) and sums their amount and generates an Excel file to be downloaded.
+Migrates all filtered invoices to QuickBooks with ultra-fast processing and guaranteed status updates. This endpoint is optimized for bulk operations and handles large datasets efficiently with priority control over background jobs.
 
 **Request Body:**
 ```json
 {
   "filter_criteria": "object", // same as /filter endpoint
-  "excluded_invoice_ids": ["UUID"]
+  "excluded_invoice_ids": ["UUID"],
+  "order_by": [{"column": "date", "order": "desc"}]
 }
 ```
 
+**Background Tasks:**
+- **background_tasks** (`BackgroundTasks`): FastAPI background tasks for async processing
+
 **Responses:**
-- **200**: Returns download URL for batch entry file
-- **400**: Unmatched items or sheet names are present
+- **200**: Returns presigned S3 URL for downloading the QuickBooks Excel file
+- **400**: No invoice IDs found for export or unmatched items/sheet names present
+- **500**: Processing or upload error
+
+**Process Flow:**
+1. Applies filter criteria to get matching invoice IDs
+2. Excludes specified invoice IDs if provided
+3. Pauses all background jobs for absolute priority
+4. Processes invoices with ultra-fast QuickBooks migration
+5. Generates Excel file in QuickBooks format with tax distribution
+6. Updates export statuses to 'Sent'
+7. Resumes background jobs
+8. Returns download URL
+
+**Priority Control:**
+- **ABSOLUTE PRIORITY**: Pauses ALL background jobs during processing
+- Ensures maximum system resources for QuickBooks migration
+- Automatic resume of background jobs after completion
+- Critical priority context management
+
+**Performance Features:**
+- Ultra-fast data processing with vectorized operations
+- Optimized database queries for large datasets
+- Fast Excel generation and S3 upload
+- Immediate status updates for guaranteed consistency
+
+**Status Updates:**
+- Invoice-level export status updated to 'Sent'
+- Item-level export status updated to 'Sent'
+- Immediate updates for guaranteed consistency
+- Comprehensive status reporting
 
 ### Migrate Selected Invoices to QB
 **POST** `/quickbooks/migrate`
 
-Similar to migrate-all endpoint but migrates one specific invoice.
+Migrates specific invoices to QuickBooks with priority control and guaranteed status updates. Supports both individual invoice selection and bulk operations with flexible request formats.
 
 **Request Body:**
+Supports multiple formats:
 ```json
+// Array of UUIDs
+["550e8400-e29b-41d4-a716-446655440000", "550e8400-e29b-41d4-a716-446655440001"]
+
+// Object with invoice_ids
 {
-  "invoice_ids": ["UUID"]
+  "invoice_ids": ["550e8400-e29b-41d4-a716-446655440000", "550e8400-e29b-41d4-a716-446655440001"]
 }
+
+// Empty/None - exports all invoices
 ```
 
+**Query Parameters:**
+- `order_by` (`list`, optional): Sorting criteria for the export
+
+**Background Tasks:**
+- **background_tasks** (`BackgroundTasks`): FastAPI background tasks for async processing
+
 **Responses:**
-- **200**: Returns download URL for batch entry file
-- **400**: Unmatched items or sheet names are present
+- **200**: Returns presigned S3 URL for downloading the QuickBooks Excel file
+- **400**: No valid invoice IDs provided
+- **500**: Processing or upload error
+
+**Process Flow:**
+1. Validates and cleans invoice IDs
+2. Pauses background jobs for priority processing
+3. Processes invoices with ultra-fast QuickBooks migration
+4. Generates Excel file in QuickBooks format with tax distribution
+5. Updates export statuses to 'Sent' immediately
+6. Resumes background jobs
+7. Returns download URL
+
+**Priority Control:**
+- Pauses background jobs during processing
+- Ensures system resources for QuickBooks migration
+- Automatic resume of background jobs after completion
+- Safe priority context management
+
+**Performance Features:**
+- Ultra-fast data processing with vectorized operations
+- Optimized database queries
+- Fast Excel generation and S3 upload
+- Immediate status updates for guaranteed consistency
+
+**Validation:**
+- Removes duplicate and null invoice IDs
+- Validates UUID format
+- Limits to 5000 invoices for performance
+- Comprehensive error handling
+
+**Status Updates:**
+- Invoice-level export status updated to 'Sent'
+- Item-level export status updated to 'Sent'
+- Immediate updates for guaranteed consistency
+- Detailed status reporting
 
 ---
 
@@ -351,34 +431,237 @@ Retrieves all MPI items and MPI descriptions for a specific supplier.
 ### Sync Mapping
 **POST** `/sync/mapping`
 
-Manually trigger enhanced synchronization of mappings from Google Sheets. If a sync task is already running, returns a message indicating that. Otherwise, starts the enhanced sync process in the background.
+Manually trigger enhanced synchronization of mappings from Google Sheets. This endpoint provides enhanced synchronization with better handling of temporary and permanent mappings. If a sync task is already running, it returns a detailed status message.
+
+**Background Tasks:**
+- **background_tasks** (`BackgroundTasks`): FastAPI background tasks for async processing
 
 **Responses:**
 - **200**: Returns `SyncMappingsResponse` with success status, message, and timestamp
+- **401**: Unauthorized (invalid or missing token)
+- **500**: Database error or sync controller failure
+
+**Response Example - Success:**
+```json
+{
+  "success": true,
+  "message": "Sync task started manually",
+  "timestamp": "2024-12-19T14:30:25.123456"
+}
+```
+
+**Response Example - Already Running:**
+```json
+{
+  "success": false,
+  "message": "Cannot start sync: Google Sheets Sync is currently running",
+  "timestamp": "2024-12-19T14:30:25.123456"
+}
+```
+
+**Process Flow:**
+1. Checks current sync status
+2. If sync is running, returns detailed blocking job information
+3. If no sync is running, starts enhanced sync in background
+4. Returns immediate response with task status
+
+**Sync Operations:**
+- **Google Sheets Sync**: Basic synchronization from Google Sheets
+- **UIDI Update**: Updates No Match / UIDI mappings (3-step process)
+- **Full Update**: Updates all mappings (3-step process)
+
+**Blocking Job Detection:**
+- Detects currently running sync operations
+- Provides detailed step-by-step progress information
+- Prevents multiple sync operations from running simultaneously
+- Returns specific blocking job descriptions
+
+**Background Processing:**
+- Uses GoogleSheetSyncController for enhanced sync
+- Runs in background to prevent API blocking
+- Provides detailed operation tracking
+- Handles temporary and permanent mapping updates
 
 ### Get Sync Status
 **GET** `/sync/status`
 
-Check the status of synchronization tasks.
+Retrieves the current status of all synchronization operations including running tasks, completed operations, and timestamps. Provides detailed information about the current operation and its progress through multi-step processes.
 
 **Responses:**
-- **200**: Returns current sync status including running operations and timestamps
+- **200**: Returns current sync status with detailed operation information
+- **401**: Unauthorized (invalid or missing token)
+- **500**: Database error or sync controller failure
+
+**Response Example - Idle:**
+```json
+{
+  "status": "idle",
+  "current_operation": "No operation in progress",
+  "last_sync_time": "2024-12-19T14:30:25.123456",
+  "last_no_match_uidi_update": "2024-12-19T14:25:10.123456",
+  "last_full_update": "2024-12-19T14:20:15.123456"
+}
+```
+
+**Response Example - Running:**
+```json
+{
+  "status": "running",
+  "current_operation": "Updating No Match / UIDI Mappings (Step 2/3: Syncing Temporary Mappings)",
+  "last_sync_time": "2024-12-19T14:30:25.123456",
+  "last_no_match_uidi_update": "2024-12-19T14:25:10.123456",
+  "last_full_update": "2024-12-19T14:20:15.123456"
+}
+```
+
+**Response Fields:**
+- **status** (`str`): "running" or "idle"
+- **current_operation** (`str`): Detailed description of current operation
+- **last_sync_time** (`str`): Timestamp of last basic sync
+- **last_no_match_uidi_update** (`str`): Timestamp of last UIDI update
+- **last_full_update** (`str`): Timestamp of last full update
+
+**Operation Types:**
+- **Google Sheets Sync**: Basic synchronization from Google Sheets
+- **UIDI Update**: 3-step process for No Match / UIDI mappings
+- **Full Update**: 3-step process for all mappings
+
+**Step-by-Step Progress:**
+- **Step 1**: Syncing Google Sheets
+- **Step 2**: Syncing Temporary Mappings
+- **Step 3**: Updating Items
+
+**Status Detection:**
+- Real-time operation status checking
+- Detailed sub-operation tracking
+- Progress indication for multi-step processes
+- Historical timestamp tracking
 
 ### Update No Match UIDI Mappings
 **POST** `/sync/update-no-match-uidi-mappings`
 
-Updates only the "No Match" UIDI mappings from Google Sheets. This is a targeted update that only affects items that currently have "No Match" status.
+Initiates a specialized synchronization process that targets items with "No Match" or UIDI mappings. This 3-step process syncs data from Google Sheets and then updates specific item mappings to improve data quality and mapping accuracy.
+
+**Background Tasks:**
+- **background_tasks** (`BackgroundTasks`): FastAPI background tasks for async processing
 
 **Responses:**
-- **200**: Returns sync status and operation details
+- **200**: Returns response with status, message, and timestamp
+- **401**: Unauthorized (invalid or missing token)
+- **500**: Database error or sync controller failure
+
+**Response Example - Success:**
+```json
+{
+  "status": "success",
+  "message": "No Match / UIDI update task has been started in the background",
+  "timestamp": "2024-12-19T14:30:25.123456"
+}
+```
+
+**Response Example - Already Running:**
+```json
+{
+  "status": "error",
+  "message": "Cannot start UIDI update: UIDI Update (Step 2/3: Syncing Temporary Mappings) is currently running",
+  "timestamp": "2024-12-19T14:30:25.123456"
+}
+```
+
+**Target Items:**
+- **No Match Items**: Items where mpi_item is "no match" (case insensitive)
+- **UIDI Items**: Items where mpi_item starts with "UIDI"
+- **Empty Items**: Items where mpi_item is None or empty
+
+**3-Step Process:**
+1. **Step 1**: Sync Google Sheets data
+2. **Step 2**: Sync temporary mappings
+3. **Step 3**: Update UIDI items with new mappings
+
+**Mapping Logic:**
+- Searches ItemsMapping table for matches
+- Uses org_item (item) and org_description (description) fields
+- Applies enhanced mapping algorithms
+- Updates both temporary and permanent mappings
+
+**Process Flow:**
+1. Checks if any sync operation is currently running
+2. If running, returns detailed blocking job information
+3. If available, starts UIDI update in background
+4. Returns immediate response with task status
+
+**Background Processing:**
+- Runs in background to prevent API blocking
+- Uses GoogleSheetSyncController for enhanced processing
+- Provides detailed operation tracking
+- Handles large datasets efficiently
 
 ### Update All Mappings
 **POST** `/sync/update-all-mappings`
 
-Performs a complete update of all mappings from Google Sheets. This is a comprehensive update that affects all items.
+Initiates a comprehensive synchronization process that updates all invoice items with the latest mappings from Google Sheets. This 3-step process is useful for propagating mapping changes across the entire system after bulk updates or data migrations.
+
+**Background Tasks:**
+- **background_tasks** (`BackgroundTasks`): FastAPI background tasks for async processing
 
 **Responses:**
-- **200**: Returns sync status and operation details
+- **200**: Returns response with status, message, and timestamp
+- **401**: Unauthorized (invalid or missing token)
+- **500**: Database error or sync controller failure
+
+**Response Example - Success:**
+```json
+{
+  "status": "success",
+  "message": "Full update task has been started in the background",
+  "timestamp": "2024-12-19T14:30:25.123456"
+}
+```
+
+**Response Example - Already Running:**
+```json
+{
+  "status": "error",
+  "message": "Cannot start full update: Full Update (Step 2/3: Syncing Temporary Mappings) is currently running",
+  "timestamp": "2024-12-19T14:30:25.123456"
+}
+```
+
+**3-Step Process:**
+1. **Step 1**: Sync Google Sheets data
+2. **Step 2**: Sync temporary mappings
+3. **Step 3**: Update all items with new mappings
+
+**Scope:**
+- **All Invoice Items**: Updates every invoice item in the system
+- **Comprehensive Coverage**: Ensures all items have latest mappings
+- **Bulk Processing**: Handles large datasets efficiently
+- **Data Consistency**: Maintains mapping consistency across system
+
+**Use Cases:**
+- After bulk mapping table changes
+- Data migration completion
+- System-wide mapping updates
+- Data quality improvement initiatives
+- Mapping table restructuring
+
+**Process Flow:**
+1. Checks if any sync operation is currently running
+2. If running, returns detailed blocking job information
+3. If available, starts full update in background
+4. Returns immediate response with task status
+
+**Background Processing:**
+- Runs in background to prevent API blocking
+- Uses GoogleSheetSyncController for enhanced processing
+- Provides detailed operation tracking
+- Handles large datasets efficiently
+
+**Performance Considerations:**
+- May take significant time for large datasets
+- Processes all invoice items in the system
+- Uses optimized batch processing
+- Provides progress tracking for long operations
 
 ---
 
@@ -514,11 +797,54 @@ Delete a specific statement from the system.
 ### Get Supplier List
 **GET** `/supplier`
 
-Retrieves a list of all suppliers with their IDs and names.
+Retrieves a complete list of all suppliers from the database. Returns a dictionary mapping supplier IDs to supplier names for easy lookup and integration with other parts of the system.
+
+**Authentication:**
+- **token** (`str`): JWT Bearer token required for access
 
 **Responses:**
 - **200**: Returns dictionary mapping supplier IDs to supplier names
-- **500**: Failed to fetch suppliers
+- **401**: Unauthorized (invalid or missing token)
+- **500**: Database error or server failure
+
+**Response Example:**
+```json
+{
+  "1": "ABC Plumbing Supplies",
+  "2": "XYZ Hardware Store",
+  "3": "World Wide Plumbing",
+  "4": "Gotham Supply Co"
+}
+```
+
+**Response Format:**
+- **Key**: Supplier ID (string)
+- **Value**: Supplier name (string)
+
+**Process Flow:**
+1. Authenticates user with JWT token
+2. Queries database for all suppliers
+3. Converts supplier objects to dictionary format
+4. Returns supplier ID to name mapping
+
+**Performance Features:**
+- Direct database query for all suppliers
+- Efficient dictionary conversion
+- Minimal data processing
+- Fast response time
+
+**Use Cases:**
+- Populating supplier dropdown menus
+- Supplier selection in forms
+- Data validation and lookup
+- Integration with other API endpoints
+
+**Notes:**
+- Returns all suppliers regardless of status
+- Supplier IDs are converted to strings for consistency
+- Empty dictionary returned if no suppliers exist
+- Logs successful retrieval with count
+- Comprehensive error logging for debugging
 
 ---
 

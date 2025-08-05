@@ -400,7 +400,73 @@ def immediate_status_update(all_item_ids_for_status: List,
 def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
                               background_tasks: BackgroundTasks,
                               db: Session = Depends(get_qb_db)):
-    """ULTRA-FAST: QuickBooks migration optimized for all invoices with guaranteed status updates"""
+    """
+    Migrate all filtered invoices to QuickBooks with ultra-fast processing.
+    
+    **Summary:**
+        Exports all invoices matching the specified filter criteria to QuickBooks
+        format with ultra-fast processing and guaranteed status updates. This
+        endpoint is optimized for bulk operations and handles large datasets
+        efficiently with priority control over background jobs.
+        
+    **Request Body:**
+        - **request** (`SendtoQBFilterRequest`): Filter criteria for selecting invoices:
+            - Filter parameters (supplier, date range, status, etc.)
+            - **excluded_invoice_ids** (`List[str]`, optional): Invoice IDs to exclude
+            - **order_by** (`List[dict]`, optional): Sorting criteria
+            
+    **Background Tasks:**
+        - **background_tasks** (`BackgroundTasks`): FastAPI background tasks for async processing
+        
+    **Returns:**
+        - **str**: Presigned S3 URL for downloading the QuickBooks Excel file
+        
+    **Response Example:**
+    ```json
+    "https://s3.amazonaws.com/bucket/Exports/qb_export_20241219_143025.xlsx?AWSAccessKeyId=..."
+    ```
+    
+    **Process Flow:**
+        1. Applies filter criteria to get matching invoice IDs
+        2. Excludes specified invoice IDs if provided
+        3. Pauses all background jobs for absolute priority
+        4. Processes invoices with ultra-fast QuickBooks migration
+        5. Generates Excel file in QuickBooks format
+        6. Updates export statuses to 'Sent'
+        7. Resumes background jobs
+        8. Returns download URL
+        
+    **Priority Control:**
+        - **ABSOLUTE PRIORITY**: Pauses ALL background jobs during processing
+        - Ensures maximum system resources for QuickBooks migration
+        - Automatic resume of background jobs after completion
+        - Critical priority context management
+        
+    **Performance Features:**
+        - Ultra-fast data processing with vectorized operations
+        - Optimized database queries for large datasets
+        - Fast Excel generation and S3 upload
+        - Immediate status updates for guaranteed consistency
+        
+    **Error Codes:**
+        - **400**: No invoice IDs found for export
+        - **500**: Processing or upload error
+        
+    **Status Updates:**
+        - Invoice-level export status updated to 'Sent'
+        - Item-level export status updated to 'Sent'
+        - Immediate updates for guaranteed consistency
+        - Comprehensive status reporting
+        
+    **Notes:**
+        - Designed for bulk operations with large datasets
+        - Uses absolute priority control over background jobs
+        - Guaranteed status updates before response
+        - Excel file includes QuickBooks-compatible format
+        - File is stored in S3 with timestamp for uniqueness
+        - Presigned URL has limited expiration time
+        - Automatic cleanup by S3 lifecycle policies
+    """
     operation_start = time.time()
     operation_id = f"qb_migrate_all_{int(operation_start)}"
 
@@ -456,7 +522,95 @@ async def migrate_invoice_to_QB(
     db: Session = Depends(get_qb_db),
     order_by: list = None
 ):
-    """QuickBooks migration with priority control and guaranteed status updates"""
+    """
+    Migrate specific invoices to QuickBooks with priority control.
+    
+    **Summary:**
+        Exports specified invoices to QuickBooks format with priority control
+        over background jobs and guaranteed status updates. This endpoint
+        supports both individual invoice selection and bulk operations
+        with flexible request formats.
+        
+    **Request Body:**
+        Supports multiple formats:
+        - **Array of UUIDs**: Direct list of invoice IDs
+        - **Object with invoice_ids**: `{"invoice_ids": ["uuid1", "uuid2"]}`
+        - **Empty/None**: Exports all invoices in the system
+        
+    **Query Parameters:**
+        - **order_by** (`list`, optional): Sorting criteria for the export
+        
+    **Background Tasks:**
+        - **background_tasks** (`BackgroundTasks`): FastAPI background tasks for async processing
+        
+    **Returns:**
+        - **str**: Presigned S3 URL for downloading the QuickBooks Excel file
+        
+    **Response Example:**
+    ```json
+    "https://s3.amazonaws.com/bucket/Exports/qb_export_20241219_143025.xlsx?AWSAccessKeyId=..."
+    ```
+    
+    **Request Examples:**
+    
+    **Array of Invoice IDs:**
+    ```json
+    ["550e8400-e29b-41d4-a716-446655440000", "550e8400-e29b-41d4-a716-446655440001"]
+    ```
+    
+    **Object with Invoice IDs:**
+    ```json
+    {
+        "invoice_ids": ["550e8400-e29b-41d4-a716-446655440000", "550e8400-e29b-41d4-a716-446655440001"]
+    }
+    ```
+    
+    **Process Flow:**
+        1. Validates and cleans invoice IDs
+        2. Pauses background jobs for priority processing
+        3. Processes invoices with ultra-fast QuickBooks migration
+        4. Generates Excel file in QuickBooks format
+        5. Updates export statuses to 'Sent' immediately
+        6. Resumes background jobs
+        7. Returns download URL
+        
+    **Priority Control:**
+        - Pauses background jobs during processing
+        - Ensures system resources for QuickBooks migration
+        - Automatic resume of background jobs after completion
+        - Safe priority context management
+        
+    **Performance Features:**
+        - Ultra-fast data processing with vectorized operations
+        - Optimized database queries
+        - Fast Excel generation and S3 upload
+        - Immediate status updates for guaranteed consistency
+        
+    **Validation:**
+        - Removes duplicate and null invoice IDs
+        - Validates UUID format
+        - Limits to 5000 invoices for performance
+        - Comprehensive error handling
+        
+    **Error Codes:**
+        - **400**: No valid invoice IDs provided
+        - **500**: Processing or upload error
+        
+    **Status Updates:**
+        - Invoice-level export status updated to 'Sent'
+        - Item-level export status updated to 'Sent'
+        - Immediate updates for guaranteed consistency
+        - Detailed status reporting
+        
+    **Notes:**
+        - Supports flexible request formats for easy integration
+        - Uses priority control over background jobs
+        - Guaranteed status updates before response
+        - Excel file includes QuickBooks-compatible format
+        - File is stored in S3 with timestamp for uniqueness
+        - Presigned URL has limited expiration time
+        - Automatic cleanup by S3 lifecycle policies
+    """
     start_time = time.time()
     operation_id = f"qb_migrate_{int(start_time)}"
     invoice_ids = None
