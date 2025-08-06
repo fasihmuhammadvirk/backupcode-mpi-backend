@@ -1960,7 +1960,6 @@ class InvoiceItemController:
                                'customer_job', 'po_number', 'bill', 'buyer',
                                'memo', 'class_']:
                 # Use func.trim() and ilike for case-insensitive, trimmed comparison
-                from sqlalchemy import func
                 conditions = []
                 for cleaned_value in cleaned_values:
                     if isinstance(cleaned_value, str):
