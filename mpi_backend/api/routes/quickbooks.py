@@ -874,19 +874,20 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
                 'Class': class_val or '',
             })
         result_rows.extend(invoice_lines)
-        # Always add a total line for each invoice
-        result_rows.append({
-            'Date': pd.to_datetime(date, errors='coerce').strftime('%m/%d/%Y') if pd.notnull(date) else '',
-            'Ref': ref_no,
-            'vendor': vendor,
-            'terms': '',
-            'bill due': '',
-            'account': '',
-            'Amount': round(authoritative_total, 4),
-            'Memo': memo,
-            'Customer Job': customer_job,
-            'Class': '',
-        })
+        # Only add a total line for each invoice if it has multiple accounts (split invoice)
+        if len(split_totals) > 1:
+            result_rows.append({
+                'Date': pd.to_datetime(date, errors='coerce').strftime('%m/%d/%Y') if pd.notnull(date) else '',
+                'Ref': ref_no,
+                'vendor': vendor,
+                'terms': '',
+                'bill due': '',
+                'account': '',
+                'Amount': round(authoritative_total, 4),
+                'Memo': memo,
+                'Customer Job': customer_job,
+                'Class': '',
+            })
     final_batch_entry = pd.DataFrame(result_rows)[[
         'Date', 'Ref', 'vendor', 'terms', 'bill due',
         'account', 'Amount', 'Memo', 'Customer Job', 'Class'

@@ -374,14 +374,17 @@ def search_replace(row, temp_items, item_mappings, db):
     ]
 
     if not temp_match.empty:
-        # For temporary mappings, we assign the sheet name but keep "No Match" for the MPI item
+        # For temporary mappings, we assign the sheet name but preserve existing MPI item and description
         # The temporary mapping system assigns items to sheets for later processing
-        # Keep as No Match - temporary mappings don't provide MPI codes
-        row['MpiItem'] = 'No Match'
-        row['MpiDescription'] = temp_match.iloc[0]['original_description'] or 'No Match'
+        # Preserve existing values - temporary mappings don't change MPI codes
+        # Only update if current values are "No Match" or empty
+        if row.get('MpiItem') in ['No Match', '', None]:
+            row['MpiItem'] = 'No Match'
+        if row.get('MpiDescription') in ['No Match', '', None]:
+            row['MpiDescription'] = temp_match.iloc[0]['original_description'] or 'No Match'
         row['Sheet Name'] = temp_match.iloc[0]['sheet_name']
         logger.debug(
-            f"Applied temporary mapping: {original_item} -> sheet: {temp_match.iloc[0]['sheet_name']}")
+            f"Applied temporary mapping: {original_item} -> sheet: {temp_match.iloc[0]['sheet_name']} (preserved existing MPI values)")
         return row
 
     # THIRD: If no mapping found at all, add to unmapped items

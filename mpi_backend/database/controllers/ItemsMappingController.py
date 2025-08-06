@@ -759,13 +759,17 @@ class ItemsMappingController:
                                 f"UIDI override: {clean_invoice_item} -> {matched_mapping.mpi_code}")
 
                     elif match_source == "temporary":
-                        # Apply temporary mapping (keep as No Match but assign sheet name)
-                        item.mpi_item = "No Match"  # Temporary mappings don't provide MPI codes
-                        item.mpi_description = matched_mapping.original_description or "No Match"
+                        # Apply temporary mapping (preserve existing MPI item and description)
+                        # Temporary mappings don't change MPI codes, only assign sheet name
+                        # Only update if current values are "No Match" or empty
+                        if item.mpi_item in ["No Match", "", None]:
+                            item.mpi_item = "No Match"
+                        if item.mpi_description in ["No Match", "", None]:
+                            item.mpi_description = matched_mapping.original_description or "No Match"
                         item.sheet_name = matched_mapping.sheet_name or ""
                         updated_from_temp += 1
                         logger.info(
-                            f"UIDI override (temp): {clean_invoice_item} -> sheet: {matched_mapping.sheet_name}")
+                            f"UIDI override (temp): {clean_invoice_item} -> sheet: {matched_mapping.sheet_name} (preserved existing MPI values)")
 
                     updated_count += 1
 

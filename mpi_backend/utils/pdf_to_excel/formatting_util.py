@@ -504,7 +504,9 @@ def export_price_history_to_excel(price_history, output_dir="mpi_backend/storage
 
 def save_ultra_fast_excel(final_df, output_path):
     """
-    Ultra-fast Excel export: no formatting except invoice total rows (where 'account' is empty) get a distinct background color.
+    QuickBooks Excel export with conditional formatting:
+    - Split invoices (multiple accounts): Light pink for account rows, dark pink for total row
+    - Single account invoices: No background color
     Args:
         final_df: DataFrame to export
         output_path: Output file path
@@ -514,13 +516,103 @@ def save_ultra_fast_excel(final_df, output_path):
             final_df.to_excel(writer, sheet_name='Exported Data', index=False)
             workbook = writer.book
             worksheet = writer.sheets['Exported Data']
-            # Find rows where 'account' is empty (invoice total rows)
-            if 'account' in final_df.columns:
-                total_rows = final_df.index[final_df['account'] == ''].tolist()
-                if total_rows:
-                    total_format = workbook.add_format({'bg_color': '#FFD966'})  # Light yellow
-                    for row in total_rows:
-                        worksheet.set_row(row + 1, None, total_format)  # +1 for header
+            
+            # Define formats
+            light_pink_format = workbook.add_format(
+                {'bg_color': '#FFE6E6'}
+            )  # Light pink
+            dark_pink_format = workbook.add_format(
+                {'bg_color': '#FF6B6B'}
+            )  # Dark pink
+
+            # Set column widths for better readability
+            column_widths = {
+                'Date': 12,
+                'Ref': 15,
+                'vendor': 25,
+                'terms': 10,
+                'bill due': 12,
+                'account': 40,
+                'Amount': 12,
+                'Memo': 25,
+                'Customer Job': 40,
+                'Class': 10
+            }
+            
+            # Apply column widths
+            for col_num, column in enumerate(final_df.columns):
+                width = column_widths.get(column, 15)
+                worksheet.set_column(col_num, col_num, width)
+            
+            # Group rows by invoice (Ref column) to identify split vs single account invoices
+            if 'Ref' in final_df.columns and 'account' in final_df.columns:
+                current_ref = None
+                current_invoice_rows = []
+                total_rows = []
+
+                for row_idx, row in final_df.iterrows():
+                    ref = row['Ref']
+                    account = row['account']
+
+                    # New invoice
+                    if ref != current_ref:
+                        # Process previous invoice
+                        if current_ref and current_invoice_rows:
+                            # Check if this invoice has multiple accounts (split invoice)
+                            unique_accounts = set(
+                                row_data['account'] for row_data in current_invoice_rows
+                                if row_data['account'] != ''
+                            )
+                            if len(unique_accounts) > 1:
+                                # Split invoice: apply light pink to account rows
+                                for row_data in current_invoice_rows:
+                                    if row_data['account'] != '':  # Account row
+                                        worksheet.set_row(
+                                            row_data['row_idx'] + 1, None,
+                                            light_pink_format
+                                        )
+                                    else:  # Total row
+                                        worksheet.set_row(
+                                            row_data['row_idx'] + 1, None,
+                                            dark_pink_format
+                                        )
+                                        total_rows.append(row_data['row_idx'])
+
+                        # Start new invoice
+                        current_ref = ref
+                        current_invoice_rows = []
+
+                    # Add row to current invoice
+                    current_invoice_rows.append({
+                        'row_idx': row_idx,
+                        'account': account
+                    })
+
+                # Process the last invoice
+                if current_ref and current_invoice_rows:
+                    unique_accounts = set(
+                        row_data['account'] for row_data in current_invoice_rows
+                        if row_data['account'] != ''
+                    )
+                    if len(unique_accounts) > 1:
+                        # Split invoice: apply light pink to account rows
+                        for row_data in current_invoice_rows:
+                            if row_data['account'] != '':  # Account row
+                                worksheet.set_row(
+                                    row_data['row_idx'] + 1, None,
+                                    light_pink_format
+                                )
+                            else:  # Total row
+                                worksheet.set_row(
+                                    row_data['row_idx'] + 1, None,
+                                    dark_pink_format
+                                )
+                                total_rows.append(row_data['row_idx'])
+
+                # Apply autofilter
+                worksheet.autofilter(0, 0, len(final_df), len(final_df.columns) - 1)
+                
     except Exception as e:
-        print(f"Error in ultra fast Excel export: {e}")
+        print(f"Error in QuickBooks Excel export: {e}")
+        # Fallback to simple export
         final_df.to_excel(output_path, index=False)
