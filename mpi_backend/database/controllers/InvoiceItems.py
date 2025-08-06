@@ -175,7 +175,6 @@ class InvoiceItemController:
                             # For string columns, use case-insensitive and trimmed comparison
                             if column in ['ref_no', 'vendor', 'item', 'description', 'customer_job', 'po_number', 'bill', 'buyer', 'memo', 'class_']:
                                 # Use func.trim() and ilike for case-insensitive, trimmed comparison
-                                from sqlalchemy import func
                                 conditions = []
                                 for cleaned_value in cleaned_values:
                                     if isinstance(cleaned_value, str):
@@ -517,7 +516,6 @@ class InvoiceItemController:
                                'customer_job', 'po_number', 'bill', 'buyer',
                                'memo', 'class_']:
                 # Use func.trim() and ilike for case-insensitive, trimmed comparison
-                from sqlalchemy import func
                 conditions = []
                 for cleaned_value in cleaned_values:
                     if isinstance(cleaned_value, str):
@@ -1758,7 +1756,6 @@ class InvoiceItemController:
                                    'customer_job', 'po_number', 'bill', 'buyer',
                                    'memo', 'class_']:
                 # Use func.trim() and ilike for case-insensitive, trimmed comparison
-                from sqlalchemy import func
                 conditions = []
                 for cleaned_value in cleaned_values:
                     if isinstance(cleaned_value, str):

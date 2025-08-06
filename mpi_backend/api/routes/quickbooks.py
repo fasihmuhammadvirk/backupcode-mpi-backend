@@ -755,10 +755,12 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
     df = pd.DataFrame(all_items_data)
     df['account'] = ''
 
-    # Vectorized class-based mapping
+    # Vectorized class-based mapping (case-insensitive)
     # Only assign account based on the item's own class
-    df.loc[df['class_'] == 'A', 'account'] = 'UnInvoiced JIP:Material:Additional Material'
-    df.loc[(df['class_'] == 'L') & (df['account'] == ''), 'account'] = 'UnInvoiced JIP:Subcontractors Expense:Labor'
+    # Class 'A' or 'a' → Additional Material
+    df.loc[df['class_'].str.upper() == 'A', 'account'] = 'UnInvoiced JIP:Material:Additional Material'
+    # Class 'L' or 'l' → Labor
+    df.loc[(df['class_'].str.upper() == 'L') & (df['account'] == ''), 'account'] = 'UnInvoiced JIP:Subcontractors Expense:Labor'
 
     # Vectorized sheet name mapping
     unassigned_mask = df['account'] == ''
