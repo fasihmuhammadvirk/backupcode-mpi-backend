@@ -505,8 +505,8 @@ def export_price_history_to_excel(price_history, output_dir="mpi_backend/storage
 def save_ultra_fast_excel(final_df, output_path):
     """
     QuickBooks Excel export with conditional formatting:
-    - Split invoices (multiple accounts): Light pink for account rows, dark pink for total row
-    - Single account invoices: No background color
+    - Multiple row invoices (including total line): Light pink for account rows, dark pink for total row
+    - Single row invoices: No background color
     Args:
         final_df: DataFrame to export
         output_path: Output file path
@@ -544,11 +544,10 @@ def save_ultra_fast_excel(final_df, output_path):
                 width = column_widths.get(column, 15)
                 worksheet.set_column(col_num, col_num, width)
             
-            # Group rows by invoice (Ref column) to identify split vs single account invoices
+            # Group rows by invoice (Ref column) to identify split vs single row invoices
             if 'Ref' in final_df.columns and 'account' in final_df.columns:
                 current_ref = None
                 current_invoice_rows = []
-                total_rows = []
 
                 for row_idx, row in final_df.iterrows():
                     ref = row['Ref']
@@ -558,13 +557,9 @@ def save_ultra_fast_excel(final_df, output_path):
                     if ref != current_ref:
                         # Process previous invoice
                         if current_ref and current_invoice_rows:
-                            # Check if this invoice has multiple accounts (split invoice)
-                            unique_accounts = set(
-                                row_data['account'] for row_data in current_invoice_rows
-                                if row_data['account'] != ''
-                            )
-                            if len(unique_accounts) > 1:
-                                # Split invoice: apply light pink to account rows
+                            # Check if this invoice has multiple rows (including total line)
+                            if len(current_invoice_rows) > 1:
+                                # Multiple rows invoice: apply light pink to account rows, dark pink to total row
                                 for row_data in current_invoice_rows:
                                     if row_data['account'] != '':  # Account row
                                         worksheet.set_row(
@@ -576,7 +571,6 @@ def save_ultra_fast_excel(final_df, output_path):
                                             row_data['row_idx'] + 1, None,
                                             dark_pink_format
                                         )
-                                        total_rows.append(row_data['row_idx'])
 
                         # Start new invoice
                         current_ref = ref
@@ -590,12 +584,9 @@ def save_ultra_fast_excel(final_df, output_path):
 
                 # Process the last invoice
                 if current_ref and current_invoice_rows:
-                    unique_accounts = set(
-                        row_data['account'] for row_data in current_invoice_rows
-                        if row_data['account'] != ''
-                    )
-                    if len(unique_accounts) > 1:
-                        # Split invoice: apply light pink to account rows
+                    # Check if this invoice has multiple rows (including total line)
+                    if len(current_invoice_rows) > 1:
+                        # Multiple rows invoice: apply light pink to account rows, dark pink to total row
                         for row_data in current_invoice_rows:
                             if row_data['account'] != '':  # Account row
                                 worksheet.set_row(
@@ -607,7 +598,6 @@ def save_ultra_fast_excel(final_df, output_path):
                                     row_data['row_idx'] + 1, None,
                                     dark_pink_format
                                 )
-                                total_rows.append(row_data['row_idx'])
 
                 # Apply autofilter
                 worksheet.autofilter(0, 0, len(final_df), len(final_df.columns) - 1)
