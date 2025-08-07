@@ -743,6 +743,7 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
                 'customer_job': getattr(item, 'customer_job', '') or '',
                 'vendor': getattr(item, 'vendor', '') or '',
                 'class_': getattr(item, 'class_', '') or '',
+                'account': getattr(item, 'account', '') or '',
                 'memo': getattr(item, 'memo', '') or '',
             }
             all_items_data.append(item_data)
@@ -753,14 +754,34 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
         raise HTTPException(status_code=400, detail="No non-tax items found")
 
     df = pd.DataFrame(all_items_data)
-    df['account'] = ''
+    # Don't overwrite account values from database - preserve original account values
 
-    # Vectorized class-based mapping (case-insensitive)
-    # Only assign account based on the item's own class
-    # Class 'A' or 'a' → Additional Material
-    df.loc[df['class_'].str.upper() == 'A', 'account'] = 'UnInvoiced JIP:Material:Additional Material'
-    # Class 'L' or 'l' → Labor
+    # Enhanced account and class mapping logic
+    # Step 1: Map account field for one-letter values
+    # Account 'A' or 'a' → Additional Material
+    df.loc[df['account'].str.upper() == 'A', 'account'] = 'UnInvoiced JIP:Material:Additional Material'
+    # Account 'L' or 'l' → Labor
+    df.loc[df['account'].str.upper() == 'L', 'account'] = 'UnInvoiced JIP:Subcontractors Expense:Labor'
+    
+    # Step 2: Map class field for one-letter values (only if account is empty)
+    # Class 'A' or 'a' → Additional Material (only if account is still empty)
+    df.loc[(df['class_'].str.upper() == 'A') & (df['account'] == ''), 'account'] = 'UnInvoiced JIP:Material:Additional Material'
+    # Class 'L' or 'l' → Labor (only if account is still empty)
     df.loc[(df['class_'].str.upper() == 'L') & (df['account'] == ''), 'account'] = 'UnInvoiced JIP:Subcontractors Expense:Labor'
+    
+    # Step 3: For descriptive classes, ensure proper account assignment
+    # This ensures invoice splitting based on class while preserving account
+    descriptive_classes = df[df['class_'].str.len() > 1]  # Classes longer than 1 character
+    if not descriptive_classes.empty:
+        # For items with descriptive classes, ensure proper account assignment
+        for idx in descriptive_classes.index:
+            class_val = df.loc[idx, 'class_']
+            account_val = df.loc[idx, 'account']
+            
+            if account_val == '':
+                # If no account defined, use default account
+                df.loc[idx, 'account'] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
+            # If account is defined, keep it as is (no class suffix)
 
     # Vectorized sheet name mapping
     unassigned_mask = df['account'] == ''

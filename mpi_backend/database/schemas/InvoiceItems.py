@@ -22,6 +22,7 @@ class InvoiceItems(BaseModel):
     bill: Optional[str]
     vendor: Optional[str]
     class_: Optional[str]  # 'class' is reserved in Python
+    account: Optional[str]  # New account field for account mapping
     memo: Optional[str]
     buyer: Optional[str]
     date_added: Optional[str]
@@ -72,6 +73,7 @@ class UpdateInvoiceItemRequest(BaseModel):
     bill: str = None
     vendor: str = None
     class_: str = None
+    account: str = None  # New account field for account mapping
     memo: str = None
     buyer: str = None
     date_added: str = None

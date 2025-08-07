@@ -27,6 +27,7 @@ class InvoiceItem(Base):
     bill = Column(String)
     vendor = Column(String)
     class_ = Column(String)  # 'class' is a reserved word in Python, so appending an underscore
+    account = Column(String, default='')  # New account field for account mapping
     memo = Column(String)
     buyer = Column(String)
     date_added = Column(Date)
@@ -45,7 +46,7 @@ def _apply_active_filter(query):
     for desc in query.column_descriptions:
         if desc['type'] is InvoiceItem:
             # Show items where is_active is NOT FALSE
-            query = query.enable_assertions(False).filter( or_(
+            query = query.enable_assertions(False).filter(or_(
                     InvoiceItem.is_active.is_(True),
                     InvoiceItem.is_active.is_(None)  # Include NULL values
                 )

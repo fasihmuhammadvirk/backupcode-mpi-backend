@@ -188,6 +188,7 @@ def get_column_mappings():
         "bill": "Bill",
         "vendor": "Vendor",
         "class_": "Class",
+        "account": "Account",
         "memo": "Memo",
         "buyer": "Buyer",
         "date_added": "Date Added"

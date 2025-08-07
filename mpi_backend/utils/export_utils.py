@@ -25,6 +25,7 @@ def convert_items_to_dataframe(items, use_suffix=True):
         'bill': 'Bill',
         'vendor': 'Vendor',
         'class_': 'Class',
+        'account': 'Account',
         'memo': 'Memo',
         'buyer': 'Buyer',
         "filename": "Filename",
@@ -85,6 +86,7 @@ def convert_items_to_dataframe_optimized(db_session, ids, columns=None, order_by
         'bill': 'Bill',
         'vendor': 'Vendor',
         'class_': 'Class',
+        'account': 'Account',
         'memo': 'Memo',
         'buyer': 'Buyer',
         'filename': 'Filename',
@@ -107,7 +109,7 @@ def convert_items_to_dataframe_optimized(db_session, ids, columns=None, order_by
     else:
         # Default columns for export - match original convert_items_to_dataframe
         selected_columns = ['item', 'description', 'qty', 'cost', 'amount', 'date', 
-                          'ref_no', 'po_number', 'customer_job', 'bill', 'vendor', 'class_', 'memo',
+                          'ref_no', 'po_number', 'customer_job', 'bill', 'vendor', 'class_', 'account', 'memo',
                           'buyer', 'filename', 'sheet_name', 'mpi_item', 'mpi_description', 'date_added']
     
     # Always include vendor for suffix calculation if needed

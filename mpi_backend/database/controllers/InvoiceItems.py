@@ -44,7 +44,7 @@ class InvoiceItemController:
                     InvoiceItem.id, InvoiceItem.item, InvoiceItem.vendor,
                     InvoiceItem.customer_job, InvoiceItem.cost, InvoiceItem.qty,
                     InvoiceItem.date, InvoiceItem.is_active, InvoiceItem.class_,
-                    InvoiceItem.export_status
+                    InvoiceItem.account, InvoiceItem.export_status
                 ))
                 .where(InvoiceItem.is_active == True)
             )
@@ -154,7 +154,7 @@ class InvoiceItemController:
                     InvoiceItem.id, InvoiceItem.item, InvoiceItem.vendor,
                     InvoiceItem.customer_job, InvoiceItem.cost, InvoiceItem.qty,
                     InvoiceItem.date, InvoiceItem.amount, InvoiceItem.description,
-                    InvoiceItem.mpi_item, InvoiceItem.class_, InvoiceItem.export_status
+                    InvoiceItem.mpi_item, InvoiceItem.class_, InvoiceItem.account, InvoiceItem.export_status
                 ))
             )
 
@@ -173,7 +173,7 @@ class InvoiceItemController:
                                     cleaned_values.append(value)
 
                             # For string columns, use case-insensitive and trimmed comparison
-                            if column in ['ref_no', 'vendor', 'item', 'description', 'customer_job', 'po_number', 'bill', 'buyer', 'memo', 'class_']:
+                            if column in ['ref_no', 'vendor', 'item', 'description', 'customer_job', 'po_number', 'bill', 'buyer', 'memo', 'class_', 'account']:
                                 # Use func.trim() and ilike for case-insensitive, trimmed comparison
                                 conditions = []
                                 for cleaned_value in cleaned_values:
@@ -707,6 +707,7 @@ class InvoiceItemController:
             bill=row['Bill'],
             vendor=row['Vendor'],
             class_=row['Class'],
+            account=row.get('Account', ''),  # New account field with default empty string
             memo=row['Memo'],
             buyer=row['Buyer'],
             date_added=row['email_date'],
@@ -1274,6 +1275,7 @@ class InvoiceItemController:
             'bill': InvoiceItem.bill,
             'vendor': InvoiceItem.vendor,
             'class_': InvoiceItem.class_,
+            'account': InvoiceItem.account,
             'memo': InvoiceItem.memo,
             'buyer': InvoiceItem.buyer,
             'filename': InvoiceItem.filename,
@@ -1299,6 +1301,7 @@ class InvoiceItemController:
                 'Bill': 'bill',
                 'Vendor': 'vendor',
                 'Class': 'class_',
+                'Account': 'account',
                 'Memo': 'memo',
                 'Buyer': 'buyer',
                 'Filename': 'filename',
@@ -1318,7 +1321,7 @@ class InvoiceItemController:
         else:
             # Default columns for export - match the original convert_items_to_dataframe output
             default_cols = ['item', 'description', 'qty', 'cost', 'amount', 'date',
-                            'ref_no', 'po_number', 'customer_job', 'bill', 'vendor', 'class_', 'memo',
+                            'ref_no', 'po_number', 'customer_job', 'bill', 'vendor', 'class_', 'account', 'memo',
                             'buyer', 'filename', 'sheet_name', 'mpi_item', 'mpi_description', 'date_added']
             selected_columns = [available_columns[col] for col in default_cols]
             column_names = default_cols
@@ -2788,6 +2791,7 @@ class InvoiceItemController:
                     bill=row['Bill'],
                     vendor=row['Vendor'],
                     class_=row['Class'],
+                    account=row.get('Account', ''),  # New account field with default empty string
                     memo=row['Memo'],
                     buyer=row['Buyer'],
                     date_added=row['email_date'],
