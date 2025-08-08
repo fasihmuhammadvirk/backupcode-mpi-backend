@@ -33,6 +33,24 @@ class InvoiceItemController:
         # Pre-compile frequently used queries for better performance
         self._compiled_queries = {}
         self._setup_query_cache()
+        # Allowed columns whitelist for dynamic operations
+        self._allowed_distinct_columns = {
+            'filename', 'sheet_name', 'item', 'description', 'qty', 'cost',
+            'amount', 'date', 'ref_no', 'po_number', 'customer_job', 'bill',
+            'vendor', 'class_', 'account', 'memo', 'buyer', 'date_added',
+            'mpi_item', 'mpi_description', 'export_status'
+        }
+
+    def _validate_safe_column(self, column_name: str) -> str:
+        """Validate provided column name against whitelist and model attributes."""
+        if not isinstance(column_name, str):
+            raise ValueError("Invalid column name type")
+        normalized = column_name.strip()
+        if normalized not in self._allowed_distinct_columns:
+            raise ValueError(f"Invalid or unsafe column: {column_name}")
+        if not hasattr(InvoiceItem, normalized):
+            raise ValueError(f"Column not found: {column_name}")
+        return normalized
 
     def _safe_numeric_cast(self, text_column):
         """Safely cast a textual numeric column to Float.
@@ -113,36 +131,34 @@ class InvoiceItemController:
                     LIMIT 5000
                 """)
             else:
-                # Standard distinct query with limit for performance
-                raw_query = text(f"""
-                    SELECT DISTINCT {column} 
-                    FROM invoice_items 
-                    WHERE is_active = true 
-                        AND {column} IS NOT NULL 
-                        AND {column} != ''
-                    ORDER BY {column}
-                    LIMIT 2000
-                """)
+                # Safe ORM-based distinct query (validated column)
+                try:
+                    safe_column = self._validate_safe_column(column)
+                except ValueError as e:
+                    logger.warning(f"Rejected unsafe column in distinct: {e}")
+                    return []
 
-            # Execute with result streaming for memory efficiency
-            result = self.db.execute(raw_query)
+                column_attr = getattr(InvoiceItem, safe_column)
+                query = (
+                    self.db.query(column_attr)
+                    .filter(InvoiceItem.is_active.is_(True))
+                    .filter(column_attr.isnot(None))
+                    .distinct()
+                    .order_by(column_attr.asc())
+                    .limit(2000)
+                )
+                rows = query.all()
+                values = [row[0] for row in rows]
 
-            # Stream results to avoid memory overload
-            values = []
-            for row in result:
-                values.append(row[0])
-                if len(values) >= 2000:  # Safety limit
-                    break
+                # Force garbage collection for large datasets
+                if len(values) > 500:
+                    gc.collect()
 
-            # Force garbage collection for large datasets
-            if len(values) > 500:
-                gc.collect()
+                logger.info(f"Ultra-optimized distinct values for '{column}' "
+                            f"took {time.time() - start_time:.3f}s, "
+                            f"returned {len(values)} values")
 
-            logger.info(f"Ultra-optimized distinct values for '{column}' "
-                        f"took {time.time() - start_time:.3f}s, "
-                        f"returned {len(values)} values")
-
-            return values
+                return values
 
         except Exception as e:
             logger.error(f"Error in ultra-optimized distinct values: {e}")
@@ -499,6 +515,13 @@ class InvoiceItemController:
         Optimized version of get_data_by_column_name with caching and better performance.
         Now handles 10,000+ records efficiently while preserving ALL business logic.
         """
+        # Validate column for safety (prevents SQL injection via dynamic columns)
+        try:
+            column_name = self._validate_safe_column(column_name)
+        except ValueError as e:
+            logger.warning(f"Rejected unsafe column in get_data_by_column_name: {e}")
+            return []
+
         start_time = time.time()
 
         # Create cache keys for filter context and comparison filters
