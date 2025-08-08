@@ -759,11 +759,26 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
 
     # Enhanced account and class mapping logic
     # Step 1: Map account field for one-letter values
-    # Account 'A' or 'a' → Special case: Labor & Material: Additional Material
+    # Account 'A' → Special case: Labor & Material: Additional Material
     df.loc[
         df['account'].str.upper() == 'A',
         'account'
-    ] = 'UnInvoiced JIP:Subcontractors Expense:Labor & Material:Additional Material'
+    ] = (
+        'UnInvoiced JIP:Subcontractors Expense:Labor & Material:'
+        'Additional Material'
+    )
+
+    # Account 'M' → Job Materials Purchased
+    df.loc[
+        df['account'].str.upper() == 'M',
+        'account'
+    ] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
+
+    # Account 'E' → Job Equipment
+    df.loc[
+        df['account'].str.upper() == 'E',
+        'account'
+    ] = 'UnInvoiced JIP:Cost Of Materials:Job Equipment'
 
     # Step 2: Do NOT derive default account from class codes when account is empty.
     # Instead, rely on ItemClassification (sheet_name → account) for default mapping.

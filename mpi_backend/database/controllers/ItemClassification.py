@@ -1,6 +1,5 @@
 from mpi_backend.database.models import ItemClassification
 from fuzzywuzzy import fuzz
-from sqlalchemy import func
 
 
 class ItemClassificationController:
@@ -10,13 +9,18 @@ class ItemClassificationController:
     def get_classification(self, item):
         """
         Get classification for an item with fuzzy matching fallback.
-        First tries exact match, then fuzzy match with 90% similarity threshold.
+        First tries exact match, then fuzzy match with 90% similarity
+        threshold.
         """
         if not item or not item.strip():
             return ''
 
         # First try exact match
-        query = self.db_context.query(ItemClassification).filter(ItemClassification.item == item).first()
+        query = (
+            self.db_context.query(ItemClassification)
+            .filter(ItemClassification.item == item)
+            .first()
+        )
         if query:
             return self._get_account_from_category(query.category)
 
@@ -32,18 +36,24 @@ class ItemClassificationController:
         if category == 'M':
             return 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
         elif category == 'E':
-            # Fix QuickBooks account naming: singular "Equipment" and no extra word
+            # Fix QuickBooks account naming: singular "Equipment"
             return 'UnInvoiced JIP:Cost Of Materials:Job Equipment'
+        elif category == 'A':
+            return (
+                'UnInvoiced JIP:Subcontractors Expense:Labor & Material:'
+                'Additional Material'
+            )
         else:
             return ''
 
     def _find_fuzzy_match(self, target_item, threshold=90):
         """
-        Find fuzzy match for target item using fuzzywuzzy with specified threshold.
-        Uses multiple algorithms to find the best match:
+        Find fuzzy match for target item using fuzzywuzzy with specified
+        threshold. Uses multiple algorithms to find the best match:
         1. partial_ratio() - for cases like "(PVC) Williams" matching "(PVC)"
         2. ratio() - for general similarity
-        Returns the ItemClassification object with highest similarity score >= threshold.
+        Returns the ItemClassification object with highest similarity
+        score >= threshold.
         """
         # Get all classifications from database
         all_classifications = self.db_context.query(ItemClassification).all()
@@ -61,9 +71,18 @@ class ItemClassificationController:
 
             # Try different fuzzywuzzy algorithms
             algorithms = [
-                ('partial_ratio', fuzz.partial_ratio(target_lower, classification_lower)),
-                ('token_set_ratio', fuzz.token_set_ratio(target_lower, classification_lower)),
-                ('ratio', fuzz.ratio(target_lower, classification_lower))
+                (
+                    'partial_ratio',
+                    fuzz.partial_ratio(target_lower, classification_lower),
+                ),
+                (
+                    'token_set_ratio',
+                    fuzz.token_set_ratio(target_lower, classification_lower),
+                ),
+                (
+                    'ratio',
+                    fuzz.ratio(target_lower, classification_lower),
+                ),
             ]
 
             # Find the best score from all algorithms
@@ -74,7 +93,10 @@ class ItemClassificationController:
                     best_algorithm = algorithm_name
 
         if best_match:
-            print(f"Fuzzy match found: '{target_item}' -> '{best_match.item}' (similarity: {best_score}% using {best_algorithm})")
+            msg = (
+                "Fuzzy match found: '{}' -> '{}' (similarity: {}% using {})"
+            ).format(target_item, best_match.item, best_score, best_algorithm)
+            print(msg)
 
         return best_match
 
