@@ -536,8 +536,25 @@ class InvoiceItemController:
         """
         start_time = time.time()
 
-        # Build base query with proper filtering
-        query = self.db.query(InvoiceItem)
+        # Build base query with proper filtering and column pruning
+        query = (
+            self.db.query(InvoiceItem)
+            .options(load_only(
+                InvoiceItem.id,
+                InvoiceItem.item,
+                InvoiceItem.vendor,
+                InvoiceItem.customer_job,
+                InvoiceItem.cost,
+                InvoiceItem.qty,
+                InvoiceItem.date,
+                InvoiceItem.amount,
+                InvoiceItem.description,
+                InvoiceItem.mpi_item,
+                InvoiceItem.class_,
+                InvoiceItem.account,
+                InvoiceItem.export_status,
+            ))
+        )
 
         # Apply empty item filter
         query = self._apply_empty_item_filter(query)
@@ -563,28 +580,25 @@ class InvoiceItemController:
                 else:
                     cleaned_values.append(value)
 
-            # For string columns, use case-insensitive and trimmed comparison
+            # For string columns, use case-insensitive and trimmed equality to leverage functional indexes
             if column_name in ['ref_no', 'vendor', 'item', 'description',
                                'customer_job', 'po_number', 'bill', 'buyer',
-                               'memo', 'class_']:
-                # Use func.trim() and ilike for case-insensitive, trimmed comparison
+                               'memo', 'class_', 'account']:
+                normalized_col = func.lower(func.trim(column))
                 conditions = []
                 for cleaned_value in cleaned_values:
                     if isinstance(cleaned_value, str):
-                        # Trim both database value and filter value, then do case-insensitive comparison
-                        conditions.append(func.trim(column).ilike(
-                            func.trim(cleaned_value)))
+                        conditions.append(
+                            normalized_col == func.lower(func.trim(cleaned_value))
+                        )
                     else:
                         conditions.append(column == cleaned_value)
                 if conditions:
-                    # Optimize large conditions
                     if len(conditions) > 1000:
-                        # Split into smaller batches for better database performance
                         batch_conditions = []
                         batch_size = 1000
                         for i in range(0, len(conditions), batch_size):
-                            batch_conditions.append(
-                                or_(*conditions[i:i + batch_size]))
+                            batch_conditions.append(or_(*conditions[i:i + batch_size]))
                         query = query.filter(or_(*batch_conditions))
                     else:
                         query = query.filter(or_(*conditions))
@@ -670,8 +684,8 @@ class InvoiceItemController:
             query = query.order_by(
                 InvoiceItem.date.desc(), InvoiceItem.id.desc())
 
-        # Get total count efficiently
-        total = query.count()
+        # Get total count efficiently using subquery-based count
+        total = self._get_optimized_count(query)
 
         # Apply pagination if size > 0
         if size > 0:

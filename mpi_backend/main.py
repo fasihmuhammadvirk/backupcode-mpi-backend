@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import ORJSONResponse as JSONResponse
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -484,7 +484,8 @@ app = FastAPI(
     title="MPI Backend API",
     description="Backend API for MPI operations",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    default_response_class=JSONResponse,
 )
 
 # Add essential middleware only
