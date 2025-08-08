@@ -540,18 +540,30 @@ class InvoiceItemController:
         query = (
             self.db.query(InvoiceItem)
             .options(load_only(
+                # Load all columns required by the frontend schema to avoid None values
                 InvoiceItem.id,
-                InvoiceItem.item,
-                InvoiceItem.vendor,
-                InvoiceItem.customer_job,
-                InvoiceItem.cost,
-                InvoiceItem.qty,
-                InvoiceItem.date,
-                InvoiceItem.amount,
-                InvoiceItem.description,
+                InvoiceItem.filename,
+                InvoiceItem.sheet_name,
                 InvoiceItem.mpi_item,
+                InvoiceItem.mpi_description,
+                InvoiceItem.item,
+                InvoiceItem.description,
+                InvoiceItem.qty,
+                InvoiceItem.cost,
+                InvoiceItem.amount,
+                InvoiceItem.date,
+                InvoiceItem.ref_no,
+                InvoiceItem.po_number,
+                InvoiceItem.customer_job,
+                InvoiceItem.bill,
+                InvoiceItem.vendor,
                 InvoiceItem.class_,
                 InvoiceItem.account,
+                InvoiceItem.memo,
+                InvoiceItem.buyer,
+                InvoiceItem.date_added,
+                InvoiceItem.invoice_id,
+                InvoiceItem.is_active,
                 InvoiceItem.export_status,
             ))
         )
@@ -697,10 +709,13 @@ class InvoiceItemController:
         # Process results for display
         invoices_items = []
         for item in items:
-            item_dict = item.__dict__.copy()
-            # Use the full item code as stored in database
-            item_dict['item'] = item.item
-            invoices_items.append(InvoiceItemsResponse(**item_dict))
+            # Use ORM-based serialization so all loaded attributes are preserved
+            try:
+                # Pydantic v2
+                invoices_items.append(InvoiceItemsResponse.model_validate(item))
+            except AttributeError:
+                # Pydantic v1 fallback
+                invoices_items.append(InvoiceItemsResponse.from_orm(item))
 
         # Calculate pagination metadata
         total_pages = (total + size - 1) // size if size > 0 else 1
