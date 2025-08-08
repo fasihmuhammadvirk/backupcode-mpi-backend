@@ -8,8 +8,11 @@ Usage:
   python -m scripts.normalize_mpi_description [--dry-run]
 """
 
-from sqlalchemy import text
 import sys
+from pathlib import Path
+
+from sqlalchemy import text
+sys.path.append(str(Path(__file__).parent.parent))
 from mpi_backend.database import SessionLocal
 
 
