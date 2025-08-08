@@ -1,10 +1,12 @@
 from mpi_backend.database.models import UnmappedItems
 from mpi_backend.database.models.InvoiceItems import InvoiceItem
 import pandas as pd
-from mpi_backend.utils.item_utils import (
-    extract_supplier_id
-)
-from sqlalchemy import and_, or_
+# Note: extract_supplier_id is not used in this controller
+# from mpi_backend.utils.item_utils import (
+#     extract_supplier_id
+# )
+from sqlalchemy import and_, or_, exists
+from sqlalchemy.orm import aliased
 from typing import Dict, Any, Optional, List
 from datetime import date
 import logging
@@ -18,8 +20,11 @@ class UnmappedItemsController:
         self.db_context = db
 
     def _get_db_session(self) -> Session:
-        """Get a database session object, whether db_context is a factory or session."""
-        # Check if it's already a session instance (has query, add, commit methods)
+        """
+        Get a database session object, whether db_context is a factory or
+        an existing session.
+        """
+        # Check if it's already a session instance (has query, add, commit)
         if hasattr(self.db_context, 'query') and hasattr(self.db_context, 'commit'):
             return self.db_context
         # Otherwise assume it's a session factory
@@ -28,10 +33,23 @@ class UnmappedItemsController:
     def get_items_mappings(self):
         db = self._get_db_session()
         query_result = db.query(UnmappedItems).all()
-        data = [(item.google_sheet_name, item.mpi_code, item.description,
-                 item.supplier_item_ids, item.supplier_id) for item in query_result]
-        columns = ['google_sheet_name', 'mpi_code', 'description',
-                   'supplier_item_ids', 'supplier_id']
+        data = [
+            (
+                item.google_sheet_name,
+                item.mpi_code,
+                item.description,
+                item.supplier_item_ids,
+                item.supplier_id,
+            )
+            for item in query_result
+        ]
+        columns = [
+            'google_sheet_name',
+            'mpi_code',
+            'description',
+            'supplier_item_ids',
+            'supplier_id',
+        ]
         items_mappings = pd.DataFrame(data, columns=columns)
         return items_mappings
 
@@ -102,8 +120,15 @@ class UnmappedItemsController:
         try:
             db = self._get_db_session()
             return self._get_unmapped_items_query(
-                db, item_type, date_from, date_to, supplier_names, 
-                search, order_by, page, size
+                db,
+                item_type,
+                date_from,
+                date_to,
+                supplier_names,
+                search,
+                order_by,
+                page,
+                size,
             )
         except Exception as e:
             logger.error(f"Error retrieving unmapped items: {e}")
@@ -130,13 +155,45 @@ class UnmappedItemsController:
         """Internal method to execute the unmapped items query"""
         
         if item_type == "temporary":
-            return self._get_temporary_items(db, date_from, date_to, supplier_names, search, order_by, page, size)
+            return self._get_temporary_items(
+                db,
+                date_from,
+                date_to,
+                supplier_names,
+                search,
+                order_by,
+                page,
+                size,
+            )
         elif item_type == "unmapped":
-            return self._get_all_unmapped_items(db, date_from, date_to, supplier_names, search, order_by, page, size)
+            return self._get_all_unmapped_items(
+                db,
+                date_from,
+                date_to,
+                supplier_names,
+                search,
+                order_by,
+                page,
+                size,
+            )
         elif item_type == "no_temporary":
-            return self._get_unmapped_items_logic(db, date_from, date_to, supplier_names, search, order_by, page, size)
+            return self._get_unmapped_items_logic(
+                db,
+                date_from,
+                date_to,
+                supplier_names,
+                search,
+                order_by,
+                page,
+                size,
+            )
         else:
-            raise ValueError(f"Invalid item_type: {item_type}. Must be 'temporary', 'unmapped', or 'no_temporary'")
+            raise ValueError(
+                (
+                    "Invalid item_type: {item_type}. Must be 'temporary', "
+                    "'unmapped', or 'no_temporary'"
+                ).format(item_type=item_type)
+            )
 
     def _get_temporary_items(
         self,
@@ -211,20 +268,72 @@ class UnmappedItemsController:
         page: int,
         size: int
     ) -> Dict[str, Any]:
-        """Get items that do not have a sheet_name and have no valid mapping"""
-        
-        # Base query for unmapped items
-        query = db.query(InvoiceItem).filter(
+        """
+        Get items that do not have a sheet_name and have no valid mapping.
+
+        This returns only those (vendor, item) groups that are truly
+        "no temporary" – i.e. none of their unmapped rows has a non-empty
+        sheet_name. This guarantees that counts of "temporary" and
+        "no_temporary" partition the "unmapped" set without overlap.
+        """
+
+        # Start from rows that are unmapped (No Match or UIDI), regardless of sheet_name
+        base_unmapped = db.query(InvoiceItem).filter(
+            or_(
+                InvoiceItem.mpi_item == 'No Match',
+                InvoiceItem.mpi_item.like('UIDI%'),
+                InvoiceItem.mpi_description == 'No Match',
+                InvoiceItem.mpi_description.like('UIDI%')
+            )
+        )
+
+        # Apply common date/supplier filters first so subquery respects them too
+        base_unmapped = self._apply_common_filters(
+            base_unmapped,
+            date_from,
+            date_to,
+            supplier_names,
+        )
+
+        # Alias for correlated NOT EXISTS check
+        ItemAlias = aliased(InvoiceItem)
+
+        # Now restrict to rows with NO sheet_name for the current rows
+        query = base_unmapped.filter(
             or_(
                 InvoiceItem.sheet_name.is_(None),
                 InvoiceItem.sheet_name == ''
             )
         )
-        
-        # Apply filters (date and supplier filters)
-        query = self._apply_common_filters(query, date_from, date_to, supplier_names)
-        
-        # Get unique items based on cleaned original item ID (without search filter first)
+
+        # Exclude any vendor+item that has at least one unmapped row WITH a sheet_name
+        # so that mixed groups (some rows with sheet, some without) are counted only in
+        # the "temporary" bucket and not here.
+        exists_conditions = [
+            ItemAlias.vendor == InvoiceItem.vendor,
+            ItemAlias.item == InvoiceItem.item,
+            # Consider only active (or NULL) rows like the global filter
+            or_(ItemAlias.is_active.is_(True), ItemAlias.is_active.is_(None)),
+            # Only among unmapped rows
+            or_(
+                ItemAlias.mpi_item == 'No Match',
+                ItemAlias.mpi_item.like('UIDI%'),
+                ItemAlias.mpi_description == 'No Match',
+                ItemAlias.mpi_description.like('UIDI%'),
+            ),
+            # With a non-empty sheet_name
+            and_(ItemAlias.sheet_name.isnot(None), ItemAlias.sheet_name != ''),
+        ]
+
+        # Apply date range to the correlated EXISTS so partitioning respects filters
+        if date_from:
+            exists_conditions.append(ItemAlias.date >= date_from)
+        if date_to:
+            exists_conditions.append(ItemAlias.date <= date_to)
+
+        query = query.filter(~exists().where(and_(*exists_conditions)))
+
+        # Get unique items based on original item ID per supplier
         return self._get_unique_items_with_pagination(db, query, page, size, order_by, search)
 
     def _apply_common_filters(self, query, date_from, date_to, supplier_names):
@@ -248,22 +357,27 @@ class UnmappedItemsController:
         """Get unique items per supplier with supplier suffixes for distinction"""
         
         # Use a CTE to aggregate unique items per supplier on the DB side
-        from sqlalchemy import func, literal
-        base = query.with_entities(
-            InvoiceItem.vendor.label("supplier"),
-            InvoiceItem.item.label("original_item_id"),
-            func.min(InvoiceItem.description).label("original_description"),
-            func.min(InvoiceItem.sheet_name).label("sheet_name"),
-            func.min(InvoiceItem.cost).label("cost"),
-            func.min(InvoiceItem.qty).label("quantity"),
-            (func.min(InvoiceItem.cost) * func.min(InvoiceItem.qty)).label("amount"),
-        ).filter(
-            InvoiceItem.item.isnot(None),
-            InvoiceItem.item != ""
-        ).group_by(
-            InvoiceItem.vendor,
-            InvoiceItem.item
-        ).cte("unique_items_cte")
+        from sqlalchemy import func
+        base = (
+            query.with_entities(
+                InvoiceItem.vendor.label("supplier"),
+                InvoiceItem.item.label("original_item_id"),
+                func.min(InvoiceItem.description).label("original_description"),
+                func.min(InvoiceItem.sheet_name).label("sheet_name"),
+                func.min(InvoiceItem.cost).label("cost"),
+                func.min(InvoiceItem.qty).label("quantity"),
+                (func.min(InvoiceItem.cost) * func.min(InvoiceItem.qty)).label("amount"),
+            )
+            .filter(
+                InvoiceItem.item.isnot(None),
+                InvoiceItem.item != "",
+            )
+            .group_by(
+                InvoiceItem.vendor,
+                InvoiceItem.item,
+            )
+            .cte("unique_items_cte")
+        )
 
         q = db.query(
             base.c.original_item_id,
@@ -307,26 +421,30 @@ class UnmappedItemsController:
             q = q.offset((page - 1) * size).limit(size)
 
         rows = q.all()
-        unique_items = [
-            {
-                "original_item_id": r.original_item_id,
-                "original_description": r.original_description or "",
-                "cost": float(r.cost or 0.0),
-                "amount": float(r.amount or 0.0),
-                "quantity": int(r.quantity or 0),
-                "sheet_name": r.sheet_name or "",
-                "supplier": r.supplier or "",
-            }
-            for r in rows
-        ]
+        unique_items = []
+        for r in rows:
+            unique_items.append(
+                {
+                    "original_item_id": r.original_item_id,
+                    "original_description": r.original_description or "",
+                    "cost": float(r.cost or 0.0),
+                    "amount": float(r.amount or 0.0),
+                    "quantity": int(r.quantity or 0),
+                    "sheet_name": r.sheet_name or "",
+                    "supplier": r.supplier or "",
+                }
+            )
         
         # Apply search filter AFTER deduplication (search on original_item_id and description that users see)
         if search and search.strip():
             clean_search = search.strip().lower()
             unique_items = [
-                item for item in unique_items
-                if (clean_search in item["original_item_id"].lower() or
-                    clean_search in (item["original_description"] or "").lower())
+                item
+                for item in unique_items
+                if (
+                    clean_search in item["original_item_id"].lower()
+                    or clean_search in (item["original_description"] or "").lower()
+                )
             ]
         
         # Apply ordering
