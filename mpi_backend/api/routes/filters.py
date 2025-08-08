@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
-from fastapi.responses import JSONResponse
+from fastapi.responses import ORJSONResponse as JSONResponse
 from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
@@ -1168,6 +1168,9 @@ def get_unmapped_items(
     except ValueError as e:
         logger.error(f"Invalid request parameters: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException as e:
+        # Re-raise HTTPExceptions (e.g., explicit 400 validations) without masking
+        raise e
     except Exception as e:
         logger.error(f"Error retrieving unmapped items: {e}")
         raise HTTPException(

@@ -247,50 +247,78 @@ class UnmappedItemsController:
     def _get_unique_items_with_pagination(self, db, query, page, size, order_by=None, search=None):
         """Get unique items per supplier with supplier suffixes for distinction"""
         
-        # Execute query to get all matching items (within date range and supplier filters)
-        all_items = query.all()
-        logger.info(f"Retrieved {len(all_items)} raw items for deduplication")
-        
-        # Group by supplier + cleaned item code to get unique items per supplier
-        unique_items_map = {}
-        skipped_items = 0
-        for item in all_items:
-            # Use the full item code as stored in database
-            item_code = item.item or ""
-            if not item_code:
-                skipped_items += 1
-                continue
-                
-            # Create a unique key combining supplier and item code
-            supplier = item.vendor or ""
-            unique_key = f"{supplier}|{item_code}"
-            
-            if unique_key not in unique_items_map:
-                # Calculate amount based on cost and quantity with validation
-                cost = float(item.cost or 0.0)
-                quantity = int(item.qty or 0)
-                amount = round(cost * quantity, 3)
-                
-                # Validate amount calculation
-                if cost < 0 or quantity < 0:
-                    logger.warning(f"Negative values found for item {item_code}: cost={cost}, quantity={quantity}")
-                
-                unique_items_map[unique_key] = {
-                    "original_item_id": item_code,  # Use full item code as stored
-                    "original_description": item.description or "",
-                    "cost": cost,
-                    "amount": amount,  # Calculated as cost * quantity
-                    "quantity": quantity,
-                    "sheet_name": item.sheet_name or "",
-                    "supplier": supplier
-                }
-            else:
-                # Log if we find duplicate items (this shouldn't happen with the current logic)
-                logger.debug(f"Duplicate item found but not added: {unique_key}")
-        
-        # Convert to list
-        unique_items = list(unique_items_map.values())
-        logger.info(f"Deduplication complete: {len(unique_items)} unique items (skipped {skipped_items} empty items)")
+        # Use a CTE to aggregate unique items per supplier on the DB side
+        from sqlalchemy import func, literal
+        base = query.with_entities(
+            InvoiceItem.vendor.label("supplier"),
+            InvoiceItem.item.label("original_item_id"),
+            func.min(InvoiceItem.description).label("original_description"),
+            func.min(InvoiceItem.sheet_name).label("sheet_name"),
+            func.min(InvoiceItem.cost).label("cost"),
+            func.min(InvoiceItem.qty).label("quantity"),
+            (func.min(InvoiceItem.cost) * func.min(InvoiceItem.qty)).label("amount"),
+        ).filter(
+            InvoiceItem.item.isnot(None),
+            InvoiceItem.item != ""
+        ).group_by(
+            InvoiceItem.vendor,
+            InvoiceItem.item
+        ).cte("unique_items_cte")
+
+        q = db.query(
+            base.c.original_item_id,
+            base.c.original_description,
+            base.c.cost,
+            base.c.amount,
+            base.c.quantity,
+            base.c.sheet_name,
+            base.c.supplier,
+        )
+
+        # Apply search AFTER aggregation
+        if search and search.strip():
+            s = f"%{search.strip()}%"
+            q = q.filter(
+                or_(
+                    base.c.original_item_id.ilike(s),
+                    base.c.original_description.ilike(s),
+                )
+            )
+
+        # Ordering
+        if order_by and len(order_by) > 0:
+            for order_item in order_by:
+                col = order_item.get("column", "amount")
+                order = order_item.get("order", "desc").lower()
+                col_expr = {
+                    "amount": base.c.amount,
+                    "cost": base.c.cost,
+                    "quantity": base.c.quantity,
+                    "supplier": base.c.supplier,
+                    "original_item_id": base.c.original_item_id,
+                }.get(col, base.c.amount)
+                q = q.order_by(col_expr.desc() if order == "desc" else col_expr.asc())
+        else:
+            q = q.order_by(base.c.amount.desc())
+
+        # Pagination
+        total_count = q.count()
+        if size > 0:
+            q = q.offset((page - 1) * size).limit(size)
+
+        rows = q.all()
+        unique_items = [
+            {
+                "original_item_id": r.original_item_id,
+                "original_description": r.original_description or "",
+                "cost": float(r.cost or 0.0),
+                "amount": float(r.amount or 0.0),
+                "quantity": int(r.quantity or 0),
+                "sheet_name": r.sheet_name or "",
+                "supplier": r.supplier or "",
+            }
+            for r in rows
+        ]
         
         # Apply search filter AFTER deduplication (search on original_item_id and description that users see)
         if search and search.strip():
@@ -321,7 +349,6 @@ class UnmappedItemsController:
             unique_items.sort(key=lambda x: x.get("amount", 0), reverse=True)
         
         # Calculate pagination
-        total_count = len(unique_items)
         if total_count == 0:
             total_pages = 0
         else:
@@ -337,11 +364,8 @@ class UnmappedItemsController:
             # size=0 means get all items (used by export endpoints)
             paginated_items = unique_items
         
-        # Calculate total amount for verification
-        total_amount = sum(item.get('amount', 0) for item in paginated_items)
-        
         # Log summary for debugging
-        logger.info(f"Pagination result: {len(paginated_items)} items, total amount: ${total_amount:,.2f}")
+        logger.info(f"Pagination result: {len(paginated_items)} items")
         
         return {
             "items": paginated_items,

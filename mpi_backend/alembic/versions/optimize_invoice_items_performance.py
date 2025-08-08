@@ -29,6 +29,8 @@ def upgrade():
     op.create_index('ix_invoice_items_class', 'invoice_items', ['class_'])
     op.create_index('ix_invoice_items_is_active', 'invoice_items', 
                     ['is_active'])
+    op.create_index('ix_invoice_items_account', 'invoice_items', ['account'])
+    op.create_index('ix_invoice_items_ref_no', 'invoice_items', ['ref_no'])
     
     # Add composite indexes for common filter combinations
     op.create_index('ix_invoice_items_vendor_date', 'invoice_items', 
@@ -51,6 +53,14 @@ def upgrade():
         WHERE is_active = true OR is_active IS NULL
     """)
 
+    # Functional indexes to support lower(trim(...)) comparisons used in filters
+    op.execute("CREATE INDEX IF NOT EXISTS ix_invoice_items_vendor_norm ON invoice_items (lower(trim(vendor)))")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_invoice_items_item_norm ON invoice_items (lower(trim(item)))")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_invoice_items_ref_no_norm ON invoice_items (lower(trim(ref_no)))")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_invoice_items_customer_job_norm ON invoice_items (lower(trim(customer_job)))")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_invoice_items_class_norm ON invoice_items (lower(trim(class_)))")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_invoice_items_account_norm ON invoice_items (lower(trim(account)))")
+
 
 def downgrade():
     """Remove performance indexes"""
@@ -63,6 +73,8 @@ def downgrade():
     op.drop_index('ix_invoice_items_export_status', table_name='invoice_items')
     op.drop_index('ix_invoice_items_class', table_name='invoice_items')
     op.drop_index('ix_invoice_items_is_active', table_name='invoice_items')
+    op.drop_index('ix_invoice_items_account', table_name='invoice_items')
+    op.drop_index('ix_invoice_items_ref_no', table_name='invoice_items')
     
     # Drop composite indexes
     op.drop_index('ix_invoice_items_vendor_date', 
@@ -80,3 +92,9 @@ def downgrade():
     
     # Drop partial index
     op.execute("DROP INDEX IF EXISTS ix_invoice_items_active_vendor_date") 
+    op.execute("DROP INDEX IF EXISTS ix_invoice_items_vendor_norm")
+    op.execute("DROP INDEX IF EXISTS ix_invoice_items_item_norm")
+    op.execute("DROP INDEX IF EXISTS ix_invoice_items_ref_no_norm")
+    op.execute("DROP INDEX IF EXISTS ix_invoice_items_customer_job_norm")
+    op.execute("DROP INDEX IF EXISTS ix_invoice_items_class_norm")
+    op.execute("DROP INDEX IF EXISTS ix_invoice_items_account_norm")
