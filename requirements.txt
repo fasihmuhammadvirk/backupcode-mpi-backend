@@ -10,7 +10,6 @@ boto3==1.34.85
 botocore==1.34.134
 cachetools==5.5.2
 camelot-py==0.11.0
-certifi @ file:///C:/ci/certifi_1655907209390/work/certifi
 cffi==1.17.1
 chardet==5.2.0
 charset-normalizer==3.3.2
