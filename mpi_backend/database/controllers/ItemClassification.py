@@ -32,7 +32,8 @@ class ItemClassificationController:
         if category == 'M':
             return 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
         elif category == 'E':
-            return 'UnInvoiced JIP:Cost Of Materials:Job Equipments Purchased'
+            # Fix QuickBooks account naming: singular "Equipment" and no extra word
+            return 'UnInvoiced JIP:Cost Of Materials:Job Equipment'
         else:
             return ''
 

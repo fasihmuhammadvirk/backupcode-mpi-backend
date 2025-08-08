@@ -486,6 +486,7 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
                 query = db.query(Invoice.id)
                 # Optionally apply filters from request here if needed
                 invoice_ids = [row.id for row in query.all()]
+            
             if request.excluded_invoice_ids:
                 invoice_ids = [
                     invoice_id for invoice_id in invoice_ids
@@ -758,40 +759,31 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
 
     # Enhanced account and class mapping logic
     # Step 1: Map account field for one-letter values
-    # Account 'A' or 'a' → Additional Material
-    df.loc[df['account'].str.upper() == 'A', 'account'] = 'UnInvoiced JIP:Material:Additional Material'
-    # Account 'L' or 'l' → Labor
-    df.loc[df['account'].str.upper() == 'L', 'account'] = 'UnInvoiced JIP:Subcontractors Expense:Labor'
-    
-    # Step 2: Map class field for one-letter values (only if account is empty)
-    # Class 'A' or 'a' → Additional Material (only if account is still empty)
-    df.loc[(df['class_'].str.upper() == 'A') & (df['account'] == ''), 'account'] = 'UnInvoiced JIP:Material:Additional Material'
-    # Class 'L' or 'l' → Labor (only if account is still empty)
-    df.loc[(df['class_'].str.upper() == 'L') & (df['account'] == ''), 'account'] = 'UnInvoiced JIP:Subcontractors Expense:Labor'
-    
-    # Step 3: For descriptive classes, ensure proper account assignment
-    # This ensures invoice splitting based on class while preserving account
-    descriptive_classes = df[df['class_'].str.len() > 1]  # Classes longer than 1 character
-    if not descriptive_classes.empty:
-        # For items with descriptive classes, ensure proper account assignment
-        for idx in descriptive_classes.index:
-            class_val = df.loc[idx, 'class_']
-            account_val = df.loc[idx, 'account']
-            
-            if account_val == '':
-                # If no account defined, use default account
-                df.loc[idx, 'account'] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
-            # If account is defined, keep it as is (no class suffix)
+    # Account 'A' or 'a' → Special case: Labor & Material: Additional Material
+    df.loc[
+        df['account'].str.upper() == 'A',
+        'account'
+    ] = 'UnInvoiced JIP:Subcontractors Expense:Labor & Material:Additional Material'
 
-    # Vectorized sheet name mapping
+    # Step 2: Do NOT derive default account from class codes when account is empty.
+    # Instead, rely on ItemClassification (sheet_name → account) for default mapping.
+    
+    # Step 3: Do not derive default account from descriptive classes.
+    # Leave account blank here; it will be filled by classification mapping below.
+
+    # Vectorized default mapping using ItemClassification (sheet_name → account)
     unassigned_mask = df['account'] == ''
     if unassigned_mask.any():
-        df.loc[unassigned_mask, 'account'] = df.loc[unassigned_mask, 'sheet_name'].map(classification_cache).fillna('')
+        df.loc[unassigned_mask, 'account'] = (
+            df.loc[unassigned_mask, 'sheet_name']
+            .map(classification_cache)
+            .fillna('')
+        )
 
     # Special case mapping
     mpi_mappings = {
         'UIDI-Job Materials Purchased': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased',
-        'UIDI-Job Equipment': 'UnInvoiced JIP:Cost Of Materials:Job Equipments Purchased',
+        'UIDI-Job Equipment': 'UnInvoiced JIP:Cost Of Materials:Job Equipment',
         'UIDI-Sprinkler specialty item': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased',
         'UIDI-Drainage Material': 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
     }
@@ -895,19 +887,21 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
                 'Class': class_val or '',
             })
         result_rows.extend(invoice_lines)
-        # Only add a total line for each invoice if it has multiple accounts (split invoice)
-        if len(split_totals) > 1:
+        # Add a total line ONLY when the invoice is split across multiple accounts
+        if len(split_totals) > 1 and len(invoice_lines) > 0:
+            total_line_account = invoice_lines[0].get('account', '')
+            total_line_class = invoice_lines[0].get('Class', '')
             result_rows.append({
                 'Date': pd.to_datetime(date, errors='coerce').strftime('%m/%d/%Y') if pd.notnull(date) else '',
                 'Ref': ref_no,
                 'vendor': vendor,
                 'terms': '',
                 'bill due': '',
-                'account': '',
+                'account': total_line_account,
                 'Amount': round(authoritative_total, 4),
                 'Memo': memo,
                 'Customer Job': customer_job,
-                'Class': '',
+                'Class': total_line_class,
             })
     final_batch_entry = pd.DataFrame(result_rows)[[
         'Date', 'Ref', 'vendor', 'terms', 'bill due',

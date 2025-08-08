@@ -34,6 +34,28 @@ class InvoiceItemController:
         self._compiled_queries = {}
         self._setup_query_cache()
 
+    def _safe_numeric_cast(self, text_column):
+        """Safely cast a textual numeric column to Float.
+
+        - Removes commas
+        - Validates with a regex so bad rows don't crash the query
+        - Returns NULL when non-numeric so comparisons behave as expected
+        """
+        cleaned = func.replace(text_column, ',', '')
+        is_numeric = cleaned.op('~')('^-?[0-9]*\\.?[0-9]+$')
+        return case(
+            (
+                and_(
+                    text_column.isnot(None),
+                    text_column != '',
+                    func.length(text_column) < 100,
+                    is_numeric,
+                ),
+                cast(cleaned, Float),
+            ),
+            else_=None,
+        )
+
     def _setup_query_cache(self):
         """Pre-compile frequently used queries for ultra-fast execution."""
         try:
@@ -195,16 +217,30 @@ class InvoiceItemController:
                 for comp_filter in request.comparison_filters:
                     attr = getattr(InvoiceItem, comp_filter.column, None)
                     if attr is not None:
+                        # Ensure numeric comparison for 'amount' which is stored as String
+                        if comp_filter.column == 'amount':
+                            # Robust cast that ignores non-numeric rows
+                            attr = self._safe_numeric_cast(attr)
+                            try:
+                                comp_value = float(
+                                    str(comp_filter.value).replace(',', '')
+                                )
+                            except (TypeError, ValueError):
+                                # Skip invalid numeric filters gracefully
+                                continue
+                        else:
+                            comp_value = comp_filter.value
+
                         if comp_filter.operator == 'gt':
-                            query = query.filter(attr > comp_filter.value)
+                            query = query.filter(attr > comp_value)
                         elif comp_filter.operator == 'lt':
-                            query = query.filter(attr < comp_filter.value)
+                            query = query.filter(attr < comp_value)
                         elif comp_filter.operator == 'gte':
-                            query = query.filter(attr >= comp_filter.value)
+                            query = query.filter(attr >= comp_value)
                         elif comp_filter.operator == 'lte':
-                            query = query.filter(attr <= comp_filter.value)
+                            query = query.filter(attr <= comp_value)
                         elif comp_filter.operator == 'eq':
-                            query = query.filter(attr == comp_filter.value)
+                            query = query.filter(attr == comp_value)
 
             # Add ordering for consistent results
             query = query.order_by(
@@ -329,18 +365,34 @@ class InvoiceItemController:
 
         if request.comparison_filters:
             for comp_filter in request.comparison_filters:
+                # Handle amount (stored as text) by casting after removing commas
+                if getattr(comp_filter, 'column', None) == 'amount':
+                    column_sql = (
+                        "CASE WHEN amount IS NOT NULL AND amount <> '' "
+                        "AND length(amount) < 100 "
+                        "AND REPLACE(amount, ',', '') ~ '^-?[0-9]*\\.?[0-9]+$' "
+                        "THEN CAST(REPLACE(amount, ',', '') AS DOUBLE PRECISION) "
+                        "ELSE NULL END"
+                    )
+                    try:
+                        value_num = float(
+                            str(comp_filter.value).replace(',', '')
+                        )
+                    except (TypeError, ValueError):
+                        # Skip invalid numeric filters
+                        continue
+                else:
+                    column_sql = comp_filter.column
+                    value_num = comp_filter.value
+
                 if comp_filter.operator == 'gt':
-                    where_conditions.append(
-                        f"{comp_filter.column} > {comp_filter.value}")
+                    where_conditions.append(f"{column_sql} > {value_num}")
                 elif comp_filter.operator == 'lt':
-                    where_conditions.append(
-                        f"{comp_filter.column} < {comp_filter.value}")
+                    where_conditions.append(f"{column_sql} < {value_num}")
                 elif comp_filter.operator == 'gte':
-                    where_conditions.append(
-                        f"{comp_filter.column} >= {comp_filter.value}")
+                    where_conditions.append(f"{column_sql} >= {value_num}")
                 elif comp_filter.operator == 'lte':
-                    where_conditions.append(
-                        f"{comp_filter.column} <= {comp_filter.value}")
+                    where_conditions.append(f"{column_sql} <= {value_num}")
 
         # Combine conditions
         if where_conditions:
@@ -557,9 +609,9 @@ class InvoiceItemController:
 
             column = getattr(InvoiceItem, comp_filter.column)
 
-            # Special handling for 'amount' column (string to float conversion)
+            # Special handling for 'amount' column (string to float conversion with comma removal)
             if comp_filter.column == "amount":
-                column = cast(column, Float)
+                column = self._safe_numeric_cast(column)
 
             try:
                 value = self._convert_filter_value(
@@ -1719,9 +1771,9 @@ class InvoiceItemController:
 
             column = getattr(InvoiceItem, comp_filter['column'])
 
-            # Special handling for 'amount' column (string to float conversion)
+            # Special handling for 'amount' column (string to float conversion with comma removal)
             if comp_filter['column'] == "amount":
-                column = cast(column, Float)
+                column = self._safe_numeric_cast(column)
 
             # Handle type casting for comparison filters with better error handling
             try:
@@ -1801,7 +1853,8 @@ class InvoiceItemController:
         Optimized value conversion with better error handling.
         """
         if comp_filter['column'] == "amount":
-            return float(comp_filter['value'])
+            # Remove thousand separators before casting to float
+            return float(str(comp_filter['value']).replace(',', ''))
         elif hasattr(column.type, 'python_type'):
             if column.type.python_type == int:
                 return int(comp_filter['value'])

@@ -557,20 +557,17 @@ def save_ultra_fast_excel(final_df, output_path):
                     if ref != current_ref:
                         # Process previous invoice
                         if current_ref and current_invoice_rows:
-                            # Check if this invoice has multiple rows (including total line)
+                            # Apply formatting for previous invoice group
                             if len(current_invoice_rows) > 1:
-                                # Multiple rows invoice: apply light pink to account rows, dark pink to total row
-                                for row_data in current_invoice_rows:
-                                    if row_data['account'] != '':  # Account row
-                                        worksheet.set_row(
-                                            row_data['row_idx'] + 1, None,
-                                            light_pink_format
-                                        )
-                                    else:  # Total row
-                                        worksheet.set_row(
-                                            row_data['row_idx'] + 1, None,
-                                            dark_pink_format
-                                        )
+                                # Light pink for all account rows except the last row,
+                                # Dark pink for the last row (total line)
+                                for i, row_data in enumerate(current_invoice_rows):
+                                    is_last = (i == len(current_invoice_rows) - 1)
+                                    worksheet.set_row(
+                                        row_data['row_idx'] + 1,
+                                        None,
+                                        dark_pink_format if is_last else light_pink_format
+                                    )
 
                         # Start new invoice
                         current_ref = ref
@@ -584,20 +581,15 @@ def save_ultra_fast_excel(final_df, output_path):
 
                 # Process the last invoice
                 if current_ref and current_invoice_rows:
-                    # Check if this invoice has multiple rows (including total line)
+                    # Apply formatting for the last invoice group
                     if len(current_invoice_rows) > 1:
-                        # Multiple rows invoice: apply light pink to account rows, dark pink to total row
-                        for row_data in current_invoice_rows:
-                            if row_data['account'] != '':  # Account row
-                                worksheet.set_row(
-                                    row_data['row_idx'] + 1, None,
-                                    light_pink_format
-                                )
-                            else:  # Total row
-                                worksheet.set_row(
-                                    row_data['row_idx'] + 1, None,
-                                    dark_pink_format
-                                )
+                        for i, row_data in enumerate(current_invoice_rows):
+                            is_last = (i == len(current_invoice_rows) - 1)
+                            worksheet.set_row(
+                                row_data['row_idx'] + 1,
+                                None,
+                                dark_pink_format if is_last else light_pink_format
+                            )
 
                 # Apply autofilter
                 worksheet.autofilter(0, 0, len(final_df), len(final_df.columns) - 1)
