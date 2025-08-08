@@ -112,14 +112,18 @@ def scheduled_uidi_no_match_update():
     def _execute():
         try:
             logger.info("Starting scheduled UIDI/NO Match update")
-            from mpi_backend.database import SessionLocal
             from mpi_backend.database.controllers.GoogleSheetSyncController import (
                 GoogleSheetSyncController,
             )
 
-            with SessionLocal() as temp_db:
-                GoogleSheetSyncController.execute_sync_task(temp_db, "update_no_match_uidi")
-            logger.info("Scheduled UIDI/NO Match update completed")
+            # Submit the actual background worker (non-blocking)
+            ack = GoogleSheetSyncController._execute_sync_task_worker(
+                None, "update_no_match_uidi"
+            )
+            logger.info(
+                "Scheduled UIDI/NO Match update submitted: %s",
+                ack.get("message", "submitted"),
+            )
         except Exception as exc:  # noqa: BLE001
             logger.error("UIDI/NO Match update failed: %s", exc)
 
@@ -131,14 +135,18 @@ def scheduled_all_mappings_update():
     def _execute():
         try:
             logger.info("Starting scheduled All Mappings update")
-            from mpi_backend.database import SessionLocal
             from mpi_backend.database.controllers.GoogleSheetSyncController import (
                 GoogleSheetSyncController,
             )
 
-            with SessionLocal() as temp_db:
-                GoogleSheetSyncController.execute_sync_task(temp_db, "update_all")
-            logger.info("Scheduled All Mappings update completed")
+            # Submit the actual background worker (non-blocking)
+            ack = GoogleSheetSyncController._execute_sync_task_worker(
+                None, "update_all"
+            )
+            logger.info(
+                "Scheduled All Mappings update submitted: %s",
+                ack.get("message", "submitted"),
+            )
         except Exception as exc:  # noqa: BLE001
             logger.error("All Mappings update failed: %s", exc)
 
