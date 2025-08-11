@@ -729,6 +729,12 @@ class InvoiceItemController:
         # Execute query and get results
         items = query.all()
 
+        # Opportunistically backfill missing accounts for returned items
+        try:
+            self._ensure_accounts_assigned(items)
+        except Exception:
+            pass
+
         # Process results for display
         invoices_items = []
         for item in items:
@@ -758,6 +764,34 @@ class InvoiceItemController:
             "has_next": has_next,
             "has_prev": has_prev
         }
+
+    def _ensure_accounts_assigned(self, items: List[InvoiceItem]) -> None:
+        """
+        Assign accounts to items in-memory and persist if missing.
+        Does not overwrite any non-empty account values.
+        """
+        updated = False
+        for item in items:
+            try:
+                current = (item.account or '').strip()
+                if current:
+                    continue
+                new_letter = self._auto_assign_account(
+                    sheet_name=getattr(item, 'sheet_name', ''),
+                    current_account=current,
+                    mpi_item=getattr(item, 'mpi_item', '')
+                )
+                if new_letter and new_letter != current:
+                    item.account = new_letter
+                    updated = True
+            except Exception:
+                continue
+
+        if updated:
+            try:
+                self.db.commit()
+            except Exception:
+                self.db.rollback()
 
     def insert_invoice_items(self, row, filename, invoice_id):
         """
@@ -793,6 +827,13 @@ class InvoiceItemController:
                 f"Item already exists for invoice_id: {invoice_id}, ref_no: {row['Ref NO']}, vendor: {row['Vendor']}, date: {parsed_date}, amount: {row['Amount']}. Skipping insertion.")
             return
 
+        # Determine account assignment based on item classification
+        auto_account = self._auto_assign_account(
+            sheet_name=row.get('Sheet Name', ''),
+            current_account=row.get('Account', ''),
+            mpi_item=row.get('MpiItem', '')
+        )
+
         new_item = InvoiceItem(
             filename=filename,
             sheet_name=row['Sheet Name'],
@@ -811,7 +852,7 @@ class InvoiceItemController:
             bill=row['Bill'],
             vendor=row['Vendor'],
             class_=row['Class'],
-            account=row.get('Account', ''),  # New account field with default empty string
+            account=auto_account,
             memo=row['Memo'],
             buyer=row['Buyer'],
             date_added=row['email_date'],
@@ -819,6 +860,87 @@ class InvoiceItemController:
         )
         self.db.add(new_item)
         self.db.commit()
+        # Normalize long QB account paths to letters after commit, if needed
+        try:
+            if new_item.account and isinstance(new_item.account, str):
+                low = new_item.account.lower()
+                if 'job materials purchased' in low:
+                    if new_item.account != 'M':
+                        new_item.account = 'M'
+                        self.db.commit()
+                elif 'job equipment' in low:
+                    if new_item.account != 'E':
+                        new_item.account = 'E'
+                        self.db.commit()
+        except Exception:
+            self.db.rollback()
+
+    def _auto_assign_account(self, sheet_name: Optional[str], current_account: Optional[str], mpi_item: Optional[str] = None) -> str:
+        """
+        Decide account value for a new item based on ItemClassification table.
+        Rules:
+        - Preserve explicit 'A' if provided
+        - If UIDI mpi_item category implies M/E, use that letter
+        - Else if classification category is 'M' or 'E' (exact match), use that letter
+        - Else try fuzzy classification (like QuickBooks) and map to M/E only
+        - If category is 'L' or unknown, keep current
+        - Return empty string if nothing applicable and current is falsy
+        """
+        try:
+            current = (current_account or '').strip()
+            if current.upper() == 'A':
+                return current
+
+            # UIDI-specific mapping by mpi_item (case-insensitive exacts)
+            mpi = (mpi_item or '').strip()
+            if mpi:
+                mpi_upper = mpi.upper()
+                uidi_to_letter = {
+                    'UIDI-JOB MATERIALS PURCHASED': 'M',
+                    'UIDI JOB MATERIAL': 'M',
+                    'UIDI-JOB EQUIPMENT': 'E',
+                    'UIDI-SPRINKLER SPECIALTY ITEM': 'M',
+                    'UIDI-DRAINAGE MATERIAL': 'M',
+                }
+                if mpi_upper in uidi_to_letter and not current:
+                    return uidi_to_letter[mpi_upper]
+
+            sheet = (sheet_name or '').strip()
+            if not sheet:
+                return current
+
+            # Lazy import to avoid circulars
+            from mpi_backend.database.models.ItemClassification import ItemClassification as IC
+
+            # First try exact match on classification table
+            row = self.db.query(IC).filter(IC.item == sheet).first()
+            if row:
+                category = (row.category or '').strip().upper()
+                if category == 'L':
+                    return current
+                if category in ('M', 'E'):
+                    return category
+
+            # Fuzzy fallback via ItemClassificationController (maps similar to QuickBooks logic)
+            try:
+                from mpi_backend.database.controllers.ItemClassification import (
+                    ItemClassificationController,
+                )
+                icc = ItemClassificationController(self.db)
+                qb_account = icc.get_classification(sheet)
+                # Map QB account string to our letter codes; only accept M/E
+                qb_lower = (qb_account or '').lower()
+                if 'job materials purchased' in qb_lower:
+                    return 'M'
+                if 'job equipment' in qb_lower:
+                    return 'E'
+                # Do not auto-set 'A' here; A is user-chosen
+            except Exception:
+                pass
+
+            return current
+        except Exception:
+            return (current_account or '').strip()
 
     def invoice_exists(self, reference_no, vendor):
         """

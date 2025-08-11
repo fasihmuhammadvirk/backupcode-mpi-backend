@@ -1394,6 +1394,17 @@ class ItemsMappingController:
                 item.mpi_item = new_mpi_code
                 item.mpi_description = new_description
                 item.sheet_name = sheet_name
+
+                # Assign account based on new mapping/sheet if applicable
+                try:
+                    self._assign_account_for_item(
+                        db=db,
+                        item_obj=item,
+                        sheet_name=sheet_name,
+                        mpi_item=new_mpi_code,
+                    )
+                except Exception:
+                    pass
                 updated_count += 1
 
                 if was_uidi:
@@ -1413,6 +1424,88 @@ class ItemsMappingController:
             logger.error(f"Error propagating mapping changes: {str(e)}")
             db.rollback()
             raise
+
+    def _determine_account_letter(self, db: Session, sheet_name: Optional[str], current_account: Optional[str], mpi_item: Optional[str]) -> str:
+        """
+        Determine account letter (M/E) from sheet_name and mpi_item.
+        - Preserve 'A'
+        - UIDI categories → M/E
+        - Exact ItemClassification by sheet_name → M/E; skip 'L'
+        - Fuzzy fallback via ItemClassificationController.get_classification → map to M/E
+        """
+        try:
+            current = (current_account or '').strip()
+            if current.upper() == 'A':
+                return current
+
+            # UIDI mapping based on mpi_item
+            key = (mpi_item or '').strip().upper()
+            if key:
+                uidi_map = {
+                    'UIDI-JOB MATERIALS PURCHASED': 'M',
+                    'UIDI JOB MATERIAL': 'M',
+                    'UIDI-JOB EQUIPMENT': 'E',
+                    'UIDI-SPRINKLER SPECIALTY ITEM': 'M',
+                    'UIDI-DRAINAGE MATERIAL': 'M',
+                }
+                if key in uidi_map:
+                    return uidi_map[key]
+
+            # Exact classification by sheet_name
+            sheet = (sheet_name or '').strip()
+            if sheet:
+                try:
+                    from mpi_backend.database.models.ItemClassification import ItemClassification as IC
+                    row = db.query(IC).filter(IC.item == sheet).first()
+                    if row:
+                        cat = (row.category or '').strip().upper()
+                        if cat in ('M', 'E'):
+                            return cat
+                except Exception:
+                    pass
+
+                # Fuzzy fallback using controller
+                try:
+                    from mpi_backend.database.controllers.ItemClassification import ItemClassificationController
+                    icc = ItemClassificationController(db)
+                    qb_account = icc.get_classification(sheet)
+                    qb_lower = (qb_account or '').lower()
+                    if 'job materials purchased' in qb_lower:
+                        return 'M'
+                    if 'job equipment' in qb_lower:
+                        return 'E'
+                except Exception:
+                    pass
+
+            return current
+        except Exception:
+            return (current_account or '').strip()
+
+    def _assign_account_for_item(self, db: Session, item_obj, sheet_name: Optional[str], mpi_item: Optional[str]) -> None:
+        """
+        Assign account letter to a single invoice item if missing or if it's a long QB path.
+        Never overwrite explicit 'A'.
+        """
+        current = (getattr(item_obj, 'account', '') or '').strip()
+        if current.upper() == 'A':
+            return
+        # Normalize long QB paths to letters
+        low = current.lower()
+        if current and low:
+            if 'job materials purchased' in low:
+                if current != 'M':
+                    item_obj.account = 'M'
+                return
+            if 'job equipment' in low:
+                if current != 'E':
+                    item_obj.account = 'E'
+                return
+
+        # If empty or not mapped, determine from classification
+        if not current or current not in ('M', 'E'):
+            letter = self._determine_account_letter(db, sheet_name, current, mpi_item)
+            if letter in ('M', 'E') and letter != current:
+                item_obj.account = letter
 
     def _get_db_session(self):
         """Get a database session object, whether db_context is a factory or session."""

@@ -104,6 +104,28 @@ class InvoiceItems(BaseModel):
         flush()
         return ' '.join(filter(None, segments))
 
+    @validator('account', pre=True)
+    def normalize_account(cls, value):
+        """
+        Normalize QuickBooks account strings to letter codes for responses.
+        - 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased' -> 'M'
+        - 'UnInvoiced JIP:Cost Of Materials:Job Equipment' -> 'E'
+        Preserve 'A', 'M', 'E'. Leave others as-is.
+        """
+        if value is None:
+            return value
+        s = str(value).strip()
+        if not s:
+            return s
+        if s in ('A', 'M', 'E'):
+            return s
+        low = s.lower()
+        if 'job materials purchased' in low:
+            return 'M'
+        if 'job equipment' in low:
+            return 'E'
+        return s
+
 
 class PaginatedInvoiceItemsResponse(BaseModel):
     items: List[InvoiceItems]
