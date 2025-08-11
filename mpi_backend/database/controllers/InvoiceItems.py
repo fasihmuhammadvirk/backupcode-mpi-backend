@@ -99,6 +99,43 @@ class InvoiceItemController:
         except Exception as e:
             logger.error(f"Failed to setup query cache: {e}")
 
+    def _apply_priority_ordering(self, query, order_by_filters):
+        """Ordering policy:
+        - If no order_by or it contains only one entry with column=id and order=desc,
+          apply default: date desc, then id desc.
+        - Otherwise, honor the provided order_by sequence exactly; append id desc
+          at the end as a stable tiebreaker if not already present.
+        """
+        # Normalize incoming order_by
+        normalized: List[tuple] = []
+        if order_by_filters:
+            for ob in order_by_filters:
+                try:
+                    col = (ob.column or '').strip()
+                    ord_dir = (ob.order or '').strip().lower()
+                except Exception:
+                    continue
+                if not hasattr(InvoiceItem, col):
+                    continue
+                if ord_dir not in ('asc', 'desc'):
+                    ord_dir = 'asc'
+                normalized.append((col, ord_dir))
+
+        # Case 1: default ordering trigger (none or only id desc)
+        if not normalized or (len(normalized) == 1 and normalized[0][0] == 'id' and normalized[0][1] == 'desc'):
+            query = query.order_by(InvoiceItem.date.desc(), InvoiceItem.id.desc())
+            return query
+
+        # Case 2: honor user-provided ordering; append id desc as tiebreaker if missing
+        for col, ord_dir in normalized:
+            order_col = getattr(InvoiceItem, col)
+            query = query.order_by(order_col.asc() if ord_dir == 'asc' else order_col.desc())
+
+        if not any(col == 'id' for col, _ in normalized):
+            query = query.order_by(InvoiceItem.id.desc())
+
+        return query
+
     @lru_cache(maxsize=256)
     def _get_distinct_values_ultra_optimized(
         self,
@@ -458,18 +495,14 @@ class InvoiceItemController:
     def _get_optimized_count(self, query) -> int:
         """Get count with performance optimizations."""
         try:
-            # Use subquery for complex queries to optimize counting
-            count_query = select(func.count()).select_from(query.subquery())
-            return self.db.execute(count_query).scalar()
+            # Strip ordering for accurate counts on some backends
+            count_query = select(func.count()).select_from(query.order_by(None).subquery())
+            result = self.db.execute(count_query).scalar()
+            return int(result or 0)
         except Exception:
-            # Fallback to estimated count for very large datasets
+            # Safe fallback: use ORM count (accurate, may be slower but correct)
             try:
-                estimated = self.db.execute(text("""
-                    SELECT reltuples::bigint AS estimate
-                    FROM pg_class 
-                    WHERE relname = 'invoice_items'
-                """)).scalar()
-                return int(estimated) if estimated else 0
+                return int(query.order_by(None).count())
             except Exception:
                 return 0
 
@@ -594,6 +627,12 @@ class InvoiceItemController:
         # Apply empty item filter
         query = self._apply_empty_item_filter(query)
 
+        # Exclude rows with empty or NULL export_status globally
+        query = query.filter(
+            InvoiceItem.export_status.isnot(None),
+            func.trim(InvoiceItem.export_status) != ''
+        )
+
         # Apply 'IN' filters dynamically
         for column_name, values in request.filters.items():
             if not hasattr(InvoiceItem, column_name):
@@ -618,7 +657,7 @@ class InvoiceItemController:
             # For string columns, use case-insensitive and trimmed equality to leverage functional indexes
             if column_name in ['ref_no', 'vendor', 'item', 'description',
                                'customer_job', 'po_number', 'bill', 'buyer',
-                               'memo', 'class_', 'account']:
+                               'memo', 'class_', 'account', 'export_status']:
                 normalized_col = func.lower(func.trim(column))
                 conditions = []
                 for cleaned_value in cleaned_values:
@@ -678,20 +717,8 @@ class InvoiceItemController:
 
             column_attr = getattr(InvoiceItem, col_param)
 
-            # Apply sorting if specified
-            if request.order_by:
-                for order_filter in request.order_by:
-                    if not hasattr(InvoiceItem, order_filter.column):
-                        continue
-                    order_column = getattr(InvoiceItem, order_filter.column)
-                    if order_filter.order == "asc":
-                        query = query.order_by(order_column.asc())
-                    elif order_filter.order == "desc":
-                        query = query.order_by(order_column.desc())
-            else:
-                # Default sorting
-                query = query.order_by(
-                    InvoiceItem.date.desc(), InvoiceItem.id.desc())
+            # Enforce priority ordering (date then id)
+            query = self._apply_priority_ordering(query, request.order_by)
 
             # Execute query to get specific column values
             results = query.with_entities(column_attr).all()
@@ -703,21 +730,8 @@ class InvoiceItemController:
 
             return column_values
 
-        # Apply sorting
-        if request.order_by:
-            for order_filter in request.order_by:
-                if not hasattr(InvoiceItem, order_filter.column):
-                    continue
-
-                column = getattr(InvoiceItem, order_filter.column)
-                if order_filter.order == "asc":
-                    query = query.order_by(column.asc())
-                elif order_filter.order == "desc":
-                    query = query.order_by(column.desc())
-        else:
-            # Default sorting by date descending
-            query = query.order_by(
-                InvoiceItem.date.desc(), InvoiceItem.id.desc())
+        # Enforce priority ordering (date then id) for main listing
+        query = self._apply_priority_ordering(query, request.order_by)
 
         # Get total count efficiently using subquery-based count
         total = self._get_optimized_count(query)
@@ -2047,13 +2061,28 @@ class InvoiceItemController:
             elif column.type.python_type == float:
                 return float(comp_filter['value'])
             elif column.type.python_type == date:
-                return date.fromisoformat(comp_filter['value'])
+                # Accept ISO date or ISO datetime; use the date portion
+                raw = comp_filter['value']
+                if isinstance(raw, date):
+                    return raw
+                if isinstance(raw, str):
+                    try:
+                        # Support 'YYYY-MM-DD' and 'YYYY-MM-DDTHH:MM:SS'
+                        return date.fromisoformat(raw[:10])
+                    except Exception:
+                        # As a fallback, try parsing common formats MM/DD/YYYY
+                        try:
+                            return datetime.strptime(raw, "%m/%d/%Y").date()
+                        except Exception:
+                            pass
+                return raw
         return comp_filter['value']
 
     def _apply_operator_filter(self, query, column, operator: str, value):
         """
         Optimized operator filter application.
         """
+        op = (operator or '').strip().lower()
         operator_map = {
             "gt": column > value,
             "lt": column < value,
@@ -2062,8 +2091,8 @@ class InvoiceItemController:
             "eq": column == value
         }
 
-        if operator in operator_map:
-            return query.filter(operator_map[operator])
+        if op in operator_map:
+            return query.filter(operator_map[op])
         return query
 
     def get_price_history(self, request):

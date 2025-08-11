@@ -24,6 +24,7 @@ class InvoiceItems(BaseModel):
     vendor: Optional[str]
     class_: Optional[str]  # 'class' is reserved in Python
     account: Optional[str]  # New account field for account mapping
+    export_status: Optional[str]
     memo: Optional[str]
     buyer: Optional[str]
     date_added: Optional[str]
