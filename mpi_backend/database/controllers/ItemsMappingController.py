@@ -351,25 +351,68 @@ class ItemsMappingController:
     def _get_mappings_by_mpi_type(self, db):
         """Helper method to get mappings by MPI type"""
         try:
+            # Include valid mappings and also UIDI items (temporary placeholders)
+            # Exclude only true invalids and explicit "No Match" variants
             query_result = db.query(ItemsMapping).filter(
-                ~ItemsMapping.mpi_code.like("UIDI%"),
-                ItemsMapping.mpi_code != "No Match",
-                ItemsMapping.mpi_code != "No Match / UIDI",
                 ItemsMapping.mpi_code.isnot(None),
-                ItemsMapping.mpi_code != ""
+                ItemsMapping.mpi_code != "",
+                ItemsMapping.mpi_code != "No Match",
             ).all()
 
             # Additional validation to filter out any temporary mappings
             data = {}
             for item in query_result:
-                if not is_temporary_mapping(item.mpi_code, item.description):
-                    data[item.mpi_code] = {
+                # If UIDI item (case-insensitive, ignore surrounding whitespace),
+                # include with type forcibly set to "UDI" and keep any description present
+                mpi_code_clean = str(item.mpi_code).strip()
+                if mpi_code_clean.upper().startswith("UIDI"):
+                    data[mpi_code_clean] = {
+                        "type": "UDI",
+                        "mpi_description": item.description or ""
+                    }
+                # For non-UIDI, keep excluding other temporary placeholders
+                elif not is_temporary_mapping(mpi_code_clean, item.description):
+                    data[mpi_code_clean] = {
                         "type": item.google_sheet_name,
                         "mpi_description": item.description
                     }
                 else:
                     logger.warning(
                         f"Filtered out temporary mapping from MPI type data: {item.mpi_code}")
+
+            # Also include UIDI entries that are not present in supplier_item_mappings but appear
+            # in invoice items as mpi_item values (e.g., No Match / UIDI or UIDI*** codes).
+            # For these, we set type to "UDI" and use any available description.
+            try:
+                invoice_uidi_items = (
+                    db.query(InvoiceItem.mpi_item, InvoiceItem.mpi_description, InvoiceItem.description)
+                    .filter(
+                        InvoiceItem.mpi_item.isnot(None),
+                        InvoiceItem.mpi_item != "",
+                        # Include both explicit UIDI codes and the combined label
+                        or_(
+                            InvoiceItem.mpi_item.ilike("UIDI%"),
+                            InvoiceItem.mpi_item == "No Match / UIDI"
+                        )
+                    )
+                    .all()
+                )
+
+                for mpi_item_value, mpi_desc, item_desc in invoice_uidi_items:
+                    key = str(mpi_item_value).strip()
+                    if not key:
+                        continue
+                    # Skip if already present from the permanent mappings
+                    if key in data:
+                        continue
+                    # Use mpi_description if present, else fallback to item description, else empty
+                    desc = (mpi_desc or item_desc or "").strip()
+                    data[key] = {
+                        "type": "UDI",
+                        "mpi_description": desc
+                    }
+            except Exception as inv_err:
+                logger.warning(f"Failed to enrich UIDI types from invoice items: {inv_err}")
 
             return data
         except Exception as e:
@@ -403,6 +446,20 @@ class ItemsMappingController:
         try:
             # Clean and validate the mapping data
             cleaned_data = clean_mapping_data(mapping_data)
+
+            # Guard against empty/whitespace-only supplier_item_ids for both update and create paths
+            supplier_item_ids_clean = cleaned_data.get("supplier_item_ids", "")
+            if isinstance(supplier_item_ids_clean, str):
+                supplier_item_ids_clean = supplier_item_ids_clean.strip()
+            if not supplier_item_ids_clean:
+                logger.info("Skipping mapping update/create due to empty supplier_item_ids")
+                return {
+                    "status": "skipped_empty_item",
+                    "message": "supplier_item_ids cannot be empty or whitespace",
+                    "action": "no_change"
+                }
+            # Persist trimmed value
+            cleaned_data["supplier_item_ids"] = supplier_item_ids_clean
             is_valid, validation_errors = validate_mapping_for_permanent_storage(
                 cleaned_data)
 
@@ -485,12 +542,30 @@ class ItemsMappingController:
                 old_description = conflicting_mapping.description
 
                 # Update existing mapping (exclude supplier_id to avoid conflicts)
+                # Do NOT overwrite fields with None or empty strings
+                updated_fields = []
                 for key, value in cleaned_data.items():
-                    if key != 'supplier_id':  # Don't update supplier_id as it's already set
-                        setattr(conflicting_mapping, key, value)
+                    if key == 'supplier_id':
+                        continue
+                    if value is None:
+                        continue
+                    if isinstance(value, str) and value.strip() == "":
+                        continue
+                    setattr(conflicting_mapping, key, value)
+                    updated_fields.append(key)
+
+                if not updated_fields:
+                    logger.info(
+                        f"Skipped updating mapping due to only empty/None values provided: {cleaned_data.get('supplier_item_ids', '')}")
+                    return {
+                        "status": "skipped_empty_update",
+                        "message": "No non-empty fields provided to update",
+                        "action": "no_change",
+                        "mapping_id": conflicting_mapping.id
+                    }
 
                 logger.info(
-                    f"Updated existing mapping: {cleaned_data['supplier_item_ids']} | {old_mpi_code} -> {cleaned_data['mpi_code']}")
+                    f"Updated existing mapping fields {updated_fields}: {cleaned_data['supplier_item_ids']} | {old_mpi_code} -> {cleaned_data['mpi_code']}")
             else:
                 # Create new mapping (append)
                 is_update = False

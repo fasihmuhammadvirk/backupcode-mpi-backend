@@ -259,9 +259,10 @@ def sync_status(
     return {
         "status": "running" if status["is_running"] else "idle",
         "current_operation": current_operation,
-        "last_sync_time": status["last_sync_time"],
-        "last_no_match_uidi_update": status["last_update_no_match_uidi_time"],
-        "last_full_update": status["last_update_all_time"]
+        # Ensure ISO strings are returned for timestamps
+        "last_sync_time": status.get("last_sync_time"),
+        "last_no_match_uidi_update": status.get("last_update_no_match_uidi_time"),
+        "last_full_update": status.get("last_update_all_time"),
     }
 
 

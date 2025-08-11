@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field, validator
+import re
 from typing import List, Optional, Dict
 from datetime import date
 from uuid import UUID
@@ -47,6 +48,61 @@ class InvoiceItems(BaseModel):
         if isinstance(value, date):
             return value.strftime("%m/%d/%Y")
         return value
+
+    @validator('buyer', pre=True)
+    def normalize_buyer(cls, value):
+        """
+        Normalize buyer strings to collapse internal spacing within alpha and numeric segments
+        while preserving segment order. Examples:
+          - "PR ST GE 12 34 98" -> "PRSTGE 123498"
+          - "an dr e w 3 4 7 52 6 -9 5 90" -> "andrew 3475269590"
+          - "Arlem(929) 442-955" -> "Arlem 929442955"
+          - "YOELY 3472102715 POD" -> "YOELY 3472102715 POD"
+        """
+        if value is None:
+            return value
+        s = str(value).strip()
+        if not s:
+            return s
+
+        # Replace non-alphanumeric characters with spaces, keep letters, digits, spaces
+        cleaned = re.sub(r"[^A-Za-z0-9\s]", " ", s)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+        segments = []
+        current = []
+        current_type = None  # 'alpha' | 'digit' | 'other'
+
+        def flush():
+            nonlocal current, current_type
+            if not current:
+                return
+            if current_type == 'alpha':
+                segments.append(''.join(current))
+            elif current_type == 'digit':
+                segments.append(''.join(current))
+            else:
+                segments.append(' '.join(current))
+            current = []
+            current_type = None
+
+        for tok in cleaned.split(' '):
+            if not tok:
+                continue
+            tok_type = 'alpha' if tok.isalpha() else ('digit' if tok.isdigit() else 'other')
+            if current_type is None:
+                current_type = tok_type
+                current.append(re.sub(r"\s+", "", tok))
+                continue
+            if tok_type == current_type and tok_type in ('alpha', 'digit'):
+                current.append(re.sub(r"\s+", "", tok))
+            else:
+                flush()
+                current_type = tok_type
+                current.append(re.sub(r"\s+", "", tok))
+
+        flush()
+        return ' '.join(filter(None, segments))
 
 
 class PaginatedInvoiceItemsResponse(BaseModel):

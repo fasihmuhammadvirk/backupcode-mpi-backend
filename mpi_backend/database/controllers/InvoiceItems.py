@@ -1582,6 +1582,18 @@ class InvoiceItemController:
             # Get the new MPI item value, defaulting to current value if not in request
             new_mpi_item = item_data.get('mpi_item', item.mpi_item)
 
+            # Disallow updating mpi_item to empty/whitespace or None if it was previously non-empty
+            if 'mpi_item' in item_data:
+                incoming_mpi_item = item_data.get('mpi_item')
+                was_non_empty = bool(item.mpi_item) and str(item.mpi_item).strip() != ""
+                becomes_empty = (incoming_mpi_item is None) or (
+                    isinstance(incoming_mpi_item, str) and incoming_mpi_item.strip() == ""
+                )
+                if was_non_empty and becomes_empty:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Cannot set mpi_item to empty for invoice item ID {item_id}")
+
             # Check if it's a valid MPI item (not "No Match" and not starting with "UIDI")
             is_valid_mpi = (new_mpi_item and
                             new_mpi_item.lower() != "no match" and

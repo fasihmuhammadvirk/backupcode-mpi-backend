@@ -179,14 +179,39 @@ class GoogleSheetSyncController:
         Returns:
             Dictionary with sync status information
         """
+        # Load persisted timestamps from stats file as fallback so values survive restarts
+        try:
+            stats_manager = MappingStatsManager()
+            item_stats = stats_manager.get_item_mapping_stats()  # contains last_sync_time
+            overall_stats = stats_manager.get_overall_stats()    # contains last_uidi_update, last_all_update
+        except Exception:
+            item_stats, overall_stats = {}, {}
+
+        def _normalize_time(value):
+            # Return ISO string or None
+            if not value:
+                return None
+            try:
+                # If it's already a string (from JSON), return as-is
+                if isinstance(value, str):
+                    return value
+                # If it's a datetime, convert to isoformat
+                return value.isoformat()
+            except Exception:
+                return str(value)
+
+        last_sync_time = cls._last_sync_time or item_stats.get("last_sync_time")
+        last_uidi_time = cls._last_update_no_match_uidi_time or overall_stats.get("last_uidi_update")
+        last_all_time = cls._last_update_all_time or overall_stats.get("last_all_update")
+
         return {
             "is_running": cls._sync_task_running,
             "current_operation": cls._current_operation,
             "current_sub_operation": cls._current_sub_operation,
-            "last_sync_time": cls._last_sync_time,
-            "last_update_no_match_uidi_time": cls._last_update_no_match_uidi_time,
-            "last_update_all_time": cls._last_update_all_time,
-            "last_update_invalid_time": cls._last_update_invalid_time
+            "last_sync_time": _normalize_time(last_sync_time),
+            "last_update_no_match_uidi_time": _normalize_time(last_uidi_time),
+            "last_update_all_time": _normalize_time(last_all_time),
+            "last_update_invalid_time": _normalize_time(cls._last_update_invalid_time),
         }
 
     def perform_sync_task(self, operation: str = 'sync') -> Dict[str, Any]:
@@ -258,9 +283,15 @@ class GoogleSheetSyncController:
             "operation": "sync"
         }
 
-        # Update last sync time on success
+        # Update last sync time on success and persist to stats file
         if final_result["success"]:
-            self.__class__._last_sync_time = datetime.now()
+            now_ts = datetime.now()
+            self.__class__._last_sync_time = now_ts
+            try:
+                stats_manager = MappingStatsManager()
+                stats_manager.update_sync_times("item_sync", timestamp=now_ts)
+            except Exception as e:
+                logger.error(f"Error persisting item sync time: {str(e)}")
 
         # Log comprehensive summary at the end
         self._log_comprehensive_summary(

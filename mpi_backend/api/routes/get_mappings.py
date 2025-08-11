@@ -84,6 +84,14 @@ def update_item_mappings(request: UpdateMappingRequest, db: Session = Depends(ge
         temporary_redirected = 0
 
         for mapping in request.mapping:
+            # Normalize supplier_item_ids in request payload to avoid empty/whitespace-only inserts
+            if isinstance(mapping.get("supplier_item_ids"), str) and mapping["supplier_item_ids"].strip() == "":
+                results.append({
+                    "status": "skipped_empty_item",
+                    "message": "supplier_item_ids cannot be empty or whitespace",
+                    "action": "no_change"
+                })
+                continue
             result = ItemsMappingController(db).update_mapping(
                 request.supplier_id, mapping)
             results.append(result)
