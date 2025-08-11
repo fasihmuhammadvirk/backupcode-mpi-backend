@@ -123,17 +123,25 @@ def sync_mapping(
         return SyncMappingsResponse(
             success=False,
             message=f"Cannot start sync: {blocking_job} is currently running",
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
+            last_sync_time=status.get("last_sync_time"),
+            last_update_no_match_uidi_time=status.get("last_update_no_match_uidi_time"),
+            last_update_all_time=status.get("last_update_all_time"),
         )
 
     # Start enhanced sync in the background using the worker method
     background_tasks.add_task(
         GoogleSheetSyncController._execute_sync_task_worker, db, 'sync')
 
+    # Include last-known update times in the response for visibility
+    status = sync_controller.get_sync_status()
     return SyncMappingsResponse(
         success=True,
         message="Sync task started manually",
-        timestamp=datetime.now()
+        timestamp=datetime.now(),
+        last_sync_time=status.get("last_sync_time"),
+        last_update_no_match_uidi_time=status.get("last_update_no_match_uidi_time"),
+        last_update_all_time=status.get("last_update_all_time"),
     )
 
 
@@ -399,10 +407,15 @@ def update_no_match_uidi_mappings(
             'update_no_match_uidi'
         )
 
+        # Include last-known update times
+        status = sync_controller.get_sync_status()
         return {
             "status": "success",
             "message": "No Match / UIDI update task has been started in the background",
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "last_sync_time": status.get("last_sync_time"),
+            "last_update_no_match_uidi_time": status.get("last_update_no_match_uidi_time"),
+            "last_update_all_time": status.get("last_update_all_time")
         }
     except Exception as e:
         logger.error(f"Failed to start No Match / UIDI update: {str(e)}")
@@ -549,10 +562,15 @@ def update_all_mappings(
             'update_all'
         )
 
+        # Include last-known update times
+        status = sync_controller.get_sync_status()
         return {
             "status": "success",
             "message": "Full update task has been started in the background",
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "last_sync_time": status.get("last_sync_time"),
+            "last_update_no_match_uidi_time": status.get("last_update_no_match_uidi_time"),
+            "last_update_all_time": status.get("last_update_all_time")
         }
     except Exception as e:
         logger.error(f"Failed to start full update: {str(e)}")

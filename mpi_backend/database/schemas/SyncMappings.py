@@ -9,6 +9,10 @@ class SyncMappingsResponse(BaseModel):
     new_mappings_count: Optional[int] = None
     existing_mappings_count: Optional[int] = None
     timestamp: datetime = datetime.now()
+    # Added fields for visibility of last operations
+    last_sync_time: Optional[str] = None
+    last_update_no_match_uidi_time: Optional[str] = None
+    last_update_all_time: Optional[str] = None
 
     class Config:
-        from_attributes = True 
+        from_attributes = True

@@ -389,7 +389,7 @@ class UnmappedItemsController:
             base.c.supplier,
         )
 
-        # Apply search AFTER aggregation
+        # Apply search AFTER aggregation (SQL-level for consistent counts/pagination)
         if search and search.strip():
             s = f"%{search.strip()}%"
             q = q.filter(
@@ -415,7 +415,7 @@ class UnmappedItemsController:
         else:
             q = q.order_by(base.c.amount.desc())
 
-        # Pagination
+        # Pagination (SQL-level only)
         total_count = q.count()
         if size > 0:
             q = q.offset((page - 1) * size).limit(size)
@@ -435,36 +435,7 @@ class UnmappedItemsController:
                 }
             )
         
-        # Apply search filter AFTER deduplication (search on original_item_id and description that users see)
-        if search and search.strip():
-            clean_search = search.strip().lower()
-            unique_items = [
-                item
-                for item in unique_items
-                if (
-                    clean_search in item["original_item_id"].lower()
-                    or clean_search in (item["original_description"] or "").lower()
-                )
-            ]
-        
-        # Apply ordering
-        if order_by and len(order_by) > 0:
-            for order_item in reversed(order_by):  # Apply in reverse to handle multiple sorts
-                column = order_item.get("column", "amount")
-                order = order_item.get("order", "desc")
-                reverse = (order.lower() == "desc")
-                
-                # Map column names to actual fields
-                sort_key = column
-                if column == "id":
-                    sort_key = "original_item_id"
-                elif column == "date":
-                    sort_key = "amount"  # Default fallback
-                
-                unique_items.sort(key=lambda x: x.get(sort_key, 0), reverse=reverse)
-        else:
-            # Default sort by amount in descending order (highest amounts first)
-            unique_items.sort(key=lambda x: x.get("amount", 0), reverse=True)
+        # Keep ordering as defined by SQL to ensure stable pagination
         
         # Calculate pagination
         if total_count == 0:
@@ -472,15 +443,8 @@ class UnmappedItemsController:
         else:
             total_pages = (total_count + size - 1) // size if size > 0 else 1
         
-        # Apply pagination
-        if size > 0:
-            # Normal pagination
-            start_index = (page - 1) * size
-            end_index = start_index + size
-            paginated_items = unique_items[start_index:end_index]
-        else:
-            # size=0 means get all items (used by export endpoints)
-            paginated_items = unique_items
+        # Results are already paginated at SQL level; do not re-slice here
+        paginated_items = unique_items
         
         # Log summary for debugging
         logger.info(f"Pagination result: {len(paginated_items)} items")
