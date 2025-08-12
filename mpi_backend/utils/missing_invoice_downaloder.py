@@ -127,20 +127,33 @@ def search_previous_week_emails(mail):
 
 
 def get_supplier(email_subject, supplier_email) -> str:
-    """Get supplier name with error handling"""
+    """Get supplier name with error handling (normalized; matches regular downloader)."""
     try:
-        subject = (email_subject or "").lower()
-        supplier_email = (supplier_email or "").lower()
+        raw_subject = (email_subject or "").lower()
+        subject = " ".join(raw_subject.split())
+        supplier_email = (supplier_email or "").lower().strip()
 
         if "statement" in subject:
             return "no_supplier"
         
+        # Domain-based fast paths
+        if any(d in supplier_email for d in ["@wwps.co", "worldwideplumbingsupply", "wwps."]):
+            return SUPPLIERS[1]
+        if any(d in supplier_email for d in ["@bmwpsupply", "@bmwplumbing", "bmwpsupply.com"]):
+            return SUPPLIERS[0]
+
         # BMW Plumbing Supplies - multiple patterns
-        if any(pattern in subject for pattern in ["bmw", "bmwpsupply"]):
+        if any(pattern in subject for pattern in ["bmw", "bmwpsupply", "bmw plumbing supplies"]):
             return SUPPLIERS[0]
         
         # World Wide Plumbing - multiple patterns
-        elif any(pattern in subject for pattern in ["world wide", "wwps", "worldwide"]):
+        elif any(pattern in subject for pattern in [
+            "world wide plumbing supply",
+            "world wide",
+            "world-wide",
+            "worldwide",
+            "wwps",
+        ]):
             return SUPPLIERS[1]
         
         # Y & S Plumbing Supply - multiple patterns
