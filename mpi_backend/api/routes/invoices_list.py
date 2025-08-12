@@ -18,6 +18,23 @@ from mpi_backend.utils.invoice_convertor import convert_single_invoice
 from mpi_backend.database.schemas import Invoice, PaginatedInvoiceResponse
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.s3_utils import get_presigned_url, upload_file
+import re
+import shutil
+def _sanitize_path_component(name: str) -> str:
+    """Sanitize user/DB-provided strings for safe filesystem usage on Windows/Linux.
+    Replaces reserved characters and path separators with underscores.
+    """
+    if not name:
+        return "unknown"
+    # Replace Windows reserved characters and any slashes/backslashes
+    name = re.sub(r'[<>:"/\\|?*]+', '_', name)
+    # Collapse spaces
+    name = re.sub(r"\s+", " ", name).strip()
+    # Guard against device names (CON, PRN, AUX, NUL, COM1, LPT1, etc.)
+    if re.fullmatch(r"(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])", name):
+        name = f"_{name}__"
+    return name
+
 
 logger = logging.getLogger(__name__)
 
@@ -393,8 +410,9 @@ async def upload_and_process_invoice(
                 detail=f"Supplier with ID {supplier_id} not found"
             )
 
-        # Create upload directory
-        upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{supplier}'
+        # Create upload directory (sanitize supplier for filesystem safety)
+        safe_supplier = _sanitize_path_component(supplier)
+        upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{safe_supplier}'
         if not os.path.exists(upload_folder):
             os.makedirs(upload_folder)
 
@@ -464,9 +482,17 @@ async def upload_and_process_invoice(
         s3_key = f'{supplier}/{created_invoice.id}'
         upload_file(file_name=file_path, file_key=s3_key)
 
-        # Clean up files after processing
-        for filename in os.listdir(upload_folder):
-            os.remove(os.path.join(upload_folder, filename))
+        # Clean up files after processing (handle files and directories)
+        for entry in os.listdir(upload_folder):
+            path = os.path.join(upload_folder, entry)
+            try:
+                if os.path.isfile(path) or os.path.islink(path):
+                    os.remove(path)
+                elif os.path.isdir(path):
+                    shutil.rmtree(path, ignore_errors=True)
+            except Exception:
+                # Do not fail response on cleanup issues
+                pass
 
         logger.info(f"POST /invoice/upload - Successfully uploaded and processed invoice: {file.filename}")
         return {
@@ -585,13 +611,16 @@ async def process_again(
                 detail="Couldn't fetch requested Invoice"
             )
 
-        # Create upload directory
-        upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{supplier}'
+        # Create upload directory (sanitize supplier for filesystem safety)
+        safe_supplier = _sanitize_path_component(supplier)
+        upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{safe_supplier}'
         if not os.path.exists(upload_folder):
             os.makedirs(upload_folder)
 
         # Download file
-        response = requests.get(invoice_url)
+        # Stream download with small timeout to avoid blocking and suppress
+        # verbose third-party logs
+        response = requests.get(invoice_url, timeout=30)
         if response.status_code == 200:
             file_path = os.path.join(upload_folder, invoice.filename)
             with open(file_path, 'wb') as file:
@@ -621,9 +650,16 @@ async def process_again(
             converted_files, failed_files, existing_invoice_id=invoice_id
         )
 
-        # Clean up files after processing
-        for filename in os.listdir(upload_folder):
-            os.remove(os.path.join(upload_folder, filename))
+        # Clean up files after processing (handle files and directories)
+        for entry in os.listdir(upload_folder):
+            path = os.path.join(upload_folder, entry)
+            try:
+                if os.path.isfile(path) or os.path.islink(path):
+                    os.remove(path)
+                elif os.path.isdir(path):
+                    shutil.rmtree(path, ignore_errors=True)
+            except Exception:
+                pass
 
         logger.info(f"POST /invoice/process - Successfully reprocessed invoice: {invoice.filename}")
         return {

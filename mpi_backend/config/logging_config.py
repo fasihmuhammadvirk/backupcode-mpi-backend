@@ -5,17 +5,31 @@ import os
 # Create logs directory if it doesn't exist
 os.makedirs("logs", exist_ok=True)
 
+class AsciiSafeFormatter(logging.Formatter):
+    """Formatter that strips non-ASCII characters after standard formatting."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        # First perform standard formatting (which safely applies %s args)
+        msg = super().format(record)
+        try:
+            return msg.encode("ascii", "ignore").decode("ascii")
+        except Exception:
+            return "Log message encoding error"
+
+
 LOGGING_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
         "default": {
+            "()": "mpi_backend.config.logging_config.AsciiSafeFormatter",
             "format": "%(asctime)s - %(levelname)s - %(message)s",
-            "datefmt": "%Y-%m-%d %H:%M:%S"
+            "datefmt": "%Y-%m-%d %H:%M:%S",
         },
         "detailed": {
+            "()": "mpi_backend.config.logging_config.AsciiSafeFormatter",
             "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            "datefmt": "%Y-%m-%d %H:%M:%S"
+            "datefmt": "%Y-%m-%d %H:%M:%S",
         },
     },
     "handlers": {
@@ -69,8 +83,8 @@ LOGGING_CONFIG = {
             "propagate": False,
         },
         "uvicorn.access": {
-            "handlers": ["console"],
-            "level": "WARNING",  # Reduce uvicorn access log noise
+            "handlers": ["file"],
+            "level": "WARNING",
             "propagate": False,
         },
         "sqlalchemy.engine": {
@@ -88,6 +102,22 @@ LOGGING_CONFIG = {
             "level": "INFO",
             "propagate": False,
         },
+        # Quiet noisy third‑party libs on Windows
+        "camelot": {
+            "handlers": ["file"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "pdfminer": {
+            "handlers": ["file"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "matplotlib": {
+            "handlers": ["file"],
+            "level": "WARNING",
+            "propagate": False,
+        },
         "missing_logger": {
             "handlers": ["missing_file"],
             "level": "INFO",
@@ -98,23 +128,6 @@ LOGGING_CONFIG = {
 
 def setup_logging():
     logging.config.dictConfig(LOGGING_CONFIG)
-    
-    # Ensure all log messages are ASCII-safe
-    class ASCIIFilter(logging.Filter):
-        def filter(self, record):
-            # Convert message to ASCII-safe string, removing any special characters
-            if hasattr(record, 'msg'):
-                try:
-                    # Convert to string and encode/decode to remove non-ASCII chars
-                    record.msg = str(record.msg).encode('ascii', 'ignore').decode('ascii')
-                except:
-                    record.msg = "Log message encoding error"
-            return True
-    
-    # Add ASCII filter to all handlers
-    for handler in logging.getLogger().handlers:
-        handler.addFilter(ASCIIFilter())
-    
     logging.info("Logging configured successfully - ASCII mode enabled")
 
 def get_missing_logger():
