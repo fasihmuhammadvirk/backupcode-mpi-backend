@@ -384,7 +384,11 @@ def download_email_attachments(email_message, base_folder_path):
         # Log detailed email information
         logger.info(f"  {date_str} | {sender}")
         logger.info(f"    Subject: {email_subject}")
-        logger.info(f"    Supplier: {supplier_name} | Type: {'invoice' if any(kw in email_subject.lower() for kw in ['invoice', 'invoices', 'invoice(s)']) else 'other'}")
+        subj_lower = (email_subject or '').lower()
+        inv_type = 'invoice' if any(
+            kw in subj_lower for kw in ['invoice', 'invoices', 'invoice(s)', 'see invoice', 'inv #', 'invoice no']
+        ) else 'other'
+        logger.info(f"    Supplier: {supplier_name} | Type: {inv_type}")
 
         # Enhanced directory structure creation
         try:

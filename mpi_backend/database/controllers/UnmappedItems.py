@@ -5,7 +5,8 @@ import pandas as pd
 # from mpi_backend.utils.item_utils import (
 #     extract_supplier_id
 # )
-from sqlalchemy import and_, or_, exists
+from sqlalchemy import and_, or_, exists, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from typing import Dict, Any, Optional, List
 from datetime import date
@@ -60,10 +61,35 @@ class UnmappedItemsController:
             mpi_code='',
             description=description,
             supplier_item_ids=item_code,
-            supplier_id=supplier_id
+            supplier_id=supplier_id,
         )
-        db.add(new_item)
-        db.commit()
+        try:
+            db.add(new_item)
+            db.commit()
+        except IntegrityError as ie:
+            logger.error(
+                f"UnmappedItems insert failed with IntegrityError: {ie}. Attempting sequence resync and retry."
+            )
+            db.rollback()
+            try:
+                # Resync sequence to max(id) to avoid duplicate primary key values
+                db.execute(
+                    text(
+                        "SELECT setval(pg_get_serial_sequence('unmapped_items','id'), "
+                        "COALESCE((SELECT MAX(id) FROM unmapped_items), 1), true)"
+                    )
+                )
+                db.add(new_item)
+                db.commit()
+                logger.info("UnmappedItems insert succeeded after sequence resync")
+            except Exception as inner:
+                logger.error(
+                    f"UnmappedItems insert retry failed: {inner}. Skipping this unmapped item."
+                )
+                db.rollback()
+        except Exception as e:
+            logger.error(f"UnmappedItems insert failed: {e}")
+            db.rollback()
 
     def is_item_code_present(self, item_code, supplier_id=None):
         """

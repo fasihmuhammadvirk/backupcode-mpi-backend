@@ -75,7 +75,10 @@ def main() -> int:
     )
 
     success = downloader.run_download()
-    return 0 if success else 1
+    if not success:
+        # Non-zero exit for CI visibility
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

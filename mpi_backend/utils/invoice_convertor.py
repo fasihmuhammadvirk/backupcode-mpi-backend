@@ -1,13 +1,12 @@
 # run as a separate job and will process all the downloaded invoices
-import pandas as pd
 import os
 import shutil
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
 
-from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER, TIMEZONE
+from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.utils.pdf_to_excel.main_extractor import extract_data
 from mpi_backend.utils.pdf_to_excel.cleaning_util import get_files_from_folder
 from mpi_backend.utils.pdf_to_excel.abc_opus_services_utils import process_invoice
@@ -141,7 +140,7 @@ def convert_invoice_for_email(base_folder):
 
     try:
         base_path = base_folder
-        # Resolve base path using pathlib
+        # Resolve base path using pathlib (kept as simple path var per existing callers)
         # base_path = (Path(INVOICE_DOWNLOAD_FOLDER) / base_folder).resolve()
         logger.info(f"Resolved base path: {base_path}")
 
@@ -162,8 +161,10 @@ def convert_invoice_for_email(base_folder):
         # Process directories
         for folder in leaf_dirs:
             output, failed = convert_and_combine(folder)
-            converted_paths.extend(output)
-            failed_files.extend(failed)
+            if output:
+                converted_paths.extend(output)
+            if failed:
+                failed_files.extend(failed)
 
         return converted_paths, failed_files
 
@@ -242,7 +243,7 @@ def convert_and_combine(all_files):
             if splited_filepaths:  # check for splited file list is not empty
                 for splitFile_path in splited_filepaths:
                     output_splited_filepath = splitFile_path.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
-                    returned_paths = extract_data(splitFile_path, output_splited_filepath, supplier)
+                    extract_data(splitFile_path, output_splited_filepath, supplier)
                     all_output_paths.append(splitFile_path)
 
         except Exception as e:

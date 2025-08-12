@@ -407,15 +407,21 @@ def download_email_attachments(email_message, base_folder_path):
         # Log detailed email information
         logger.info(f"  {date_str} | {sender}")
         logger.info(f"    Subject: {email_subject}")
-        invoice_type = ('invoice' if any(kw in email_subject.lower()
-                                       for kw in ['invoice', 'invoices', 'invoice(s)'])
-                       else 'other')
+        subj_lower = (email_subject or '').lower()
+        invoice_type = (
+            'invoice' if any(
+                kw in subj_lower for kw in [
+                    'invoice', 'invoices', 'invoice(s)', 'see invoice', 'inv #', 'invoice no'
+                ]
+            ) else 'other'
+        )
         logger.info(f"    Supplier: {supplier_name} | Type: {invoice_type}")
 
         # Enhanced directory structure creation
         try:
-            inner_dir = (f'{date_time_obj.month}-{date_time_obj.day}'
-                        f'-{date_time_obj.year}')
+            inner_dir = (
+                f'{date_time_obj.month}-{date_time_obj.day}-{date_time_obj.year}'
+            )
             supplier_path = os.path.join(base_folder_path, supplier_name)
             Path(supplier_path).mkdir(parents=True, exist_ok=True)
             inner_dir_path = os.path.join(supplier_path, inner_dir)

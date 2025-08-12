@@ -23,6 +23,7 @@ from mpi_backend.database.controllers.UnmappedItems import (
     UnmappedItemsController
 )
 from mpi_backend.utils.s3_utils import upload_file
+from mpi_backend.database.models.InvoiceItems import InvoiceItem
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,12 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
         extracted_data = pd.read_excel(excel_file)
         logger.info(f"Processing file: {file} with {len(extracted_data)} "
                     f"items")
+        # Ensure DB session is clean before any queries (in case a previous
+        # operation in this same session failed and left it in error state)
+        try:
+            db.rollback()
+        except Exception:
+            pass
     except FileNotFoundError:
         logger.error(f'Invoice ->{file} does not exists')
         return {"status": "error", "message": f"File not found: {file}", "file": file}
@@ -292,6 +299,11 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
                 "message": "Invoice created successfully"
             }
     except Exception as e:
+        # Always rollback on error to clear aborted transaction state
+        try:
+            db.rollback()
+        except Exception:
+            pass
         logger.error(f"Error processing file {file}: {str(e)}")
         return {"status": "error", "message": str(e), "file": file}
 
@@ -432,7 +444,8 @@ def extract_supplier_id(file_path):
     for company, code in company_codes.items():
         if company in file_path:
             return code, company
-    return 1  # Need to return some default supplier
+    # Return a safe default tuple to avoid unpack errors in callers
+    return 1, "BMW Plumbing Supplies"
 
 
 def extract_email_date(path):

@@ -1,4 +1,7 @@
 import os
+import re
+from datetime import datetime
+import fitz
 import sys
 import tabula
 import pandas as pd
@@ -141,9 +144,87 @@ def extract_data(filename, output_path, supplier):
                     tax_row = ["10 Materials", item.capitalize(), "", "", financial_data[item]]
             final_df.loc[len(final_df)] = tax_row
 
+    # Robust fallback for invoice number and date when extraction is empty
+    try:
+        with fitz.open(filename) as doc:
+            pdf_text = "\n".join(page.get_text("text") for page in doc)
+    except Exception:
+        pdf_text = ""
+
+    if not invoice_num or str(invoice_num).strip() == "":
+        patterns = (
+            r"Invoice\s*#\s*[:\-]?\s*([A-Za-z0-9\-\./]+)",
+            r"Invoice\s*No\.?\s*[:\-]?\s*([A-Za-z0-9\-\./]+)",
+            r"INVOICE\s*NO\.?\s*[:\-]?\s*([A-Za-z0-9\-\./]+)",
+            r"INVOICE\s*#\s*[:\-]?\s*([A-Za-z0-9\-\./]+)",
+            r"INVOICE\s*NUMBER\s*[:\-]?\s*([A-Za-z0-9\-\./]+)",
+        )
+        for pat in patterns:
+            m = re.search(pat, pdf_text, flags=re.IGNORECASE)
+            if m:
+                invoice_num = m.group(1).strip()
+                break
+
+    if not invoice_date or str(invoice_date).strip() == "":
+        # Prefer label-adjacent date
+        label = re.search(r"Invoice\s*Date\s*[:\-]?\s*(.+)", pdf_text, flags=re.IGNORECASE)
+        candidate = None
+        if label:
+            candidate = label.group(1).splitlines()[0].strip()
+        if not candidate:
+            dm = re.search(r"(\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4})", pdf_text)
+            if dm:
+                candidate = dm.group(1)
+        if candidate:
+            normalized = None
+            for fmt in ("%m/%d/%Y", "%m-%d-%Y", "%m/%d/%y", "%Y-%m-%d"):
+                try:
+                    dt = datetime.strptime(candidate, fmt)
+                    normalized = dt.strftime("%m/%d/%Y")
+                    break
+                except ValueError:
+                    continue
+            invoice_date = normalized or candidate
+
     final_df['Date'] = invoice_date
     final_df['Ref NO'] = str(invoice_num)
     final_df['PO #'] = po
+
+    # Fallback for job name if extraction failed
+    if not job_name or len(str(job_name).strip()) < 3:
+        # Try to find address block near common markers
+        lines = [ln.strip() for ln in (pdf_text or '').splitlines() if ln.strip()]
+        markers = (
+            r"^ship\s*to:?$",
+            r"^shipping\s*address:?$",
+            r"^job\s*address:?$",
+            r"^project:?$",
+        )
+        job_lines = []
+        for idx, line in enumerate(lines):
+            if any(re.match(p, line, flags=re.IGNORECASE) for p in markers):
+                for nxt in lines[idx+1: idx+6]:
+                    if re.search(r"invoice|bill\s*to|phone|fax|date|terms", nxt, re.IGNORECASE):
+                        break
+                    job_lines.append(nxt)
+                break
+        if not job_lines:
+            # Choose longest address-like block in top area
+            block = []
+            blocks = []
+            for ln in lines[:40]:
+                if re.search(r"[A-Za-z].*\d|\d.*[A-Za-z]", ln):
+                    block.append(ln)
+                else:
+                    if block:
+                        blocks.append(" ".join(block))
+                        block = []
+            if block:
+                blocks.append(" ".join(block))
+            if blocks:
+                job_name = max(blocks, key=len)[:250]
+        else:
+            job_name = " ".join(job_lines)[:250]
 
     memo = ""
     final_df['Customer Job'] = job_name

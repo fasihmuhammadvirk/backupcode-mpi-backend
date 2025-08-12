@@ -818,23 +818,33 @@ class InvoiceItemController:
         # Robust date parsing
         date_str = str(row['Date'])
         try:
-            parsed_date = datetime.strptime(date_str, '%m/%d/%Y')
+            parsed_dt = datetime.strptime(date_str, '%m/%d/%Y')
         except ValueError:
             try:
-                parsed_date = datetime.strptime(date_str, '%m/%d/%y')
+                parsed_dt = datetime.strptime(date_str, '%m/%d/%y')
             except ValueError:
                 logger.error(f"Could not parse date: {date_str}")
-                parsed_date = None
+                parsed_dt = None
+        parsed_date = parsed_dt.date() if parsed_dt else None
 
         # Check for existing item with same invoice_id, ref_no, vendor, date, and amount
-        existing_item = self.db.query(InvoiceItem).filter(
-            InvoiceItem.invoice_id == invoice_id,
-            InvoiceItem.ref_no == row['Ref NO'],
-            InvoiceItem.vendor == row['Vendor'],
-            InvoiceItem.date == parsed_date,
-            InvoiceItem.amount == row['Amount'],
-            InvoiceItem.is_active == True
-        ).first()
+        # Normalize types to match DB schema (ref_no and amount are stored as strings)
+        ref_no_val = str(row['Ref NO']).strip() if row.get('Ref NO') is not None else ""
+        vendor_val = str(row['Vendor']).strip() if row.get('Vendor') is not None else ""
+        amount_val = str(row['Amount']).strip() if row.get('Amount') is not None else ""
+
+        existing_item = (
+            self.db.query(InvoiceItem)
+            .filter(
+                InvoiceItem.invoice_id == invoice_id,
+                InvoiceItem.ref_no == ref_no_val,
+                InvoiceItem.vendor == vendor_val,
+                InvoiceItem.date == parsed_date,
+                InvoiceItem.amount == amount_val,
+                InvoiceItem.is_active == True,
+            )
+            .first()
+        )
 
         if existing_item:
             logger.warning(
@@ -858,13 +868,13 @@ class InvoiceItemController:
             description=row['Description'],
             qty=row['Qty'],
             cost=row['Cost'],
-            amount=row['Amount'],
+            amount=amount_val,
             date=parsed_date,
-            ref_no=row['Ref NO'],
+            ref_no=ref_no_val,
             po_number=row['PO #'],
             customer_job=row['Customer Job'],
             bill=row['Bill'],
-            vendor=row['Vendor'],
+            vendor=vendor_val,
             class_=row['Class'],
             account=auto_account,
             memo=row['Memo'],
