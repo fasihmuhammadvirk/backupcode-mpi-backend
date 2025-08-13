@@ -29,6 +29,10 @@ from pathlib import Path
 import logging
 from sqlalchemy.orm import Session
 
+# Add parent directory for imports
+sys.path.append(str(Path(__file__).parent.parent))
+
+
 from mpi_backend.database import get_db
 from mpi_backend.database.controllers.Invoice import InvoiceController
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
