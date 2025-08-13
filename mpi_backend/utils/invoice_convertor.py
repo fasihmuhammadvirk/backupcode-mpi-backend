@@ -1,15 +1,14 @@
 # run as a separate job and will process all the downloaded invoices
 import os
 import shutil
-from datetime import datetime
 import logging
-
-logger = logging.getLogger(__name__)
 
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.utils.pdf_to_excel.main_extractor import extract_data
 from mpi_backend.utils.pdf_to_excel.cleaning_util import get_files_from_folder
 from mpi_backend.utils.pdf_to_excel.abc_opus_services_utils import process_invoice
+
+logger = logging.getLogger(__name__)
 
 
 def convert_single_invoice(file_path, supplier):
@@ -83,12 +82,14 @@ def convert_single_file(file_path, supplier):
         if supplier == 'ABC Opus Services':
             process_invoice(file_path, output_path)
             logger.info(f"ABC Opus: Downloaded at -> {output_path}")
-            logger.warning(f"Skipping ABC Opus file for Processing")
-            return [file_path], []
+            logger.warning("Skipping ABC Opus file for Processing")
+            return [], []
         
         # Process the file using the main extraction logic
         split_filepaths = extract_data(file_path, output_path, supplier)
-        converted_paths.append(file_path)
+        # Only include the original file if it was processed as a single invoice
+        if not split_filepaths:
+            converted_paths.append(file_path)
         
         # Handle split invoices if any
         if split_filepaths:
@@ -191,7 +192,7 @@ def convert_and_combine(all_files):
     for filepath in all_files:
         try:
             print(filepath)
-            filename = filepath.split("/")[-1]
+            filename = os.path.basename(filepath)
             if not filename[-4:].lower() == ".pdf":
                 logger.info(f"Invalid File >> {filename}")
                 continue
@@ -233,7 +234,7 @@ def convert_and_combine(all_files):
             if supplier == 'ABC Opus Services':
                 process_invoice(filepath, outputpath)
                 logger.info(f"ABC Opus: Downloaded at -> {outputpath}")
-                logger.warning(f"Skipping ABC Opus file for Processing")
+                logger.warning("Skipping ABC Opus file for Processing")
                 continue
 
             splited_filepaths = extract_data(filepath, outputpath, supplier)
@@ -247,7 +248,7 @@ def convert_and_combine(all_files):
                     all_output_paths.append(splitFile_path)
 
         except Exception as e:
-            logger.error(f"File ->{filepath.split('/')[-1]} Conversion Failed because : {e}")
+            logger.error(f"File ->{os.path.basename(filepath)} Conversion Failed because : {e}")
             failed_input_paths.append(filepath)
 
     for file_path in all_files:

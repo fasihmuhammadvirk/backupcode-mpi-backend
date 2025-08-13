@@ -87,7 +87,12 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
                         db, existing_invoice_id=None):
     """Process a single converted file and return status/result dict"""
     try:
-        excel_file = file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
+        # Normalize path handling to be cross-platform
+        import os
+        base_name = os.path.basename(file)
+        excel_file = file
+        if base_name.lower().endswith('.pdf'):
+            excel_file = file[: -4] + '.xlsx'
         extracted_data = pd.read_excel(excel_file)
         logger.info(f"Processing file: {file} with {len(extracted_data)} "
                     f"items")
@@ -235,7 +240,7 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
         if duplicate_status['status'] == 'updated_invoice':
             # Update existing invoice with new data
             success = InvoiceItemController(db).update_existing_invoice_items(
-                existing_invoice_id, extracted_data, file.rsplit('/')[-1]
+                existing_invoice_id, extracted_data, os.path.basename(file)
             )
             if success:
                 logger.info(
@@ -263,7 +268,7 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
             if existing_invoice_id:
                 # For reprocessing, use existing invoice ID
                 invoice_record = InvoiceController(db).insert_invoice(
-                    extracted_data['Date'][0], file.rsplit('/')[-1],
+                    extracted_data['Date'][0], os.path.basename(file),
                     supplier_id, 'PROCESSING', file, existing_invoice_id
                 )
                 logger.info(
@@ -271,7 +276,7 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
             else:
                 # For new uploads, let the database generate a new ID
                 invoice_record = InvoiceController(db).insert_invoice(
-                    extracted_data['Date'][0], file.rsplit('/')[-1],
+                    extracted_data['Date'][0], os.path.basename(file),
                     supplier_id, 'PROCESSING', file
                 )
 
@@ -285,11 +290,11 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
             # Store invoice items
             for index, row in extracted_data.iterrows():
                 InvoiceItemController(db).insert_invoice_items(
-                    row, file.rsplit('/')[-1], invoice_record.id
+                    row, os.path.basename(file), invoice_record.id
                 )
 
             logger.info(
-                f'Successfully processed invoice {file.rsplit("/")[-1]} with {len(extracted_data)} items')
+                f'Successfully processed invoice {os.path.basename(file)} with {len(extracted_data)} items')
             return {
                 "status": "created",
                 "invoice_id": invoice_record.id,
@@ -313,13 +318,14 @@ def process_failed_file(file, db):
     try:
         supplier_id, supplier_name = extract_supplier_id(file_path=file)
 
-        if InvoiceController(db).is_invoice_present(file.split("/")[-1]):
+        import os
+        if InvoiceController(db).is_invoice_present(os.path.basename(file)):
             logger.info(f"Failed file {file} already exists in database, "
                         f"skipping")
             return
 
         invoice_record = InvoiceController(db).insert_invoice(
-            datetime.now().strftime('%m/%d/%Y'), file.rsplit('/')[-1],
+            datetime.now().strftime('%m/%d/%Y'), os.path.basename(file),
             supplier_id, 'FAILED', file
         )
         upload_file(file_name=file,

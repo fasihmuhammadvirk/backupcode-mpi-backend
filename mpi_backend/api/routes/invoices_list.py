@@ -412,7 +412,7 @@ async def upload_and_process_invoice(
 
         # Create upload directory (sanitize supplier for filesystem safety)
         safe_supplier = _sanitize_path_component(supplier)
-        upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{safe_supplier}'
+        upload_folder = os.path.normpath(os.path.join(INVOICE_DOWNLOAD_FOLDER, safe_supplier))
         if not os.path.exists(upload_folder):
             os.makedirs(upload_folder)
 
@@ -613,7 +613,7 @@ async def process_again(
 
         # Create upload directory (sanitize supplier for filesystem safety)
         safe_supplier = _sanitize_path_component(supplier)
-        upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/{safe_supplier}'
+        upload_folder = os.path.join(INVOICE_DOWNLOAD_FOLDER, safe_supplier)
         if not os.path.exists(upload_folder):
             os.makedirs(upload_folder)
 
