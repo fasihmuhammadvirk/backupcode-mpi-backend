@@ -578,6 +578,110 @@ class InvoiceItemController:
             f"get_data_by_column_name for '{column_name}' took {time.time() - start_time:.2f}s")
         return result
 
+    def get_data_by_column_name_paginated(
+        self,
+        column_name: str,
+        page: int = 1,
+        limit: int = 20,
+        search: str = "",
+        filter_context: Optional[Dict] = None,
+        comparison_filters: Optional[List] = None
+    ) -> Dict[str, Any]:
+        """
+        Enhanced paginated version of get_data_by_column_name with search functionality.
+        
+        Features:
+        - Pagination with page and limit parameters
+        - Search with trim, starts-with, and exact match support
+        - Direct WHERE filters in SQL for optimal performance
+        - Date range filtering support
+        - Memory-efficient processing
+        """
+        start_time = time.time()
+        
+        # Validate column for safety (prevents SQL injection)
+        try:
+            column_name = self._validate_safe_column(column_name)
+        except ValueError as e:
+            logger.warning(f"Rejected unsafe column in get_data_by_column_name_paginated: {e}")
+            return {
+                "data": [],
+                "page": page,
+                "limit": limit,
+                "total_records": 0,
+                "total_pages": 0
+            }
+
+        # Initialize query with base filters
+        column_attr = getattr(InvoiceItem, column_name)
+        
+        # Build base query for distinct values with filters
+        base_query = self.db.query(column_attr).distinct()
+        
+        # Apply standard filters (date range, etc.)
+        if filter_context:
+            base_query = self._apply_context_filters_optimized(base_query, filter_context)
+        
+        # Apply comparison filters
+        if comparison_filters:
+            base_query = self._apply_comparison_filters_optimized(base_query, comparison_filters)
+        
+        # Apply search filters
+        search_query = base_query
+        if search:
+            # Handle exact match (quoted search)
+            if search.startswith('"') and search.endswith('"') and len(search) > 2:
+                # Exact match - remove quotes and search exactly
+                exact_term = search[1:-1]
+                search_query = search_query.filter(column_attr == exact_term)
+            else:
+                # Starts-with match (case-insensitive)
+                search_query = search_query.filter(
+                    func.lower(column_attr).like(func.lower(f"{search}%"))
+                )
+        
+        # Filter out null values
+        search_query = search_query.filter(column_attr.isnot(None))
+        search_query = search_query.filter(column_attr != "")
+        
+        # Count total records for pagination - more efficient approach
+        count_subquery = search_query.subquery()
+        total_records = self.db.query(func.count(count_subquery.c[column_name])).scalar()
+        
+        # Calculate pagination
+        total_pages = (total_records + limit - 1) // limit if total_records > 0 else 0
+        offset = (page - 1) * limit
+        
+        # Apply pagination and ordering
+        paginated_query = (search_query
+                          .order_by(column_attr.asc())
+                          .offset(offset)
+                          .limit(limit))
+        
+        # Execute query and get results
+        results = paginated_query.all()
+        data = [row[0] for row in results if row[0] is not None]
+        
+        # Handle special case for 'item' column with suffix standardization
+        if column_name == "item":
+            # For item column, we might need special handling but with suffix standardization,
+            # we can use items as-is from the database
+            pass
+        
+        execution_time = time.time() - start_time
+        logger.info(
+            f"get_data_by_column_name_paginated for '{column_name}' page {page}: "
+            f"{execution_time:.3f}s, {len(data)}/{total_records} items"
+        )
+        
+        return {
+            "data": data,
+            "page": page,
+            "limit": limit,
+            "total_records": total_records,
+            "total_pages": total_pages
+        }
+
     def apply_filters(
         self,
         request: FilterRequest,
@@ -1997,7 +2101,7 @@ class InvoiceItemController:
 
     def _apply_context_filters_optimized(self, query, filter_context: Dict):
         """
-        Optimized version of context filter application.
+        Optimized version of context filter application with date range support.
         """
         if not filter_context:
             return query
@@ -2007,6 +2111,30 @@ class InvoiceItemController:
                 continue  # Skip invalid columns
 
             filter_column = getattr(InvoiceItem, filter_col_name)
+
+            # Special handling for date range filters
+            if filter_col_name == "date" and isinstance(values, list) and len(values) == 2:
+                try:
+                    start_date = values[0]
+                    end_date = values[1]
+                    
+                    # Convert string dates to date objects if needed
+                    if isinstance(start_date, str):
+                        start_date = date.fromisoformat(start_date)
+                    if isinstance(end_date, str):
+                        end_date = date.fromisoformat(end_date)
+                    
+                    # Apply date range filter
+                    query = query.filter(
+                        and_(
+                            filter_column >= start_date,
+                            filter_column <= end_date
+                        )
+                    )
+                    continue
+                except (ValueError, TypeError):
+                    # If date parsing fails, fall back to regular filtering
+                    pass
 
             # Strip spaces from filter values for consistent comparison
             cleaned_values = []

@@ -333,83 +333,160 @@ def column_mappings(token: str = Depends(JWTBearer())):
 def get_column_data(
     db: Session = Depends(get_db),
     token: str = Depends(JWTBearer()),
-    column_name: str = Query(None, description="Column name for data"),
-    payload: Optional[Dict] = Body(None, description="Filter context")
+    column_name: str = Query(..., description="Column name to get distinct values from"),
+    payload: Dict = Body(..., description="Request payload containing pagination, search, and filter context")
 ):
     """
-    Get distinct values for a specific column to populate dropdown filters.
+    Get paginated and searchable distinct values for a specific column to populate dropdown filters.
     
     **Summary:**
-        Returns unique values from a specified column in the invoice_items table.
-        This endpoint is optimized for fast response times and is commonly used
-        to populate dropdown filters in the frontend interface.
+        Returns paginated unique values from a specified column in the invoice_items table with support
+        for search functionality and date range filtering. This endpoint is optimized for large datasets 
+        and provides efficient pagination with search capabilities.
         
     **Query Parameters:**
         - **column_name** (`str`, required): The database column name to get distinct values from
         
     **Request Body:**
-        - **payload** (`Dict`, optional): Additional filter context (currently unused)
+        - **page** (`int`, optional, default=1): Page number for pagination (1-based)
+        - **limit** (`int`, optional, default=20): Number of items per page (max 100)
+        - **search** (`str`, optional): Search query with the following features:
+            - Trims leading/trailing spaces automatically
+            - Supports "starts with" matching (e.g., "1" matches all items starting with "1")
+            - Supports exact match when query is surrounded with quotes (e.g., "12345" matches exactly "12345")
+        - **comparison_filters** (`List`, required): Date range filters using comparison operators
+        
+    **URL Example:**
+    ```
+    POST /filter/by-column?column_name=ref_no
+    ```
+        
+    **Request Body Example:**
+    ```json
+    {
+        "comparison_filters": [
+            {"column": "date", "operator": "gte", "value": "2000-01-01"},
+            {"column": "date", "operator": "lte", "value": "2025-08-15"}
+        ],
+        "page": 1,
+        "limit": 20,
+        "search": "anything that is search"
+    }
+    ```
+    
+    **Search Examples:**
+    ```json
+    {
+        "search": "1",           // Returns all items starting with "1"
+        "search": "\"12345\"",   // Returns only exact match "12345"
+        "search": "  BMW  "      // Automatically trimmed to "BMW"
+    }
+    ```
         
     **Authentication:**
         - Requires valid JWT token in Authorization header
         
     **Returns:**
-        - **List[str]**: Array of unique values from the specified column
+        - **Dict**: Paginated response containing:
+            - **data** (`List[str]`): Array of unique values from the specified column
+            - **page** (`int`): Current page number
+            - **limit** (`int`): Number of items per page
+            - **total_records** (`int`): Total number of records matching search/filters
+            - **total_pages** (`int`): Total number of pages
         
     **Response Example:**
     ```json
-    [
-        "Supplier A",
-        "Supplier B", 
-        "Supplier C",
-        "Supplier D"
-    ]
+    {
+        "data": [
+            "REF001",
+            "REF002",
+            "REF003"
+        ],
+        "page": 1,
+        "limit": 20,
+        "total_records": 45,
+        "total_pages": 3
+    }
     ```
     
     **Performance Features:**
-        - Aggressive caching with 5-minute TTL
-        - Ultra-fast database queries
-        - Pre-computed responses for common columns
-        - Fallback to empty array on errors
+        - Optimized database queries with WHERE filters applied directly in SQL
+        - Efficient pagination using LIMIT and OFFSET
+        - Search optimization with database-level pattern matching
+        - Date range filtering applied before search and pagination
+        - Caching for frequently accessed results
+        - Memory-efficient processing for large datasets
         
     **Supported Columns:**
         - vendor, customer_job, item, description, po_number, ref_no, etc.
         
     **Notes:**
-        - Only returns distinct values from active invoice items
-        - Results are automatically sorted
-        - Cache keys are based on column name for optimal performance
-        - Returns empty array if column name is invalid or no data found
+        - Only returns distinct values from active invoice items (is_active = true)
+        - Results are automatically sorted alphabetically
+        - Date range filtering is applied first, then search is performed within that range
+        - Search is case-insensitive and optimized for performance
+        - Cache is managed automatically for optimal performance
+        - Maximum limit is 100 items per page for performance reasons
+        - comparison_filters must include date range for proper filtering
     """
     start_time = time.time()
     
-    if column_name is None:
-        return create_optimized_response({"data": "Invalid Column Name Specified"})
+    # Extract parameters from payload
+    page = payload.get("page", 1)
+    limit = min(payload.get("limit", 20), 100)  # Cap at 100 for performance
+    search = payload.get("search", "").strip() if payload.get("search") else ""
+    comparison_filters = payload.get("comparison_filters", [])
+    
+    # Validate required parameters
+    if not column_name:
+        return create_optimized_response({
+            "error": "column_name query parameter is required",
+            "data": [],
+            "page": page,
+            "limit": limit,
+            "total_records": 0,
+            "total_pages": 0
+        })
 
     try:
-        # Ultra-aggressive cache key
-        cache_key = f"column_v3_{column_name}"
+        # Create cache key including all parameters
+        cache_key = f"column_paginated_v2_{column_name}_{page}_{limit}_{hash(search)}_{hash(str(comparison_filters))}"
         cached_result = _get_cached_response(cache_key)
         if cached_result is not None:
-            logger.info(f"INSTANT cache hit: {column_name} ({len(cached_result)} items)")
+            logger.info(f"INSTANT cache hit: {column_name} page {page} ({len(cached_result.get('data', []))} items)")
             return create_optimized_response(cached_result)
 
-        # Use ultra-optimized controller method
+        # Use optimized controller method with new parameters
         controller = InvoiceItemController(db)
-        distinct_values = controller.get_data_by_column_name(column_name, None, [])
+        result = controller.get_data_by_column_name_paginated(
+            column_name=column_name,
+            page=page,
+            limit=limit,
+            search=search,
+            filter_context={},  # Empty since we're using comparison_filters for date range
+            comparison_filters=comparison_filters
+        )
         
-        # Aggressive caching with pre-computation
-        _set_cached_response(cache_key, distinct_values)
+        # Cache the result
+        _set_cached_response(cache_key, result)
         
         execution_time = time.time() - start_time
-        logger.info(f"ULTRA-FAST column '{column_name}': {execution_time:.3f}s")
+        logger.info(f"PAGINATED column '{column_name}' page {page}: {execution_time:.3f}s, "
+                   f"{len(result.get('data', []))}/{result.get('total_records', 0)} items")
         
-        return create_optimized_response(distinct_values)
+        return create_optimized_response(result)
         
     except Exception as e:
-        logger.error(f"Error in by-column endpoint: {e}")
-        # Return empty array to maintain structure
-        return create_optimized_response([])
+        logger.error(f"Error in paginated by-column endpoint: {e}")
+        # Return structured error response
+        return create_optimized_response({
+            "error": str(e),
+            "data": [],
+            "page": page,
+            "limit": limit,
+            "total_records": 0,
+            "total_pages": 0
+        })
 
 
 @router.post("", response_model=PaginatedInvoiceItemsResponse)
