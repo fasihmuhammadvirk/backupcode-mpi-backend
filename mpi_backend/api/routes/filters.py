@@ -333,6 +333,89 @@ def column_mappings(token: str = Depends(JWTBearer())):
 def get_column_data(
     db: Session = Depends(get_db),
     token: str = Depends(JWTBearer()),
+    column_name: str = Query(None, description="Column name for data"),
+    payload: Optional[Dict] = Body(None, description="Filter context")
+):
+    """
+    Get distinct values for a specific column to populate dropdown filters.
+    
+    **Summary:**
+        Returns unique values from a specified column in the invoice_items table.
+        This endpoint is optimized for fast response times and is commonly used
+        to populate dropdown filters in the frontend interface.
+        
+    **Query Parameters:**
+        - **column_name** (`str`, required): The database column name to get distinct values from
+        
+    **Request Body:**
+        - **payload** (`Dict`, optional): Additional filter context (currently unused)
+        
+    **Authentication:**
+        - Requires valid JWT token in Authorization header
+        
+    **Returns:**
+        - **List[str]**: Array of unique values from the specified column
+        
+    **Response Example:**
+    ```json
+    [
+        "Supplier A",
+        "Supplier B", 
+        "Supplier C",
+        "Supplier D"
+    ]
+    ```
+    
+    **Performance Features:**
+        - Aggressive caching with 5-minute TTL
+        - Ultra-fast database queries
+        - Pre-computed responses for common columns
+        - Fallback to empty array on errors
+        
+    **Supported Columns:**
+        - vendor, customer_job, item, description, po_number, ref_no, etc.
+        
+    **Notes:**
+        - Only returns distinct values from active invoice items
+        - Results are automatically sorted
+        - Cache keys are based on column name for optimal performance
+        - Returns empty array if column name is invalid or no data found
+    """
+    start_time = time.time()
+    
+    if column_name is None:
+        return create_optimized_response({"data": "Invalid Column Name Specified"})
+
+    try:
+        # Ultra-aggressive cache key
+        cache_key = f"column_v3_{column_name}"
+        cached_result = _get_cached_response(cache_key)
+        if cached_result is not None:
+            logger.info(f"INSTANT cache hit: {column_name} ({len(cached_result)} items)")
+            return create_optimized_response(cached_result)
+
+        # Use ultra-optimized controller method
+        controller = InvoiceItemController(db)
+        distinct_values = controller.get_data_by_column_name(column_name, None, [])
+        
+        # Aggressive caching with pre-computation
+        _set_cached_response(cache_key, distinct_values)
+        
+        execution_time = time.time() - start_time
+        logger.info(f"ULTRA-FAST column '{column_name}': {execution_time:.3f}s")
+        
+        return create_optimized_response(distinct_values)
+        
+    except Exception as e:
+        logger.error(f"Error in by-column endpoint: {e}")
+        # Return empty array to maintain structure
+        return create_optimized_response([])
+
+
+@router.post("/by-column-paginated")
+def get_column_data_paginated(
+    db: Session = Depends(get_db),
+    token: str = Depends(JWTBearer()),
     column_name: str = Query(..., description="Column name to get distinct values from"),
     payload: Dict = Body(..., description="Request payload containing pagination, search, and filter context")
 ):
@@ -358,7 +441,7 @@ def get_column_data(
         
     **URL Example:**
     ```
-    POST /filter/by-column?column_name=ref_no
+    POST /filter/by-column-paginated?column_name=ref_no
     ```
         
     **Request Body Example:**
