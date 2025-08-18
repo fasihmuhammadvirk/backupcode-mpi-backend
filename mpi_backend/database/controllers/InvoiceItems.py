@@ -1870,8 +1870,18 @@ class InvoiceItemController:
 
             # Process MPI description updates if changed
             if 'mpi_description' in item_data and item_data['mpi_description'] != item.mpi_description:
-                background_tasks.add_task(self.update_mpi_field, item_data['item'], 'mpi_description',
-                                          item_data['mpi_description'])
+                # Do NOT change mpi_description when mpi_item is No Match or UIDI
+                effective_mpi_item = new_mpi_item if 'mpi_item' in item_data else item.mpi_item
+                if not effective_mpi_item or effective_mpi_item == 'No Match' or str(effective_mpi_item).upper().startswith('UIDI'):
+                    logger.debug(
+                        f"Skipping mpi_description update for item {item.id} because mpi_item is '{effective_mpi_item}'")
+                else:
+                    background_tasks.add_task(
+                        self.update_mpi_field,
+                        item_data['item'],
+                        'mpi_description',
+                        item_data['mpi_description']
+                    )
 
             # Process sheet_name updates if changed
             if 'sheet_name' in item_data and item_data['sheet_name'] != item.sheet_name:
@@ -1906,8 +1916,17 @@ class InvoiceItemController:
         self.db.commit()
 
     def update_mpi_field(self, item_value: str, field_name: str, new_value: str):
-        self.db.query(InvoiceItem).filter(InvoiceItem.item ==
-                                          item_value).update({field_name: new_value})
+        # If updating mpi_description, enforce that we never change it for No Match or UIDI items
+        if field_name == 'mpi_description':
+            (self.db.query(InvoiceItem)
+             .filter(InvoiceItem.item == item_value)
+             .filter(InvoiceItem.mpi_item != 'No Match')
+             .filter(~InvoiceItem.mpi_item.ilike('UIDI%'))
+             .update({InvoiceItem.mpi_description: new_value}, synchronize_session=False))
+            self.db.commit()
+            return
+
+        self.db.query(InvoiceItem).filter(InvoiceItem.item == item_value).update({field_name: new_value})
         self.db.commit()
 
     def update_customer_job(self, item_value: str, field_name: str, new_value: str):

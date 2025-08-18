@@ -1209,7 +1209,7 @@ class ItemsMappingController:
         """Helper method to perform the actual all mappings update"""
         try:
             # Fetch ALL mappings from supplier table - this should apply everything in the mapping table
-            # Note: We include ALL mappings because "Update All" means apply whatever is in the mapping table
+            # But when a mapping is temporary (UIDI/No Match/etc.), we will only assign sheet_name
             all_mappings = db.query(ItemsMapping).all()
 
             if not all_mappings:
@@ -1229,8 +1229,7 @@ class ItemsMappingController:
                         f"Skipping mapping with empty MPI code: {mapping.supplier_item_ids}")
                     continue
 
-                # For "Update All", we want to apply what's in the table, even if it's UIDI
-                # The business logic is: if it's in the supplier mapping table, apply it
+                # Keep all mappings, but handle temporary ones safely during application below
                 valid_mappings.append(mapping)
 
             if not valid_mappings:
@@ -1286,14 +1285,25 @@ class ItemsMappingController:
                         old_mpi_item = item.mpi_item or "Empty"
                         old_sheet_name = item.sheet_name or "Empty"
 
-                        item.mpi_item = mapping.mpi_code
-                        item.mpi_description = mapping.description
-                        item.sheet_name = mapping.google_sheet_name or ""
-                        item_updated_count += 1
-
-                        logger.debug(f"Updated item {item.id}: item='{item.item}', "
-                                     f"mpi_item: '{old_mpi_item}' -> '{mapping.mpi_code}', "
-                                     f"sheet_name: '{old_sheet_name}' -> '{mapping.google_sheet_name}'")
+                        if is_temporary_mapping(mapping.mpi_code, mapping.description):
+                            # Temporary mapping: only update sheet_name, keep MPI fields unchanged
+                            item.sheet_name = mapping.google_sheet_name or ""
+                            item_updated_count += 1
+                            logger.debug(
+                                f"Applied TEMP mapping to item {item.id}: item='{item.item}', "
+                                f"mpi_item preserved='{old_mpi_item}', sheet_name: '{old_sheet_name}' -> '{mapping.google_sheet_name}'"
+                            )
+                        else:
+                            # Permanent mapping: update MPI fields and sheet_name
+                            item.mpi_item = mapping.mpi_code
+                            item.mpi_description = mapping.description
+                            item.sheet_name = mapping.google_sheet_name or ""
+                            item_updated_count += 1
+                            logger.debug(
+                                f"Updated item {item.id}: item='{item.item}', "
+                                f"mpi_item: '{old_mpi_item}' -> '{mapping.mpi_code}', "
+                                f"sheet_name: '{old_sheet_name}' -> '{mapping.google_sheet_name}'"
+                            )
 
                     total_updated_count += item_updated_count
                     logger.info(
