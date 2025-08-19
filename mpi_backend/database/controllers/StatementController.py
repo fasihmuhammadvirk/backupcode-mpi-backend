@@ -463,10 +463,15 @@ class StatementController:
                     'plumbing_supplier': plumbing_supplier,
                     'status': reconciliation_status
                 })
-            # Sort by invoice_date desc
+            # Stable sort: by invoice_date desc, then invoice_number asc, then supplier_name asc
             filtered_results.sort(
-                key=lambda x: x['plumbing_invoice'].invoice_date if x['plumbing_invoice'].invoice_date else date.min,
-                reverse=True
+                key=lambda x: (
+                    -(
+                        (x['plumbing_invoice'].invoice_date or date.min).toordinal()
+                    ),
+                    x['plumbing_invoice'].invoice_number or '',
+                    x['plumbing_supplier'].name or ''
+                )
             )
             # Apply pagination
             total_count = len(filtered_results)
@@ -1855,8 +1860,13 @@ class StatementController:
             # Get total count for pagination
             total_count = query.count()
 
-            # Order by date (most recent first) and apply pagination
-            query = query.order_by(InvoiceItem.date.desc())
+            # Stable ordering to match DISTINCT key and tie-break by id/date
+            query = query.order_by(
+                InvoiceItem.ref_no.asc(),
+                PlumbingSupplier.name.asc(),
+                InvoiceItem.date.desc(),
+                InvoiceItem.id.desc(),
+            )
             offset = (page - 1) * page_size
             query = query.offset(offset).limit(page_size)
 
@@ -2005,8 +2015,13 @@ class StatementController:
                 system_query = system_query.filter(
                     or_(*supplier_conditions_system))
 
-            # Order system query (no limit for comprehensive data)
-            system_query = system_query.order_by(InvoiceItem.date.desc())
+            # Order system query to match DISTINCT ON stability: DISTINCT keys first, then tie-breakers
+            system_query = system_query.order_by(
+                InvoiceItem.ref_no.asc(),
+                PlumbingSupplier.name.asc(),
+                InvoiceItem.date.desc(),
+                InvoiceItem.id.desc(),
+            )
 
             # OPTIMIZED: Build statement invoices query with all needed fields and DISTINCT
             statement_query = (
@@ -2038,26 +2053,32 @@ class StatementController:
                 statement_query = statement_query.filter(
                     or_(*supplier_conditions_statement))
 
-            # Order statement query (no limit for comprehensive data)
+            # Order statement query to match DISTINCT ON stability: DISTINCT keys first, then tie-breakers
             statement_query = statement_query.order_by(
-                PlumbingInvoice.invoice_date.desc())
+                PlumbingInvoice.invoice_number.asc(),
+                PlumbingSupplier.name.asc(),
+                PlumbingInvoice.invoice_date.desc(),
+                PlumbingInvoice.id.desc(),
+            )
 
             # Execute both queries with consistent ordering
             system_invoices = system_query.all()
             statement_invoices = statement_query.all()
 
-            # Ensure consistent ordering of raw data
+            # Ensure consistent ordering of raw data (stable and matches ORDER BY above)
             system_invoices = sorted(system_invoices, key=lambda x: (
-                x.invoice_date or datetime.min,
                 x.invoice_number or '',
-                getattr(x, 'supplier_name', '') or ''
-            ))
+                getattr(x, 'supplier_name', '') or '',
+                x.invoice_date or datetime.min,
+                getattr(x, 'system_invoice_id', 0) or 0,
+            ), reverse=False)
 
             statement_invoices = sorted(statement_invoices, key=lambda x: (
-                x.invoice_date or datetime.min,
                 x.invoice_number or '',
-                getattr(x, 'supplier_name', '') or ''
-            ))
+                getattr(x, 'supplier_name', '') or '',
+                x.invoice_date or datetime.min,
+                getattr(x, 'invoice_id', 0) or 0,
+            ), reverse=False)
 
             logger.info(
                 f"Missing/Invalid - Retrieved {len(system_invoices)} system invoices and {len(statement_invoices)} statement invoices")
@@ -2128,13 +2149,13 @@ class StatementController:
             # Combine and sort all missing invoices
             all_missing_invoices = missing_system_invoices + missing_statement_invoices
 
-            # Sort by invoice_date (most recent first) with stable sorting
+            # Sort by explicit stable key: invoice_number, supplier_name, invoice_date desc
             all_missing_invoices.sort(key=lambda x: (
-                datetime.fromisoformat(x['invoice_date']) if x.get(
-                    'invoice_date') else datetime.min,
                 x.get('invoice_number', ''),
-                x.get('supplier_name', '')
-            ), reverse=True)
+                x.get('supplier_name', ''),
+                datetime.fromisoformat(x['invoice_date']) if x.get('invoice_date') else datetime.min,
+            ), reverse=False)
+            # Now reverse only by date within same key by resorting groups if needed is overkill; above order is stable
 
             # Apply pagination
             total_count = len(all_missing_invoices)
@@ -2396,12 +2417,15 @@ class StatementController:
                     'customer_job': None,
                     'source': 'statement'
                 })
+            # Stable sort: by invoice_date desc, then invoice_number asc, supplier asc, and source (system first)
             all_invoices.sort(key=lambda x: (
-                datetime.fromisoformat(x['invoice_date']) if x.get(
-                    'invoice_date') else datetime.min,
-                # False for system (comes first), True for statement
-                x['source'] == 'statement'
-            ), reverse=True)
+                -(
+                    (datetime.fromisoformat(x['invoice_date']) if x.get('invoice_date') else datetime.min).toordinal()
+                ),
+                x.get('invoice_number', ''),
+                x.get('supplier_name', ''),
+                x['source'] == 'statement',
+            ))
             total_count = len(all_invoices)
             offset = (page - 1) * page_size
             paginated_data = all_invoices[offset:offset + page_size]

@@ -1,18 +1,15 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, desc, asc, func, text
-from typing import List, Optional, Dict, Any, Union
-from datetime import date, datetime
+from sqlalchemy import and_, or_, func, text
+from typing import List, Optional, Dict, Any
+from datetime import date
 import logging
 
-from mpi_backend.database.models.ItemsMapping import ItemsMapping
 from mpi_backend.database.models.InvoiceItems import InvoiceItem
-from mpi_backend.database.models.Invoice import Invoice
 from mpi_backend.database.models.Suppliers import Supplier
 from mpi_backend.database.schemas.MonthlyComparison import (
     ItemInfo, 
     ItemPriceResponse,
     SupplierPriceInfo,
-    SupplierCheapestItemsResponse,
     PaginatedItemInfoResponse,
     EnrichedItemPriceResponse,
     PaginatedEnrichedItemResponse
@@ -54,9 +51,9 @@ class MonthlyComparisonController:
         """
         try:
             db = self._get_db_session()
-            
-            # Base query - fetch full items to access suffix calculation
-            query = db.query(InvoiceItem).filter(
+
+            # Count distinct mpi_item within filters for stable pagination metadata
+            total = db.query(func.count(func.distinct(InvoiceItem.mpi_item))).filter(
                 and_(
                     InvoiceItem.date >= from_date,
                     InvoiceItem.date <= to_date,
@@ -66,34 +63,61 @@ class MonthlyComparisonController:
                     ~InvoiceItem.mpi_description.contains('UIDI'),
                     ~InvoiceItem.mpi_item.like('%10 Materials%')
                 )
-            ).distinct()
-            
-            # Get total count for pagination
-            total = query.count()
-            
-            # Apply pagination
-            items = query.offset((page - 1) * size).limit(size).all()
-            
+            ).scalar() or 0
+
+            # Deterministic selection: one row per mpi_item (latest date, tie-break by id)
+            # Using Postgres DISTINCT ON for stable, unique results
+            distinct_sql = text(
+                """
+                SELECT DISTINCT ON (ii.mpi_item)
+                    ii.id,
+                    ii.mpi_item,
+                    ii.item,
+                    ii.mpi_description
+                FROM invoice_items ii
+                WHERE ii.date >= :from_date
+                  AND ii.date <= :to_date
+                  AND ii.mpi_item <> 'No Match'
+                  AND ii.mpi_description NOT LIKE '%No Match%'
+                  AND ii.mpi_item NOT LIKE '%UIDI%'
+                  AND ii.mpi_description NOT LIKE '%UIDI%'
+                  AND ii.mpi_item NOT LIKE '%10 Materials%'
+                ORDER BY ii.mpi_item ASC, ii.date DESC, ii.id ASC
+                OFFSET :offset LIMIT :limit
+                """
+            )
+
+            offset_value = (page - 1) * size
+            rows = db.execute(
+                distinct_sql,
+                {
+                    "from_date": from_date,
+                    "to_date": to_date,
+                    "offset": offset_value,
+                    "limit": size,
+                },
+            ).fetchall()
+
             # Calculate total pages
             pages = (total + size - 1) // size if size > 0 else 1
-            
-            # Format response with suffixed item codes
+
+            # Format response
             items = [
                 ItemInfo(
-                    id=item.id,  # Use the database item ID
-                    mpi_item=item.mpi_item,
-                    original_item=item.item,  # Use full item code
-                    mpi_description=item.mpi_description
+                    id=row[0] or 0,
+                    mpi_item=row[1] or '',
+                    original_item=row[2] or '',
+                    mpi_description=row[3] or '',
                 )
-                for item in items
+                for row in rows
             ]
-            
+
             return PaginatedItemInfoResponse(
                 items=items,
                 total=total,
                 page=page,
                 size=size,
-                pages=pages
+                pages=pages,
             )
         except Exception as e:
             logger.error(f"Error fetching items in date range: {str(e)}")
@@ -371,7 +395,7 @@ class MonthlyComparisonController:
                         s.id as supplier_id,
                         MIN(ii.cost) as min_cost
                     FROM invoice_items ii
-                    JOIN suppliers s ON s.supplier_name = ii.vendor
+                    LEFT JOIN suppliers s ON s.supplier_name = ii.vendor
                     WHERE ii.mpi_item = ANY(:mpi_items)
                     AND ii.cost IS NOT NULL 
                     AND ii.cost > 0
@@ -423,10 +447,7 @@ class MonthlyComparisonController:
             for item in paginated_items:
                 if item.mpi_item in price_data:
                     data = price_data[item.mpi_item]
-                    
-                    # Sort suppliers by price (cheapest first)
                     suppliers = sorted(data['suppliers'], key=lambda x: x.unit_price)
-                    
                     result.append(
                         EnrichedItemPriceResponse(
                             id=item.id or 0,
@@ -435,6 +456,18 @@ class MonthlyComparisonController:
                             mpi_description=item.mpi_description or "",
                             cheapest_unit_price=data['absolute_cheapest_price'],
                             suppliers=suppliers
+                        )
+                    )
+                else:
+                    # Ensure item appears even if no suppliers/prices found
+                    result.append(
+                        EnrichedItemPriceResponse(
+                            id=item.id or 0,
+                            mpi_item=item.mpi_item or "",
+                            original_item=item.original_item or "",
+                            mpi_description=item.mpi_description or "",
+                            cheapest_unit_price=0.0,
+                            suppliers=[]
                         )
                     )
             
@@ -585,9 +618,12 @@ class MonthlyComparisonController:
         """
         try:
             db = self._get_db_session()
-            
-            # Base query to get distinct items in the date range - fetch full items for suffix calculation
-            query = db.query(InvoiceItem).filter(
+
+            # Build dynamic filter SQL for exclusions
+            excluded_list = [item.mpi_item for item in (unselected_items or []) if getattr(item, 'mpi_item', None)]
+
+            # Total unique items by mpi_item under filters and exclusions
+            total_query = db.query(func.count(func.distinct(InvoiceItem.mpi_item))).filter(
                 and_(
                     InvoiceItem.date >= from_date,
                     InvoiceItem.date <= to_date,
@@ -598,100 +634,127 @@ class MonthlyComparisonController:
                     ~InvoiceItem.mpi_item.like('%10 Materials%')
                 )
             )
-            
-            # Add exclusion filter if unselected_items is provided
-            if unselected_items and len(unselected_items) > 0:
-                # Extract mpi_item values from the ItemInfo objects
-                unselected_mpi_items = [item.mpi_item for item in unselected_items if item.mpi_item]
-                if unselected_mpi_items:
-                    query = query.filter(~InvoiceItem.mpi_item.in_(unselected_mpi_items))
-            
-            # Get total count for pagination
-            total = query.distinct().count()
-            
-            # Apply pagination and ordering directly
-            items = query.distinct().order_by(InvoiceItem.mpi_item).offset((page - 1) * size).limit(size).all()
-            
-            # Format items to ItemInfo objects with suffixed item codes
+            if excluded_list:
+                total_query = total_query.filter(~InvoiceItem.mpi_item.in_(excluded_list))
+            total = total_query.scalar() or 0
+
+            # Deterministic page of unique items (one per mpi_item)
+            # Use DISTINCT ON with stable ordering
+            base_sql = """
+                SELECT DISTINCT ON (ii.mpi_item)
+                    ii.id,
+                    ii.mpi_item,
+                    ii.item,
+                    ii.mpi_description,
+                    ii.date
+                FROM invoice_items ii
+                WHERE ii.date >= :from_date
+                  AND ii.date <= :to_date
+                  AND ii.mpi_item <> 'No Match'
+                  AND ii.mpi_description NOT LIKE '%No Match%'
+                  AND ii.mpi_item NOT LIKE '%UIDI%'
+                  AND ii.mpi_description NOT LIKE '%UIDI%'
+                  AND ii.mpi_item NOT LIKE '%10 Materials%'
+            """
+            if excluded_list:
+                base_sql += "\n                  AND NOT (ii.mpi_item = ANY(:excluded))\n"
+            base_sql += """
+                ORDER BY ii.mpi_item ASC, ii.date DESC, ii.id ASC
+                OFFSET :offset LIMIT :limit
+            """
+
+            offset_value = (page - 1) * size
+            params: Dict[str, Any] = {
+                "from_date": from_date,
+                "to_date": to_date,
+                "offset": offset_value,
+                "limit": size,
+            }
+            if excluded_list:
+                params["excluded"] = excluded_list
+
+            rows = db.execute(text(base_sql), params).fetchall()
+
+            # Convert to ItemInfo list
             item_infos = [
                 ItemInfo(
-                    id=item.id,  # Use the database item ID
-                    mpi_item=item.mpi_item or '',
-                    original_item=item.item or '',  # Use full item code
-                    mpi_description=item.mpi_description or ''
+                    id=row[0] or 0,
+                    mpi_item=row[1] or '',
+                    original_item=row[2] or '',
+                    mpi_description=row[3] or '',
                 )
-                for item in items
+                for row in rows
             ]
-            
+
             # Calculate total pages
             pages = (total + size - 1) // size if size > 0 else 1
-            
-            # Get enriched items with supplier information
+
+            # Enrich with supplier information
             result = []
-            
             for item in item_infos:
-                # If item ID is not provided, try to find it based on mpi_item
-                item_id = item.id
-                if item_id is None:
-                    # Look up the item ID based on mpi_item
-                    invoice_item = db.query(InvoiceItem.id).filter(
-                        InvoiceItem.mpi_item == item.mpi_item
-                    ).first()
-                    
-                    if invoice_item:
-                        item_id = invoice_item.id
-                    else:
-                        # If we still can't find an ID, use 0 as a placeholder
-                        item_id = 0
-                
-                # Get all prices for this item across all suppliers
+                item_id = item.id or 0
+
+                # Get all prices for this item across all suppliers within date range
                 all_prices = db.query(
                     InvoiceItem.vendor,
                     InvoiceItem.cost,
                     Supplier.id.label('supplier_id')
                 ).join(
-                    Supplier, 
+                    Supplier,
                     Supplier.supplier_name == InvoiceItem.vendor
                 ).filter(
                     InvoiceItem.mpi_item == item.mpi_item,
                     InvoiceItem.cost.isnot(None),
+                    InvoiceItem.cost > 0,
                     InvoiceItem.vendor.isnot(None),
                     InvoiceItem.date >= from_date,
                     InvoiceItem.date <= to_date
                 ).all()
-                
+
+                # Keep the item in the result even if no supplier prices in range
                 if not all_prices:
+                    result.append(
+                        EnrichedItemPriceResponse(
+                            id=item_id,
+                            mpi_item=item.mpi_item or "",
+                            original_item=item.original_item or "",
+                            mpi_description=item.mpi_description or "",
+                            cheapest_unit_price=0.0,
+                            suppliers=[],
+                        )
+                    )
                     continue
-                
-                # Get the absolute cheapest price across all suppliers and dates
-                absolute_cheapest_price = min([float(cost) for _, cost, _ in all_prices if cost is not None])
-                
-                # Get the lowest price per supplier for this item
-                supplier_prices_dict = {}
+
+                # Absolute cheapest price across all suppliers and dates (> 0)
+                absolute_cheapest_price = min(
+                    [float(cost) for _, cost, _ in all_prices if cost is not None and float(cost) > 0]
+                )
+
+                # Lowest price per supplier
+                supplier_prices_dict: Dict[str, Any] = {}
                 for vendor, cost, supplier_id in all_prices:
-                    if vendor not in supplier_prices_dict or float(cost) < supplier_prices_dict[vendor][1]:
-                        supplier_prices_dict[vendor] = (supplier_id, float(cost))
-                
-                # Format supplier prices with supplier ID
+                    if cost is None:
+                        continue
+                    price_value = float(cost)
+                    if vendor not in supplier_prices_dict or price_value < supplier_prices_dict[vendor][1]:
+                        supplier_prices_dict[vendor] = (supplier_id, price_value)
+
                 suppliers = [
                     SupplierPriceInfo(
                         id=supplier_id,
-                        name=vendor or "Unknown", 
+                        name=vendor or "Unknown",
                         unit_price=price
                     )
                     for vendor, (supplier_id, price) in supplier_prices_dict.items()
                 ]
-                
-                # Sort suppliers by price (cheapest first)
+
                 suppliers.sort(key=lambda x: x.unit_price)
-                
                 if not suppliers:
                     continue
-                
-                # Create enriched response
+
                 result.append(
                     EnrichedItemPriceResponse(
-                        id=item.id,  # Use the item ID from the request
+                        id=item_id,
                         mpi_item=item.mpi_item or "",
                         original_item=item.original_item or "",
                         mpi_description=item.mpi_description or "",
@@ -699,13 +762,13 @@ class MonthlyComparisonController:
                         suppliers=suppliers
                     )
                 )
-            
+
             return PaginatedEnrichedItemResponse(
                 items=result,
                 total=total,
                 page=page,
                 size=size,
-                pages=pages
+                pages=pages,
             )
             
         except Exception as e:
