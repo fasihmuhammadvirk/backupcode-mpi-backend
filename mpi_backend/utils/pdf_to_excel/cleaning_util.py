@@ -5,7 +5,10 @@ import re
 from os import listdir
 import fitz
 from os.path import isfile, join
-from PyPDF2 import PdfFileWriter, PdfFileReader
+try:
+    from PyPDF2 import PdfWriter as PdfFileWriter, PdfReader as PdfFileReader
+except ImportError:
+    from PyPDF2 import PdfFileWriter, PdfFileReader
 from mpi_backend.utils.pdf_to_excel.extraction_util import extract_invoice_info
 
 def clean_spaces(text):
@@ -176,7 +179,13 @@ def split_multiple_invoices(filename, supplier):
 
     input_pdf = PdfFileReader(open(filename, "rb"))
     output = PdfFileWriter()
-    for index in range(input_pdf.numPages):
+    try:
+        # New API
+        num_pages = len(input_pdf.pages)
+    except AttributeError:
+        # Old API
+        num_pages = input_pdf.numPages
+    for index in range(num_pages):
 
         if index == 0:  # its first page, so always add it
             output.addPage(input_pdf.getPage(index))
