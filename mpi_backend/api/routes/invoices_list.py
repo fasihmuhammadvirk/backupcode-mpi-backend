@@ -1,7 +1,7 @@
 from fastapi import (
     APIRouter, Depends, HTTPException, Query, UploadFile, File
 )
-from typing import List, Optional
+from typing import List, Optional, Dict
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
 from fastapi_pagination import Page, paginate
@@ -772,64 +772,52 @@ def sort_invoices(
 
 @router.delete("/delete")
 async def delete_invoice(
-    invoice_id: str, 
+    invoice_id: Optional[str] = Query(
+        None, description="Single invoice ID to delete (use body for multiple)"
+    ),
+    invoice_ids: Optional[List[str]] = Query(
+        None, description="Multiple invoice IDs to delete"
+    ),
+    payload: Optional[Dict[str, List[str]]] = None,
     db: Session = Depends(get_db), 
     token: str = Depends(JWTBearer())
 ):
     """
-    Delete an invoice and its associated file from the system.
+    Delete one or more invoices and their associated files from the system.
     
-    **Summary:**
-        Permanently deletes an invoice record from the database and removes
-        the associated PDF file from S3 storage. This operation is irreversible
-        and will also delete all related invoice items.
-        
-    **Query Parameters:**
-        - **invoice_id** (`str`, required): The ID of the invoice to delete
-        
-    **Authentication:**
-        - Requires valid JWT token in Authorization header
-        
-    **Returns:**
-        - **Dict**: Deletion confirmation message:
-            - **status** (`str`): Success message confirming deletion
-            
-    **Response Example:**
-    ```json
-    {
-        "status": "Invoice 123 and associated file deleted successfully."
-    }
-    ```
+    - If `invoice_ids` query param is provided, those invoices will be deleted.
+    - Else if `invoice_id` is provided, that single invoice will be deleted.
     
-    **Deletion Process:**
-        1. Removes invoice record from database
-        2. Deletes associated invoice items
-        3. Removes PDF file from S3 storage
-        4. Cleans up any related temporary files
-        
-    **Cascade Effects:**
-        - Invoice record is permanently deleted
-        - All associated invoice items are removed
-        - PDF file is deleted from S3 storage
-        - Related metadata is cleaned up
-        
-    **Error Codes:**
-        - **404**: Invoice not found
-        - **500**: Deletion error or file removal failure
-        
-    **Notes:**
-        - This operation is irreversible
-        - All related data will be permanently lost
-        - Use with caution in production environments
-        - Consider backing up data before deletion
-        - Deletion includes both database records and S3 files
+    Returns a summary of deletions.
     """
-    # Delete from database
     invoice_controller = InvoiceController(db)
-    invoice_id = invoice_controller.delete_invoice(invoice_id, db)
 
+    # Prefer multiple IDs when provided (body or query)
+    body_ids = []
+    try:
+        if payload and isinstance(payload, dict):
+            body_ids = payload.get("invoice_ids", []) or []
+    except Exception:
+        body_ids = []
+
+    ids_to_delete = body_ids or (invoice_ids or [])
+
+    if ids_to_delete:
+        summary = invoice_controller.delete_invoices(ids_to_delete, db)
+        return {
+            "deleted_ids": summary["deleted_ids"],
+            "not_found_ids": summary["not_found_ids"],
+            "status": f"Deleted {len(summary['deleted_ids'])} invoice(s)."
+        }
+
+    if not invoice_id:
+        raise HTTPException(status_code=400, detail="invoice_id or invoice_ids is required")
+
+    deleted_single_id = invoice_controller.delete_invoice(invoice_id, db)
     return {
-        "status": f"Invoice {invoice_id} and associated file deleted successfully."
+        "deleted_ids": [deleted_single_id],
+        "not_found_ids": [],
+        "status": f"Invoice {deleted_single_id} and associated file deleted successfully."
     }
 
 

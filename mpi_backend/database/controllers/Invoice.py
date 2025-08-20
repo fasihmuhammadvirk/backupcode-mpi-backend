@@ -232,6 +232,31 @@ class InvoiceController:
         return invoice_id
 
 
+    def delete_invoices(self, invoice_ids, db):
+        """
+        Delete multiple invoices by their IDs. Continues on not-found invoices.
+        Returns a summary of deleted and not-found IDs.
+        """
+        deleted_ids = []
+        not_found_ids = []
+
+        if not invoice_ids:
+            return {"deleted_ids": deleted_ids, "not_found_ids": not_found_ids}
+
+        for single_id in invoice_ids:
+            try:
+                self.delete_invoice(single_id, db)
+                deleted_ids.append(single_id)
+            except HTTPException as exc:
+                if getattr(exc, "status_code", None) == 404:
+                    not_found_ids.append(single_id)
+                else:
+                    # Re-raise unexpected errors
+                    raise
+
+        return {"deleted_ids": deleted_ids, "not_found_ids": not_found_ids}
+
+
     def get_invoice_by_invoiceID(self, invoice_id,db):
         return db.query(Invoice).filter(Invoice.id == invoice_id).first()
 

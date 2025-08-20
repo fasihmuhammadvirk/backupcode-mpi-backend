@@ -387,25 +387,50 @@ def get_column_data(
         return create_optimized_response({"data": "Invalid Column Name Specified"})
 
     try:
-        # Ultra-aggressive cache key
-        cache_key = f"column_v3_{column_name}"
+        # Extract filter context and comparison filters from payload
+        filter_context = {}
+        comparison_filters = []
+        if payload:
+            filter_context = payload.get("filter_context", {}) or {}
+            # Avoid self-filtering on the same column to expand choices
+            if column_name and column_name in filter_context:
+                try:
+                    filter_context = {k: v for k, v in filter_context.items() if k != column_name}
+                except Exception:
+                    pass
+            comparison_filters = (
+                payload.get("comparison_filters", []) or []
+            )
+
+        # Build stable cache key including filters
+        fc_hash = hashlib.md5(str(filter_context).encode()).hexdigest()
+        cf_hash = hashlib.md5(str(comparison_filters).encode()).hexdigest()
+        cache_key = f"column_v3_{column_name}_{fc_hash}_{cf_hash}"
+
         cached_result = _get_cached_response(cache_key)
         if cached_result is not None:
-            logger.info(f"INSTANT cache hit: {column_name} ({len(cached_result)} items)")
+            logger.info(
+                f"INSTANT cache hit: {column_name} "
+                f"({len(cached_result)} items)"
+            )
             return create_optimized_response(cached_result)
 
-        # Use ultra-optimized controller method
+        # Use optimized controller method with context
         controller = InvoiceItemController(db)
-        distinct_values = controller.get_data_by_column_name(column_name, None, [])
-        
-        # Aggressive caching with pre-computation
+        distinct_values = controller.get_data_by_column_name(
+            column_name, filter_context, comparison_filters
+        )
+
+        # Cache result
         _set_cached_response(cache_key, distinct_values)
-        
+
         execution_time = time.time() - start_time
-        logger.info(f"ULTRA-FAST column '{column_name}': {execution_time:.3f}s")
-        
+        logger.info(
+            f"ULTRA-FAST column '{column_name}': {execution_time:.3f}s"
+        )
+
         return create_optimized_response(distinct_values)
-        
+
     except Exception as e:
         logger.error(f"Error in by-column endpoint: {e}")
         # Return empty array to maintain structure
@@ -516,9 +541,16 @@ def get_column_data_paginated(
     
     # Extract parameters from payload
     page = payload.get("page", 1)
-    limit = min(payload.get("limit", 20), 100)  # Cap at 100 for performance
+    limit = min(payload.get("limit", 20), 100)
     search = payload.get("search", "").strip() if payload.get("search") else ""
     comparison_filters = payload.get("comparison_filters", [])
+    filter_context = payload.get("filter_context", {}) or {}
+    # Avoid self-filtering on the same column to expand choices
+    if column_name and column_name in filter_context:
+        try:
+            filter_context = {k: v for k, v in filter_context.items() if k != column_name}
+        except Exception:
+            pass
     
     # Validate required parameters
     if not column_name:
@@ -532,8 +564,14 @@ def get_column_data_paginated(
         })
 
     try:
-        # Create cache key including all parameters
-        cache_key = f"column_paginated_v2_{column_name}_{page}_{limit}_{hash(search)}_{hash(str(comparison_filters))}"
+        # Create cache key including all parameters (stable hashes)
+        s_hash = hashlib.md5(search.encode()).hexdigest()
+        cf_hash = hashlib.md5(str(comparison_filters).encode()).hexdigest()
+        fc_hash = hashlib.md5(str(filter_context).encode()).hexdigest()
+        cache_key = (
+            f"column_paginated_v2_{column_name}_{page}_{limit}_"
+            f"{s_hash}_{cf_hash}_{fc_hash}"
+        )
         cached_result = _get_cached_response(cache_key)
         if cached_result is not None:
             logger.info(f"INSTANT cache hit: {column_name} page {page} ({len(cached_result.get('data', []))} items)")
@@ -546,7 +584,7 @@ def get_column_data_paginated(
             page=page,
             limit=limit,
             search=search,
-            filter_context={},  # Empty since we're using comparison_filters for date range
+            filter_context=filter_context,
             comparison_filters=comparison_filters
         )
         

@@ -617,6 +617,12 @@ class InvoiceItemController:
         
         # Build base query for distinct values with filters
         base_query = self.db.query(column_attr).distinct()
+        # Limit dataset to active items when available for performance
+        if hasattr(InvoiceItem, "is_active"):
+            try:
+                base_query = base_query.filter(InvoiceItem.is_active.is_(True))
+            except Exception:
+                pass
         
         # Apply standard filters (date range, etc.)
         if filter_context:
@@ -631,14 +637,15 @@ class InvoiceItemController:
         if search:
             # Handle exact match (quoted search)
             if search.startswith('"') and search.endswith('"') and len(search) > 2:
-                # Exact match - remove quotes and search exactly
                 exact_term = search[1:-1]
                 search_query = search_query.filter(column_attr == exact_term)
             else:
-                # Starts-with match (case-insensitive)
-                search_query = search_query.filter(
-                    func.lower(column_attr).like(func.lower(f"{search}%"))
-                )
+                # Fast path: case-insensitive prefix match without applying a function on the column
+                try:
+                    search_query = search_query.filter(column_attr.ilike(f"{search}%"))
+                except Exception:
+                    # Fallback to case-sensitive prefix on error
+                    search_query = search_query.filter(column_attr.like(f"{search}%"))
         
         # Filter out null values
         search_query = search_query.filter(column_attr.isnot(None))
