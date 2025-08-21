@@ -129,28 +129,9 @@ def sync_mapping(
             last_update_all_time=status.get("last_update_all_time"),
         )
 
-    # Start enhanced sync in the background using the worker method with safety
-    def _safe_sync_task():
-        """Wrapper to ensure safe execution of sync task"""
-        from mpi_backend.database import background_db_context
-        from mpi_backend.utils.task_locks import task_lock
-        import socket
-        import os
-        import uuid
-        
-        worker_id = f"api_{socket.gethostname()}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
-        
-        try:
-            with background_db_context() as bg_db:
-                with task_lock(bg_db, "manual_sync", worker_id):
-                    return GoogleSheetSyncController._execute_sync_task_worker(db, 'sync')
-        except RuntimeError as e:
-            if "Could not acquire lock" in str(e):
-                logger.warning("Manual sync skipped - already running")
-                return {"success": False, "message": "Sync already running"}
-            raise
-    
-    background_tasks.add_task(_safe_sync_task)
+    # Start enhanced sync in the background using the worker method
+    background_tasks.add_task(
+        GoogleSheetSyncController._execute_sync_task_worker, db, 'sync')
 
     # Include last-known update times in the response for visibility
     status = sync_controller.get_sync_status()
@@ -419,30 +400,12 @@ def update_no_match_uidi_mappings(
         }
 
     try:
-        # Start sync with update_no_match_uidi operation using safe worker method
-        def _safe_uidi_task():
-            """Wrapper to ensure safe execution of UIDI update task"""
-            from mpi_backend.database import background_db_context
-            from mpi_backend.utils.task_locks import task_lock
-            import socket
-            import os
-            import uuid
-            
-            worker_id = f"api_{socket.gethostname()}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
-            
-            try:
-                with background_db_context() as bg_db:
-                    with task_lock(bg_db, "manual_uidi_update", worker_id):
-                        return GoogleSheetSyncController._execute_sync_task_worker(
-                            db, 'update_no_match_uidi'
-                        )
-            except RuntimeError as e:
-                if "Could not acquire lock" in str(e):
-                    logger.warning("Manual UIDI update skipped - already running")
-                    return {"success": False, "message": "UIDI update already running"}
-                raise
-        
-        background_tasks.add_task(_safe_uidi_task)
+        # Start sync with update_no_match_uidi operation using the worker method
+        background_tasks.add_task(
+            GoogleSheetSyncController._execute_sync_task_worker,
+            db,
+            'update_no_match_uidi'
+        )
 
         # Include last-known update times
         status = sync_controller.get_sync_status()
@@ -592,30 +555,12 @@ def update_all_mappings(
         }
 
     try:
-        # Start sync with update_all operation using safe worker method
-        def _safe_all_update_task():
-            """Wrapper to ensure safe execution of all mappings update task"""
-            from mpi_backend.database import background_db_context
-            from mpi_backend.utils.task_locks import task_lock
-            import socket
-            import os
-            import uuid
-            
-            worker_id = f"api_{socket.gethostname()}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
-            
-            try:
-                with background_db_context() as bg_db:
-                    with task_lock(bg_db, "manual_all_update", worker_id):
-                        return GoogleSheetSyncController._execute_sync_task_worker(
-                            db, 'update_all'
-                        )
-            except RuntimeError as e:
-                if "Could not acquire lock" in str(e):
-                    logger.warning("Manual all update skipped - already running")
-                    return {"success": False, "message": "All update already running"}
-                raise
-        
-        background_tasks.add_task(_safe_all_update_task)
+        # Start sync with update_all operation using the worker method
+        background_tasks.add_task(
+            GoogleSheetSyncController._execute_sync_task_worker,
+            db,
+            'update_all'
+        )
 
         # Include last-known update times
         status = sync_controller.get_sync_status()
@@ -632,69 +577,5 @@ def update_all_mappings(
         return {
             "status": "error",
             "message": f"Failed to start full update: {str(e)}",
-            "timestamp": datetime.now().isoformat()
-        }
-
-
-@router.get("/task-locks")
-def get_task_locks(
-    db: Session = Depends(get_db),
-    token: str = Depends(JWTBearer())
-):
-    """
-    Get current task locks for monitoring and debugging.
-    
-    **Summary:**
-        Returns information about all currently active task locks
-        to help monitor background task execution and prevent duplicates.
-        
-    **Authentication:**
-        - **token** (`str`): JWT Bearer token required for access
-        
-    **Returns:**
-        - **dict**: List of active task locks with details
-        
-    **Response Example:**
-    ```json
-    {
-        "active_locks": [
-            {
-                "task_name": "email_download",
-                "locked_by": "worker_host_123_abc",
-                "locked_at": "2024-12-19T14:30:25.123456",
-                "expires_at": "2024-12-19T15:30:25.123456"
-            }
-        ],
-        "total_locks": 1,
-        "timestamp": "2024-12-19T14:35:00.123456"
-    }
-    ```
-    
-    **Use Cases:**
-        - Monitoring task execution
-        - Debugging lock issues
-        - System health checks
-        - Task coordination analysis
-        
-    **Notes:**
-        - Shows only non-expired locks
-        - Automatically cleans up expired locks
-        - Useful for troubleshooting duplicate task issues
-    """
-    from mpi_backend.utils.task_locks import get_locked_tasks
-    
-    try:
-        locked_tasks = get_locked_tasks(db)
-        return {
-            "active_locks": locked_tasks,
-            "total_locks": len(locked_tasks),
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Failed to get task locks: {str(e)}")
-        return {
-            "active_locks": [],
-            "total_locks": 0,
-            "error": str(e),
             "timestamp": datetime.now().isoformat()
         }

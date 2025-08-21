@@ -348,9 +348,7 @@ def get_column_data(
         - **column_name** (`str`, required): The database column name to get distinct values from
         
     **Request Body:**
-        - **payload** (`Dict`, optional): Additional filter context containing:
-            - **filter_context** (`Dict`, optional): Key-value pairs where keys are column names and values are filter values
-            - **comparison_filters** (`List`, optional): Date range filters using comparison operators
+        - **payload** (`Dict`, optional): Additional filter context (currently unused)
         
     **Authentication:**
         - Requires valid JWT token in Authorization header
@@ -358,20 +356,6 @@ def get_column_data(
     **Returns:**
         - **List[str]**: Array of unique values from the specified column
         
-    **Request Body Example:**
-    ```json
-    {
-        "filter_context": {
-            "vendor": "Supplier A",
-            "customer_job": "Project Alpha"
-        },
-        "comparison_filters": [
-            {"column": "date", "operator": "gte", "value": "2024-01-01"},
-            {"column": "date", "operator": "lte", "value": "2024-12-31"}
-        ]
-    }
-    ```
-    
     **Response Example:**
     ```json
     [
@@ -396,9 +380,6 @@ def get_column_data(
         - Results are automatically sorted
         - Cache keys are based on column name for optimal performance
         - Returns empty array if column name is invalid or no data found
-        - filter_context allows additional filtering to narrow down results
-        - The specified column_name is automatically excluded from filter_context to prevent self-filtering
-        - comparison_filters support date range filtering for more precise results
     """
     start_time = time.time()
     
@@ -482,10 +463,6 @@ def get_column_data_paginated(
             - Supports "starts with" matching (e.g., "1" matches all items starting with "1")
             - Supports exact match when query is surrounded with quotes (e.g., "12345" matches exactly "12345")
         - **comparison_filters** (`List`, required): Date range filters using comparison operators
-        - **filter_context** (`Dict`, optional): Additional filter context to narrow down results
-            - Key-value pairs where keys are column names and values are filter values
-            - Example: `{"vendor": "Supplier A", "customer_job": "Project Alpha"}`
-            - The specified column_name is automatically excluded from filter_context to prevent self-filtering
         
     **URL Example:**
     ```
@@ -499,10 +476,6 @@ def get_column_data_paginated(
             {"column": "date", "operator": "gte", "value": "2000-01-01"},
             {"column": "date", "operator": "lte", "value": "2025-08-15"}
         ],
-        "filter_context": {
-            "vendor": "Supplier A",
-            "customer_job": "Project Alpha"
-        },
         "page": 1,
         "limit": 20,
         "search": "anything that is search"
@@ -563,8 +536,6 @@ def get_column_data_paginated(
         - Cache is managed automatically for optimal performance
         - Maximum limit is 100 items per page for performance reasons
         - comparison_filters must include date range for proper filtering
-        - filter_context allows additional filtering to narrow down results
-        - The specified column_name is automatically excluded from filter_context to prevent self-filtering
     """
     start_time = time.time()
     

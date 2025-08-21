@@ -33,8 +33,6 @@ qb_engine = create_engine(
     echo=False,  # Disable SQL logging for performance
 )
 
-
-
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 QBSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=qb_engine)
 Base = declarative_base()
@@ -131,9 +129,6 @@ def qb_db_context():
             logger.warning(f"Error closing QB DB context session: {e}")
         except Exception as e:
             logger.error(f"Unexpected error closing QB DB context session: {e}")
-
-
-
 
 # Log initial pool configuration
 logger.info("Database connection pools configured:")
