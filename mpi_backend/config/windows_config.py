@@ -1,5 +1,5 @@
 """
-Windows-specific configuration to prevent h11 protocol errors.
+Windows-specific configuration optimized for httptools protocol.
 This file contains settings optimized for Windows environments.
 """
 
@@ -8,21 +8,21 @@ import platform
 # Check if running on Windows
 IS_WINDOWS = platform.system().lower() == "windows"
 
-# Windows-specific uvicorn settings
+# Windows-specific uvicorn settings for httptools (more stable than h11)
 WINDOWS_UVICORN_CONFIG = {
-    "timeout_keep_alive": 30,  # Reduced keep-alive timeout
-    "timeout_graceful_shutdown": 15,  # Faster shutdown
-    "limit_concurrency": 500,  # Lower concurrency limit
-    "backlog": 100,  # Smaller connection backlog
+    "timeout_keep_alive": 60,  # Increased for httptools stability
+    "timeout_graceful_shutdown": 20,  # Balanced shutdown time
+    "limit_concurrency": 800,  # Higher concurrency with httptools
+    "backlog": 200,  # Larger backlog for httptools
     "proxy_headers": True,  # Better proxy handling
     "forwarded_allow_ips": "*",  # Allow forwarded IPs
 }
 
-# Standard settings for non-Windows
+# Standard settings for non-Windows with httptools
 STANDARD_UVICORN_CONFIG = {
-    "timeout_keep_alive": 65,
+    "timeout_keep_alive": 120,
     "timeout_graceful_shutdown": 30,
-    "limit_concurrency": 1000,
+    "limit_concurrency": 1500,
     "backlog": 2048,
     "proxy_headers": True,
     "forwarded_allow_ips": "*",

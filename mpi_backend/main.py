@@ -92,30 +92,19 @@ app.add_middleware(
     max_age=3600
 )
 
-# Windows-specific connection error handling middleware
+# Simple connection error handler for stability
 @app.middleware("http")
 async def connection_error_handler(request: Request, call_next):
     try:
-        # Check if client is still connected before processing
-        if request.client and hasattr(request.client, 'is_connected'):
-            if not request.client.is_connected():
-                return JSONResponse(
-                    status_code=499,  # Client Closed Request
-                    content={"detail": "Client disconnected"}
-                )
-        
         response = await call_next(request)
         return response
-        
     except Exception as e:
-        # Handle h11 protocol errors specifically
-        if "h11" in str(e).lower() or "protocol" in str(e).lower():
-            logger.warning(f"Connection protocol error handled: {e}")
-            return JSONResponse(
-                status_code=499,
-                content={"detail": "Connection error - please retry"}
-            )
-        raise
+        # Simple error handling without protocol-specific logic
+        logger.warning(f"Request error handled: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error - please retry"}
+        )
 
 # Enhanced request logging middleware
 
@@ -260,7 +249,7 @@ if __name__ == "__main__":
     # Get platform-specific configuration
     uvicorn_config = get_uvicorn_config()
     
-    # Windows-optimized uvicorn configuration to prevent h11 protocol errors
+    # Stable uvicorn configuration using httptools for Windows compatibility
     uvicorn.run(
         "mpi_backend.main:app",
         host="0.0.0.0",
@@ -268,7 +257,7 @@ if __name__ == "__main__":
         reload=False,
         workers=1,
         loop="asyncio",
-        http="h11",
+        http="httptools",  # Use httptools instead of h11 for Windows stability
         access_log=False,  # We handle our own request logging
         log_level="info",
         **uvicorn_config  # Use platform-specific settings
