@@ -123,9 +123,9 @@ class GoogleSheetSyncController:
                 cls._current_operation = operation
                 cls._current_sub_operation = "starting"
 
-                # Create a new database session for this thread
-                from mpi_backend.database import SessionLocal
-                thread_db = SessionLocal()
+                # Create a new background database session for this thread
+                from mpi_backend.database import BackgroundSessionLocal
+                thread_db = BackgroundSessionLocal()
 
                 try:
                     controller = cls(thread_db)
