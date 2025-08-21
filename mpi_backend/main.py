@@ -11,6 +11,7 @@ import json
 
 # Setup logging first, before any other imports
 from mpi_backend.config.logging_config import setup_logging, get_missing_logger
+from mpi_backend.config.windows_config import get_uvicorn_config
 setup_logging()
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,31 @@ app.add_middleware(
     allow_headers=["*"],
     max_age=3600
 )
+
+# Windows-specific connection error handling middleware
+@app.middleware("http")
+async def connection_error_handler(request: Request, call_next):
+    try:
+        # Check if client is still connected before processing
+        if request.client and hasattr(request.client, 'is_connected'):
+            if not request.client.is_connected():
+                return JSONResponse(
+                    status_code=499,  # Client Closed Request
+                    content={"detail": "Client disconnected"}
+                )
+        
+        response = await call_next(request)
+        return response
+        
+    except Exception as e:
+        # Handle h11 protocol errors specifically
+        if "h11" in str(e).lower() or "protocol" in str(e).lower():
+            logger.warning(f"Connection protocol error handled: {e}")
+            return JSONResponse(
+                status_code=499,
+                content={"detail": "Connection error - please retry"}
+            )
+        raise
 
 # Enhanced request logging middleware
 
@@ -231,7 +257,10 @@ add_pagination(app)
 
 
 if __name__ == "__main__":
-    # Optimized uvicorn configuration for stability
+    # Get platform-specific configuration
+    uvicorn_config = get_uvicorn_config()
+    
+    # Windows-optimized uvicorn configuration to prevent h11 protocol errors
     uvicorn.run(
         "mpi_backend.main:app",
         host="0.0.0.0",
@@ -242,8 +271,5 @@ if __name__ == "__main__":
         http="h11",
         access_log=False,  # We handle our own request logging
         log_level="info",
-        timeout_keep_alive=65,
-        timeout_graceful_shutdown=30,
-        limit_concurrency=1000,
-        limit_max_requests=None
+        **uvicorn_config  # Use platform-specific settings
     )
