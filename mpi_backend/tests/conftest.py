@@ -19,11 +19,14 @@ def _enable_pytest_auth_bypass():
     os.environ["PYTEST_CURRENT_TEST"] = os.environ.get(
         "PYTEST_CURRENT_TEST", "1"
     )
+    # Disable scheduler during tests to prevent hanging
+    os.environ["DISABLE_SCHEDULER"] = "1"
     yield
 
 
 @pytest.fixture(scope="session")
 def client():
+    # Create a real FastAPI TestClient to test actual app startup and functionality
     return TestClient(app)
 
 

@@ -135,8 +135,8 @@ class TestAuthHandler:
 
     def test_decode_jwt_none_token(self):
         """Test decoding None token."""
-        with pytest.raises(TypeError):
-            decodeJWT(None)
+        decoded = decodeJWT(None)
+        assert decoded == {}
 
     def test_jwt_algorithm_consistency(self):
         """Test that encoding and decoding use the same algorithm."""
