@@ -6,11 +6,14 @@ Create Date: 2024-12-19 15:00:00.000000
 
 """
 from alembic import op
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # revision identifiers, used by Alembic.
 revision = 'optimize_search_performance'
-down_revision = 'optimize_invoice_items_performance'
+down_revision = 'optimize_performance_2024'
 branch_labels = None
 depends_on = None
 
@@ -18,44 +21,61 @@ depends_on = None
 def upgrade():
     """Add search-optimized indexes for ultra-fast search performance"""
     
+    # Enable trigram extension if not already enabled
+    # This is required for GIN trigram indexes
+    try:
+        op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+        logger.info("pg_trgm extension enabled successfully")
+    except Exception as e:
+        logger.warning(f"Could not enable pg_trgm extension: {e}")
+        logger.warning("GIN trigram indexes will be skipped")
+        return
+    
     # Add GIN indexes for text search columns (PostgreSQL specific)
     # These indexes dramatically improve ILIKE performance for search queries
     
-    # GIN index for vendor column with trigram support
-    op.execute("""
-        CREATE INDEX IF NOT EXISTS ix_invoice_items_vendor_gin 
-        ON invoice_items USING GIN (vendor gin_trgm_ops)
-    """)
-    
-    # GIN index for item column with trigram support
-    op.execute("""
-        CREATE INDEX IF NOT EXISTS ix_invoice_items_item_gin 
-        ON invoice_items USING GIN (item gin_trgm_ops)
-    """)
-    
-    # GIN index for description column with trigram support
-    op.execute("""
-        CREATE INDEX IF NOT EXISTS ix_invoice_items_description_gin 
-        ON invoice_items USING GIN (description gin_trgm_ops)
-    """)
-    
-    # GIN index for ref_no column with trigram support
-    op.execute("""
-        CREATE INDEX IF NOT EXISTS ix_invoice_items_ref_no_gin 
-        ON invoice_items USING GIN (ref_no gin_trgm_ops)
-    """)
-    
-    # GIN index for customer_job column with trigram support
-    op.execute("""
-        CREATE INDEX IF NOT EXISTS ix_invoice_items_customer_job_gin 
-        ON invoice_items USING GIN (customer_job gin_trgm_ops)
-    """)
-    
-    # GIN index for po_number column with trigram support
-    op.execute("""
-        CREATE INDEX IF NOT EXISTS ix_invoice_items_po_number_gin 
-        ON invoice_items USING GIN (po_number gin_trgm_ops)
-    """)
+    try:
+        # GIN index for vendor column with trigram support
+        op.execute("""
+            CREATE INDEX IF NOT EXISTS ix_invoice_items_vendor_gin 
+            ON invoice_items USING GIN (vendor gin_trgm_ops)
+        """)
+        
+        # GIN index for item column with trigram support
+        op.execute("""
+            CREATE INDEX IF NOT EXISTS ix_invoice_items_item_gin 
+            ON invoice_items USING GIN (item gin_trgm_ops)
+        """)
+        
+        # GIN index for description column with trigram support
+        op.execute("""
+            CREATE INDEX IF NOT EXISTS ix_invoice_items_description_gin 
+            ON invoice_items USING GIN (description gin_trgm_ops)
+        """)
+        
+        # GIN index for ref_no column with trigram support
+        op.execute("""
+            CREATE INDEX IF NOT EXISTS ix_invoice_items_ref_no_gin 
+            ON invoice_items USING GIN (ref_no gin_trgm_ops)
+        """)
+        
+        # GIN index for customer_job column with trigram support
+        op.execute("""
+            CREATE INDEX IF NOT EXISTS ix_invoice_items_customer_job_gin 
+            ON invoice_items USING GIN (customer_job gin_trgm_ops)
+        """)
+        
+        # GIN index for po_number column with trigram support
+        op.execute("""
+            CREATE INDEX IF NOT EXISTS ix_invoice_items_po_number_gin 
+            ON invoice_items USING GIN (po_number gin_trgm_ops)
+        """)
+        
+        logger.info("GIN trigram indexes created successfully")
+        
+    except Exception as e:
+        logger.error(f"Failed to create GIN trigram indexes: {e}")
+        logger.warning("Falling back to standard indexes only")
     
     # Composite indexes for common search combinations
     # These indexes optimize the most common search patterns
@@ -118,10 +138,6 @@ def upgrade():
         ON invoice_items (customer_job) 
         WHERE customer_job IS NOT NULL AND customer_job != ''
     """)
-    
-    # Enable trigram extension if not already enabled
-    # This is required for GIN trigram indexes
-    op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
 
 
 def downgrade():
@@ -139,12 +155,16 @@ def downgrade():
     op.execute("DROP INDEX IF EXISTS ix_invoice_items_active_vendor_search")
     op.execute("DROP INDEX IF EXISTS ix_invoice_items_active_item_search")
     op.execute("DROP INDEX IF EXISTS ix_invoice_items_active_ref_no_search")
-    op.execute("DROP INDEX IF EXISTS ix_invoice_items_active_customer_job_search")
+    op.execute(
+        "DROP INDEX IF EXISTS "
+        "ix_invoice_items_active_customer_job_search"
+    )
     
     # Drop partial indexes
     op.execute("DROP INDEX IF EXISTS ix_invoice_items_vendor_partial")
     op.execute("DROP INDEX IF EXISTS ix_invoice_items_item_partial")
     op.execute("DROP INDEX IF EXISTS ix_invoice_items_ref_no_partial")
     op.execute(
-        "DROP INDEX IF EXISTS ix_invoice_items_customer_job_partial"
+        "DROP INDEX IF EXISTS "
+        "ix_invoice_items_customer_job_partial"
     )
