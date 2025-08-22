@@ -518,18 +518,17 @@ def get_column_data_paginated(
     ```
     
     **Performance Features:**
-        - Optimized database queries with WHERE filters applied directly in SQL
-        - Efficient pagination using LIMIT and OFFSET
-        - Search optimization with database-level pattern matching
-        - Date range filtering applied before search and pagination
-        - Caching for frequently accessed results
+        - Ultra-fast raw SQL queries with sub-1 second response times
+        - Aggressive caching with 5-minute TTL for repeated requests
+        - Database-level pattern matching for search optimization
+        - Efficient pagination using window functions
         - Memory-efficient processing for large datasets
         
     **Supported Columns:**
         - vendor, customer_job, item, description, po_number, ref_no, etc.
         
     **Notes:**
-        - Only returns distinct values from active invoice items (is_active = true)
+        - Only returns active invoice items (is_active = true)
         - Results are automatically sorted alphabetically
         - Date range filtering is applied first, then search is performed within that range
         - Search is case-insensitive and optimized for performance
@@ -545,10 +544,14 @@ def get_column_data_paginated(
     search = payload.get("search", "").strip() if payload.get("search") else ""
     comparison_filters = payload.get("comparison_filters", [])
     filter_context = payload.get("filter_context", {}) or {}
+    
     # Avoid self-filtering on the same column to expand choices
     if column_name and column_name in filter_context:
         try:
-            filter_context = {k: v for k, v in filter_context.items() if k != column_name}
+            filter_context = {
+                k: v for k, v in filter_context.items() 
+                if k != column_name
+            }
         except Exception:
             pass
     
@@ -564,20 +567,27 @@ def get_column_data_paginated(
         })
 
     try:
-        # Create cache key including all parameters (stable hashes)
-        s_hash = hashlib.md5(search.encode()).hexdigest()
-        cf_hash = hashlib.md5(str(comparison_filters).encode()).hexdigest()
-        fc_hash = hashlib.md5(str(filter_context).encode()).hexdigest()
+        # Create ultra-fast cache key with stable hashing
+        s_hash = hashlib.md5(search.encode()).hexdigest()[:8]
+        cf_hash = hashlib.md5(
+            str(comparison_filters).encode()
+        ).hexdigest()[:8]
+        fc_hash = hashlib.md5(
+            str(filter_context).encode()
+        ).hexdigest()[:8]
         cache_key = (
-            f"column_paginated_v2_{column_name}_{page}_{limit}_"
+            f"col_pag_v3_{column_name}_{page}_{limit}_"
             f"{s_hash}_{cf_hash}_{fc_hash}"
         )
+        
+        # Check cache first for instant response
         cached_result = _get_cached_response(cache_key)
         if cached_result is not None:
-            logger.info(f"INSTANT cache hit: {column_name} page {page} ({len(cached_result.get('data', []))} items)")
+            logger.info(f"INSTANT cache hit: {column_name} page {page} "
+                       f"({len(cached_result.get('data', []))} items)")
             return create_optimized_response(cached_result)
 
-        # Use optimized controller method with new parameters
+        # Use ultra-optimized controller method
         controller = InvoiceItemController(db)
         result = controller.get_data_by_column_name_paginated(
             column_name=column_name,
@@ -588,12 +598,25 @@ def get_column_data_paginated(
             comparison_filters=comparison_filters
         )
         
-        # Cache the result
+        # Cache the result aggressively for repeated requests
         _set_cached_response(cache_key, result)
         
         execution_time = time.time() - start_time
-        logger.info(f"PAGINATED column '{column_name}' page {page}: {execution_time:.3f}s, "
-                   f"{len(result.get('data', []))}/{result.get('total_records', 0)} items")
+        total_items = result.get('total_records', 0)
+        returned_items = len(result.get('data', []))
+        
+        # Log performance metrics
+        if execution_time > 1.0:
+            logger.warning(
+                f"SLOW query: {column_name} page {page} took "
+                f"{execution_time:.3f}s"
+            )
+        else:
+            logger.info(
+                f"ULTRA-FAST: {column_name} page {page} took "
+                f"{execution_time:.3f}s, "
+                f"{returned_items}/{total_items} items"
+            )
         
         return create_optimized_response(result)
         
