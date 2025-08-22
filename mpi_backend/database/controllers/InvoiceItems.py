@@ -4,14 +4,11 @@ from fastapi import HTTPException, BackgroundTasks
 from typing import List, Dict, Any, Optional, Tuple
 from math import ceil
 from mpi_backend.database.models import InvoiceItem
-# Import moved inside methods to avoid circular imports
-from mpi_backend.database.controllers.CustomerJobMappingContorller import (
-    CustomerJobMappingController
-)
 from mpi_backend.database.schemas import InvoiceItems as InvoiceItemsResponse
 from mpi_backend.database.schemas import PriceHistoryResponse
 from mpi_backend.database.schemas.Filters import FilterRequest
 from mpi_backend.utils.export_utils import extract_supplier_id
+from mpi_backend.utils.number_formatter import format_currency
 import math
 import logging
 import sqlalchemy.orm
@@ -998,10 +995,22 @@ class InvoiceItemController:
             # Use ORM-based serialization so all loaded attributes are preserved
             try:
                 # Pydantic v2
-                invoices_items.append(InvoiceItemsResponse.model_validate(item))
+                item_response = InvoiceItemsResponse.model_validate(item)
+                # Format cost and amount with commas for better readability
+                if hasattr(item_response, 'cost') and item_response.cost is not None:
+                    item_response.cost = format_currency(item_response.cost)
+                if hasattr(item_response, 'amount') and item_response.amount is not None:
+                    item_response.amount = format_currency(item_response.amount)
+                invoices_items.append(item_response)
             except AttributeError:
                 # Pydantic v1 fallback
-                invoices_items.append(InvoiceItemsResponse.from_orm(item))
+                item_response = InvoiceItemsResponse.from_orm(item)
+                # Format cost and amount with commas for better readability
+                if hasattr(item_response, 'cost') and item_response.cost is not None:
+                    item_response.cost = format_currency(item_response.cost)
+                if hasattr(item_response, 'amount') and item_response.amount is not None:
+                    item_response.amount = format_currency(item_response.amount)
+                invoices_items.append(item_response)
 
         # Calculate pagination metadata
         total_pages = (total + size - 1) // size if size > 0 else 1
@@ -1653,6 +1662,11 @@ class InvoiceItemController:
             item_dict = item.__dict__.copy()
             # Use the full item code as stored in database
             item_dict['item'] = item.item
+            # Format cost and amount with commas for better readability
+            if 'cost' in item_dict and item_dict['cost'] is not None:
+                item_dict['cost'] = format_currency(item_dict['cost'])
+            if 'amount' in item_dict and item_dict['amount'] is not None:
+                item_dict['amount'] = format_currency(item_dict['amount'])
             invoices_items.append(InvoiceItemsResponse(**item_dict))
 
         return invoices_items
@@ -1689,6 +1703,11 @@ class InvoiceItemController:
             item_dict = item.__dict__.copy()
             # Use the full item code as stored in database
             item_dict['item'] = item.item
+            # Format cost and amount with commas for better readability
+            if 'cost' in item_dict and item_dict['cost'] is not None:
+                item_dict['cost'] = format_currency(item_dict['cost'])
+            if 'amount' in item_dict and item_dict['amount'] is not None:
+                item_dict['amount'] = format_currency(item_dict['amount'])
             invoices_items.append(InvoiceItemsResponse(**item_dict))
 
         return {
@@ -1735,6 +1754,11 @@ class InvoiceItemController:
             item_dict = item.__dict__.copy()
             # Use the full item code as stored in database
             item_dict['item'] = item.item
+            # Format cost and amount with commas for better readability
+            if 'cost' in item_dict and item_dict['cost'] is not None:
+                item_dict['cost'] = format_currency(item_dict['cost'])
+            if 'amount' in item_dict and item_dict['amount'] is not None:
+                item_dict['amount'] = format_currency(item_dict['amount'])
             invoices_items.append(InvoiceItemsResponse(**item_dict))
         return invoices_items
 
@@ -1950,6 +1974,11 @@ class InvoiceItemController:
                 item_dict = item.__dict__.copy()
                 # Use the full item code as stored in database
                 item_dict['item'] = item.item
+                # Format cost and amount with commas for better readability
+                if 'cost' in item_dict and item_dict['cost'] is not None:
+                    item_dict['cost'] = format_currency(item_dict['cost'])
+                if 'amount' in item_dict and item_dict['amount'] is not None:
+                    item_dict['amount'] = format_currency(item_dict['amount'])
                 invoices_items.append(InvoiceItemsResponse(**item_dict))
             return invoices_items
         except Exception as e:
@@ -2131,6 +2160,11 @@ class InvoiceItemController:
             item_dict = item.__dict__.copy()
             # Use the full item code as stored in database
             item_dict['item'] = item.item
+            # Format cost and amount with commas for better readability
+            if 'cost' in item_dict and item_dict['cost'] is not None:
+                item_dict['cost'] = format_currency(item_dict['cost'])
+            if 'amount' in item_dict and item_dict['amount'] is not None:
+                item_dict['amount'] = format_currency(item_dict['amount'])
             invoices_items.append(InvoiceItemsResponse(**item_dict))
         return invoices_items
 
@@ -2479,7 +2513,7 @@ class InvoiceItemController:
                     price_record = PriceHistoryResponse(
                         ref_no=item.ref_no,
                         date=item.date.strftime("%m-%d-%Y"),
-                        cost=float(item.cost) if item.cost else 0.0,
+                        cost=format_currency(item.cost) if item.cost else format_currency(0.0),
                         qty=int(item.qty) if item.qty else 0,
                         invoice_id=str(
                             item.invoice_id) if item.invoice_id else ""
@@ -2676,8 +2710,8 @@ class InvoiceItemController:
 
         result = {
             "total_qty": total_qty,
-            "total_amount": sanitize_float(total_amount),
-            "average_cost": sanitize_float(average_cost)
+            "total_amount": format_currency(sanitize_float(total_amount)),
+            "average_cost": format_currency(sanitize_float(average_cost))
         }
 
         # Log final result for debugging

@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional, List
 from datetime import date
 import logging
 from sqlalchemy.orm import Session
+from mpi_backend.utils.number_formatter import format_currency, format_quantity
 
 logger = logging.getLogger(__name__)
 
@@ -453,9 +454,9 @@ class UnmappedItemsController:
                 {
                     "original_item_id": r.original_item_id,
                     "original_description": r.original_description or "",
-                    "cost": float(r.cost or 0.0),
-                    "amount": float(r.amount or 0.0),
-                    "quantity": int(r.quantity or 0),
+                    "cost": format_currency(r.cost or 0.0),
+                    "amount": format_currency(r.amount or 0.0),
+                    "quantity": format_quantity(r.quantity or 0),
                     "sheet_name": r.sheet_name or "",
                     "supplier": r.supplier or "",
                 }

@@ -14,7 +14,7 @@ class InvoiceItems(BaseModel):
     item: Optional[str]
     description: Optional[str]
     qty: Optional[int]
-    cost: Optional[float]
+    cost: Optional[str]  # Changed from float to str for formatted display
     amount: Optional[str]
     date: Optional[str]
     ref_no: Optional[str]
@@ -53,8 +53,8 @@ class InvoiceItems(BaseModel):
     @validator('buyer', pre=True)
     def normalize_buyer(cls, value):
         """
-        Normalize buyer strings to collapse internal spacing within alpha and numeric segments
-        while preserving segment order. Examples:
+        Normalize buyer strings to collapse internal spacing within alpha and 
+        numeric segments while preserving segment order. Examples:
           - "PR ST GE 12 34 98" -> "PRSTGE 123498"
           - "an dr e w 3 4 7 52 6 -9 5 90" -> "andrew 3475269590"
           - "Arlem(929) 442-955" -> "Arlem 929442955"
@@ -66,7 +66,8 @@ class InvoiceItems(BaseModel):
         if not s:
             return s
 
-        # Replace non-alphanumeric characters with spaces, keep letters, digits, spaces
+        # Replace non-alphanumeric characters with spaces, keep letters, 
+        # digits, spaces
         cleaned = re.sub(r"[^A-Za-z0-9\s]", " ", s)
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
@@ -90,7 +91,8 @@ class InvoiceItems(BaseModel):
         for tok in cleaned.split(' '):
             if not tok:
                 continue
-            tok_type = 'alpha' if tok.isalpha() else ('digit' if tok.isdigit() else 'other')
+            tok_type = ('alpha' if tok.isalpha() else 
+                        ('digit' if tok.isdigit() else 'other'))
             if current_type is None:
                 current_type = tok_type
                 current.append(re.sub(r"\s+", "", tok))
@@ -145,7 +147,7 @@ class UpdateInvoiceItemRequest(BaseModel):
     item: str = None
     description: str = None
     qty: int = None
-    cost: float = None
+    cost: str = None  # Changed from float to str for consistency
     amount: str = None
     date: str = None
     ref_no: str = None
@@ -172,8 +174,8 @@ class UnmappedItemResponse(BaseModel):
     """Response model for individual unmapped item"""
     original_item_id: str
     original_description: Optional[str]
-    cost: Optional[float]
-    amount: Optional[float]  # Calculated as cost * quantity
+    cost: Optional[str]  # Changed from float to str for formatted display
+    amount: Optional[str]  # Changed from float to str for formatted display
     quantity: Optional[int]
     sheet_name: Optional[str]
     supplier: Optional[str]
@@ -185,7 +187,8 @@ class UnmappedItemResponse(BaseModel):
 class UnmappedItemsFilterRequest(BaseModel):
     """Request model for filtering unmapped items"""
     item_type: str = Field(
-        ..., description="Type of items: 'temporary', 'unmapped', or 'no_temporary'"
+        ..., 
+        description="Type of items: 'temporary', 'unmapped', or 'no_temporary'"
     )
     date_from: Optional[date] = Field(
         None, description="Start date filter (YYYY-MM-DD)"
