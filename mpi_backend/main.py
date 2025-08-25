@@ -23,6 +23,9 @@ from mpi_backend.database.query_optimizer import query_optimizer
 from mpi_backend.background.task_optimizer import task_optimizer, TaskPriority
 from mpi_backend.api.request_optimizer import request_optimizer
 
+# Import Windows VPS CPU fix
+from mpi_backend.utils.windows_cpu_fix import get_windows_cpu_percent, get_cpu_info
+
 # Import routes
 from mpi_backend.api.routes import (
     health, supplier, invoices_list, get_mappings, invoice_items,
@@ -269,7 +272,8 @@ async def proactive_optimization_middleware(request: Request, call_next):
     
     # Check system resources before processing (only for production requests)
     try:
-        cpu_percent = psutil.cpu_percent(interval=0.1)
+        # Use Windows VPS CPU fix to match Task Manager readings
+        cpu_percent = get_windows_cpu_percent(interval=0.1)
         memory = psutil.virtual_memory()
         memory_percent = memory.percent
         
@@ -422,7 +426,7 @@ async def advanced_health_check():
     """Advanced health check with memory management metrics"""
     try:
         # System metrics
-        cpu_percent = psutil.cpu_percent(interval=0.1)
+        cpu_percent = get_windows_cpu_percent(interval=0.1)
         memory = psutil.virtual_memory()
         disk = psutil.disk_usage('/')
         
@@ -469,12 +473,23 @@ async def advanced_health_check():
         return health_data
         
     except Exception as e:
-        logger.error(f"Advanced health check failed: {e}")
+        logger.error(f"Error in advanced health check: {e}")
+        return {"status": "error", "error": str(e)}
+
+
+@app.get("/cpu-info")
+async def get_cpu_information():
+    """Get detailed CPU information for Windows VPS debugging"""
+    try:
+        cpu_info = get_cpu_info()
         return {
-            "status": "error",
-            "error": str(e),
-            "timestamp": time.time()
+            "status": "success",
+            "cpu_info": cpu_info,
+            "message": "Use this endpoint to debug CPU percentage discrepancies between Task Manager and application"
         }
+    except Exception as e:
+        logger.error(f"Error getting CPU info: {e}")
+        return {"status": "error", "error": str(e)}
 
 # Optimization status endpoint
 @app.get("/optimization/status")
@@ -487,7 +502,7 @@ async def optimization_status():
         return {
             "timestamp": time.time(),
             "system_resources": {
-                "cpu_percent": psutil.cpu_percent(interval=1),
+                "cpu_percent": get_windows_cpu_percent(interval=1),
                 "memory_percent": memory.percent,
                 "memory_available_gb": memory.available / (1024**3)
             },
