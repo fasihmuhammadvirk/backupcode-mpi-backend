@@ -19,6 +19,7 @@ import hashlib
 import json
 import traceback
 import gc
+import psutil
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,34 @@ class InvoiceItemController:
             'vendor', 'class_', 'account', 'memo', 'buyer', 'date_added',
             'mpi_item', 'mpi_description', 'export_status'
         }
+        # ADDED: Resource monitoring
+        self._query_start_time = None
+        self._memory_before = None
+
+    def _monitor_resource_usage(self, operation: str):
+        """Monitor resource usage for operations"""
+        try:
+            self._query_start_time = time.time()
+            self._memory_before = psutil.virtual_memory().percent
+        except Exception as e:
+            logger.debug(f"Could not monitor resources: {e}")
+
+    def _log_resource_usage(self, operation: str):
+        """Log resource usage after operations"""
+        try:
+            if self._query_start_time:
+                duration = time.time() - self._query_start_time
+                memory_after = psutil.virtual_memory().percent
+                memory_diff = memory_after - self._memory_before if self._memory_before else 0
+                
+                if duration > 1.0:  # Log slow queries
+                    logger.warning(f"Slow query detected: {operation} took {duration:.2f}s")
+                
+                if memory_diff > 5.0:  # Log high memory usage
+                    logger.warning(f"High memory usage: {operation} used {memory_diff:.1f}% RAM")
+                    
+        except Exception as e:
+            logger.debug(f"Could not log resource usage: {e}")
 
     def _validate_safe_column(self, column_name: str) -> str:
         """Validate provided column name against whitelist and model attributes."""
@@ -74,7 +103,7 @@ class InvoiceItemController:
     def _setup_query_cache(self):
         """Pre-compile frequently used queries for ultra-fast execution."""
         try:
-            # Cache base query patterns
+            # Cache base query patterns with optimized field selection
             self._compiled_queries['base_select'] = (
                 select(InvoiceItem)
                 .options(load_only(
@@ -89,6 +118,17 @@ class InvoiceItemController:
             # Cache count query
             self._compiled_queries['count_active'] = (
                 select(func.count(InvoiceItem.id))
+                .where(InvoiceItem.is_active.is_(True))
+            )
+
+            # ADDED: Cache optimized filter queries
+            self._compiled_queries['filter_base'] = (
+                select(InvoiceItem)
+                .options(load_only(
+                    InvoiceItem.id, InvoiceItem.item, InvoiceItem.vendor,
+                    InvoiceItem.cost, InvoiceItem.qty, InvoiceItem.date,
+                    InvoiceItem.customer_job, InvoiceItem.is_active
+                ))
                 .where(InvoiceItem.is_active.is_(True))
             )
 
@@ -3407,3 +3447,70 @@ class InvoiceItemController:
             logger.error(f"Error updating existing invoice items: {str(e)}")
             self.db.rollback()
             return False
+
+    def get_filtered_items_paginated(self, filter_request: FilterRequest, page_size: int, offset: int = 0):
+        """
+        OPTIMIZED: Get filtered invoice items with efficient pagination
+        """
+        try:
+            self._monitor_resource_usage("get_filtered_items_paginated")
+            
+            # Build base query from cache
+            query = self._compiled_queries['filter_base'].execution_options(
+                enable_eagerloads=False  # Disable eager loading for performance
+            )
+            
+            # Apply filters efficiently
+            query = self._apply_filters_to_query(query, filter_request)
+            
+            # Get total count first (optimized)
+            count_query = query.with_entities(func.count(InvoiceItem.id))
+            total_count = self.db.execute(count_query).scalar()
+            
+            # Apply pagination and ordering
+            query = query.offset(offset).limit(page_size)
+            
+            # Execute query with optimized loading
+            results = self.db.execute(query).scalars().all()
+            
+            self._log_resource_usage("get_filtered_items_paginated")
+            
+            return results, total_count
+            
+        except Exception as e:
+            logger.error(f"Error in get_filtered_items_paginated: {e}")
+            raise
+
+    def _apply_filters_to_query(self, query, filter_request: FilterRequest):
+        """Apply filters to query efficiently"""
+        try:
+            # Apply date range filter if provided
+            if filter_request.start_date and filter_request.end_date:
+                query = query.filter(
+                    InvoiceItem.date >= filter_request.start_date,
+                    InvoiceItem.date <= filter_request.end_date
+                )
+            
+            # Apply supplier filter if provided
+            if filter_request.supplier_id:
+                query = query.filter(InvoiceItem.supplier_id == filter_request.supplier_id)
+            
+            # Apply customer job filter if provided
+            if filter_request.customer_job:
+                query = query.filter(InvoiceItem.customer_job == filter_request.customer_job)
+            
+            # Apply item code filter if provided
+            if filter_request.item_code:
+                query = query.filter(InvoiceItem.item == filter_request.item_code)
+            
+            # Apply cost range filter if provided
+            if filter_request.min_cost is not None:
+                query = query.filter(InvoiceItem.cost >= filter_request.min_cost)
+            if filter_request.max_cost is not None:
+                query = query.filter(InvoiceItem.cost <= filter_request.max_cost)
+            
+            return query
+            
+        except Exception as e:
+            logger.error(f"Error applying filters: {e}")
+            return query

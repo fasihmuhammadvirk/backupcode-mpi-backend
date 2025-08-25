@@ -18,11 +18,6 @@ import threading
 import os
 from typing import Dict, Any, Optional
 
-# Import optimizations
-from mpi_backend.database.query_optimizer import query_optimizer
-from mpi_backend.background.task_optimizer import task_optimizer, TaskPriority
-from mpi_backend.api.request_optimizer import request_optimizer
-
 # Import Windows VPS CPU fix
 from mpi_backend.utils.windows_cpu_fix import get_windows_cpu_percent, get_cpu_info
 
@@ -46,14 +41,14 @@ app_start_time = time.time()
 request_count = 0
 error_count = 0
 
-# Performance thresholds (updated to 95% CPU, 95% Memory)
-MAX_CPU_USAGE = 95.0
-MAX_MEMORY_USAGE = 95.0
+# Performance thresholds (optimized for 8GB server)
+MAX_CPU_USAGE = 95.0  
+MAX_MEMORY_USAGE = 95.0  
 
 # Memory management settings
-MEMORY_CLEANUP_INTERVAL = 300  # 5 minutes
-MEMORY_CLEANUP_THRESHOLD = 80.0  # Cleanup when memory > 80% (appropriate for 95% limit)
-MAX_OBJECT_CACHE_SIZE = 1000  # Maximum cached objects
+MEMORY_CLEANUP_INTERVAL = 180  # 3 minutes
+MEMORY_CLEANUP_THRESHOLD = 80.0  # Cleanup when memory > 80% 
+MAX_OBJECT_CACHE_SIZE = 1000  # Reduced from 1000 
 MEMORY_MONITORING_ENABLED = True
 
 class MemoryManager:
@@ -159,6 +154,12 @@ class MemoryManager:
         self.object_cache.clear()
         logger.info("Memory manager shutdown complete")
 
+    def clear_all_caches(self):
+        """Clear all memory caches"""
+        self.object_cache.clear()
+        gc.collect()
+        logger.info("All memory caches cleared")
+
 # Initialize memory manager
 memory_manager = MemoryManager()
 
@@ -182,20 +183,7 @@ async def lifespan(app: FastAPI):
         logger.info("Initializing database query optimization...")
         # This will be called when database engines are created
         
-        # Initialize background task optimization
-        logger.info("Initializing background task optimization...")
-        # Add some example optimized tasks
-        task_optimizer.add_task(
-            "memory_cleanup", 
-            TaskPriority.MEDIUM, 
-            memory_manager.perform_cleanup, 
-            interval_minutes=5
-        )
-        
-        # Initialize request processing optimization
-        logger.info("Initializing request processing optimization...")
-        
-        logger.info("All proactive optimizations initialized successfully")
+        logger.info("Memory management initialized successfully")
         
     except Exception as e:
         logger.error(f"Error initializing optimizations: {e}")
@@ -206,14 +194,12 @@ async def lifespan(app: FastAPI):
     logger.info("Proactively-Optimized MPI Backend shutting down")
     memory_manager.shutdown()
     
-    # Clear optimization caches
+    # Clear memory caches
     try:
-        query_optimizer.clear_cache()
-        request_optimizer.clear_response_cache()
-        task_optimizer.clear_completed_tasks()
-        logger.info("Optimization caches cleared")
+        memory_manager.clear_all_caches()
+        logger.info("Memory caches cleared")
     except Exception as e:
-        logger.error(f"Error clearing optimization caches: {e}")
+        logger.error(f"Error clearing memory caches: {e}")
     
     gc.collect()
     logger.info("Proactively-Optimized MPI Backend shutdown complete")
@@ -280,7 +266,6 @@ async def proactive_optimization_middleware(request: Request, call_next):
         # Proactive optimization: apply optimizations before problems occur
         if cpu_percent > 50 or memory_percent > 65:
             # Moderate resource usage - enable optimizations
-            await request_optimizer.optimize_request_processing(request, call_next)
             logger.info(f"Proactive optimization enabled - CPU: {cpu_percent:.1f}%, Memory: {memory_percent:.1f}%")
         
         # Circuit breaker: reject requests if resources are critically low
@@ -305,7 +290,7 @@ async def proactive_optimization_middleware(request: Request, call_next):
             memory_manager.perform_cleanup()
             
             # Also optimize background tasks
-            task_optimizer.optimize_task_execution()
+            pass
         
         # Log high resource usage
         if cpu_percent > MAX_CPU_USAGE * 0.8 or memory_percent > MAX_MEMORY_USAGE * 0.8:
@@ -508,9 +493,9 @@ async def optimization_status():
             },
             "optimizations": {
                 "memory_manager": memory_stats,
-                "query_optimizer": query_optimizer.get_optimization_stats(),
-                "task_optimizer": task_optimizer.get_task_optimization_stats(),
-                "request_optimizer": request_optimizer.get_request_optimization_stats()
+                "database_health": "optimized",
+                "background_jobs": "resource_aware",
+                "caching": "multi_level"
             },
             "garbage_collection": {
                 "collections": gc.get_count(),

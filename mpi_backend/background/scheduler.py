@@ -36,27 +36,32 @@ from mpi_backend.utils.quickbooks_priority import set_scheduler_instance
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# CONFIGURATION CONSTANTS - Optimized for Vultr Windows servers
+# CONFIGURATION CONSTANTS - Optimized for 8GB server
 # =============================================================================
 
-# Resource thresholds - conservative for production stability
-CPU_THRESHOLD = 75.0  # CPU % threshold (more conservative)
-MEMORY_THRESHOLD_MB = 1000  # Available RAM in MB (higher threshold)
-DB_CONNECTION_LIMIT = 8  # Max DB connections for background jobs
+# Resource thresholds - optimized for 4GB server stability
+CPU_THRESHOLD = 80.0  # CPU % threshold (more conservative for 4GB)
+MEMORY_THRESHOLD_MB = 2500  # Available RAM in MB (2.5GB threshold for 4GB server)
+DB_CONNECTION_LIMIT = 3  # Max DB connections for background jobs (reduced for 4GB)
 
-# Executor pool sizes - optimized for single-worker setup
+# Executor pool sizes - optimized for 4GB server
 CPU_POOL_SIZE = 1  # Single process for CPU-intensive tasks
-IO_POOL_SIZE = 4   # Moderate thread count for I/O operations
-MAPPING_POOL_SIZE = 2  # Dedicated threads for mapping operations
+IO_POOL_SIZE = 2   # Reduced thread count for 4GB server
+MAPPING_POOL_SIZE = 1  # Dedicated threads for mapping operations
 
 # Circuit breaker settings
 MAX_FAILURES = 3
 FAILURE_WINDOW_HOURS = 24
-MAX_RESOURCE_WAIT_MINUTES = 15  # Shorter timeout for responsiveness
+MAX_RESOURCE_WAIT_MINUTES = 10  # Shorter timeout for responsiveness
 
 # Job execution settings
-MAX_JOB_DURATION_MINUTES = 30  # Kill jobs that run too long
+MAX_JOB_DURATION_MINUTES = 20  # Reduced from 30 for 8GB server
 JOB_COALESCE_TIME = 300  # Coalesce missed executions within 5 minutes
+
+# ADDED: Resource management for 4GB server
+MEMORY_CLEANUP_THRESHOLD = 75.0  # Cleanup when memory > 75% (more aggressive for 4GB)
+CPU_THROTTLE_THRESHOLD = 85.0  # Throttle jobs when CPU > 85% (more conservative for 4GB)
+CRITICAL_JOB_PRIORITY = ["email_download", "failed_recovery"]  # Jobs that must always run
 
 # =============================================================================
 # JOB PRIORITY SYSTEM
@@ -211,6 +216,51 @@ class ResourceMonitor:
         
         if old_metrics:
             logger.info("Cleaned up %s old job metrics", len(old_metrics))
+
+    def can_execute_job(self, job_id: str, job_priority: JobPriority) -> bool:
+        """
+        ADDED: Resource-aware job execution decision
+        Critical jobs always run, others are throttled under high load
+        """
+        try:
+            # Get current system resources
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+            memory_percent = psutil.virtual_memory().percent
+            
+            # Critical jobs always run regardless of system load
+            if job_id in CRITICAL_JOB_PRIORITY:
+                return True
+            
+            # Check if system is under high load
+            if cpu_percent > CPU_THROTTLE_THRESHOLD or memory_percent > MEMORY_CLEANUP_THRESHOLD:
+                # Only allow high priority jobs under high load
+                if job_priority in [JobPriority.CRITICAL, JobPriority.HIGH]:
+                    logger.warning(f"High system load detected (CPU: {cpu_percent:.1f}%, Memory: {memory_percent:.1f}%). Allowing only high priority job: {job_id}")
+                    return True
+                else:
+                    logger.info(f"Deferring low priority job {job_id} due to high system load (CPU: {cpu_percent:.1f}%, Memory: {memory_percent:.1f}%)")
+                    return False
+            
+            # Normal execution under normal load
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error checking job execution: {e}")
+            # Default to allowing execution if monitoring fails
+            return True
+    
+    def should_throttle_jobs(self) -> bool:
+        """Check if jobs should be throttled due to high resource usage"""
+        try:
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+            memory_percent = psutil.virtual_memory().percent
+            
+            return (cpu_percent > CPU_THROTTLE_THRESHOLD or 
+                   memory_percent > MEMORY_CLEANUP_THRESHOLD)
+                   
+        except Exception as e:
+            logger.error(f"Error checking throttling: {e}")
+            return False
 
 # Global resource monitor
 resource_monitor = ResourceMonitor()

@@ -29,22 +29,45 @@ from functools import lru_cache
 import hashlib
 from datetime import datetime, date
 from sqlalchemy.sql import text
+import psutil
+from math import ceil
+import gc
 
 router = APIRouter(prefix="/filter", tags=["Filtering Data"])
 
 logger = logging.getLogger(__name__)
 
-# Enhanced caching with ultra-aggressive optimization
+# OPTIMIZED: Enhanced caching with resource-aware fallback
 cache_store = {}
 cache_timestamps = {}
 response_cache = {}  # Pre-computed responses
 CACHE_TTL = 300  # 5 minutes
+
+# ADDED: Resource monitoring thresholds (optimized for 4GB server)
+MAX_CPU_USAGE = 80.0  # Reduced from 95% for 4GB server
+MAX_MEMORY_USAGE = 80.0  # Reduced from 95% for 4GB server
+CACHE_FALLBACK_THRESHOLD = 65.0  # Use cache when CPU/Memory > 65% (more aggressive for 4GB)
 
 # Pre-computed static responses for ultra-fast delivery
 static_responses = {
     "column_mappings": None,
     "empty_filter_result": None
 }
+
+
+def _get_system_resources():
+    """Get current system resource usage"""
+    try:
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        memory_percent = psutil.virtual_memory().percent
+        return {
+            "cpu_percent": cpu_percent,
+            "memory_percent": memory_percent,
+            "high_load": cpu_percent > CACHE_FALLBACK_THRESHOLD or memory_percent > CACHE_FALLBACK_THRESHOLD
+        }
+    except Exception as e:
+        logger.debug(f"Could not get system resources: {e}")
+        return {"cpu_percent": 0, "memory_percent": 0, "high_load": False}
 
 
 def _is_cache_valid(key: str) -> bool:
@@ -631,6 +654,148 @@ def get_column_data_paginated(
             "total_records": 0,
             "total_pages": 0
         })
+
+
+@router.post("/invoice-items", response_model=PaginatedInvoiceItemsResponse)
+async def filter_invoice_items(
+    request: FilterRequest,
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=1000, description="Items per page"),
+    db: Session = Depends(get_db)
+):
+    """
+    OPTIMIZED: Filter invoice items with resource-aware execution and efficient pagination
+    """
+    start_time = time.time()
+    
+    # ADDED: Resource monitoring and cache fallback
+    system_resources = _get_system_resources()
+    cache_key = f"filter_{hashlib.md5(str(request.dict()).encode()).hexdigest()}_{page}_{page_size}"
+    
+    # Check if we should use cached results due to high system load
+    if system_resources["high_load"]:
+        cached_result = _get_cached_response(cache_key)
+        if cached_result:
+            logger.info(f"Using cached result due to high system load (CPU: {system_resources['cpu_percent']:.1f}%, Memory: {system_resources['memory_percent']:.1f}%)")
+            return cached_result
+    
+    try:
+        # Monitor resource usage
+        memory_before = psutil.virtual_memory().percent if hasattr(psutil, 'virtual_memory') else 0
+        
+        # Create controller with resource monitoring
+        controller = InvoiceItemController(db)
+        controller._monitor_resource_usage("filter_invoice_items")
+        
+        # OPTIMIZED: Use efficient pagination with offset
+        offset = (page - 1) * page_size
+        
+        # Get filtered results with pagination
+        results, total_count = controller.get_filtered_items_paginated(
+            request, page_size, offset
+        )
+        
+        # Calculate pagination info
+        total_pages = ceil(total_count / page_size) if total_count > 0 else 0
+        
+        # Build response
+        response = PaginatedInvoiceItemsResponse(
+            items=results,
+            total=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            has_next=page < total_pages,
+            has_prev=page > 1
+        )
+        
+        # Cache the result for future use
+        _set_cached_response(cache_key, response)
+        
+        # Log resource usage
+        duration = time.time() - start_time
+        memory_after = psutil.virtual_memory().percent if hasattr(psutil, 'virtual_memory') else 0
+        memory_diff = memory_after - memory_before
+        
+        if duration > 2.0:  # Log slow operations
+            logger.warning(f"Slow filter operation: {duration:.2f}s, Memory: {memory_diff:+.1f}%")
+        
+        controller._log_resource_usage("filter_invoice_items")
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error in filter_invoice_items: {e}")
+        # Return cached result if available, even if expired
+        cached_result = _get_cached_response(cache_key)
+        if cached_result:
+            logger.info("Returning cached result due to error")
+            return cached_result
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/invoice-items/stream")
+async def filter_invoice_items_stream(
+    request: FilterRequest,
+    page_size: int = Query(100, ge=1, le=1000, description="Items per page"),
+    db: Session = Depends(get_db)
+):
+    """
+    OPTIMIZED: Stream filtered invoice items for large datasets
+    Uses efficient cursor-based pagination to avoid memory issues
+    """
+    try:
+        # Check system resources
+        system_resources = _get_system_resources()
+        if system_resources["high_load"]:
+            logger.warning(f"High system load detected, using conservative page size. CPU: {system_resources['cpu_percent']:.1f}%, Memory: {system_resources['memory_percent']:.1f}%")
+            page_size = min(page_size, 50)  # Reduce page size under high load
+        
+        controller = InvoiceItemController(db)
+        controller._monitor_resource_usage("filter_invoice_items_stream")
+        
+        # Use streaming response for large datasets
+        from fastapi.responses import StreamingResponse
+        import json
+        
+        def generate_stream():
+            """Generate streaming response with memory management"""
+            try:
+                offset = 0
+                while True:
+                    # Get batch of results
+                    results, total_count = controller.get_filtered_items_paginated(
+                        request, page_size, offset
+                    )
+                    
+                    if not results:
+                        break
+                    
+                    # Yield results as JSON lines
+                    for item in results:
+                        yield json.dumps(item.dict()) + "\n"
+                    
+                    offset += page_size
+                    
+                    # Memory cleanup after each batch
+                    if offset % (page_size * 5) == 0:  # Every 5 batches
+                        gc.collect()
+                        
+            except Exception as e:
+                logger.error(f"Error in stream generation: {e}")
+                yield json.dumps({"error": str(e)}) + "\n"
+        
+        controller._log_resource_usage("filter_invoice_items_stream")
+        
+        return StreamingResponse(
+            generate_stream(),
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": "attachment; filename=filtered_items.jsonl"}
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in filter_invoice_items_stream: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("", response_model=PaginatedInvoiceItemsResponse)
