@@ -222,39 +222,6 @@ class UnmappedItemsController:
                 ).format(item_type=item_type)
             )
 
-    def _get_temporary_items(
-        self,
-        db,
-        date_from: Optional[date],
-        date_to: Optional[date],
-        supplier_names: Optional[List[str]],
-        search: Optional[str],
-        order_by: Optional[List[dict]],
-        page: int,
-        size: int
-    ) -> Dict[str, Any]:
-        """Get items that have a sheet_name but are 'No Match' or start with 'UIDI'"""
-        
-        # Base query for temporary items
-        query = db.query(InvoiceItem).filter(
-            and_(
-                InvoiceItem.sheet_name.isnot(None),
-                InvoiceItem.sheet_name != '',
-                or_(
-                    InvoiceItem.mpi_item == 'No Match',
-                    InvoiceItem.mpi_item.like('UIDI%'),
-                    InvoiceItem.mpi_description == 'No Match',
-                    InvoiceItem.mpi_description.like('UIDI%')
-                )
-            )
-        )
-        
-        # Apply filters (date and supplier filters)
-        query = self._apply_common_filters(query, date_from, date_to, supplier_names)
-        
-        # Get unique items based on cleaned original item ID (without search filter first)
-        return self._get_unique_items_with_pagination(db, query, page, size, order_by, search)
-
     def _get_all_unmapped_items(
         self,
         db,
@@ -266,7 +233,7 @@ class UnmappedItemsController:
         page: int,
         size: int
     ) -> Dict[str, Any]:
-        """Get ALL items with No Match or UIDI regardless of sheet_name"""
+        """Get ALL items with No Match or UIDI regardless of sheet_name, but EXCLUDE items with valid mappings"""
         
         # Base query for all unmapped items (No Match or UIDI)
         query = db.query(InvoiceItem).filter(
@@ -280,6 +247,22 @@ class UnmappedItemsController:
         
         # Apply filters (date and supplier filters)
         query = self._apply_common_filters(query, date_from, date_to, supplier_names)
+        
+        # Filter out items that have valid mappings using a single query
+        from mpi_backend.database.models.ItemsMapping import ItemsMapping
+        from mpi_backend.database.models.Suppliers import Supplier
+        
+        # Build the exists condition for valid mappings
+        exists_condition = exists().where(
+            and_(
+                ItemsMapping.supplier_item_ids == InvoiceItem.item,
+                ItemsMapping.supplier_id == Supplier.id,
+                Supplier.supplier_name == InvoiceItem.vendor
+            )
+        )
+        
+        # Apply the filter to exclude items with valid mappings
+        query = query.filter(~exists_condition)
         
         # Get unique items based on cleaned original item ID (without search filter first)
         return self._get_unique_items_with_pagination(db, query, page, size, order_by, search)
@@ -322,6 +305,22 @@ class UnmappedItemsController:
             supplier_names,
         )
 
+        # Filter out items that have valid mappings using a single query
+        from mpi_backend.database.models.ItemsMapping import ItemsMapping
+        from mpi_backend.database.models.Suppliers import Supplier
+        
+        # Build the exists condition for valid mappings
+        exists_condition = exists().where(
+            and_(
+                ItemsMapping.supplier_item_ids == InvoiceItem.item,
+                ItemsMapping.supplier_id == Supplier.id,
+                Supplier.supplier_name == InvoiceItem.vendor
+            )
+        )
+        
+        # Apply the filter to exclude items with valid mappings
+        base_unmapped = base_unmapped.filter(~exists_condition)
+
         # Alias for correlated NOT EXISTS check
         ItemAlias = aliased(InvoiceItem)
 
@@ -361,6 +360,55 @@ class UnmappedItemsController:
         query = query.filter(~exists().where(and_(*exists_conditions)))
 
         # Get unique items based on original item ID per supplier
+        return self._get_unique_items_with_pagination(db, query, page, size, order_by, search)
+
+    def _get_temporary_items(
+        self,
+        db,
+        date_from: Optional[date],
+        date_to: Optional[date],
+        supplier_names: Optional[List[str]],
+        search: Optional[str],
+        order_by: Optional[List[dict]],
+        page: int,
+        size: int
+    ) -> Dict[str, Any]:
+        """Get items that have a sheet_name but are 'No Match' or start with 'UIDI'"""
+        
+        # Base query for temporary items
+        query = db.query(InvoiceItem).filter(
+            and_(
+                InvoiceItem.sheet_name.isnot(None),
+                InvoiceItem.sheet_name != '',
+                or_(
+                    InvoiceItem.mpi_item == 'No Match',
+                    InvoiceItem.mpi_item.like('UIDI%'),
+                    InvoiceItem.mpi_description == 'No Match',
+                    InvoiceItem.mpi_description.like('UIDI%')
+                )
+            )
+        )
+        
+        # Apply filters (date and supplier filters)
+        query = self._apply_common_filters(query, date_from, date_to, supplier_names)
+        
+        # Filter out items that have valid mappings using a single query
+        from mpi_backend.database.models.ItemsMapping import ItemsMapping
+        from mpi_backend.database.models.Suppliers import Supplier
+        
+        # Build the exists condition for valid mappings
+        exists_condition = exists().where(
+            and_(
+                ItemsMapping.supplier_item_ids == InvoiceItem.item,
+                ItemsMapping.supplier_id == Supplier.id,
+                Supplier.supplier_name == InvoiceItem.vendor
+            )
+        )
+        
+        # Apply the filter to exclude items with valid mappings
+        query = query.filter(~exists_condition)
+        
+        # Get unique items based on cleaned original item ID (without search filter first)
         return self._get_unique_items_with_pagination(db, query, page, size, order_by, search)
 
     def _apply_common_filters(self, query, date_from, date_to, supplier_names):
