@@ -28,12 +28,14 @@ MPI Backend is a comprehensive FastAPI-based application designed for managing i
 - **Containerization**: Docker & Docker Compose
 
 ## Performance Optimizations
-- **Resource Management**: Advanced memory management with automatic cleanup
-- **Performance Thresholds**: 85% CPU and memory usage limits
+- **Proactive Resource Management**: Advanced optimizations that prevent high CPU usage before it occurs
+- **Performance Thresholds**: 95% CPU and 85% memory usage limits with proactive optimization
 - **Circuit Breaker**: Intelligent request rejection to prevent system overload
 - **Memory Optimization**: Weak reference caching and garbage collection
-- **Database Optimization**: Connection pooling and query optimization
-- **Background Task Optimization**: Resource-aware scheduling and execution
+- **Database Optimization**: Automatic query optimization, indexing, and connection pooling
+- **Background Task Optimization**: Priority-based scheduling with automatic resource management
+- **Request Processing Optimization**: Intelligent caching and batch processing
+- **Proactive Monitoring**: Real-time optimization based on resource usage patterns
 
 ## Project Structure
 

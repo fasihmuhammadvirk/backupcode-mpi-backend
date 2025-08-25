@@ -12,15 +12,15 @@ from typing import Dict, Any
 # =============================================================================
 
 # CPU Usage Limits (percentage)
-MAX_CPU_USAGE = 85.0  # Maximum allowed CPU usage
-CPU_WARNING_THRESHOLD = 75.0  # Warning threshold
-CPU_CRITICAL_THRESHOLD = 90.0  # Critical threshold
+MAX_CPU_USAGE = 95.0  # Maximum allowed CPU usage
+CPU_WARNING_THRESHOLD = 85.0  # Warning threshold
+CPU_CRITICAL_THRESHOLD = 98.0  # Critical threshold
 
 
 # Memory Usage Limits (percentage)
-MAX_MEMORY_USAGE = 85.0  # Maximum allowed memory usage
-MEMORY_WARNING_THRESHOLD = 75.0  # Warning threshold
-MEMORY_CRITICAL_THRESHOLD = 90.0  # Critical threshold
+MAX_MEMORY_USAGE = 95.0  # Maximum allowed memory usage
+MEMORY_WARNING_THRESHOLD = 85.0  # Warning threshold
+MEMORY_CRITICAL_THRESHOLD = 98.0  # Critical threshold
 
 # Database Connection Limits
 MAX_DB_CONNECTIONS = 20  # Total database connections
