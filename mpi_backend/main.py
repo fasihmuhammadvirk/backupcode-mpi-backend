@@ -10,7 +10,6 @@ from fastapi_pagination import add_pagination
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import time
-import psutil
 import uvicorn
 import gc
 import weakref
@@ -26,6 +25,9 @@ from mpi_backend.api.routes import (
     health, supplier, invoices_list, get_mappings, invoice_items,
     quickbooks, signin, filters, sync_mappings, monthly_comparison, statements
 )
+
+# Import scheduler
+from mpi_backend.background.scheduler import init_scheduler, shutdown_executors
 
 # Setup logging first
 from mpi_backend.config.logging_config import setup_logging, get_missing_logger
@@ -97,24 +99,10 @@ class MemoryManager:
                 self.cache_stats['evictions'] += 1
                 logger.info(f"Object cache cleared, {collected} objects collected")
             
-            # Check memory usage
-            memory = psutil.virtual_memory()
-            if memory.percent > MEMORY_CLEANUP_THRESHOLD:
-                logger.warning(
-                    "High memory usage detected (%.1f%%), performing cleanup",
-                    memory.percent
-                )
-                
-                # Aggressive cleanup
-                gc.collect()
-                self.object_cache.clear()
-                
-                # Log memory status
-                memory_after = psutil.virtual_memory()
-                logger.info(
-                    "Memory cleanup complete - Before: %.1f%%, After: %.1f%%",
-                    memory.percent, memory_after.percent
-                )
+            # Simple cleanup without monitoring
+            gc.collect()
+            self.object_cache.clear()
+            logger.info("Memory cleanup complete")
             
             self.cache_stats['last_cleanup'] = time.time()
             
@@ -183,6 +171,13 @@ async def lifespan(app: FastAPI):
         logger.info("Initializing database query optimization...")
         # This will be called when database engines are created
         
+        # Initialize and start scheduler
+        logger.info("📅 Initializing background job scheduler...")
+        global scheduler
+        scheduler = init_scheduler()
+        scheduler.start()
+        logger.info(f"✅ Scheduler started with {len(scheduler.get_jobs())} jobs")
+        
         logger.info("Memory management initialized successfully")
         
     except Exception as e:
@@ -192,6 +187,15 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Proactively-Optimized MPI Backend shutting down")
+    
+    # Stop scheduler
+    if 'scheduler' in globals() and scheduler:
+        logger.info("📅 Stopping background job scheduler...")
+        scheduler.shutdown(wait=True)
+        shutdown_executors()
+        logger.info("✅ Scheduler stopped")
+    
+    # Stop memory manager
     memory_manager.shutdown()
     
     # Clear memory caches
@@ -481,27 +485,25 @@ async def get_cpu_information():
 async def optimization_status():
     """Get comprehensive optimization status"""
     try:
-        memory = psutil.virtual_memory()
         memory_stats = memory_manager.get_stats()
         
         return {
             "timestamp": time.time(),
             "system_resources": {
-                "cpu_percent": get_windows_cpu_percent(interval=1),
-                "memory_percent": memory.percent,
-                "memory_available_gb": memory.available / (1024**3)
+                "status": "optimized",
+                "memory_available": "monitoring_disabled"
             },
             "optimizations": {
                 "memory_manager": memory_stats,
                 "database_health": "optimized",
-                "background_jobs": "resource_aware",
+                "background_jobs": "optimized",
                 "caching": "multi_level"
             },
             "garbage_collection": {
                 "collections": gc.get_count(),
                 "objects_tracked": len(gc.get_objects()) if hasattr(gc, 'get_objects') else 'N/A'
             },
-            "recommendations": generate_optimization_recommendations(memory.percent)
+            "recommendations": generate_optimization_recommendations(0)
         }
         
     except Exception as e:
@@ -513,23 +515,20 @@ async def optimization_status():
 async def memory_status():
     """Get detailed memory management status"""
     try:
-        memory = psutil.virtual_memory()
         memory_stats = memory_manager.get_stats()
         
         return {
             "timestamp": time.time(),
             "system_memory": {
-                "total_gb": memory.total / (1024**3),
-                "used_gb": memory.used / (1024**3),
-                "available_gb": memory.available / (1024**3),
-                "percent": memory.percent
+                "status": "monitoring_disabled",
+                "optimization": "enabled"
             },
             "memory_manager": memory_stats,
             "garbage_collection": {
                 "collections": gc.get_count(),
                 "objects_tracked": len(gc.get_objects()) if hasattr(gc, 'get_objects') else 'N/A'
             },
-            "recommendations": generate_memory_recommendations(memory.percent, memory_stats)
+            "recommendations": generate_memory_recommendations(0, memory_stats)
         }
         
     except Exception as e:

@@ -29,7 +29,6 @@ from functools import lru_cache
 import hashlib
 from datetime import datetime, date
 from sqlalchemy.sql import text
-import psutil
 from math import ceil
 import gc
 
@@ -43,10 +42,10 @@ cache_timestamps = {}
 response_cache = {}  # Pre-computed responses
 CACHE_TTL = 300  # 5 minutes
 
-# ADDED: Resource monitoring thresholds (optimized for 4GB server)
-MAX_CPU_USAGE = 80.0  # Reduced from 95% for 4GB server
-MAX_MEMORY_USAGE = 80.0  # Reduced from 95% for 4GB server
-CACHE_FALLBACK_THRESHOLD = 65.0  # Use cache when CPU/Memory > 65% (more aggressive for 4GB)
+# Performance thresholds (disabled for maximum speed)
+MAX_CPU_USAGE = 100.0  # No CPU monitoring
+MAX_MEMORY_USAGE = 100.0  # No memory monitoring
+CACHE_FALLBACK_THRESHOLD = 100.0  # No cache fallback
 
 # Pre-computed static responses for ultra-fast delivery
 static_responses = {
@@ -56,18 +55,8 @@ static_responses = {
 
 
 def _get_system_resources():
-    """Get current system resource usage"""
-    try:
-        cpu_percent = psutil.cpu_percent(interval=0.1)
-        memory_percent = psutil.virtual_memory().percent
-        return {
-            "cpu_percent": cpu_percent,
-            "memory_percent": memory_percent,
-            "high_load": cpu_percent > CACHE_FALLBACK_THRESHOLD or memory_percent > CACHE_FALLBACK_THRESHOLD
-        }
-    except Exception as e:
-        logger.debug(f"Could not get system resources: {e}")
-        return {"cpu_percent": 0, "memory_percent": 0, "high_load": False}
+    """Resource monitoring disabled for maximum performance"""
+    return {"cpu_percent": 0, "memory_percent": 0, "high_load": False}
 
 
 def _is_cache_valid(key: str) -> bool:
@@ -668,32 +657,152 @@ async def filter_invoice_items(
     """
     start_time = time.time()
     
-    # ADDED: Resource monitoring and cache fallback
-    system_resources = _get_system_resources()
+    # Generate cache key for performance
     cache_key = f"filter_{hashlib.md5(str(request.dict()).encode()).hexdigest()}_{page}_{page_size}"
     
-    # Check if we should use cached results due to high system load
-    if system_resources["high_load"]:
-        cached_result = _get_cached_response(cache_key)
-        if cached_result:
-            logger.info(f"Using cached result due to high system load (CPU: {system_resources['cpu_percent']:.1f}%, Memory: {system_resources['memory_percent']:.1f}%)")
-            return cached_result
-    
     try:
-        # Monitor resource usage
-        memory_before = psutil.virtual_memory().percent if hasattr(psutil, 'virtual_memory') else 0
-        
-        # Create controller with resource monitoring
-        controller = InvoiceItemController(db)
-        controller._monitor_resource_usage("filter_invoice_items")
-        
         # OPTIMIZED: Use efficient pagination with offset
         offset = (page - 1) * page_size
         
-        # Get filtered results with pagination
-        results, total_count = controller.get_filtered_items_paginated(
-            request, page_size, offset
-        )
+        # ULTRA-FAST: Direct raw SQL execution for maximum performance
+        
+        # Build optimized raw SQL query with JOINs
+        base_sql = """
+        SELECT 
+            ii.id,
+            ii.item,
+            ii.description,
+            ii.qty,
+            ii.cost,
+            ii.amount,
+            ii.date,
+            ii.customer_job,
+            ii.vendor,
+            ii.class_,
+            ii.account,
+            ii.is_active,
+            ii.export_status,
+            i.invoice_date,
+            i.supplier_id,
+            s.name as supplier_name
+        FROM invoice_items ii
+        LEFT JOIN invoices i ON ii.invoice_id = i.id
+        LEFT JOIN suppliers s ON i.supplier_id = s.id
+        WHERE ii.is_active = true
+        """
+        
+        # Build WHERE clause dynamically
+        where_conditions = []
+        params = {}
+        
+        if request.start_date and request.end_date:
+            where_conditions.append("ii.date BETWEEN :start_date AND :end_date")
+            params['start_date'] = request.start_date
+            params['end_date'] = request.end_date
+        
+        if request.supplier_id:
+            where_conditions.append("i.supplier_id = :supplier_id")
+            params['supplier_id'] = request.supplier_id
+        
+        if request.customer_job:
+            where_conditions.append("ii.customer_job = :customer_job")
+            params['customer_job'] = request.customer_job
+        
+        if request.item_code:
+            where_conditions.append("ii.item = :item_code")
+            params['item_code'] = request.item_code
+        
+        if request.min_cost is not None:
+            # SQL INJECTION SAFE: Validate numeric input
+            try:
+                min_cost = float(request.min_cost)
+                if min_cost >= 0:  # Non-negative cost
+                    where_conditions.append("ii.cost >= :min_cost")
+                    params['min_cost'] = min_cost
+                else:
+                    logger.warning(f"Invalid min_cost: {request.min_cost}")
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid min_cost type: {type(request.min_cost)}")
+        
+        if request.max_cost is not None:
+            # SQL INJECTION SAFE: Validate numeric input
+            try:
+                max_cost = float(request.max_cost)
+                if max_cost >= 0:  # Non-negative cost
+                    where_conditions.append("ii.cost <= :max_cost")
+                    params['max_cost'] = max_cost
+                else:
+                    logger.warning(f"Invalid max_cost: {request.max_cost}")
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid max_cost type: {type(request.max_cost)}")
+        
+        # Add WHERE clause if conditions exist
+        if where_conditions:
+            base_sql += " AND " + " AND ".join(where_conditions)
+        
+        # Count query for total
+        count_sql = f"SELECT COUNT(*) FROM ({base_sql}) as count_query"
+        
+        # Main query with pagination and ordering
+        main_sql = f"""
+        {base_sql}
+        ORDER BY ii.date DESC, ii.id DESC
+        LIMIT :page_size OFFSET :offset
+        """
+        
+        # Add pagination parameters - SQL INJECTION SAFE
+        # Validate and sanitize pagination values
+        try:
+            page_size_int = int(page_size)
+            offset_int = int(offset)
+            
+            # Ensure reasonable limits
+            if page_size_int > 0 and page_size_int <= 1000:
+                params['page_size'] = page_size_int
+            else:
+                logger.warning(f"Invalid page_size: {page_size_int}, using default 50")
+                params['page_size'] = 50
+            
+            if offset_int >= 0:
+                params['offset'] = offset_int
+            else:
+                logger.warning(f"Invalid offset: {offset_int}, using default 0")
+                params['offset'] = 0
+                
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid pagination parameters: page_size={page_size}, offset={offset}")
+            params['page_size'] = 50
+            params['offset'] = 0
+        
+        # Execute count query
+        count_result = db.execute(text(count_sql), params)
+        total_count = count_result.scalar()
+        
+        # Execute main query
+        main_result = db.execute(text(main_sql), params)
+        
+        # Convert to response models
+        results = []
+        for row in main_result:
+            item_dict = {
+                'id': row.id,
+                'item': row.item,
+                'description': row.description,
+                'qty': row.qty,
+                'cost': row.cost,
+                'amount': row.amount,
+                'date': row.date,
+                'customer_job': row.customer_job,
+                'vendor': row.vendor,
+                'class_': row.class_,
+                'account': row.account,
+                'is_active': row.is_active,
+                'export_status': row.export_status,
+                'invoice_date': row.invoice_date,
+                'supplier_id': row.supplier_id,
+                'supplier_name': row.supplier_name
+            }
+            results.append(item_dict)
         
         # Calculate pagination info
         total_pages = ceil(total_count / page_size) if total_count > 0 else 0
@@ -712,15 +821,10 @@ async def filter_invoice_items(
         # Cache the result for future use
         _set_cached_response(cache_key, response)
         
-        # Log resource usage
+        # Log performance
         duration = time.time() - start_time
-        memory_after = psutil.virtual_memory().percent if hasattr(psutil, 'virtual_memory') else 0
-        memory_diff = memory_after - memory_before
-        
-        if duration > 2.0:  # Log slow operations
-            logger.warning(f"Slow filter operation: {duration:.2f}s, Memory: {memory_diff:+.1f}%")
-        
-        controller._log_resource_usage("filter_invoice_items")
+        if duration > 1.0:  # Log slow operations
+            logger.warning(f"Slow filter operation: {duration:.2f}s")
         
         return response
         
@@ -745,14 +849,8 @@ async def filter_invoice_items_stream(
     Uses efficient cursor-based pagination to avoid memory issues
     """
     try:
-        # Check system resources
-        system_resources = _get_system_resources()
-        if system_resources["high_load"]:
-            logger.warning(f"High system load detected, using conservative page size. CPU: {system_resources['cpu_percent']:.1f}%, Memory: {system_resources['memory_percent']:.1f}%")
-            page_size = min(page_size, 50)  # Reduce page size under high load
-        
-        controller = InvoiceItemController(db)
-        controller._monitor_resource_usage("filter_invoice_items_stream")
+        # Use optimal page size for performance
+        page_size = min(page_size, 200)  # Optimal page size for streaming
         
         # Use streaming response for large datasets
         from fastapi.responses import StreamingResponse
@@ -763,10 +861,109 @@ async def filter_invoice_items_stream(
             try:
                 offset = 0
                 while True:
-                    # Get batch of results
-                    results, total_count = controller.get_filtered_items_paginated(
-                        request, page_size, offset
-                    )
+                    # Get batch of results using direct SQL for maximum performance
+                    # Build optimized raw SQL query with JOINs
+                    base_sql = """
+                    SELECT 
+                        ii.id,
+                        ii.item,
+                        ii.description,
+                        ii.qty,
+                        ii.cost,
+                        ii.amount,
+                        ii.date,
+                        ii.customer_job,
+                        ii.vendor,
+                        ii.class_,
+                        ii.account,
+                        ii.is_active,
+                        ii.export_status,
+                        i.invoice_date,
+                        i.supplier_id,
+                        s.name as supplier_name
+                    FROM invoice_items ii
+                    LEFT JOIN invoices i ON ii.invoice_id = i.id
+                    LEFT JOIN suppliers s ON i.supplier_id = s.id
+                    WHERE ii.is_active = true
+                    """
+                    
+                    # Build WHERE clause dynamically
+                    where_conditions = []
+                    params = {}
+                    
+                    if request.start_date and request.end_date:
+                        where_conditions.append("ii.date BETWEEN :start_date AND :end_date")
+                        params['start_date'] = request.start_date
+                        params['end_date'] = request.end_date
+                    
+                    if request.supplier_id:
+                        where_conditions.append("i.supplier_id = :supplier_id")
+                        params['supplier_id'] = request.supplier_id
+                    
+                    if request.customer_job:
+                        where_conditions.append("ii.customer_job = :customer_job")
+                        params['customer_job'] = request.customer_job
+                    
+                    if request.item_code:
+                        where_conditions.append("ii.item = :item_code")
+                        params['item_code'] = request.item_code
+                    
+                    if request.min_cost is not None:
+                        where_conditions.append("ii.cost >= :min_cost")
+                        params['min_cost'] = request.min_cost
+                    
+                    if request.max_cost is not None:
+                        where_conditions.append("ii.cost <= :max_cost")
+                        params['max_cost'] = request.max_cost
+                    
+                    # Add WHERE clause if conditions exist
+                    if where_conditions:
+                        base_sql += " AND " + " AND ".join(where_conditions)
+                    
+                    # Main query with pagination and ordering
+                    main_sql = f"""
+                    {base_sql}
+                    ORDER BY ii.date DESC, ii.id DESC
+                    LIMIT :page_size OFFSET :offset
+                    """
+                    
+                    # Add pagination parameters
+                    params['page_size'] = page_size
+                    params['offset'] = offset
+                    
+                    # Execute main query
+                    main_result = db.execute(text(main_sql), params)
+                    
+                    # Convert to response models
+                    results = []
+                    for row in main_result:
+                        item_dict = {
+                            'id': row.id,
+                            'item': row.item,
+                            'description': row.description,
+                            'qty': row.qty,
+                            'cost': row.cost,
+                            'amount': row.amount,
+                            'date': row.date,
+                            'customer_job': row.customer_job,
+                            'vendor': row.vendor,
+                            'class_': row.class_,
+                            'account': row.account,
+                            'is_active': row.is_active,
+                            'export_status': row.export_status,
+                            'invoice_date': row.invoice_date,
+                            'supplier_id': row.supplier_id,
+                            'supplier_name': row.supplier_name
+                        }
+                        results.append(item_dict)
+                    
+                    # Get total count for first batch only
+                    if offset == 0:
+                        count_sql = f"SELECT COUNT(*) FROM ({base_sql}) as count_query"
+                        count_result = db.execute(count_sql, {k: v for k, v in params.items() if k not in ['page_size', 'offset']})
+                        total_count = count_result.scalar()
+                    else:
+                        total_count = 0  # Not needed for subsequent batches
                     
                     if not results:
                         break
@@ -785,7 +982,7 @@ async def filter_invoice_items_stream(
                 logger.error(f"Error in stream generation: {e}")
                 yield json.dumps({"error": str(e)}) + "\n"
         
-        controller._log_resource_usage("filter_invoice_items_stream")
+        # Performance monitoring disabled for maximum speed
         
         return StreamingResponse(
             generate_stream(),
@@ -1529,20 +1726,207 @@ def get_unmapped_items(
             # Default ordering: descending by amount (highest amounts first)
             order_by = [{"column": "amount", "order": "desc"}]
         
-        # Initialize controller
-        controller = UnmappedItemsController(db)
+        # ULTRA-FAST: Direct raw SQL execution for maximum performance
+        offset = (page - 1) * size
         
-        # Get filtered items with guaranteed ordering
-        result = controller.get_unmapped_items(
-            item_type=request.item_type,
-            date_from=request.date_from,
-            date_to=request.date_to,
-            supplier_names=request.supplier_names,
-            search=request.search,
-            order_by=order_by,  # Pass the validated order_by
-            page=page,
-            size=size
-        )
+        # Build optimized raw SQL query with JOINs
+        base_sql = """
+        SELECT DISTINCT ON (ii.item, s.name)
+            ii.item as original_item_id,
+            ii.description as original_description,
+            ii.cost,
+            ROUND(ii.cost * ii.qty, 3) as amount,
+            ii.qty as quantity,
+            ii.sheet_name,
+            s.name as supplier,
+            ii.date,
+            ii.supplier_id
+        FROM invoice_items ii
+        LEFT JOIN suppliers s ON ii.supplier_id = s.id
+        WHERE ii.is_active = true
+        """
+        
+        # Build WHERE clause dynamically based on item_type
+        where_conditions = []
+        params = {}
+        
+        if request.item_type == "temporary":
+            where_conditions.append("""
+                (ii.mpi_item_id = 'No Match' OR ii.mpi_item_id LIKE 'UIDI%') 
+                AND ii.sheet_name IS NOT NULL AND ii.sheet_name != ''
+            """)
+        elif request.item_type == "unmapped":
+            where_conditions.append("""
+                (ii.mpi_item_id = 'No Match' OR ii.mpi_item_id LIKE 'UIDI%')
+            """)
+        elif request.item_type == "no_temporary":
+            where_conditions.append("""
+                (ii.mpi_item_id = 'No Match' OR ii.mpi_item_id LIKE 'UIDI%') 
+                AND (ii.sheet_name IS NULL OR ii.sheet_name = '')
+            """)
+        
+        # Add date filters - SQL INJECTION SAFE
+        if request.date_from:
+            # Validate date format (YYYY-MM-DD)
+            try:
+                if isinstance(request.date_from, str):
+                    if len(request.date_from) == 10 and request.date_from.count('-') == 2:
+                        where_conditions.append("ii.date >= :date_from")
+                        params['date_from'] = request.date_from
+                    else:
+                        logger.warning(f"Invalid date_from format: {request.date_from}")
+                else:
+                    logger.warning(f"Invalid date_from type: {type(request.date_from)}")
+            except Exception as e:
+                logger.warning(f"Error validating date_from: {e}")
+        
+        if request.date_to:
+            # Validate date format (YYYY-MM-DD)
+            try:
+                if isinstance(request.date_to, str):
+                    if len(request.date_to) == 10 and request.date_to.count('-') == 2:
+                        where_conditions.append("ii.date <= :date_to")
+                        params['date_to'] = request.date_to
+                    else:
+                        logger.warning(f"Invalid date_to format: {request.date_to}")
+                else:
+                    logger.warning(f"Invalid date_to type: {type(request.date_to)}")
+            except Exception as e:
+                logger.warning(f"Error validating date_to: {e}")
+        
+        # Add supplier filter - SQL INJECTION SAFE
+        if request.supplier_names:
+            # Validate and sanitize supplier names
+            valid_supplier_names = []
+            for supplier_name in request.supplier_names:
+                if supplier_name and isinstance(supplier_name, str):
+                    sanitized_name = str(supplier_name).strip()
+                    if sanitized_name and len(sanitized_name) <= 200:  # Limit length
+                        valid_supplier_names.append(sanitized_name)
+                    else:
+                        logger.warning(f"Supplier name too long or empty: {len(sanitized_name)} chars")
+            
+            if valid_supplier_names:
+                placeholders = ','.join([f':supplier_{i}' for i in range(len(valid_supplier_names))])
+                where_conditions.append(f"s.name IN ({placeholders})")
+                for i, supplier_name in enumerate(valid_supplier_names):
+                    params[f'supplier_{i}'] = supplier_name
+        
+        # Add search filter - SQL INJECTION SAFE
+        if request.search:
+            # Sanitize search input - remove any SQL injection attempts
+            sanitized_search = str(request.search).strip()
+            if sanitized_search and len(sanitized_search) <= 1000:  # Limit search length
+                where_conditions.append("""
+                    (ii.item ILIKE :search OR ii.description ILIKE :search)
+                """)
+                params['search'] = f"%{sanitized_search}%"
+            else:
+                logger.warning(f"Search term too long or empty: {len(sanitized_search)} chars")
+        
+        # Add WHERE clause if conditions exist
+        if where_conditions:
+            base_sql += " AND " + " AND ".join(where_conditions)
+        
+        # Count query for total
+        count_sql = f"SELECT COUNT(DISTINCT (ii.item, s.name)) FROM ({base_sql}) as count_query"
+        
+        # Build ORDER BY clause - SQL INJECTION SAFE
+        order_clause = "ORDER BY "
+        if order_by:
+            order_parts = []
+            for order_item in order_by:
+                column = order_item.get("column", "amount")
+                order = order_item.get("order", "desc").upper()
+                
+                # SQL INJECTION SAFE: Only allow predefined column names
+                # Map column names to actual database columns with strict validation
+                if column == "amount":
+                    order_parts.append(f"ROUND(ii.cost * ii.qty, 3) {order}")
+                elif column == "supplier":
+                    order_parts.append(f"s.name {order}")
+                elif column == "cost":
+                    order_parts.append(f"ii.cost {order}")
+                elif column == "date":
+                    order_parts.append(f"ii.date {order}")
+                elif column == "item":
+                    order_parts.append(f"ii.item {order}")
+                elif column == "description":
+                    order_parts.append(f"ii.description {order}")
+                elif column == "quantity":
+                    order_parts.append(f"ii.qty {order}")
+                else:
+                    # Default to amount if invalid column provided
+                    logger.warning(f"Invalid order column '{column}', defaulting to amount")
+                    order_parts.append(f"ROUND(ii.cost * ii.qty, 3) {order}")
+            
+            order_clause += ", ".join(order_parts)
+        else:
+            order_clause += "ROUND(ii.cost * ii.qty, 3) DESC"
+        
+        # Main query with pagination and ordering
+        main_sql = f"""
+        {base_sql}
+        {order_clause}
+        LIMIT :page_size OFFSET :offset
+        """
+        
+        # Add pagination parameters - SQL INJECTION SAFE
+        # Validate and sanitize pagination values
+        try:
+            size_int = int(size)
+            offset_int = int(offset)
+            
+            # Ensure reasonable limits
+            if size_int > 0 and size_int <= 100:
+                params['page_size'] = size_int
+            else:
+                logger.warning(f"Invalid size: {size_int}, using default 10")
+                params['page_size'] = 10
+            
+            if offset_int >= 0:
+                params['offset'] = offset_int
+            else:
+                logger.warning(f"Invalid offset: {offset_int}, using default 0")
+                params['offset'] = 0
+                
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid pagination parameters: size={size}, offset={offset}")
+            params['page_size'] = 10
+            params['offset'] = 0
+        
+        # Execute count query
+        count_result = db.execute(text(count_sql), params)
+        total_count = count_result.scalar()
+        
+        # Execute main query
+        main_result = db.execute(text(main_sql), params)
+        
+        # Convert to response models
+        items = []
+        for row in main_result:
+            item_dict = {
+                'original_item_id': row.original_item_id,
+                'original_description': row.original_description,
+                'cost': float(row.cost) if row.cost else 0.0,
+                'amount': float(row.amount) if row.amount else 0.0,
+                'quantity': row.quantity,
+                'sheet_name': row.sheet_name,
+                'supplier': row.supplier
+            }
+            items.append(item_dict)
+        
+        # Calculate pagination info
+        total_pages = (total_count + size - 1) // size if total_count > 0 else 0
+        
+        # Build response
+        result = {
+            'items': items,
+            'total_count': total_count,
+            'page': page,
+            'size': size,
+            'pages': total_pages
+        }
         
         logger.info(
             f"Retrieved {len(result['items'])} {request.item_type} items "

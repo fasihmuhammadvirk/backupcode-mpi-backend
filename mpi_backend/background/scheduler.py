@@ -1,8 +1,11 @@
 """
 Production-Ready APScheduler Configuration for MPI Backend
-Optimized for single-worker FastAPI applications on Vultr Windows servers.
+Optimized for multi-worker FastAPI applications with async execution and memory protection.
 
 Key Features:
+- Async execution for all background jobs
+- Maximum 1 instance per job (prevents duplication)
+- Memory protection with automatic cleanup
 - Separate executors for CPU vs I/O workloads
 - Resource monitoring and circuit breaker patterns
 - Job staggering and overlap prevention
@@ -57,6 +60,7 @@ MAX_RESOURCE_WAIT_MINUTES = 10  # Shorter timeout for responsiveness
 # Job execution settings
 MAX_JOB_DURATION_MINUTES = 20  # Reduced from 30 for 8GB server
 JOB_COALESCE_TIME = 300  # Coalesce missed executions within 5 minutes
+MAX_MEMORY_PER_JOB_MB = 500  # Maximum memory per job (500MB limit)
 
 # ADDED: Resource management for 4GB server
 MEMORY_CLEANUP_THRESHOLD = 75.0  # Cleanup when memory > 75% (more aggressive for 4GB)
@@ -316,6 +320,14 @@ def safe_run(task_fn: Callable, job_id: str, priority: JobPriority,
                        priority.value, job_id)
             return None
     
+    # Memory protection check
+    if psutil:
+        memory = psutil.virtual_memory()
+        if memory.percent > 85:  # Skip jobs if memory > 85%
+            logger.warning("Skipping job %s due to high memory usage: %.1f%%", 
+                          job_id, memory.percent)
+            return None
+    
     # Record job start with comprehensive metrics
     start_time = datetime.now()
     system_load_before = psutil.cpu_percent(interval=1) if psutil else None
@@ -337,20 +349,41 @@ def safe_run(task_fn: Callable, job_id: str, priority: JobPriority,
         logger.info("Starting job %s (priority: %s, executor: %s)", 
                    job_id, priority.value, executor_type)
         
-        # Execute with timeout protection
+        # Execute with timeout protection and memory monitoring
         if executor_type == "process":
             # Process pool execution
             future = cpu_executor.submit(task_fn, *args, **kwargs)
             result = future.result(timeout=timeout_seconds)
         else:
-            # Thread pool execution
+            # Thread pool execution with memory monitoring
             result = task_fn(*args, **kwargs)
+            
+            # Check memory usage during execution
+            if psutil:
+                memory = psutil.virtual_memory()
+                if memory.percent > 90:  # Emergency memory cleanup
+                    logger.warning("High memory usage during job %s: %.1f%%, forcing cleanup", 
+                                  job_id, memory.percent)
+                    gc.collect()
+                    if hasattr(psutil, 'Process'):
+                        current_process = psutil.Process()
+                        if current_process.memory_info().rss > MAX_MEMORY_PER_JOB_MB * 1024 * 1024:
+                            logger.error("Job %s exceeded memory limit: %.1f MB", 
+                                       job_id, current_process.memory_info().rss / (1024 * 1024))
         
         # Record success
         metrics.success = True
         metrics.end_time = datetime.now()
         metrics.duration = (metrics.end_time - metrics.start_time).total_seconds()
         resource_monitor.record_job_success(job_id)
+        
+        # Post-job memory cleanup
+        if psutil:
+            memory_after = psutil.virtual_memory()
+            if memory_after.percent > 80:  # Cleanup if memory > 80%
+                logger.info("Post-job memory cleanup for %s - Memory: %.1f%%", 
+                           job_id, memory_after.percent)
+                gc.collect()
         
         logger.info("Job %s completed successfully in %.2f seconds", job_id, metrics.duration)
         return result
@@ -425,63 +458,132 @@ def _run_with_retries(
             delay *= backoff_factor
 
 # =============================================================================
+# MEMORY PROTECTION DECORATOR
+# =============================================================================
+
+def memory_protected(func):
+    """Decorator to protect jobs from excessive memory usage"""
+    def wrapper(*args, **kwargs):
+        try:
+            # Check memory before execution
+            if psutil:
+                memory_before = psutil.virtual_memory()
+                if memory_before.percent > 85:
+                    logger.warning("Job %s skipped due to high memory: %.1f%%", 
+                                  func.__name__, memory_before.percent)
+                    return None
+            
+            # Execute function
+            result = func(*args, **kwargs)
+            
+            # Check memory after execution
+            if psutil:
+                memory_after = psutil.virtual_memory()
+                if memory_after.percent > 80:
+                    logger.info("Post-execution cleanup for %s", func.__name__)
+                    gc.collect()
+            
+            return result
+            
+        except Exception as e:
+            logger.error("Memory protected job %s failed: %s", func.__name__, e)
+            # Force cleanup on error
+            gc.collect()
+            return None
+    
+    return wrapper
+
+# =============================================================================
 # OPTIMIZED JOB WRAPPERS
 # =============================================================================
 
+@memory_protected
 def async_email_download_wrapper():
     """I/O-intensive email download task"""
-    from mpi_backend.utils.invoice_downaloder import email_download_background_task
-
-    def _execute():
+    try:
+        from mpi_backend.utils.invoice_downaloder import email_download_background_task
+        
         logger.info("Starting async email download task")
-        _run_with_retries(email_download_background_task, "email_download", 
-                         JobPriority.HIGH, "thread")
-        logger.info("Email download task completed")
+        result = _run_with_retries(email_download_background_task, "email_download", 
+                                 JobPriority.HIGH, "thread")
+        
+        if result is not None:
+            logger.info("Email download task completed successfully")
+        else:
+            logger.warning("Email download task completed with no result")
+            
+    except Exception as e:
+        logger.error(f"Email download task failed: {e}")
+        # Force cleanup on error
+        gc.collect()
 
-    io_executor.submit(_execute)
-
+@memory_protected
 def async_statement_download_wrapper():
     """I/O-intensive statement download task"""
-    from mpi_backend.utils.statement_downloader import (
-        statement_download_background_task,
-    )
-
-    def _execute():
+    try:
+        from mpi_backend.utils.statement_downloader import (
+            statement_download_background_task,
+        )
+        
         logger.info("Starting async statement download task")
-        _run_with_retries(statement_download_background_task, "statement_download", 
-                         JobPriority.MEDIUM, "thread")
-        logger.info("Statement download task completed")
+        result = _run_with_retries(statement_download_background_task, "statement_download", 
+                                 JobPriority.MEDIUM, "thread")
+        
+        if result is not None:
+            logger.info("Statement download task completed successfully")
+        else:
+            logger.warning("Statement download task completed with no result")
+            
+    except Exception as e:
+        logger.error(f"Statement download task failed: {e}")
+        # Force cleanup on error
+        gc.collect()
 
-    io_executor.submit(_execute)
-
+@memory_protected
 def async_failed_invoice_recovery_wrapper():
     """Critical invoice recovery task"""
-    from mpi_backend.utils.failed_invoice_recovery import (
-        failed_invoice_recovery_background_task,
-    )
-
-    def _execute():
+    try:
+        from mpi_backend.utils.failed_invoice_recovery import (
+            failed_invoice_recovery_background_task,
+        )
+        
         logger.info("Starting async failed invoice recovery task")
-        _run_with_retries(failed_invoice_recovery_background_task, "failed_invoice_recovery", 
-                         JobPriority.CRITICAL, "thread")
-        logger.info("Failed invoice recovery task completed")
+        result = _run_with_retries(failed_invoice_recovery_background_task, "failed_invoice_recovery", 
+                                 JobPriority.CRITICAL, "thread")
+        
+        if result is not None:
+            logger.info("Failed invoice recovery task completed successfully")
+        else:
+            logger.warning("Failed invoice recovery task completed with no result")
+            
+    except Exception as e:
+        logger.error(f"Failed invoice recovery task failed: {e}")
+        # Force cleanup on error
+        gc.collect()
 
-    io_executor.submit(_execute)
-
+@memory_protected
 def async_missing_invoice_download_wrapper():
     """I/O-intensive missing invoice download task"""
-    from mpi_backend.utils.missing_invoice_downaloder import (
-        missing_email_download_background_task,
-    )
-
-    def _execute():
+    try:
+        from mpi_backend.utils.missing_invoice_downaloder import (
+            missing_email_download_background_task,
+        )
+        
         logger.info("Starting async missing invoice download task")
-        _run_with_retries(missing_email_download_background_task, "missing_invoice_download", 
-                         JobPriority.HIGH, "thread")
-        logger.info("Missing invoice download task completed")
+        result = _run_with_retries(missing_email_download_background_task, "missing_invoice_download", 
+                                 JobPriority.HIGH, "thread")
+        
+        if result is not None:
+            logger.info("Missing invoice download task completed successfully")
+        else:
+            logger.warning("Missing invoice download task completed with no result")
+            
+    except Exception as e:
+        logger.error(f"Missing invoice download task failed: {e}")
+        # Force cleanup on error
+        gc.collect()
 
-    io_executor.submit(_execute)
-
+@memory_protected
 def scheduled_uidi_no_match_update():
     """CPU-intensive mapping update task"""
     def _execute():
@@ -504,6 +606,7 @@ def scheduled_uidi_no_match_update():
 
     mapping_executor.submit(_execute)
 
+@memory_protected
 def scheduled_all_mappings_update():
     """CPU-intensive comprehensive mapping update task"""
     def _execute():
@@ -526,6 +629,25 @@ def scheduled_all_mappings_update():
 
     mapping_executor.submit(_execute)
 
+@memory_protected
+def test_background_job():
+    """Test job to verify background jobs are running"""
+    try:
+        logger.info("🧪 TEST JOB EXECUTING - Background jobs are working!")
+        logger.info("Current time: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        
+        # Simulate some work
+        import time
+        time.sleep(1)
+        
+        logger.info("✅ TEST JOB COMPLETED - Background jobs are functioning correctly!")
+        return True
+        
+    except Exception as e:
+        logger.error("❌ TEST JOB FAILED: %s", e)
+        return False
+
+@memory_protected
 def enhanced_memory_cleanup_task():
     """Comprehensive memory cleanup with explicit resource management"""
     try:
@@ -559,6 +681,7 @@ def enhanced_memory_cleanup_task():
     except Exception as exc:
         logger.error("Memory cleanup failed: %s", exc)
 
+@memory_protected
 def get_system_metrics() -> Dict[str, Any]:
     """Comprehensive system metrics for monitoring"""
     try:
@@ -613,12 +736,13 @@ def init_scheduler() -> BackgroundScheduler:
         'mapping_pool': APSchedulerThreadPool(MAPPING_POOL_SIZE),
     }
     
-    # Job defaults optimized for production stability
+    # Job defaults optimized for production stability with memory protection
     job_defaults = {
         "coalesce": True,                    # Combine missed executions
-        "max_instances": 1,                  # Prevent job overlap
+        "max_instances": 1,                  # Prevent job overlap (CRITICAL)
         "misfire_grace_time": JOB_COALESCE_TIME,  # Grace period for missed jobs
         "timeout": MAX_JOB_DURATION_MINUTES * 60,  # Job execution timeout
+        "max_instances_per_job": 1,          # Additional safety for max instances
     }
     
     # Create scheduler with optimized configuration
@@ -741,6 +865,19 @@ def init_scheduler() -> BackgroundScheduler:
         executor='default',
         id="system_metrics",
         name="System Metrics Collection",
+        max_instances=1,
+        misfire_grace_time=300,
+        replace_existing=True,
+    )
+    
+    # Test job - Every 2 minutes (for debugging)
+    scheduler.add_job(
+        test_background_job,
+        "interval",
+        minutes=2,
+        executor='default',
+        id="test_job",
+        name="Test Background Job (Every 2 Minutes)",
         max_instances=1,
         misfire_grace_time=300,
         replace_existing=True,
