@@ -172,11 +172,11 @@ async def lifespan(app: FastAPI):
         # This will be called when database engines are created
         
         # Initialize and start scheduler
-        logger.info("📅 Initializing background job scheduler...")
+        logger.info("Initializing background job scheduler...")
         global scheduler
         scheduler = init_scheduler()
         scheduler.start()
-        logger.info(f"✅ Scheduler started with {len(scheduler.get_jobs())} jobs")
+        logger.info(f"SUCCESS: Scheduler started with {len(scheduler.get_jobs())} jobs")
         
         logger.info("Memory management initialized successfully")
         
@@ -188,15 +188,39 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Proactively-Optimized MPI Backend shutting down")
     
-    # Stop scheduler
+    # Stop scheduler with timeout to prevent hanging
     if 'scheduler' in globals() and scheduler:
-        logger.info("📅 Stopping background job scheduler...")
-        scheduler.shutdown(wait=True)
-        shutdown_executors()
-        logger.info("✅ Scheduler stopped")
+        logger.info("Stopping background job scheduler...")
+        try:
+            # Shutdown scheduler with timeout to prevent hanging
+            scheduler.shutdown(wait=False)  # Don't wait indefinitely
+            logger.info("Scheduler shutdown initiated")
+            
+            # Give scheduler a short time to finish current jobs
+            import asyncio
+            await asyncio.sleep(2)
+            
+            # Force shutdown if still running
+            if scheduler.running:
+                logger.warning("Scheduler still running, forcing shutdown")
+                scheduler.shutdown(wait=False)
+            
+        except Exception as e:
+            logger.error(f"Error during scheduler shutdown: {e}")
+        
+        # Shutdown executors
+        try:
+            shutdown_executors()
+            logger.info("Executors shutdown complete")
+        except Exception as e:
+            logger.error(f"Error shutting down executors: {e}")
     
     # Stop memory manager
-    memory_manager.shutdown()
+    try:
+        memory_manager.shutdown()
+        logger.info("Memory manager shutdown complete")
+    except Exception as e:
+        logger.error(f"Error shutting down memory manager: {e}")
     
     # Clear memory caches
     try:
@@ -610,10 +634,47 @@ def generate_memory_recommendations(memory_percent: float, memory_stats: Dict[st
 if __name__ == "__main__":
     logger.info("Starting memory-optimized uvicorn server")
     
-    uvicorn.run(
-        "mpi_backend.main_memory_optimized:app",
-        host="0.0.0.0",
-        port=8000,
-        log_level="info",
-        access_log=True
-    )
+    # Add signal handlers for graceful shutdown
+    import signal
+    import sys
+    
+    def signal_handler(signum, frame):
+        """Handle shutdown signals gracefully"""
+        logger.info(f"Received signal {signum}, shutting down gracefully...")
+        
+        # Stop scheduler if running
+        if 'scheduler' in globals() and scheduler and scheduler.running:
+            try:
+                logger.info("Stopping scheduler...")
+                scheduler.shutdown(wait=False)
+                logger.info("Scheduler stopped")
+            except Exception as e:
+                logger.error(f"Error stopping scheduler: {e}")
+        
+        # Shutdown executors
+        try:
+            shutdown_executors()
+        except Exception as e:
+            logger.error(f"Error shutting down executors: {e}")
+        
+        # Exit gracefully
+        sys.exit(0)
+    
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
+    signal.signal(signal.SIGTERM, signal_handler)  # Termination signal
+    
+    try:
+        uvicorn.run(
+            "mpi_backend.main:app",  # Fixed: use main.py, not main_memory_optimized
+            host="0.0.0.0",
+            port=8000,
+            log_level="info",
+            access_log=True
+        )
+    except KeyboardInterrupt:
+        logger.info("Received KeyboardInterrupt, shutting down...")
+        signal_handler(signal.SIGINT, None)
+    except Exception as e:
+        logger.error(f"Uvicorn error: {e}")
+        signal_handler(signal.SIGTERM, None)

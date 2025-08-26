@@ -856,28 +856,57 @@ def init_scheduler() -> BackgroundScheduler:
 # =============================================================================
 
 def shutdown_executors():
-    """Gracefully shutdown all executor pools"""
+    """Gracefully shutdown all executor pools with timeout"""
     logger.info("Shutting down executor pools...")
     
     try:
-        cpu_executor.shutdown(wait=True)
-        logger.info("CPU executor pool shutdown complete")
+        cpu_executor.shutdown(wait=False)  # Don't wait indefinitely
+        logger.info("CPU executor pool shutdown initiated")
     except Exception as e:
         logger.error("Error shutting down CPU executor: %s", e)
     
     try:
-        io_executor.shutdown(wait=True)
-        logger.info("I/O executor pool shutdown complete")
+        io_executor.shutdown(wait=False)  # Don't wait indefinitely
+        logger.info("I/O executor pool shutdown initiated")
     except Exception as e:
         logger.error("Error shutting down I/O executor: %s", e)
     
     try:
-        mapping_executor.shutdown(wait=True)
-        logger.info("Mapping executor pool shutdown complete")
+        mapping_executor.shutdown(wait=False)  # Don't wait indefinitely
+        logger.info("Mapping executor pool shutdown initiated")
     except Exception as e:
         logger.error("Error shutting down mapping executor: %s", e)
+    
+    # Give executors a short time to finish current tasks
+    import time
+    time.sleep(1)
+    
+    # Force shutdown if still running
+    try:
+        if hasattr(cpu_executor, '_threads') and cpu_executor._threads:
+            cpu_executor.shutdown(wait=False)
+        if hasattr(io_executor, '_threads') and io_executor._threads:
+            io_executor.shutdown(wait=False)
+        if hasattr(io_executor, '_threads') and io_executor._threads:
+            io_executor.shutdown(wait=False)
+        logger.info("Executor pools force shutdown complete")
+    except Exception as e:
+        logger.error("Error during force shutdown: %s", e)
 
-# Register shutdown handler
+def force_shutdown_scheduler():
+    """Force shutdown scheduler with timeout"""
+    try:
+        if 'scheduler' in globals():
+            scheduler = globals().get('scheduler')
+            if scheduler and scheduler.running:
+                logger.info("Force shutting down scheduler...")
+                scheduler.shutdown(wait=False)
+                logger.info("Scheduler force shutdown complete")
+    except Exception as e:
+        logger.error("Error during force scheduler shutdown: %s", e)
+
+# Register shutdown handlers
 import atexit
 atexit.register(shutdown_executors)
+atexit.register(force_shutdown_scheduler)
 
