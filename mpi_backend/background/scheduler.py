@@ -465,22 +465,15 @@ def memory_protected(func):
     """Decorator to protect jobs from excessive memory usage"""
     def wrapper(*args, **kwargs):
         try:
-            # Check memory before execution
-            if psutil:
-                memory_before = psutil.virtual_memory()
-                if memory_before.percent > 85:
-                    logger.warning("Job %s skipped due to high memory: %.1f%%", 
-                                  func.__name__, memory_before.percent)
-                    return None
-            
-            # Execute function
+            # Execute function directly - no resource restrictions
             result = func(*args, **kwargs)
             
-            # Check memory after execution
+            # Light cleanup after execution only
             if psutil:
                 memory_after = psutil.virtual_memory()
-                if memory_after.percent > 80:
-                    logger.info("Post-execution cleanup for %s", func.__name__)
+                if memory_after.percent > 90:  # Cleanup only if memory > 90%
+                    logger.info("Post-execution cleanup for %s - Memory: %.1f%%", 
+                               func.__name__, memory_after.percent)
                     gc.collect()
             
             return result
@@ -497,23 +490,24 @@ def memory_protected(func):
 # OPTIMIZED JOB WRAPPERS
 # =============================================================================
 
-@memory_protected
 def async_email_download_wrapper():
-    """I/O-intensive email download task"""
+    """I/O-intensive email download task - ALWAYS RUNS"""
     try:
         from mpi_backend.utils.invoice_downaloder import email_download_background_task
         
-        logger.info("Starting async email download task")
-        result = _run_with_retries(email_download_background_task, "email_download", 
-                                 JobPriority.HIGH, "thread")
+        logger.info("🧪 EMAIL DOWNLOAD JOB EXECUTING - Starting email download task")
+        logger.info("Current time: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        
+        # Execute the task directly - NO RESOURCE RESTRICTIONS
+        result = email_download_background_task()
         
         if result is not None:
-            logger.info("Email download task completed successfully")
+            logger.info("✅ EMAIL DOWNLOAD JOB COMPLETED - Task completed successfully")
         else:
-            logger.warning("Email download task completed with no result")
+            logger.info("⚠️ EMAIL DOWNLOAD JOB COMPLETED - Task completed with no result")
             
     except Exception as e:
-        logger.error(f"Email download task failed: {e}")
+        logger.error("❌ EMAIL DOWNLOAD JOB FAILED: %s", e)
         # Force cleanup on error
         gc.collect()
 
@@ -525,70 +519,75 @@ def async_statement_download_wrapper():
             statement_download_background_task,
         )
         
-        logger.info("Starting async statement download task")
-        result = _run_with_retries(statement_download_background_task, "statement_download", 
-                                 JobPriority.MEDIUM, "thread")
+        logger.info("🧪 STATEMENT DOWNLOAD JOB EXECUTING - Starting statement download task")
+        logger.info("Current time: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        
+        # Execute the task directly without complex resource monitoring
+        result = statement_download_background_task()
         
         if result is not None:
-            logger.info("Statement download task completed successfully")
+            logger.info("✅ STATEMENT DOWNLOAD JOB COMPLETED - Task completed successfully")
         else:
-            logger.warning("Statement download task completed with no result")
+            logger.info("⚠️ STATEMENT DOWNLOAD JOB COMPLETED - Task completed with no result")
             
     except Exception as e:
-        logger.error(f"Statement download task failed: {e}")
+        logger.error("❌ STATEMENT DOWNLOAD JOB FAILED: %s", e)
         # Force cleanup on error
         gc.collect()
 
-@memory_protected
 def async_failed_invoice_recovery_wrapper():
-    """Critical invoice recovery task"""
+    """Critical invoice recovery task - ALWAYS RUNS"""
     try:
         from mpi_backend.utils.failed_invoice_recovery import (
             failed_invoice_recovery_background_task,
         )
         
-        logger.info("Starting async failed invoice recovery task")
-        result = _run_with_retries(failed_invoice_recovery_background_task, "failed_invoice_recovery", 
-                                 JobPriority.CRITICAL, "thread")
+        logger.info("🧪 FAILED RECOVERY JOB EXECUTING - Starting failed invoice recovery task")
+        logger.info("Current time: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        
+        # Execute the task directly - NO RESOURCE RESTRICTIONS
+        result = failed_invoice_recovery_background_task()
         
         if result is not None:
-            logger.info("Failed invoice recovery task completed successfully")
+            logger.info("✅ FAILED RECOVERY JOB COMPLETED - Task completed successfully")
         else:
-            logger.warning("Failed invoice recovery task completed with no result")
+            logger.info("⚠️ FAILED RECOVERY JOB COMPLETED - Task completed with no result")
             
     except Exception as e:
-        logger.error(f"Failed invoice recovery task failed: {e}")
+        logger.error("❌ FAILED RECOVERY JOB FAILED: %s", e)
         # Force cleanup on error
         gc.collect()
 
-@memory_protected
 def async_missing_invoice_download_wrapper():
-    """I/O-intensive missing invoice download task"""
+    """I/O-intensive missing invoice download task - ALWAYS RUNS"""
     try:
         from mpi_backend.utils.missing_invoice_downaloder import (
             missing_email_download_background_task,
         )
         
-        logger.info("Starting async missing invoice download task")
-        result = _run_with_retries(missing_email_download_background_task, "missing_invoice_download", 
-                                 JobPriority.HIGH, "thread")
+        logger.info("🧪 MISSING INVOICE JOB EXECUTING - Starting missing invoice download task")
+        logger.info("Current time: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        
+        # Execute the task directly - NO RESOURCE RESTRICTIONS
+        result = missing_email_download_background_task()
         
         if result is not None:
-            logger.info("Missing invoice download task completed successfully")
+            logger.info("✅ MISSING INVOICE JOB COMPLETED - Task completed successfully")
         else:
-            logger.warning("Missing invoice download task completed with no result")
+            logger.info("⚠️ MISSING INVOICE JOB COMPLETED - Task completed with no result")
             
     except Exception as e:
-        logger.error(f"Missing invoice download task failed: {e}")
+        logger.error("❌ MISSING INVOICE JOB FAILED: %s", e)
         # Force cleanup on error
         gc.collect()
 
-@memory_protected
 def scheduled_uidi_no_match_update():
-    """CPU-intensive mapping update task"""
+    """CPU-intensive mapping update task - ALWAYS RUNS"""
     def _execute():
         try:
-            logger.info("Starting scheduled UIDI/NO Match update")
+            logger.info("🧪 UIDI/NO MATCH UPDATE JOB EXECUTING - Starting UIDI/NO Match update")
+            logger.info("Current time: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            
             from mpi_backend.database.controllers.GoogleSheetSyncController import (
                 GoogleSheetSyncController,
             )
@@ -598,20 +597,21 @@ def scheduled_uidi_no_match_update():
                 None, "update_no_match_uidi"
             )
             logger.info(
-                "Scheduled UIDI/NO Match update submitted: %s",
+                "✅ UIDI/NO MATCH UPDATE JOB COMPLETED - Update submitted: %s",
                 ack.get("message", "submitted"),
             )
         except Exception as exc:
-            logger.error("UIDI/NO Match update failed: %s", exc)
+            logger.error("❌ UIDI/NO MATCH UPDATE JOB FAILED: %s", exc)
 
     mapping_executor.submit(_execute)
 
-@memory_protected
 def scheduled_all_mappings_update():
-    """CPU-intensive comprehensive mapping update task"""
+    """CPU-intensive comprehensive mapping update task - ALWAYS RUNS"""
     def _execute():
         try:
-            logger.info("Starting scheduled All Mappings update")
+            logger.info("🧪 ALL MAPPINGS UPDATE JOB EXECUTING - Starting All Mappings update")
+            logger.info("Current time: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            
             from mpi_backend.database.controllers.GoogleSheetSyncController import (
                 GoogleSheetSyncController,
             )
@@ -621,11 +621,11 @@ def scheduled_all_mappings_update():
                 None, "update_all"
             )
             logger.info(
-                "Scheduled All Mappings update submitted: %s",
+                "✅ ALL MAPPINGS UPDATE JOB COMPLETED - Update submitted: %s",
                 ack.get("message", "submitted"),
             )
         except Exception as exc:
-            logger.error("All Mappings update failed: %s", exc)
+            logger.error("❌ ALL MAPPINGS UPDATE JOB FAILED: %s", exc)
 
     mapping_executor.submit(_execute)
 
