@@ -295,20 +295,12 @@ async def proactive_optimization_middleware(request: Request, call_next):
             # Moderate resource usage - enable optimizations
             logger.info(f"Proactive optimization enabled - CPU: {cpu_percent:.1f}%, Memory: {memory_percent:.1f}%")
         
-        # Circuit breaker: reject requests if resources are critically low
+        # Log high resource usage but don't block requests
         if cpu_percent > MAX_CPU_USAGE or memory_percent > MAX_MEMORY_USAGE:
-            error_count += 1
             logger.warning(
                 "Resource threshold exceeded - CPU: %.1f%%, Memory: %.1f%% - "
-                "Rejecting request",
+                "Continuing to process requests (no blocking)",
                 cpu_percent, memory_percent
-            )
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "detail": "Service temporarily unavailable due to high resource usage",
-                    "retry_after": 30
-                }
             )
         
         # Trigger proactive cleanup if memory usage is high

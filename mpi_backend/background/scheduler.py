@@ -108,7 +108,7 @@ class ResourceMonitor:
         self._last_cleanup = datetime.now()
         
     def is_system_healthy(self) -> bool:
-        """Comprehensive system health check"""
+        """Comprehensive system health check - CPU usage no longer blocks operations"""
         try:
             # CPU check with multiple samples for accuracy
             cpu_samples = [0, 0, 0]  # Resource monitoring disabled
@@ -120,17 +120,23 @@ class ResourceMonitor:
             # Disk check
             disk_percent = 0  # Resource monitoring disabled
             
-            # Comprehensive health assessment
+            # Health assessment - CPU usage no longer blocks operations
             is_healthy = (
-                cpu_percent < CPU_THRESHOLD and
                 available_mb > MEMORY_THRESHOLD_MB and
                 disk_percent < 90  # Prevent disk space issues
             )
             
+            # Log CPU usage but don't block based on it
+            if cpu_percent > CPU_THRESHOLD:
+                logger.info(
+                    "High CPU usage detected: %.1f%% (no longer blocking operations)",
+                    cpu_percent
+                )
+            
             if not is_healthy:
                 logger.warning(
-                    "System resources low - CPU: %.1f%%, RAM: %.1f MB, Disk: %.1f%%",
-                    cpu_percent, available_mb, disk_percent
+                    "System resources low - RAM: %.1f MB, Disk: %.1f%%",
+                    available_mb, disk_percent
                 )
             
             return is_healthy
@@ -219,8 +225,8 @@ class ResourceMonitor:
 
     def can_execute_job(self, job_id: str, job_priority: JobPriority) -> bool:
         """
-        ADDED: Resource-aware job execution decision
-        Critical jobs always run, others are throttled under high load
+        Resource-aware job execution decision - CPU usage no longer blocks jobs
+        All jobs run regardless of CPU usage, only memory constraints apply
         """
         try:
             # Get current system resources
@@ -231,15 +237,19 @@ class ResourceMonitor:
             if job_id in CRITICAL_JOB_PRIORITY:
                 return True
             
-            # Check if system is under high load
-            if cpu_percent > CPU_THROTTLE_THRESHOLD or memory_percent > MEMORY_CLEANUP_THRESHOLD:
-                # Only allow high priority jobs under high load
+            # Check if system is under high load - only memory constraints apply
+            if memory_percent > MEMORY_CLEANUP_THRESHOLD:
+                # Only allow high priority jobs under high memory load
                 if job_priority in [JobPriority.CRITICAL, JobPriority.HIGH]:
-                    logger.warning(f"High system load detected (CPU: {cpu_percent:.1f}%, Memory: {memory_percent:.1f}%). Allowing only high priority job: {job_id}")
+                    logger.warning(f"High memory usage detected ({memory_percent:.1f}%). Allowing only high priority job: {job_id}")
                     return True
                 else:
-                    logger.info(f"Deferring low priority job {job_id} due to high system load (CPU: {cpu_percent:.1f}%, Memory: {memory_percent:.1f}%)")
+                    logger.info(f"Deferring low priority job {job_id} due to high memory usage ({memory_percent:.1f}%)")
                     return False
+            
+            # Log CPU usage but don't block based on it
+            if cpu_percent > CPU_THROTTLE_THRESHOLD:
+                logger.info(f"High CPU usage detected: {cpu_percent:.1f}% (no longer blocking jobs)")
             
             # Normal execution under normal load
             return True
