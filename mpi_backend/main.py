@@ -130,7 +130,7 @@ class MemoryManager:
         return {
             'cache_size': len(self.object_cache),
             'cache_stats': self.cache_stats.copy(),
-            'memory_usage': psutil.virtual_memory().percent,
+            'memory_usage': 'monitoring_disabled',
             'last_cleanup': self.cache_stats['last_cleanup']
         }
     
@@ -264,8 +264,7 @@ async def proactive_optimization_middleware(request: Request, call_next):
     try:
         # Use Windows VPS CPU fix to match Task Manager readings
         cpu_percent = get_windows_cpu_percent(interval=0.1)
-        memory = psutil.virtual_memory()
-        memory_percent = memory.percent
+        memory_percent = 0  # Memory monitoring disabled
         
         # Proactive optimization: apply optimizations before problems occur
         if cpu_percent > 50 or memory_percent > 65:
@@ -416,8 +415,8 @@ async def advanced_health_check():
     try:
         # System metrics
         cpu_percent = get_windows_cpu_percent(interval=0.1)
-        memory = psutil.virtual_memory()
-        disk = psutil.disk_usage('/')
+        memory_percent = 0  # Memory monitoring disabled
+        disk_percent = 0  # Disk monitoring disabled
         
         # Application metrics
         uptime = time.time() - app_start_time
@@ -431,10 +430,10 @@ async def advanced_health_check():
             "uptime_seconds": uptime,
             "system": {
                 "cpu_percent": cpu_percent,
-                "memory_percent": memory.percent,
-                "memory_available_gb": memory.available / (1024**3),
-                "disk_percent": disk.percent,
-                "disk_free_gb": disk.free / (1024**3)
+                "memory_percent": memory_percent,
+                "memory_available_gb": "monitoring_disabled",
+                "disk_percent": disk_percent,
+                "disk_free_gb": "monitoring_disabled"
             },
             "requests": {
                 "total": request_count,

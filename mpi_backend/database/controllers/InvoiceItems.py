@@ -19,7 +19,7 @@ import hashlib
 import json
 import traceback
 import gc
-import psutil
+# psutil import removed - resource monitoring disabled
 
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class InvoiceItemController:
         """Monitor resource usage for operations"""
         try:
             self._query_start_time = time.time()
-            self._memory_before = psutil.virtual_memory().percent
+            self._memory_before = 0  # Resource monitoring disabled
         except Exception as e:
             logger.debug(f"Could not monitor resources: {e}")
 
@@ -55,7 +55,7 @@ class InvoiceItemController:
         try:
             if self._query_start_time:
                 duration = time.time() - self._query_start_time
-                memory_after = psutil.virtual_memory().percent
+                memory_after = 0  # Resource monitoring disabled
                 memory_diff = memory_after - self._memory_before if self._memory_before else 0
                 
                 if duration > 1.0:  # Log slow queries
