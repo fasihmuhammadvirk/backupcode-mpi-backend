@@ -892,6 +892,7 @@ async def delete_invoice(
         raise
     except Exception as e:
         logger.error(f"DELETE /invoice/delete - Error deleting invoice(s) {invoice_id}: {str(e)}")
+        raise HTTPException(
             status_code=500, 
             detail=f"Deletion failed: {str(e)}"
         )
