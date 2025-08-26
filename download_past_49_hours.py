@@ -2,8 +2,8 @@
 """
 Past 49 Hours Invoice Downloader Script
 
-This script downloads invoices from the past 49 hours using the same concept
-as the regular email downloader but with extended time range.
+This script downloads invoices from the past 49 hours using the exact same concept
+as the regular email downloader, including email marking behavior.
 
 Usage:
     python download_past_49_hours.py
@@ -12,9 +12,10 @@ Features:
     - Downloads invoices from past 49 hours
     - Uses same supplier detection logic
     - Same attachment processing
+    - Same email marking behavior (marks as read after successful download)
     - Organized folder structure
     - Comprehensive logging
-    - No email marking (BODY.PEEK)
+    - EXACTLY like regular email downloader
 """
 
 import sys
@@ -83,13 +84,13 @@ def login():
         mail = imaplib.IMAP4_SSL(SMTP_SERVER)
         mail.login(LOGIN_EMAIL, LOGIN_PWD)
         mail.select('inbox')
-        logger.info("✅ Successfully connected to mailbox")
+        logger.info("SUCCESS: Successfully connected to mailbox")
         return mail
     except imaplib.IMAP4.error as imap_error:
-        logger.error(f"❌ IMAP connection failed: {str(imap_error)}")
+        logger.error(f"ERROR: IMAP connection failed: {str(imap_error)}")
         raise
     except Exception as e:
-        logger.error(f"❌ Unexpected error during login: {str(e)}")
+        logger.error(f"ERROR: Unexpected error during login: {str(e)}")
         if mail:
             mail.logout()
         raise
@@ -103,7 +104,7 @@ def search_past_49_hours_emails(mail):
         
         # Format for IMAP search
         time_frame = past_49_hours.strftime('%d-%b-%Y')
-        logger.info(f"🔍 Searching for emails since {time_frame} (past 49 hours)")
+        logger.info(f"SEARCH: Searching for emails since {time_frame} (past 49 hours)")
         logger.info(f"   From: {past_49_hours.strftime('%Y-%m-%d %H:%M:%S %Z')}")
         logger.info(f"   To:   {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
@@ -114,7 +115,7 @@ def search_past_49_hours_emails(mail):
             return []
 
         raw_email_ids = data[0].split()
-        logger.info(f"📧 Found {len(raw_email_ids)} emails in time frame")
+        logger.info(f"FOUND: Found {len(raw_email_ids)} emails in time frame")
 
         filtered_email_ids = []
         for idx, email_id in enumerate(raw_email_ids, 1):
@@ -138,19 +139,19 @@ def search_past_49_hours_emails(mail):
                 # Check if email is from excluded sender
                 if from_email in EXCLUDED_SENDERS:
                     filtered_email_ids.append(email_id)
-                    logger.debug(f"📧 Email UID {email_id} from excluded sender: {from_email}")
+                    logger.debug(f"EMAIL: Email UID {email_id} from excluded sender: {from_email}")
                 else:
-                    logger.debug(f"📧 Email UID {email_id} from non-excluded sender: {from_email}")
+                    logger.debug(f"EMAIL: Email UID {email_id} from non-excluded sender: {from_email}")
 
             except Exception as e:
                 logger.error(f"❌ Error processing email UID {email_id}: {str(e)}")
                 continue
 
-        logger.info(f"📧 Found {len(filtered_email_ids)} emails from excluded senders")
+        logger.info(f"FOUND: Found {len(filtered_email_ids)} emails from excluded senders")
         return filtered_email_ids
 
     except Exception as e:
-        logger.error(f"❌ Error in search_past_49_hours_emails: {str(e)}")
+        logger.error(f"ERROR: Error in search_past_49_hours_emails: {str(e)}")
         return []
 
 def get_supplier(email_subject, supplier_email) -> str:
@@ -247,7 +248,7 @@ def get_supplier(email_subject, supplier_email) -> str:
         return "unknown"
 
     except Exception as e:
-        logger.error(f"❌ Error in get_supplier: {str(e)}")
+        logger.error(f"ERROR: Error in get_supplier: {str(e)}")
         return "unknown"
 
 def download_email_attachments(email_message, base_folder_path):
@@ -258,7 +259,7 @@ def download_email_attachments(email_message, base_folder_path):
         
         # Detect supplier
         supplier = get_supplier(email_subject, sender_email)
-        logger.info(f"🏢 Detected supplier: {supplier} for email: {email_subject[:50]}...")
+        logger.info(f"SUPPLIER: Detected supplier: {supplier} for email: {email_subject[:50]}...")
         
         # Create supplier-specific folder
         supplier_folder = base_folder_path / supplier
@@ -291,12 +292,12 @@ def download_email_attachments(email_message, base_folder_path):
                     f.write(part.get_payload(decode=True))
                 
                 downloaded_count += 1
-                logger.info(f"💾 Downloaded: {safe_filename} to {supplier}")
+                logger.info(f"DOWNLOADED: Downloaded: {safe_filename} to {supplier}")
         
         return downloaded_count > 0
         
     except Exception as e:
-        logger.error(f"❌ Error downloading attachments: {str(e)}")
+        logger.error(f"ERROR: Error downloading attachments: {str(e)}")
         return False
 
 def fetch_email_thread(mail, email_id):
@@ -312,7 +313,7 @@ def fetch_email_thread(mail, email_id):
         return [email_id]
         
     except Exception as e:
-        logger.error(f"❌ Error fetching email thread: {str(e)}")
+        logger.error(f"ERROR: Error fetching email thread: {str(e)}")
         return [email_id]
 
 def download_invoice_attachments_from_thread(mail, thread_email_ids, base_folder_path):
@@ -340,21 +341,22 @@ def download_invoice_attachments_from_thread(mail, thread_email_ids, base_folder
                     total_downloaded += 1
                     
             except Exception as e:
-                logger.error(f"❌ Error processing thread email {email_id}: {str(e)}")
+                logger.error(f"ERROR: Error processing thread email {email_id}: {str(e)}")
                 continue
         
         return True, total_downloaded
         
     except Exception as e:
-        logger.error(f"❌ Error processing email thread: {str(e)}")
+        logger.error(f"ERROR: Error processing email thread: {str(e)}")
         return False, 0
 
 def download_past_49_hours_invoices():
     """Main function to download invoices from past 49 hours"""
-    logger.info("🚀 STARTING PAST 49 HOURS INVOICE DOWNLOADER")
+    logger.info("STARTING: STARTING PAST 49 HOURS INVOICE DOWNLOADER")
     logger.info("=" * 80)
     logger.info(f"Session started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info("Scope: Past 49 hours, ALL emails (not just unseen)")
+    logger.info("Behavior: EXACTLY like regular email downloader - marks as read after success")
 
     mail = None
     try:
@@ -366,9 +368,9 @@ def download_past_49_hours_invoices():
             base_folder = f"PAST_49_HOURS_{past_49_hours.strftime('%d-%b-%Y_%H-%M-%S')}_to_{now.strftime('%d-%b-%Y_%H-%M-%S')}"
             base_folder_path = Path(INVOICE_DOWNLOAD_FOLDER) / base_folder
             base_folder_path.mkdir(parents=True, exist_ok=True)
-            logger.info(f"📁 Created download directory: {base_folder_path}")
+            logger.info(f"DIRECTORY: Created download directory: {base_folder_path}")
         except Exception as dir_error:
-            logger.error(f"❌ Directory creation failed: {str(dir_error)}")
+            logger.error(f"ERROR: Directory creation failed: {str(dir_error)}")
             raise
 
         # Email processing
@@ -377,23 +379,23 @@ def download_past_49_hours_invoices():
             filtered_ids = search_past_49_hours_emails(mail)
 
             if not filtered_ids:
-                logger.info("📧 No emails found in past 49 hours")
+                logger.info("EMAILS: No emails found in past 49 hours")
                 logger.info("=" * 80)
                 return
 
-            logger.info(f"📧 Processing {len(filtered_ids)} emails from past 49 hours")
+            logger.info(f"EMAILS: Processing {len(filtered_ids)} emails from past 49 hours")
             logger.info("-" * 80)
             successfully_processed_emails = []
 
             for idx, e_id in enumerate(filtered_ids, 1):
                 try:
-                    logger.info(f"📧 Processing email {idx}/{len(filtered_ids)} - UID: {e_id}")
+                    logger.info(f"EMAIL: Processing email {idx}/{len(filtered_ids)} - UID: {e_id}")
                     
                     # Check if this email has invoice keywords in subject
                     result, response = mail.uid('fetch', e_id, '(BODY.PEEK[HEADER.FIELDS (SUBJECT)])')
                     
                     if result != 'OK' or not response or not response[0]:
-                        logger.error(f"❌ Failed to fetch subject for email UID {e_id}")
+                        logger.error(f"ERROR: Failed to fetch subject for email UID {e_id}")
                         continue
                     
                     raw_email = response[0][1]
@@ -405,13 +407,13 @@ def download_past_49_hours_invoices():
                                             for kw in ['invoice', 'invoices', 'invoice(s)'])
                     
                     if has_invoice_keyword:
-                        logger.info(f"📧 Email UID {e_id} contains invoice keywords, processing thread")
+                        logger.info(f"EMAIL: Email UID {e_id} contains invoice keywords, processing thread")
                         
                         # Fetch the full conversation thread
                         thread_email_ids = fetch_email_thread(mail, e_id)
                         
                         if len(thread_email_ids) > 1:
-                            logger.info(f"📧 Found thread with {len(thread_email_ids)} emails for UID {e_id}")
+                            logger.info(f"EMAIL: Found thread with {len(thread_email_ids)} emails for UID {e_id}")
                             # Process the entire thread for attachments
                             thread_found, thread_downloaded = download_invoice_attachments_from_thread(
                                 mail, thread_email_ids, base_folder_path
@@ -419,16 +421,16 @@ def download_past_49_hours_invoices():
                             
                             if thread_downloaded > 0:
                                 successfully_processed_emails.append(e_id)
-                                logger.info(f"✅ Email UID {e_id} thread processed successfully with {thread_downloaded} attachments")
+                                logger.info(f"SUCCESS: Email UID {e_id} thread processed successfully with {thread_downloaded} attachments")
                             else:
-                                logger.warning(f"⚠️ Email UID {e_id} thread processed but no attachments downloaded")
+                                logger.warning(f"WARNING: Email UID {e_id} thread processed but no attachments downloaded")
                         else:
-                            logger.info(f"📧 Email UID {e_id} has no thread, processing as single email")
+                            logger.info(f"EMAIL: Email UID {e_id} has no thread, processing as single email")
                             # Process as single email
                             result, response = mail.uid('fetch', e_id, '(BODY.PEEK[])')
                             
                             if result != 'OK' or not response or not response[0]:
-                                logger.error(f"❌ Failed to fetch email UID {e_id}")
+                                logger.error(f"ERROR: Failed to fetch email UID {e_id}")
                                 continue
                             
                             try:
@@ -441,32 +443,65 @@ def download_past_49_hours_invoices():
                             
                             if download_success:
                                 successfully_processed_emails.append(e_id)
-                                logger.info(f"✅ Email UID {e_id} processed successfully with attachments")
+                                logger.info(f"SUCCESS: Email UID {e_id} processed successfully with attachments")
                             else:
-                                logger.warning(f"⚠️ Email UID {e_id} processed but no attachments downloaded")
+                                logger.warning(f"WARNING: Email UID {e_id} processed but no attachments downloaded")
                     else:
-                        logger.debug(f"📧 Email UID {e_id} does not contain invoice keywords, skipping")
+                        logger.debug(f"EMAIL: Email UID {e_id} does not contain invoice keywords, skipping")
                         
                 except Exception as e:
-                    logger.error(f"❌ Error processing email UID {e_id}: {str(e)}")
+                    logger.error(f"ERROR: Error processing email UID {e_id}: {str(e)}")
                     continue
+
+            logger.info("-" * 80)
+
+            # CRITICAL: Mark emails as read after successful processing (same as regular downloader)
+            logger.info(f"MARKING: Marking {len(successfully_processed_emails)} "
+                       f"successfully processed emails as read")
+            for e_id in successfully_processed_emails:
+                try:
+                    # Get email details for conditional marking
+                    result, response = mail.uid('fetch', e_id,
+                                              '(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM)])')
+                    if result == 'OK' and response[0]:
+                        raw_email = response[0][1]
+                        msg = email.message_from_bytes(raw_email)
+                        subject = (msg.get('Subject', '') or '').lower()
+                        sender = email.utils.parseaddr(msg.get('From', ''))[1]
+
+                        # Check if should be marked as read (same logic as regular downloader)
+                        has_invoice_keyword = any(kw in subject
+                                                for kw in ['invoice', 'invoices', 'invoice(s)'])
+                        is_excluded_sender = sender in EXCLUDED_SENDERS
+
+                        if is_excluded_sender and has_invoice_keyword:
+                            mail.uid('store', e_id, '+FLAGS', '(\\Seen)')
+                            logger.info(f"SUCCESS: Marked email UID {e_id} as read "
+                                      f"(sender: {sender})")
+                        else:
+                            logger.debug(f"EMAIL: Email UID {e_id} not marked as read "
+                                       f"(sender: {sender}, has_invoice: {has_invoice_keyword})")
+
+                except Exception as flag_error:
+                    logger.error(f"ERROR: Error marking email UID {e_id} as read: "
+                               f"{str(flag_error)}")
 
             # Summary
             logger.info("-" * 80)
-            logger.info(f"📊 DOWNLOAD SUMMARY:")
+            logger.info(f"SUMMARY: DOWNLOAD SUMMARY:")
             logger.info(f"   Total emails found: {len(filtered_ids)}")
             logger.info(f"   Successfully processed: {len(successfully_processed_emails)}")
             logger.info(f"   Failed: {len(filtered_ids) - len(successfully_processed_emails)}")
             logger.info(f"   Download folder: {base_folder_path}")
             logger.info("=" * 80)
-            logger.info("✅ PAST 49 HOURS INVOICE DOWNLOAD COMPLETED")
+            logger.info("SUCCESS: PAST 49 HOURS INVOICE DOWNLOAD COMPLETED")
 
         except Exception as processing_error:
-            logger.error(f"❌ Email processing failed: {str(processing_error)}")
+            logger.error(f"ERROR: Email processing failed: {str(processing_error)}")
             raise
 
     except Exception as e:
-        logger.error(f"❌ PAST 49 HOURS DOWNLOAD FAILED: {str(e)}")
+        logger.error(f"ERROR: PAST 49 HOURS DOWNLOAD FAILED: {str(e)}")
         logger.error(traceback.format_exc())
         raise
 
@@ -474,13 +509,13 @@ def download_past_49_hours_invoices():
         if mail:
             try:
                 mail.logout()
-                logger.info("🔒 Mailbox connection closed")
+                logger.info("CLOSED: Mailbox connection closed")
             except Exception as e:
-                logger.error(f"❌ Error closing mailbox connection: {str(e)}")
+                logger.error(f"ERROR: Error closing mailbox connection: {str(e)}")
 
 if __name__ == "__main__":
     try:
-        print("🚀 Starting Past 49 Hours Invoice Downloader")
+        print("STARTING: Starting Past 49 Hours Invoice Downloader")
         print("=" * 60)
         print("This script will download invoices from the past 49 hours")
         print("using the same logic as your regular email downloader.")
@@ -489,10 +524,10 @@ if __name__ == "__main__":
         # Run the download
         download_past_49_hours_invoices()
         
-        print("\n🎉 Script completed successfully!")
+        print("\nSUCCESS: Script completed successfully!")
         print("Check the log file 'past_49_hours_download.log' for details.")
         
     except Exception as e:
-        print(f"\n❌ Script failed: {str(e)}")
+        print(f"\nERROR: Script failed: {str(e)}")
         print("Check the log file for detailed error information.")
         sys.exit(1)
