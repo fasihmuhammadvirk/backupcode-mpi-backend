@@ -23,6 +23,24 @@ def extract_job_info(filename):
 
 
 def extract_tax_etc(filename):
+    # Check if this is a BMW invoice and use enhanced tax extraction
+    try:
+        raw_text = read_invoice(filename)
+        if "BMW Plumbing Supplies" in raw_text:
+            # Use enhanced BMW tax extraction for BMW invoices
+            from mpi_backend.utils.pdf_to_excel.bmw_old import extract_tax
+            bmw_tax = extract_tax(filename)
+            try:
+                bmw_tax_float = float(bmw_tax)
+                return {'tax': bmw_tax_float}
+            except:
+                # If conversion fails, continue with normal extraction
+                pass
+    except:
+        # If BMW detection fails, continue with normal extraction
+        pass
+    
+    # Normal tax extraction for non-BMW invoices
     tables = tabula.read_pdf(filename, pages="all", area=regular_area)
     financial_details_table = tabula.read_pdf(filename, pages=len(tables), area=(658, 425, 658 + 84, 425 + 165),
                                               guess=False)

@@ -595,24 +595,6 @@ def scheduled_all_mappings_update():
     mapping_executor.submit(_execute)
 
 @memory_protected
-def test_background_job():
-    """Test job to verify background jobs are running"""
-    try:
-        logger.info("🧪 TEST JOB EXECUTING - Background jobs are working!")
-        logger.info("Current time: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        
-        # Simulate some work
-        import time
-        time.sleep(1)
-        
-        logger.info("✅ TEST JOB COMPLETED - Background jobs are functioning correctly!")
-        return True
-        
-    except Exception as e:
-        logger.error("❌ TEST JOB FAILED: %s", e)
-        return False
-
-@memory_protected
 def enhanced_memory_cleanup_task():
     """Comprehensive memory cleanup with explicit resource management"""
     try:
@@ -821,19 +803,6 @@ def init_scheduler() -> BackgroundScheduler:
         executor='default',
         id="system_metrics",
         name="System Metrics Collection",
-        max_instances=1,
-        misfire_grace_time=300,
-        replace_existing=True,
-    )
-    
-    # Test job - Every 2 minutes (for debugging)
-    scheduler.add_job(
-        test_background_job,
-        "interval",
-        minutes=2,
-        executor='default',
-        id="test_job",
-        name="Test Background Job (Every 2 Minutes)",
         max_instances=1,
         misfire_grace_time=300,
         replace_existing=True,
