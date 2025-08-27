@@ -58,6 +58,18 @@ class GoogleSheetSyncController:
     _last_update_all_time = None
     _last_update_invalid_time = None  # For backward compatibility
 
+    # Percentage tracking for background jobs
+    _current_percentage = 0
+    _total_steps = 0
+    _current_step = 0
+    _step_progress = 0  # Progress within current step (0-100)
+    _step_weight = 0    # Weight of current step in overall progress
+    
+    # Real-time progress tracking
+    _total_items_to_process = 0
+    _items_processed = 0
+    _last_progress_update = None
+
     # Thread pool for background operations
     _executor = ThreadPoolExecutor(
         max_workers=2, thread_name_prefix="sync_worker")
@@ -122,6 +134,20 @@ class GoogleSheetSyncController:
                 cls._sync_task_running = True
                 cls._current_operation = operation
                 cls._current_sub_operation = "starting"
+                
+                # Initialize progress tracking based on operation type
+                if operation == 'sync':
+                    cls._reset_progress()
+                    cls._total_steps = 3  # Google Sheets sync has 3 steps
+                elif operation == 'update_no_match_uidi':
+                    cls._reset_progress()
+                    cls._total_steps = 3  # UIDI update has 3 steps
+                elif operation == 'update_all':
+                    cls._reset_progress()
+                    cls._total_steps = 3  # Full update has 3 steps
+                else:
+                    cls._reset_progress()
+                    cls._total_steps = 1  # Default to 1 step
 
                 # Create a new database session for this thread
                 from mpi_backend.database import SessionLocal
@@ -147,6 +173,7 @@ class GoogleSheetSyncController:
                 cls._sync_task_running = False
                 cls._current_operation = None
                 cls._current_sub_operation = None
+                cls._reset_progress()  # Reset progress when job completes
 
         # Submit the task to the thread pool and return immediately
         future = cls._executor.submit(_run_sync_task)
@@ -212,7 +239,135 @@ class GoogleSheetSyncController:
             "last_update_no_match_uidi_time": _normalize_time(last_uidi_time),
             "last_update_all_time": _normalize_time(last_all_time),
             "last_update_invalid_time": _normalize_time(cls._last_update_invalid_time),
+            "percentage": cls._current_percentage,
+            "total_steps": cls._total_steps,
+            "current_step": cls._current_step,
+            "step_progress": cls._step_progress,
+            "total_items_to_process": cls._total_items_to_process,
+            "items_processed": cls._items_processed,
         }
+
+    @classmethod
+    def _update_progress(cls, current_step: int, total_steps: int, 
+                        sub_operation: str = None, step_progress: int = 0):
+        """
+        Update the progress percentage for background jobs with granular tracking.
+        
+        Args:
+            current_step: Current step number
+            total_steps: Total number of steps
+            sub_operation: Current sub-operation description
+            step_progress: Progress within current step (0-100)
+        """
+        cls._current_step = current_step
+        cls._total_steps = total_steps
+        cls._step_progress = step_progress
+        
+        # Calculate overall percentage with granular step progress
+        if total_steps > 0:
+            # Each step contributes equally to overall progress
+            step_weight = 100 / total_steps
+            # Calculate progress: completed steps + current step progress
+            completed_steps_progress = (current_step - 1) * step_weight
+            current_step_progress = (step_progress / 100) * step_weight
+            cls._current_percentage = int(completed_steps_progress + current_step_progress)
+        else:
+            cls._current_percentage = 0
+        
+        if sub_operation:
+            cls._current_sub_operation = sub_operation
+            
+        logger.info(f"Progress: {cls._current_percentage}% (Step {current_step}/{total_steps}, Step Progress: {step_progress}%) - {sub_operation or 'Unknown operation'}")
+
+    @classmethod
+    def _update_step_progress(cls, step_progress: int, sub_operation: str = None):
+        """
+        Update progress within the current step (0-100%).
+        
+        Args:
+            step_progress: Progress within current step (0-100)
+            sub_operation: Optional sub-operation description
+        """
+        cls._step_progress = max(0, min(100, step_progress))  # Clamp to 0-100
+        
+        # Recalculate overall percentage
+        if cls._total_steps > 0:
+            step_weight = 100 / cls._total_steps
+            completed_steps_progress = (cls._current_step - 1) * step_weight
+            current_step_progress = (cls._step_progress / 100) * step_weight
+            cls._current_percentage = int(completed_steps_progress + current_step_progress)
+        
+        if sub_operation:
+            cls._current_sub_operation = sub_operation
+            
+        logger.info(f"Step Progress: {cls._current_percentage}% (Step {cls._current_step}/{cls._total_steps}, Step Progress: {cls._step_progress}%) - {sub_operation or 'Unknown operation'}")
+
+    @classmethod
+    def _reset_progress(cls):
+        """Reset progress tracking variables."""
+        cls._current_percentage = 0
+        cls._total_steps = 0
+        cls._current_step = 0
+        cls._step_progress = 0
+        cls._current_sub_operation = None
+        cls._total_items_to_process = 0
+        cls._items_processed = 0
+        cls._last_progress_update = None
+
+    @classmethod
+    def _set_total_items(cls, total_items: int, step_name: str):
+        """
+        Set the total number of items to process for real-time progress tracking.
+        
+        Args:
+            total_items: Total number of items to process in current step
+            step_name: Name of the current step for logging
+        """
+        cls._total_items_to_process = total_items
+        cls._items_processed = 0
+        cls._last_progress_update = None
+        logger.info(f"Starting {step_name} with {total_items} items to process")
+
+    @classmethod
+    def _update_item_progress(cls, items_processed: int = None, step_name: str = None):
+        """
+        Update progress as items are processed in real-time.
+        
+        Args:
+            items_processed: Number of items processed so far (increments by 1 if None)
+            step_name: Optional step name for logging
+        """
+        if items_processed is not None:
+            cls._items_processed = items_processed
+        else:
+            cls._items_processed += 1
+        
+        if cls._total_items_to_process > 0:
+            # Calculate step progress based on items processed
+            step_progress = int((cls._items_processed / cls._total_items_to_process) * 100)
+            cls._step_progress = step_progress
+            
+            # Recalculate overall percentage
+            if cls._total_steps > 0:
+                step_weight = 100 / cls._total_steps
+                completed_steps_progress = (cls._current_step - 1) * step_weight
+                current_step_progress = (step_progress / 100) * step_weight
+                cls._current_percentage = int(completed_steps_progress + current_step_progress)
+            
+            # Log progress every 10 items or at major milestones to avoid spam
+            if (cls._items_processed % 10 == 0 or 
+                cls._items_processed in [cls._total_items_to_process // 4, 
+                                       cls._total_items_to_process // 2, 
+                                       3 * cls._total_items_to_process // 4] or
+                cls._items_processed == cls._total_items_to_process):
+                
+                logger.info(f"Live Progress: {cls._current_percentage}% (Step {cls._current_step}/{cls._total_steps}, "
+                           f"Items: {cls._items_processed}/{cls._total_items_to_process} - {step_progress}%) "
+                           f"- {step_name or 'Processing'}")
+        
+        # Update sub-operation if provided
+        if step_name:
+            cls._current_sub_operation = step_name
 
     def perform_sync_task(self, operation: str = 'sync') -> Dict[str, Any]:
         """
@@ -254,19 +409,31 @@ class GoogleSheetSyncController:
             Dictionary with sync results
         """
         self.__class__._current_sub_operation = "syncing_google_sheets"
+        self.__class__._update_progress(1, 3, "syncing_google_sheets", 0)
 
         # Step 1: Extract data using enhanced extractor
         extract_result = self._extract_with_enhanced_extractor()
+        
+        # Update step progress to 100% when extraction completes
+        self.__class__._update_step_progress(100, "syncing_google_sheets")
 
         if not extract_result["success"]:
             return extract_result
 
         # Step 2: Process and save mappings with proper categorization
+        self.__class__._update_progress(2, 3, "processing_mappings", 0)
         process_result = self._process_and_save_mappings(extract_result)
+        
+        # Update step progress to 100% when processing completes
+        self.__class__._update_step_progress(100, "processing_mappings")
 
         # Step 3: Sync temporary mappings
         self.__class__._current_sub_operation = "syncing_temporary_mappings"
+        self.__class__._update_progress(3, 3, "syncing_temporary_mappings", 0)
         temp_result = self._sync_temporary_mappings()
+        
+        # Update step progress to 100% when temporary sync completes
+        self.__class__._update_step_progress(100, "syncing_temporary_mappings")
 
         # Combine results
         final_result = {
@@ -308,18 +475,30 @@ class GoogleSheetSyncController:
         """
         # Step 1: Sync from Google Sheets to get latest mappings
         self.__class__._current_sub_operation = "syncing_google_sheets"
+        self.__class__._update_progress(1, 3, "syncing_google_sheets", 0)
         sync_result = self._perform_google_sheets_sync_operation()
+        
+        # Update step progress to 100% when sync completes
+        self.__class__._update_step_progress(100, "syncing_google_sheets")
 
         if not sync_result["success"]:
             return sync_result
 
         # Step 2: Sync temporary mappings and save to temp-item-mapping.json
         self.__class__._current_sub_operation = "syncing_temporary_mappings"
+        self.__class__._update_progress(2, 3, "syncing_temporary_mappings", 0)
         temp_result = self._sync_temporary_mappings()
+        
+        # Update step progress to 100% when temporary sync completes
+        self.__class__._update_step_progress(100, "syncing_temporary_mappings")
 
         # Step 3: Update No Match / UIDI mappings using the newly synced data
         self.__class__._current_sub_operation = "updating_uidi_items"
+        self.__class__._update_progress(3, 3, "updating_uidi_items", 0)
         update_result = self.mapping_controller.update_no_match_uidi_mappings()
+        
+        # Update step progress to 100% when UIDI update completes
+        self.__class__._update_step_progress(100, "updating_uidi_items")
 
         # Update last UIDI update time
         if update_result.get("status") == "success":
@@ -356,18 +535,30 @@ class GoogleSheetSyncController:
         """
         # Step 1: Sync from Google Sheets to get latest mappings
         self.__class__._current_sub_operation = "syncing_google_sheets"
+        self.__class__._update_progress(1, 3, "syncing_google_sheets", 0)
         sync_result = self._perform_google_sheets_sync_operation()
+        
+        # Update step progress to 100% when sync completes
+        self.__class__._update_step_progress(100, "syncing_google_sheets")
 
         if not sync_result["success"]:
             return sync_result
 
         # Step 2: Sync temporary mappings and save to temp-item-mapping.json
         self.__class__._current_sub_operation = "syncing_temporary_mappings"
+        self.__class__._update_progress(2, 3, "syncing_temporary_mappings", 0)
         temp_result = self._sync_temporary_mappings()
+        
+        # Update step progress to 100% when temporary sync completes
+        self.__class__._update_step_progress(100, "syncing_temporary_mappings")
 
         # Step 3: Update all mappings using the newly synced data
         self.__class__._current_sub_operation = "updating_all_items"
+        self.__class__._update_progress(3, 3, "updating_all_items", 0)
         update_result = self.mapping_controller.update_all_mappings()
+        
+        # Update step progress to 100% when all mappings update completes
+        self.__class__._update_step_progress(100, "updating_all_items")
 
         # Update last full update time
         if update_result.get("status") == "success":
@@ -416,13 +607,21 @@ class GoogleSheetSyncController:
                 fuzzy_threshold=MAPPING_CONFIG["fuzzy_threshold"]
             )
 
-            # Process all sheets
+            # Process all sheets with progress tracking
+            # Update progress to 25% when extraction starts
+            self.__class__._update_step_progress(25, "extracting_data")
+            
             result = extractor.process_all_sheets()
+            
+            # Update progress to 75% when extraction completes
+            self.__class__._update_step_progress(75, "extracting_data")
 
             if result["success"]:
                 self.logger.info(
                     f"Enhanced extraction completed: {result['statistics']['total_extracted']} items extracted"
                 )
+                # Update progress to 100% when extraction is fully complete
+                self.__class__._update_step_progress(100, "extracting_data")
             else:
                 self.logger.error(
                     f"Enhanced extraction failed: {result['message']}")
@@ -470,6 +669,9 @@ class GoogleSheetSyncController:
             total_permanent = len(permanent_mappings)
             self.logger.info(
                 f"Processing {total_permanent} permanent mappings...")
+            
+            # Set up real-time progress tracking for this step
+            self.__class__._set_total_items(total_permanent, "processing_permanent_mappings")
 
             for idx, mapping in enumerate(permanent_mappings, 1):
                 try:
@@ -516,10 +718,14 @@ class GoogleSheetSyncController:
                     # Continue processing other mappings instead of stopping
                     continue
 
-                # Log progress every 100 items
-                if idx % 100 == 0:
+                # Update real-time progress as each mapping is processed
+                self.__class__._update_item_progress(idx, "processing_permanent_mappings")
+
+                # Log progress every 100 items or at 25%, 50%, 75%
+                if idx % 100 == 0 or idx in [total_permanent // 4, total_permanent // 2, 3 * total_permanent // 4]:
+                    progress_percent = int((idx / total_permanent) * 100)
                     self.logger.info(
-                        f"Processed {idx}/{total_permanent} permanent mappings (saved: {permanent_saved}, errors: {permanent_errors})")
+                        f"Permanent mappings progress: {progress_percent}% ({idx}/{total_permanent}) - saved: {permanent_saved}, errors: {permanent_errors}")
 
             # Process temporary mappings
             temp_saved = 0

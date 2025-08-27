@@ -18,6 +18,7 @@ from mpi_backend.database.models.MonthlyStatement import (
 )
 from mpi_backend.database.models.Invoice import Invoice
 from mpi_backend.database.models.InvoiceItems import InvoiceItem
+from mpi_backend.utils.number_formatter import format_currency
 
 logger = logging.getLogger(__name__)
 
@@ -331,7 +332,7 @@ class StatementController:
                     'id': stmt.id,
                     'supplier_name': stmt.supplier.name,
                     'statement_date': stmt.statement_date.isoformat() if stmt.statement_date else None,
-                    'total_amount': float(stmt.total_amount) if stmt.total_amount else 0.0,
+                    'total_amount': format_currency(stmt.total_amount) if stmt.total_amount else format_currency(0.0),
                     'total_invoices': stmt.total_invoices,
                     'account_number': stmt.account_number,
                     'pdf_filename': stmt.pdf_filename
@@ -498,12 +499,12 @@ class StatementController:
                     'supplier_name': plumbing_supplier.name,
                     'status': reconciliation_status,
                     'original_amount': (
-                        float(plumbing_invoice.original_amount)
-                        if plumbing_invoice.original_amount else 0.0
+                        format_currency(plumbing_invoice.original_amount)
+                        if plumbing_invoice.original_amount else format_currency(0.0)
                     ),
                     'balance': (
-                        float(plumbing_invoice.balance)
-                        if plumbing_invoice.balance else 0.0
+                        format_currency(plumbing_invoice.balance)
+                        if plumbing_invoice.balance else format_currency(0.0)
                     ),
                     'statement_id': plumbing_statement.id,
                     'invoice_id': plumbing_invoice.id
@@ -1718,8 +1719,8 @@ class StatementController:
                     'statement_date': None,  # No statement for system invoices
                     'supplier_name': supplier.name,
                     'status': 'Unlisted',
-                    'original_amount': float(invoice_item.amount) if invoice_item.amount else 0.0,
-                    'balance': 0.0,  # System invoices don't have balance
+                    'original_amount': format_currency(invoice_item.amount) if invoice_item.amount else format_currency(0.0),
+                    'balance': format_currency(0.0),  # System invoices don't have balance
                     'statement_id': None,
                     'invoice_id': None,
                     'system_invoice_id': str(invoice.id),

@@ -1,0 +1,79 @@
+[Unit]
+Description=MPI Backend Production Service
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=exec
+User=mpi-user
+Group=mpi-user
+WorkingDirectory=/opt/mpi-backend
+Environment=PATH=/opt/mpi-backend/venv/bin
+Environment=ENVIRONMENT=production
+Environment=PYTHONPATH=/opt/mpi-backend
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+# Uvicorn optimization for 4GB RAM
+Environment=UVICORN_WORKERS=1
+Environment=UVICORN_LIMIT_CONCURRENCY=100
+Environment=UVICORN_MAX_REQUESTS=1000
+Environment=UVICORN_BACKLOG=100
+Environment=UVICORN_TIMEOUT_KEEP_ALIVE=5
+
+# Database optimization for 4GB RAM
+Environment=DB_POOL_SIZE=3
+Environment=DB_MAX_OVERFLOW=2
+Environment=DB_POOL_RECYCLE=600
+
+# Background job optimization for 4GB RAM
+Environment=BG_CPU_THRESHOLD=80
+Environment=BG_MEMORY_THRESHOLD=2500
+Environment=BG_IO_POOL_SIZE=2
+
+# Memory management for 4GB RAM
+Environment=MEMORY_CLEANUP_THRESHOLD=70
+Environment=MEMORY_CLEANUP_INTERVAL=180
+Environment=MAX_OBJECT_CACHE_SIZE=500
+
+ExecStart=/opt/mpi-backend/venv/bin/uvicorn mpi_backend.main:app \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --workers 1 \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --backlog 100 \
+    --max-requests 1000 \
+    --max-requests-jitter 100 \
+    --timeout-keep-alive 5 \
+    --limit-concurrency 100 \
+    --limit-max-requests 1000 \
+    --log-level warning \
+    --access-log \
+    --use-colors false \
+    --forwarded-allow-ips "*" \
+    --proxy-headers
+
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+
+# Resource limits for 4GB server
+MemoryMax=3G
+MemoryHigh=2.5G
+CPUQuota=400%
+CPUWeight=100
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/mpi-backend/logs /opt/mpi-backend/data
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mpi-backend
+
+[Install]
+WantedBy=multi-user.target

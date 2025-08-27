@@ -14,6 +14,7 @@ from mpi_backend.database.schemas.MonthlyComparison import (
     EnrichedItemPriceResponse,
     PaginatedEnrichedItemResponse
 )
+from mpi_backend.utils.number_formatter import format_currency
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +160,7 @@ class MonthlyComparisonController:
                         mpi_item=item.mpi_item or '',
                         original_item=item.original_item or '',
                         mpi_description=item.mpi_description or '',
-                        unit_price=float(lowest_price.cost)
+                        unit_price=format_currency(lowest_price.cost)
                     )
                 )
 
@@ -315,7 +316,7 @@ class MonthlyComparisonController:
                     {
                         "id": supplier_id,
                         "name": vendor or "Unknown", 
-                        "unit_price": float(cost)
+                        "unit_price": format_currency(cost)
                     }
                     for vendor, cost, supplier_id in supplier_prices
                     if cost is not None
@@ -430,7 +431,7 @@ class MonthlyComparisonController:
                 
                 if mpi_item not in price_data:
                     price_data[mpi_item] = {
-                        'absolute_cheapest_price': float(absolute_cheapest),
+                        'absolute_cheapest_price': format_currency(absolute_cheapest),
                         'suppliers': []
                     }
                 
@@ -438,7 +439,7 @@ class MonthlyComparisonController:
                     SupplierPriceInfo(
                         id=supplier_id,
                         name=vendor or "Unknown",
-                        unit_price=float(min_cost)
+                        unit_price=format_currency(min_cost)
                     )
                 )
             
@@ -466,7 +467,7 @@ class MonthlyComparisonController:
                             mpi_item=item.mpi_item or "",
                             original_item=item.original_item or "",
                             mpi_description=item.mpi_description or "",
-                            cheapest_unit_price=0.0,
+                            cheapest_unit_price=format_currency(0.0),
                             suppliers=[]
                         )
                     )
@@ -557,7 +558,7 @@ class MonthlyComparisonController:
                     SupplierPriceInfo(
                         id=supplier_id,
                         name=vendor or "Unknown", 
-                        unit_price=price
+                        unit_price=format_currency(price)
                     )
                     for vendor, (supplier_id, price) in supplier_prices_dict.items()
                 ]
@@ -575,7 +576,7 @@ class MonthlyComparisonController:
                         mpi_item=item.mpi_item or "",
                         original_item=item.original_item or "",
                         mpi_description=item.mpi_description or "",
-                        cheapest_unit_price=absolute_cheapest_price,
+                        cheapest_unit_price=format_currency(absolute_cheapest_price),
                         suppliers=suppliers
                     )
                 )
@@ -719,7 +720,7 @@ class MonthlyComparisonController:
                             mpi_item=item.mpi_item or "",
                             original_item=item.original_item or "",
                             mpi_description=item.mpi_description or "",
-                            cheapest_unit_price=0.0,
+                            cheapest_unit_price=format_currency(0.0),
                             suppliers=[],
                         )
                     )
@@ -743,7 +744,7 @@ class MonthlyComparisonController:
                     SupplierPriceInfo(
                         id=supplier_id,
                         name=vendor or "Unknown",
-                        unit_price=price
+                        unit_price=format_currency(price)
                     )
                     for vendor, (supplier_id, price) in supplier_prices_dict.items()
                 ]
@@ -758,7 +759,7 @@ class MonthlyComparisonController:
                         mpi_item=item.mpi_item or "",
                         original_item=item.original_item or "",
                         mpi_description=item.mpi_description or "",
-                        cheapest_unit_price=absolute_cheapest_price,
+                        cheapest_unit_price=format_currency(absolute_cheapest_price),
                         suppliers=suppliers
                     )
                 )

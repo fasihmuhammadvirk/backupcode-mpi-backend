@@ -784,12 +784,27 @@ class ItemsMappingController:
             updated_from_temp = 0
             updated_from_no_sheet = 0
 
-            for item in no_match_items:
+            total_items = len(no_match_items)
+            logger.info(f"Processing {total_items} items for UIDI update")
+            
+            # Set up real-time progress tracking for this step
+            from mpi_backend.database.controllers import GoogleSheetSyncController
+            GoogleSheetSyncController._set_total_items(total_items, "updating_uidi_items")
+
+            for idx, item in enumerate(no_match_items, 1):
                 # Clean the invoice item for comparison
                 clean_invoice_item = str(item.item).strip()
 
                 if not clean_invoice_item:
                     continue
+
+                # Update real-time progress as each item is processed
+                GoogleSheetSyncController._update_item_progress(idx, "updating_uidi_items")
+                
+                # Log progress every 100 items or at 25%, 50%, 75%
+                if idx % 100 == 0 or idx in [total_items // 4, total_items // 2, 3 * total_items // 4]:
+                    progress_percent = int((idx / total_items) * 100)
+                    logger.info(f"UIDI update progress: {progress_percent}% ({idx}/{total_items})")
 
                 # Log the item we're trying to match
                 logger.debug(
@@ -1038,12 +1053,27 @@ class ItemsMappingController:
             no_match_found_count = 0
             items_with_sheet_but_no_mpi = 0
 
-            for item in unmapped_items:
+            total_items = len(unmapped_items)
+            logger.info(f"Processing {total_items} unmapped items for comprehensive update")
+            
+            # Set up real-time progress tracking for this step
+            from mpi_backend.database.controllers import GoogleSheetSyncController
+            GoogleSheetSyncController._set_total_items(total_items, "updating_comprehensive_mappings")
+
+            for idx, item in enumerate(unmapped_items, 1):
                 # Clean the invoice item for comparison
                 clean_invoice_item = str(item.item).strip()
 
                 if not clean_invoice_item:
                     continue
+
+                # Update real-time progress as each item is processed
+                GoogleSheetSyncController._update_item_progress(idx, "updating_comprehensive_mappings")
+                
+                # Log progress every 100 items or at 25%, 50%, 75%
+                if idx % 100 == 0 or idx in [total_items // 4, total_items // 2, 3 * total_items // 4]:
+                    progress_percent = int((idx / total_items) * 100)
+                    logger.info(f"Comprehensive update progress: {progress_percent}% ({idx}/{total_items})")
 
                 # Track original state for logging
                 original_mpi = item.mpi_item or "Empty"
@@ -1248,8 +1278,24 @@ class ItemsMappingController:
             total_updated_count = 0
             total_mappings_processed = 0
 
-            for mapping in valid_mappings:
+            total_mappings = len(valid_mappings)
+            logger.info(f"Processing {total_mappings} mappings for all mappings update")
+            
+            # Set up real-time progress tracking for this step
+            from mpi_backend.database.controllers import GoogleSheetSyncController
+            GoogleSheetSyncController._set_total_items(total_mappings, "updating_all_mappings")
+
+            for idx, mapping in enumerate(valid_mappings, 1):
                 total_mappings_processed += 1
+                
+                # Update real-time progress as each mapping is processed
+                GoogleSheetSyncController._update_item_progress(idx, "updating_all_mappings")
+                
+                # Log progress every 50 mappings or at 25%, 50%, 75%
+                if idx % 50 == 0 or idx in [total_mappings // 4, total_mappings // 2, 3 * total_mappings // 4]:
+                    progress_percent = int((idx / total_mappings) * 100)
+                    logger.info(f"All mappings update progress: {progress_percent}% ({idx}/{total_mappings})")
+                
                 try:
                     # Strip whitespace from mapping item
                     clean_mapping_item = mapping.supplier_item_ids.strip()

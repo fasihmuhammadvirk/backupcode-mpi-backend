@@ -9,60 +9,85 @@ from mpi_backend.config import SQLALCHEMY_DATABASE_URI
 
 logger = logging.getLogger(__name__)
 
-# CRITICAL FIX: Reduced connection pool sizes to prevent exhaustion
+# OPTIMIZED: Reduced connection pool sizes for 4GB server
 # Main database engine (for regular operations)
 engine = create_engine(
     SQLALCHEMY_DATABASE_URI,
-    pool_size=10,  # REDUCED from 20 to 10
-    max_overflow=5,  # REDUCED from 10 to 5
+    pool_size=3,  # REDUCED from 5 to 3 for 4GB server
+    max_overflow=2,  # REDUCED from 3 to 2
     pool_pre_ping=True,
-    pool_timeout=10,  # INCREASED timeout for better stability
-    pool_recycle=1800,  # ADDED: Recycle connections every 30 minutes
+    pool_timeout=15,  # REDUCED timeout for 4GB server
+    pool_recycle=600,  # REDUCED to 10 minutes for better connection mgmt
     echo=False,  # Keep logging disabled for performance
+    # ADDED: Connection pool optimization
+    pool_use_lifo=True,  # Use LIFO for better connection reuse
+    pool_reset_on_return='commit',  # Reset connections on return
 )
 
-# CRITICAL FIX: Reduced QuickBooks pool size
+# OPTIMIZED: Reduced QuickBooks pool size for 4GB server
 # Dedicated high-performance connection pool for QuickBooks exports
 qb_engine = create_engine(
     SQLALCHEMY_DATABASE_URI,
-    pool_size=8,  # REDUCED from 15 to 8
-    max_overflow=3,  # REDUCED from 5 to 3
+    pool_size=2,  # REDUCED from 3 to 2 for 4GB server
+    max_overflow=1,  # REDUCED from 2 to 1
     pool_pre_ping=True,
-    pool_timeout=5,  # Keep faster timeout for QB operations
-    pool_recycle=1800,  # REDUCED from 3600 to 1800 (30 minutes)
+    pool_timeout=8,  # Reduced timeout for QB operations on 4GB
+    pool_recycle=600,  # REDUCED to 10 minutes
     echo=False,  # Disable SQL logging for performance
+    # ADDED: Connection pool optimization
+    pool_use_lifo=True,
+    pool_reset_on_return='commit',
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 QBSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=qb_engine)
 Base = declarative_base()
 
-# ENHANCED: Add connection pool monitoring
+
+# ENHANCED: Add connection pool monitoring with resource thresholds
 def log_pool_status():
-    """Log database connection pool status"""
+    """Log database connection pool status with resource monitoring"""
     try:
         main_pool = engine.pool
         qb_pool = qb_engine.pool
         
-        logger.info(f"DB Pool Status - Main: {main_pool.checkedout()}/{main_pool.size()} checked out, "
-                   f"QB: {qb_pool.checkedout()}/{qb_pool.size()} checked out")
+        main_checked_out = main_pool.checkedout()
+        main_size = main_pool.size()
+        qb_checked_out = qb_pool.checkedout()
+        qb_size = qb_pool.size()
         
-        # Warn if pools are getting full
-        main_usage = (main_pool.checkedout() / main_pool.size()) * 100
-        qb_usage = (qb_pool.checkedout() / qb_pool.size()) * 100
+        logger.info(
+            f"DB Pool Status - Main: {main_checked_out}/{main_size} "
+            f"checked out, QB: {qb_checked_out}/{qb_size} checked out"
+        )
+        
+        # Warn if pools are getting full (80% threshold)
+        main_usage = (main_checked_out / main_size) * 100 if main_size > 0 else 0
+        qb_usage = (qb_checked_out / qb_size) * 100 if qb_size > 0 else 0
         
         if main_usage > 80:
             logger.warning(f"Main DB pool usage high: {main_usage:.1f}%")
         if qb_usage > 80:
             logger.warning(f"QB DB pool usage high: {qb_usage:.1f}%")
             
+        # CRITICAL: Log if pools are exhausted
+        if main_usage >= 95:
+            logger.critical(f"Main DB pool nearly exhausted: {main_usage:.1f}%")
+        if qb_usage >= 95:
+            logger.critical(f"QB DB pool nearly exhausted: {qb_usage:.1f}%")
+            
     except Exception as e:
         logger.debug(f"Could not check pool status: {e}")
 
 
+# ADDED: Resource-aware database session management
 def get_db():
-    db = SessionLocal()
+    """Get database session with resource monitoring"""
     try:
+        # Check pool status before creating session
+        log_pool_status()
+        
+        db = SessionLocal()
         yield db
     finally:
         try:
@@ -74,9 +99,12 @@ def get_db():
 
 
 def get_qb_db():
-    """Dedicated database session for QuickBooks operations"""
-    db = QBSessionLocal()
+    """Dedicated database session for QuickBooks operations with resource monitoring"""
     try:
+        # Check QB pool status before creating session
+        log_pool_status()
+        
+        db = QBSessionLocal()
         yield db
     finally:
         try:
@@ -97,42 +125,35 @@ def db_context():
         logger.error(f"Database operation failed: {e}")
         try:
             db.rollback()
-        except:
+        except Exception:
             pass
         raise
     finally:
         try:
             db.close()
-        except (OperationalError, DBAPIError, Psycopg2OperationalError) as e:
-            logger.warning(f"Error closing DB context session: {e}")
         except Exception as e:
-            logger.error(f"Unexpected error closing DB context session: {e}")
+            logger.error(f"Error closing database session: {e}")
 
 
-@contextmanager
-def qb_db_context():
-    """Context manager for QuickBooks priority database sessions"""
-    db = QBSessionLocal()
+# ADDED: Resource monitoring function for system health checks
+def get_db_health_status():
+    """Get database health status for monitoring"""
     try:
-        yield db
+        main_pool = engine.pool
+        qb_pool = qb_engine.pool
+        
+        main_usage = (main_pool.checkedout() / main_pool.size()) * 100 if main_pool.size() > 0 else 0
+        qb_usage = (qb_pool.checkedout() / qb_pool.size()) * 100 if qb_pool.size() > 0 else 0
+        
+        return {
+            "main_pool_usage": round(main_usage, 2),
+            "qb_pool_usage": round(qb_usage, 2),
+            "main_pool_size": main_pool.size(),
+            "qb_pool_size": qb_pool.size(),
+            "main_checked_out": main_pool.checkedout(),
+            "qb_checked_out": qb_pool.checkedout(),
+            "healthy": main_usage < 90 and qb_usage < 90
+        }
     except Exception as e:
-        logger.error(f"QB Database operation failed: {e}")
-        try:
-            db.rollback()
-        except:
-            pass
-        raise
-    finally:
-        try:
-            db.close()
-        except (OperationalError, DBAPIError, Psycopg2OperationalError) as e:
-            logger.warning(f"Error closing QB DB context session: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error closing QB DB context session: {e}")
-
-# Log initial pool configuration
-logger.info("Database connection pools configured:")
-logger.info(f"  Main DB: {engine.pool.size()} connections (max overflow: {engine.pool._max_overflow})")
-logger.info(f"  QB DB: {qb_engine.pool.size()} connections (max overflow: {qb_engine.pool._max_overflow})")
-logger.info("  Connection recycling: 30 minutes")
-logger.info("  Pool monitoring: ENABLED")
+        logger.error(f"Error getting DB health status: {e}")
+        return {"healthy": False, "error": str(e)}

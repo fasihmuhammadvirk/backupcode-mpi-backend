@@ -283,14 +283,9 @@ def extract_tax(filename, page):
 
 
 def get_pages(filename):
-    try:
-        # Try new API first
-        reader = pyPdf.PdfReader(filename)
-        numPages = len(reader.pages)
-    except AttributeError:
-        # Fallback to old API for older PyPDF2 versions
-        reader = pyPdf.PdfFileReader(filename)
-        numPages = reader.getNumPages()
+
+    reader = pyPdf.PdfFileReader(filename)
+    numPages = reader.getNumPages()
     return numPages
 
 

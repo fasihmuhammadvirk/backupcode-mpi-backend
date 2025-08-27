@@ -270,11 +270,28 @@ def get_mapping_by_mpi_type(db: Session = Depends(get_db), token: str = Depends(
         - Supports inventory management and reporting
     """
     try:
+        # Simple database connection check
+        if not db:
+            raise HTTPException(status_code=500, detail="Database connection error")
+            
         mappings = ItemsMappingController(db).get_items_mappings_by_mpi_type()
+        
+        # Return empty dict if no mappings found
+        if mappings is None:
+            return {}
+            
         return mappings
+        
     except Exception as e:
+        # Log error and return simple error response
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error fetching MPI types: {str(e)}")
+        
         raise HTTPException(
-            status_code=500, detail=f"Failed to fetch item mapping by MPI type: {e}")
+            status_code=500, 
+            detail="Failed to fetch MPI types. Please try again."
+        )
 
 
 @router.get("/{supplier_id}", response_model=List[ItemMappingsResponse])

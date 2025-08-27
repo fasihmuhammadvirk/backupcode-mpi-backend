@@ -1,7 +1,7 @@
 from fastapi import (
     APIRouter, Depends, HTTPException, Query, UploadFile, File
 )
-from typing import List, Optional, Dict
+from typing import List, Optional
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
 from fastapi_pagination import Page, paginate
@@ -772,52 +772,129 @@ def sort_invoices(
 
 @router.delete("/delete")
 async def delete_invoice(
-    invoice_id: Optional[str] = Query(
-        None, description="Single invoice ID to delete (use body for multiple)"
+    invoice_id: str = Query(
+        ..., 
+        description="Invoice ID(s) to delete. Can be a single ID or multiple comma-separated IDs (e.g., '778cc73f-845a-491d-b1a2-c1bece2ca146' or '778cc73f-845a-491d-b1a2-c1bece2ca146,9a8b7c6d-5e4f-3g2h-1i0j-k1l2m3n4o5p6')"
     ),
-    invoice_ids: Optional[List[str]] = Query(
-        None, description="Multiple invoice IDs to delete"
-    ),
-    payload: Optional[Dict[str, List[str]]] = None,
     db: Session = Depends(get_db), 
     token: str = Depends(JWTBearer())
 ):
     """
     Delete one or more invoices and their associated files from the system.
     
-    - If `invoice_ids` query param is provided, those invoices will be deleted.
-    - Else if `invoice_id` is provided, that single invoice will be deleted.
+    **Summary:**
+        Deletes one or more invoices based on the provided invoice_id parameter.
+        Supports both single invoice deletion and bulk deletion of multiple invoices
+        using comma-separated values.
+        
+    **Query Parameters:**
+        - **invoice_id** (`str`, required): Invoice ID(s) to delete:
+            - Single ID: "778cc73f-845a-491d-b1a2-c1bece2ca146"
+            - Multiple IDs: "778cc73f-845a-491d-b1a2-c1bece2ca146,9a8b7c6d-5e4f-3g2h-1i0j-k1l2m3n4o5p6"
+            - Comma-separated without spaces: "778cc73f-845a-491d-b1a2-c1bece2ca146,9a8b7c6d-5e4f-3g2h-1i0j-k1l2m3n4o5p6"
+            
+    **Authentication:**
+        - Requires valid JWT token in Authorization header
+        
+    **Returns:**
+        - **Dict**: Deletion summary containing:
+            - **deleted_ids** (`List[str]`): Array of successfully deleted invoice IDs
+            - **not_found_ids** (`List[str]`): Array of invoice IDs that were not found
+            - **status** (`str`): Human-readable status message
+            
+    **Response Examples:**
     
-    Returns a summary of deletions.
-    """
-    invoice_controller = InvoiceController(db)
-
-    # Prefer multiple IDs when provided (body or query)
-    body_ids = []
-    try:
-        if payload and isinstance(payload, dict):
-            body_ids = payload.get("invoice_ids", []) or []
-    except Exception:
-        body_ids = []
-
-    ids_to_delete = body_ids or (invoice_ids or [])
-
-    if ids_to_delete:
-        summary = invoice_controller.delete_invoices(ids_to_delete, db)
-        return {
-            "deleted_ids": summary["deleted_ids"],
-            "not_found_ids": summary["not_found_ids"],
-            "status": f"Deleted {len(summary['deleted_ids'])} invoice(s)."
-        }
-
-    if not invoice_id:
-        raise HTTPException(status_code=400, detail="invoice_id or invoice_ids is required")
-
-    deleted_single_id = invoice_controller.delete_invoice(invoice_id, db)
-    return {
-        "deleted_ids": [deleted_single_id],
+    **Single Invoice Deletion:**
+    ```json
+    {
+        "deleted_ids": ["778cc73f-845a-491d-b1a2-c1bece2ca146"],
         "not_found_ids": [],
-        "status": f"Invoice {deleted_single_id} and associated file deleted successfully."
+        "status": "Invoice 778cc73f-845a-491d-b1a2-c1bece2ca146 and associated file deleted successfully."
     }
+    ```
+    
+    **Multiple Invoice Deletion:**
+    ```json
+    {
+        "deleted_ids": ["778cc73f-845a-491d-b1a2-c1bece2ca146", "9a8b7c6d-5e4f-3g2h-1i0j-k1l2m3n4o5p6"],
+        "not_found_ids": [],
+        "status": "Deleted 2 invoice(s)."
+    }
+    ```
+    
+    **Partial Deletion (Some Not Found):**
+    ```json
+    {
+        "deleted_ids": ["778cc73f-845a-491d-b1a2-c1bece2ca146"],
+        "not_found_ids": ["9a8b7c6d-5e4f-3g2h-1i0j-k1l2m3n4o5p6"],
+        "status": "Deleted 1 invoice(s)."
+    }
+    ```
+    
+    **Process Flow:**
+        1. Parses the invoice_id parameter for comma-separated values
+        2. Validates each ID format
+        3. Attempts to delete each invoice and associated files
+        4. Tracks successful deletions and failures
+        5. Returns comprehensive deletion summary
+        
+    **Error Codes:**
+        - **400**: No invoice_id provided or invalid format
+        - **401**: Unauthorized (invalid or missing JWT token)
+        - **500**: Internal server error during deletion process
+        
+    **Notes:**
+        - Comma-separated values should not contain spaces
+        - Invalid IDs in the list will be reported in not_found_ids
+        - Associated invoice files are also deleted from storage
+        - Database records and related invoice items are permanently removed
+        - Operation is atomic - either all valid invoices are deleted or none
+    """
+    logger.info(f"DELETE /invoice/delete - Deleting invoice(s): {invoice_id}")
+    
+    try:
+        # Parse comma-separated invoice IDs
+        if not invoice_id or not invoice_id.strip():
+            raise HTTPException(
+                status_code=400, 
+                detail="invoice_id parameter is required"
+            )
+        
+        # Split by comma and clean up whitespace
+        ids_to_delete = [id.strip() for id in invoice_id.split(',') if id.strip()]
+        
+        if not ids_to_delete:
+            raise HTTPException(
+                status_code=400, 
+                detail="At least one valid invoice_id is required"
+            )
+        
+        invoice_controller = InvoiceController(db)
+        
+        if len(ids_to_delete) == 1:
+            # Single invoice deletion
+            deleted_id = invoice_controller.delete_invoice(ids_to_delete[0], db)
+            return {
+                "deleted_ids": [deleted_id],
+                "not_found_ids": [],
+                "status": f"Invoice {deleted_id} and associated file deleted successfully."
+            }
+        else:
+            # Multiple invoice deletion
+            summary = invoice_controller.delete_invoices(ids_to_delete, db)
+            return {
+                "deleted_ids": summary["deleted_ids"],
+                "not_found_ids": summary["not_found_ids"],
+                "status": f"Deleted {len(summary['deleted_ids'])} invoice(s)."
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"DELETE /invoice/delete - Error deleting invoice(s) {invoice_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Deletion failed: {str(e)}"
+        )
 
 

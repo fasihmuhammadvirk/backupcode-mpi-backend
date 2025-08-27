@@ -35,5 +35,5 @@ SKIP_SHEETS = [
 # Mapping configuration settings
 MAPPING_CONFIG: Dict[str, Any] = {
     "batch_size": int(os.environ.get("MAPPING_BATCH_SIZE", "100")),
-    "fuzzy_threshold": int(os.environ.get("MAPPING_FUZZY_THRESHOLD", "75")),
+    "fuzzy_threshold": int(os.environ.get("MAPPING_FUZZY_THRESHOLD", "95")),
 } 

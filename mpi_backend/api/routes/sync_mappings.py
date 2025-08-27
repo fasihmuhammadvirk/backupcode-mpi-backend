@@ -271,6 +271,14 @@ def sync_status(
         "last_sync_time": status.get("last_sync_time"),
         "last_no_match_uidi_update": status.get("last_update_no_match_uidi_time"),
         "last_full_update": status.get("last_update_all_time"),
+        # Add percentage tracking information
+        "percentage": status.get("percentage", 0),
+        "total_steps": status.get("total_steps", 0),
+        "current_step": status.get("current_step", 0),
+        "step_progress": status.get("step_progress", 0),
+        # Add real-time progress information
+        "total_items_to_process": status.get("total_items_to_process", 0),
+        "items_processed": status.get("items_processed", 0),
     }
 
 
