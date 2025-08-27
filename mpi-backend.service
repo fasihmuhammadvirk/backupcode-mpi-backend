@@ -21,9 +21,9 @@ Environment=UVICORN_MAX_REQUESTS=1000
 Environment=UVICORN_BACKLOG=100
 Environment=UVICORN_TIMEOUT_KEEP_ALIVE=5
 
-# Database optimization for 4GB RAM
-Environment=DB_POOL_SIZE=3
-Environment=DB_MAX_OVERFLOW=2
+# Database optimization for multi-user environment
+Environment=DB_POOL_SIZE=10
+Environment=DB_MAX_OVERFLOW=8
 Environment=DB_POOL_RECYCLE=600
 
 # Background job optimization for 4GB RAM

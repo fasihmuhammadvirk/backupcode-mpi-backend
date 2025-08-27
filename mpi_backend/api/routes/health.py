@@ -1,15 +1,45 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from mpi_backend.database import get_db, get_db_health_status
+from mpi_backend.database.controllers import HealthController
 from mpi_backend.background.scheduler import (
     get_system_metrics, resource_monitor
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
 @router.get("/health")
-async def health_check():
+async def health_check(db: Session = Depends(get_db)):
     """Basic health check endpoint"""
-    return {"status": "healthy", "message": "MPI Backend is running"}
+    try:
+        health_controller = HealthController(db)
+        return health_controller.get_health_status()
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return {"status": "unhealthy", "error": str(e)}
+
+
+@router.get("/health/db-pool")
+async def database_pool_health():
+    """Database connection pool health check"""
+    try:
+        pool_status = get_db_health_status()
+        return {
+            "status": "healthy" if pool_status["healthy"] else "warning",
+            "database_pools": pool_status,
+            "message": "Database pool status retrieved successfully"
+        }
+    except Exception as e:
+        logger.error(f"Database pool health check failed: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to retrieve database pool status"
+        }
 
 
 @router.get("/health/system")

@@ -9,30 +9,30 @@ from mpi_backend.config import SQLALCHEMY_DATABASE_URI
 
 logger = logging.getLogger(__name__)
 
-# OPTIMIZED: Reduced connection pool sizes for 4GB server
+# OPTIMIZED: Increased connection pool sizes for multi-user environment
 # Main database engine (for regular operations)
 engine = create_engine(
     SQLALCHEMY_DATABASE_URI,
-    pool_size=3,  # REDUCED from 5 to 3 for 4GB server
-    max_overflow=2,  # REDUCED from 3 to 2
+    pool_size=10,  # INCREASED from 3 to 10 for multi-user
+    max_overflow=8,  # INCREASED from 2 to 8
     pool_pre_ping=True,
-    pool_timeout=15,  # REDUCED timeout for 4GB server
-    pool_recycle=600,  # REDUCED to 10 minutes for better connection mgmt
+    pool_timeout=30,  # INCREASED timeout for better user experience
+    pool_recycle=600,  # Keep 10 minutes for better connection mgmt
     echo=False,  # Keep logging disabled for performance
     # ADDED: Connection pool optimization
     pool_use_lifo=True,  # Use LIFO for better connection reuse
     pool_reset_on_return='commit',  # Reset connections on return
 )
 
-# OPTIMIZED: Reduced QuickBooks pool size for 4GB server
+# OPTIMIZED: Increased QuickBooks pool size for multi-user
 # Dedicated high-performance connection pool for QuickBooks exports
 qb_engine = create_engine(
     SQLALCHEMY_DATABASE_URI,
-    pool_size=2,  # REDUCED from 3 to 2 for 4GB server
-    max_overflow=1,  # REDUCED from 2 to 1
+    pool_size=6,  # INCREASED from 2 to 6 for multi-user
+    max_overflow=4,  # INCREASED from 1 to 4
     pool_pre_ping=True,
-    pool_timeout=8,  # Reduced timeout for QB operations on 4GB
-    pool_recycle=600,  # REDUCED to 10 minutes
+    pool_timeout=20,  # INCREASED timeout for QB operations
+    pool_recycle=600,  # Keep 10 minutes
     echo=False,  # Disable SQL logging for performance
     # ADDED: Connection pool optimization
     pool_use_lifo=True,
@@ -46,35 +46,53 @@ Base = declarative_base()
 
 # ENHANCED: Add connection pool monitoring with resource thresholds
 def log_pool_status():
-    """Log database connection pool status with resource monitoring"""
+    """Enhanced connection pool monitoring with proactive alerts"""
     try:
         main_pool = engine.pool
         qb_pool = qb_engine.pool
         
         main_checked_out = main_pool.checkedout()
         main_size = main_pool.size()
+        main_overflow = main_pool.overflow()
         qb_checked_out = qb_pool.checkedout()
         qb_size = qb_pool.size()
+        qb_overflow = qb_pool.overflow()
+        
+        # Calculate total available connections
+        main_total = main_size + main_overflow
+        qb_total = qb_size + qb_overflow
+        total_available = main_total + qb_total
+        
+        # Calculate usage percentages
+        main_usage = (main_checked_out / main_total) * 100 if main_total > 0 else 0
+        qb_usage = (qb_checked_out / qb_total) * 100 if qb_total > 0 else 0
+        total_usage = ((main_checked_out + qb_checked_out) / total_available) * 100 if total_available > 0 else 0
         
         logger.info(
-            f"DB Pool Status - Main: {main_checked_out}/{main_size} "
-            f"checked out, QB: {qb_checked_out}/{qb_size} checked out"
+            f"DB Pool Status - Main: {main_checked_out}/{main_total} "
+            f"({main_usage:.1f}%), QB: {qb_checked_out}/{qb_total} "
+            f"({qb_usage:.1f}%), Total: {total_usage:.1f}%"
         )
         
-        # Warn if pools are getting full (80% threshold)
-        main_usage = (main_checked_out / main_size) * 100 if main_size > 0 else 0
-        qb_usage = (qb_checked_out / qb_size) * 100 if qb_size > 0 else 0
-        
-        if main_usage > 80:
+        # Progressive alerts based on usage
+        if main_usage > 70:
             logger.warning(f"Main DB pool usage high: {main_usage:.1f}%")
-        if qb_usage > 80:
+        if qb_usage > 70:
             logger.warning(f"QB DB pool usage high: {qb_usage:.1f}%")
+        if total_usage > 70:
+            logger.warning(f"Total DB pool usage high: {total_usage:.1f}%")
             
-        # CRITICAL: Log if pools are exhausted
-        if main_usage >= 95:
+        # Critical alerts when approaching exhaustion
+        if main_usage >= 85:
             logger.critical(f"Main DB pool nearly exhausted: {main_usage:.1f}%")
-        if qb_usage >= 95:
+        if qb_usage >= 85:
             logger.critical(f"QB DB pool nearly exhausted: {qb_usage:.1f}%")
+        if total_usage >= 85:
+            logger.critical(f"CRITICAL: Total DB pool nearly exhausted: {total_usage:.1f}%")
+            
+        # Emergency alert at 95% usage
+        if total_usage >= 95:
+            logger.critical(f"EMERGENCY: DB pool exhaustion imminent! {total_usage:.1f}%")
             
     except Exception as e:
         logger.debug(f"Could not check pool status: {e}")
