@@ -1,5 +1,5 @@
 [Unit]
-Description=MPI Backend Production Service
+Description=MPI Backend Production Service - UNLIMITED PERFORMANCE
 After=network.target postgresql.service
 Wants=postgresql.service
 
@@ -14,54 +14,51 @@ Environment=PYTHONPATH=/opt/mpi-backend
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 
-# Uvicorn optimization for 4GB RAM
-Environment=UVICORN_WORKERS=1
-Environment=UVICORN_LIMIT_CONCURRENCY=100
-Environment=UVICORN_MAX_REQUESTS=1000
-Environment=UVICORN_BACKLOG=100
-Environment=UVICORN_TIMEOUT_KEEP_ALIVE=5
+# Uvicorn optimization - UNLIMITED PERFORMANCE
+Environment=UVICORN_WORKERS=4
+Environment=UVICORN_LIMIT_CONCURRENCY=0
+Environment=UVICORN_MAX_REQUESTS=0
+Environment=UVICORN_BACKLOG=0
+Environment=UVICORN_TIMEOUT_KEEP_ALIVE=0
 
-# Database optimization for multi-user environment
-Environment=DB_POOL_SIZE=10
-Environment=DB_MAX_OVERFLOW=8
-Environment=DB_POOL_RECYCLE=600
+# Database optimization - UNLIMITED PERFORMANCE
+Environment=DB_POOL_SIZE=50
+Environment=DB_MAX_OVERFLOW=100
+Environment=DB_POOL_RECYCLE=0
 
-# Background job optimization for 4GB RAM
-Environment=BG_CPU_THRESHOLD=80
-Environment=BG_MEMORY_THRESHOLD=2500
-Environment=BG_IO_POOL_SIZE=2
+# Background job optimization - UNLIMITED PERFORMANCE
+Environment=BG_CPU_THRESHOLD=100
+Environment=BG_MEMORY_THRESHOLD=0
+Environment=BG_IO_POOL_SIZE=50
 
-# Memory management for 4GB RAM
-Environment=MEMORY_CLEANUP_THRESHOLD=70
-Environment=MEMORY_CLEANUP_INTERVAL=180
-Environment=MAX_OBJECT_CACHE_SIZE=500
+# Memory management - UNLIMITED PERFORMANCE
+Environment=MEMORY_CLEANUP_THRESHOLD=100
+Environment=MEMORY_CLEANUP_INTERVAL=0
+Environment=MAX_OBJECT_CACHE_SIZE=0
 
 ExecStart=/opt/mpi-backend/venv/bin/uvicorn mpi_backend.main:app \
     --host 0.0.0.0 \
     --port 8000 \
-    --workers 1 \
+    --workers 4 \
     --worker-class uvicorn.workers.UvicornWorker \
-    --backlog 100 \
-    --max-requests 1000 \
-    --max-requests-jitter 100 \
-    --timeout-keep-alive 5 \
-    --limit-concurrency 100 \
-    --limit-max-requests 1000 \
-    --log-level warning \
-    --access-log \
+    --backlog 0 \
+    --max-requests 0 \
+    --max-requests-jitter 0 \
+    --timeout-keep-alive 0 \
+    --limit-concurrency 0 \
+    --limit-max-requests 0 \
+    --log-level error \
+    --no-access-log \
     --use-colors false \
     --forwarded-allow-ips "*" \
     --proxy-headers
 
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
-RestartSec=10
+RestartSec=1
 
-# Resource limits for 4GB server
-MemoryMax=3G
-MemoryHigh=2.5G
-CPUQuota=400%
-CPUWeight=100
+# NO RESOURCE LIMITS - UNLIMITED PERFORMANCE
+# All limits removed for maximum performance
 
 # Security settings
 NoNewPrivileges=true

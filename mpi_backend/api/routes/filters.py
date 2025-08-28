@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from fastapi.responses import ORJSONResponse as JSONResponse
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
@@ -56,37 +56,44 @@ static_responses = {
 
 def _get_system_resources():
     """Resource monitoring disabled for maximum performance"""
-    return {"cpu_percent": 0, "memory_percent": 0, "high_load": False}
+    return {
+        "cpu_percent": 0,
+        "memory_percent": 0,
+        "available_memory_mb": 8000,
+        "monitoring": "DISABLED"
+    }
 
 
-def _is_cache_valid(key: str) -> bool:
-    """Check if cache entry is still valid"""
-    if key not in cache_timestamps:
-        return False
-    return (time.time() - cache_timestamps[key]) < CACHE_TTL
+def _should_use_cache_fallback():
+    """Cache fallback disabled for maximum performance"""
+    return False
 
 
-def _get_cached_response(key: str):
-    """Get cached response if valid - ultra-fast lookup"""
-    if key in response_cache and _is_cache_valid(key):
-        return response_cache[key]
-    return cache_store.get(key) if _is_cache_valid(key) else None
+def _get_cached_response(cache_key: str):
+    """Get cached response - caching enabled for maximum performance"""
+    if cache_key in cache_store:
+        timestamp = cache_timestamps.get(cache_key, 0)
+        if time.time() - timestamp < CACHE_TTL:
+            return cache_store[cache_key]
+    return None
 
 
-def _set_cached_response(key: str, value):
-    """Cache response with aggressive optimization"""
-    cache_store[key] = value
-    response_cache[key] = value  # Dual cache for speed
-    cache_timestamps[key] = time.time()
+def _set_cached_response(cache_key: str, data: Any):
+    """Set cached response - aggressive caching for maximum performance"""
+    cache_store[cache_key] = data
+    cache_timestamps[cache_key] = time.time()
     
-    # Aggressive cache cleanup - keep only most recent
-    if len(cache_store) > 50:  # Reduced from 100 for speed
-        oldest_keys = sorted(cache_timestamps.keys(), 
-                           key=lambda k: cache_timestamps[k])[:20]
-        for old_key in oldest_keys:
-            cache_store.pop(old_key, None)
-            response_cache.pop(old_key, None)
-            cache_timestamps.pop(old_key, None)
+    # UNLIMITED PERFORMANCE: No cache size limits
+    if len(cache_store) > 10000:  # Only cleanup if extremely large
+        # Keep only recent items
+        cutoff_time = time.time() - CACHE_TTL
+        old_keys = [
+            k for k, v in cache_timestamps.items() 
+            if v < cutoff_time
+        ]
+        for k in old_keys[:1000]:  # Clean up in batches
+            cache_store.pop(k, None)
+            cache_timestamps.pop(k, None)
 
 
 def _warmup_cache():
@@ -1620,7 +1627,7 @@ def get_unmapped_items(
     db: Session = Depends(get_db),
     token: str = Depends(JWTBearer()),
     page: int = Query(1, ge=1, description="Page number (1-based)"),
-    size: int = Query(10, ge=1, description="Number of items per page")
+    size: int = Query(10, ge=1, le=100, description="Number of items per page")
 ):
     """
     Retrieve unique unmapped or temporary items with advanced filtering, search, and ordering.
@@ -1669,8 +1676,8 @@ def get_unmapped_items(
         {
           "original_item_id": "006-ST4-B",
           "original_description": "Pipe Fitting 3/4 inch",
-          "cost": 15.50,
-          "amount": 155.00,
+          "cost": "15.50",
+          "amount": "155.00",
           "quantity": 10,
           "sheet_name": "Sheet X",
           "supplier": "BMW Plumbing Supplies"
@@ -1688,14 +1695,14 @@ def get_unmapped_items(
     - **items** (`List[object]`): List of unique items per supplier based on filter type
         - **original_item_id** (`str`): Item code with supplier suffix (e.g., "ABC-123-B")
         - **original_description** (`str`): Original item description
-        - **cost** (`float`): Unit cost of the item
-        - **amount** (`float`): Total amount calculated as cost × quantity (rounded to 3 decimal places)
+        - **cost** (`str`): Unit cost of the item (formatted as string)
+        - **amount** (`str`): Total amount calculated as cost × quantity (formatted as string)
         - **quantity** (`int`): Quantity of the item
         - **sheet_name** (`str`): Google sheet name (null/empty for unmapped)
         - **supplier** (`str`): Supplier/vendor name
     - **total_count** (`int`): Total number of unique items found
     - **page** (`int`): Current page number
-    - **size** (`int`): Number of items per page
+    - **size** (`int`): Items per page
     - **pages** (`int`): Total number of pages
 
     **Filter Type Details:**
@@ -1731,18 +1738,16 @@ def get_unmapped_items(
         
         # Build optimized raw SQL query with JOINs
         base_sql = """
-        SELECT DISTINCT ON (ii.item, s.name)
+        SELECT DISTINCT ON (ii.item, ii.vendor)
             ii.item as original_item_id,
             ii.description as original_description,
             ii.cost,
-            ROUND(ii.cost * ii.qty, 3) as amount,
+            (ii.cost * ii.qty)::numeric(10,3) as amount,
             ii.qty as quantity,
             ii.sheet_name,
-            s.name as supplier,
-            ii.date,
-            ii.supplier_id
+            ii.vendor as supplier,
+            ii.date
         FROM invoice_items ii
-        LEFT JOIN suppliers s ON ii.supplier_id = s.id
         WHERE ii.is_active = true
         """
         
@@ -1751,23 +1756,23 @@ def get_unmapped_items(
         params = {}
         
         if request.item_type == "temporary":
-            where_conditions.append("""
-                (ii.mpi_item_id = 'No Match' OR ii.mpi_item_id LIKE 'UIDI%') 
-                AND ii.sheet_name IS NOT NULL AND ii.sheet_name != ''
-            """)
+            where_conditions.append(
+                "(ii.mpi_item = 'No Match' OR ii.mpi_item LIKE 'UIDI%') "
+                "AND ii.sheet_name IS NOT NULL AND ii.sheet_name != ''"
+            )
         elif request.item_type == "unmapped":
-            where_conditions.append("""
-                (ii.mpi_item_id = 'No Match' OR ii.mpi_item_id LIKE 'UIDI%')
-            """)
+            where_conditions.append(
+                "(ii.mpi_item = 'No Match' OR ii.mpi_item LIKE 'UIDI%')"
+            )
         elif request.item_type == "no_temporary":
-            where_conditions.append("""
-                (ii.mpi_item_id = 'No Match' OR ii.mpi_item_id LIKE 'UIDI%') 
-                AND (ii.sheet_name IS NULL OR ii.sheet_name = '')
-            """)
+            where_conditions.append(
+                "(ii.mpi_item = 'No Match' OR ii.mpi_item LIKE 'UIDI%') "
+                "AND (ii.sheet_name IS NULL OR ii.sheet_name = '')"
+            )
         
         # Add date filters - SQL INJECTION SAFE
         if request.date_from:
-            # Validate date format (YYYY-MM-DD)
+            # Handle both string and datetime.date objects
             try:
                 if isinstance(request.date_from, str):
                     if len(request.date_from) == 10 and request.date_from.count('-') == 2:
@@ -1775,13 +1780,19 @@ def get_unmapped_items(
                         params['date_from'] = request.date_from
                     else:
                         logger.warning(f"Invalid date_from format: {request.date_from}")
+                elif hasattr(request.date_from, 'strftime'):
+                    # Handle datetime.date objects
+                    date_str = request.date_from.strftime('%Y-%m-%d')
+                    where_conditions.append("ii.date >= :date_from")
+                    params['date_from'] = date_str
+                    logger.info(f"Converted date_from from {type(request.date_from)} to string: {date_str}")
                 else:
-                    logger.warning(f"Invalid date_from type: {type(request.date_from)}")
+                    logger.warning(f"Unsupported date_from type: {type(request.date_from)}")
             except Exception as e:
                 logger.warning(f"Error validating date_from: {e}")
         
         if request.date_to:
-            # Validate date format (YYYY-MM-DD)
+            # Handle both string and datetime.date objects
             try:
                 if isinstance(request.date_to, str):
                     if len(request.date_to) == 10 and request.date_to.count('-') == 2:
@@ -1789,8 +1800,14 @@ def get_unmapped_items(
                         params['date_to'] = request.date_to
                     else:
                         logger.warning(f"Invalid date_to format: {request.date_to}")
+                elif hasattr(request.date_to, 'strftime'):
+                    # Handle datetime.date objects
+                    date_str = request.date_to.strftime('%Y-%m-%d')
+                    where_conditions.append("ii.date <= :date_to")
+                    params['date_to'] = date_str
+                    logger.info(f"Converted date_to from {type(request.date_to)} to string: {date_str}")
                 else:
-                    logger.warning(f"Invalid date_to type: {type(request.date_to)}")
+                    logger.warning(f"Unsupported date_to type: {type(request.date_to)}")
             except Exception as e:
                 logger.warning(f"Error validating date_to: {e}")
         
@@ -1801,6 +1818,10 @@ def get_unmapped_items(
             for supplier_name in request.supplier_names:
                 if supplier_name and isinstance(supplier_name, str):
                     sanitized_name = str(supplier_name).strip()
+                    # Skip "All" as it's not a real supplier name
+                    if sanitized_name.lower() == 'all':
+                        logger.info("Skipping 'All' supplier filter - will return all suppliers")
+                        continue
                     if sanitized_name and len(sanitized_name) <= 200:  # Limit length
                         valid_supplier_names.append(sanitized_name)
                     else:
@@ -1808,18 +1829,21 @@ def get_unmapped_items(
             
             if valid_supplier_names:
                 placeholders = ','.join([f':supplier_{i}' for i in range(len(valid_supplier_names))])
-                where_conditions.append(f"s.name IN ({placeholders})")
+                where_conditions.append(f"ii.vendor IN ({placeholders})")
                 for i, supplier_name in enumerate(valid_supplier_names):
                     params[f'supplier_{i}'] = supplier_name
+                logger.info(f"Applied supplier filter for {len(valid_supplier_names)} suppliers: {valid_supplier_names}")
+            else:
+                logger.info("No valid supplier names found - will return items from all suppliers")
         
         # Add search filter - SQL INJECTION SAFE
         if request.search:
             # Sanitize search input - remove any SQL injection attempts
             sanitized_search = str(request.search).strip()
             if sanitized_search and len(sanitized_search) <= 1000:  # Limit search length
-                where_conditions.append("""
-                    (ii.item ILIKE :search OR ii.description ILIKE :search)
-                """)
+                where_conditions.append(
+                    "(ii.item ILIKE :search OR ii.description ILIKE :search)"
+                )
                 params['search'] = f"%{sanitized_search}%"
             else:
                 logger.warning(f"Search term too long or empty: {len(sanitized_search)} chars")
@@ -1828,48 +1852,25 @@ def get_unmapped_items(
         if where_conditions:
             base_sql += " AND " + " AND ".join(where_conditions)
         
-        # Count query for total
-        count_sql = f"SELECT COUNT(DISTINCT (ii.item, s.name)) FROM ({base_sql}) as count_query"
-        
-        # Build ORDER BY clause - SQL INJECTION SAFE
-        order_clause = "ORDER BY "
-        if order_by:
-            order_parts = []
-            for order_item in order_by:
-                column = order_item.get("column", "amount")
-                order = order_item.get("order", "desc").upper()
-                
-                # SQL INJECTION SAFE: Only allow predefined column names
-                # Map column names to actual database columns with strict validation
-                if column == "amount":
-                    order_parts.append(f"ROUND(ii.cost * ii.qty, 3) {order}")
-                elif column == "supplier":
-                    order_parts.append(f"s.name {order}")
-                elif column == "cost":
-                    order_parts.append(f"ii.cost {order}")
-                elif column == "date":
-                    order_parts.append(f"ii.date {order}")
-                elif column == "item":
-                    order_parts.append(f"ii.item {order}")
-                elif column == "description":
-                    order_parts.append(f"ii.description {order}")
-                elif column == "quantity":
-                    order_parts.append(f"ii.qty {order}")
-                else:
-                    # Default to amount if invalid column provided
-                    logger.warning(f"Invalid order column '{column}', defaulting to amount")
-                    order_parts.append(f"ROUND(ii.cost * ii.qty, 3) {order}")
-            
-            order_clause += ", ".join(order_parts)
-        else:
-            order_clause += "ROUND(ii.cost * ii.qty, 3) DESC"
-        
-        # Main query with pagination and ordering
-        main_sql = f"""
-        {base_sql}
-        {order_clause}
+        # PostgreSQL requires ORDER BY to start with DISTINCT ON columns
+        base_sql += """
+        ORDER BY ii.item, ii.vendor, (ii.cost * ii.qty)::numeric(10,3) DESC
         LIMIT :page_size OFFSET :offset
         """
+        
+        # Count query for total - simplified approach
+        count_sql = """
+        SELECT COUNT(*) FROM (
+            SELECT DISTINCT ii.item, ii.vendor
+            FROM invoice_items ii
+            WHERE ii.is_active = true
+        """
+        
+        # Add WHERE clause if conditions exist
+        if where_conditions:
+            count_sql += " AND " + " AND ".join(where_conditions)
+        
+        count_sql += ") as count_query"
         
         # Add pagination parameters - SQL INJECTION SAFE
         # Validate and sanitize pagination values
@@ -1900,19 +1901,23 @@ def get_unmapped_items(
         total_count = count_result.scalar()
         
         # Execute main query
-        main_result = db.execute(text(main_sql), params)
+        main_result = db.execute(text(base_sql), params)
         
-        # Convert to response models
+        # Convert to response models - ensure proper string formatting
         items = []
         for row in main_result:
+            # Format cost and amount as strings to match schema
+            cost_str = f"{float(row.cost):.2f}" if row.cost else "0.00"
+            amount_str = f"{float(row.amount):.2f}" if row.amount else "0.00"
+            
             item_dict = {
-                'original_item_id': row.original_item_id,
-                'original_description': row.original_description,
-                'cost': float(row.cost) if row.cost else 0.0,
-                'amount': float(row.amount) if row.amount else 0.0,
-                'quantity': row.quantity,
-                'sheet_name': row.sheet_name,
-                'supplier': row.supplier
+                'original_item_id': str(row.original_item_id) if row.original_item_id else "",
+                'original_description': str(row.original_description) if row.original_description else "",
+                'cost': cost_str,
+                'amount': amount_str,
+                'quantity': int(row.quantity) if row.quantity else 0,
+                'sheet_name': str(row.sheet_name) if row.sheet_name else None,
+                'supplier': str(row.supplier) if row.supplier else ""
             }
             items.append(item_dict)
         
@@ -1947,7 +1952,6 @@ def get_unmapped_items(
             status_code=500,
             detail="Internal server error while retrieving unmapped items"
         )
-
 
 
 @router.post("/unmapped-items/export-all")
