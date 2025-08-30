@@ -3,8 +3,8 @@ import pandas as pd
 import logging
 import re
 from typing import Dict, Any, List, Optional
-from sqlalchemy import or_, and_
-from sqlalchemy.orm import Session
+from sqlalchemy import or_, and_, select, func
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from mpi_backend.utils.quickbooks_priority import is_qb_export_active
 from mpi_backend.utils.export_utils import extract_supplier_id
@@ -26,16 +26,17 @@ class ItemsMappingController:
     def __init__(self, db):
         self.db_context = db
 
-    def _get_db_session(self) -> Session:
+    def _get_db_session(self) -> AsyncSession:
         """Get a database session object, whether db_context is a factory or session."""
         # Check if it's already a session instance (has query, add, commit methods)
-        if hasattr(self.db_context, 'query') and hasattr(self.db_context, 'commit'):
+        if (hasattr(self.db_context, 'query') and 
+            hasattr(self.db_context, 'commit')):
             return self.db_context
         # Otherwise assume it's a session factory
         return self.db_context()
 
     @classmethod
-    def execute_update_all_mappings_task(cls, db=None):
+    async def execute_update_all_mappings_task(cls, db=None):
         """
         Execute update all mappings task - runs independently of other operations
 
@@ -79,11 +80,11 @@ class ItemsMappingController:
 
             controller = cls(db)
             logger.info("Starting update all mappings task execution")
-            result = controller.update_all_mappings()
+            result = await controller.update_all_mappings()
 
             # Ensure we commit the session if we created it
             if created_new_session:
-                db.commit()
+                await db.commit()
                 logger.info("Database session committed successfully")
 
             return result
@@ -95,7 +96,7 @@ class ItemsMappingController:
             # Rollback if we created the session
             if created_new_session and db:
                 try:
-                    db.rollback()
+                    await db.rollback()
                     logger.info("Database session rolled back due to error")
                 except Exception as rollback_error:
                     logger.error(
@@ -110,13 +111,13 @@ class ItemsMappingController:
             # Close session if we created it
             if created_new_session and db:
                 try:
-                    db.close()
+                    await db.close()
                     logger.info("Database session closed successfully")
                 except Exception as close_error:
                     logger.error(
                         f"Error closing database session: {str(close_error)}")
 
-    def search_clean_item_across_suppliers(self, clean_item: str) -> Dict[str, Any]:
+    async def search_clean_item_across_suppliers(self, clean_item: str) -> Dict[str, Any]:
         """
         Search for item mappings by clean item code across all suppliers.
 
@@ -141,13 +142,16 @@ class ItemsMappingController:
             # Use the new session method instead of checking callable
             db = self._get_db_session()
             # Get only valid permanent mappings from all suppliers (exclude temporary ones)
-            all_mappings = db.query(ItemsMapping).filter(
-                ~ItemsMapping.mpi_code.like("UIDI%"),
-                ItemsMapping.mpi_code != "No Match",
-                ItemsMapping.mpi_code != "No Match / UIDI",
-                ItemsMapping.mpi_code.isnot(None),
-                ItemsMapping.mpi_code != ""
-            ).all()
+            result = await db.execute(
+                select(ItemsMapping).where(
+                    ~ItemsMapping.mpi_code.like("UIDI%"),
+                    ItemsMapping.mpi_code != "No Match",
+                    ItemsMapping.mpi_code != "No Match / UIDI",
+                    ItemsMapping.mpi_code.isnot(None),
+                    ItemsMapping.mpi_code != ""
+                )
+            )
+            all_mappings = result.scalars().all()
 
             for mapping in all_mappings:
                 # Additional validation to ensure we don't include temporary mappings
@@ -170,7 +174,7 @@ class ItemsMappingController:
                         "description": mapping.description,
                         "google_sheet_name": mapping.google_sheet_name,
                         "match_type": "exact",
-                        "supplier_name": self._get_supplier_name(mapping.supplier_id)
+                        "supplier_name": await self._get_supplier_name(mapping.supplier_id)
                     })
                 # With suffix standardization, we only do exact matches
                 # No more suffix cleaning needed
@@ -178,13 +182,16 @@ class ItemsMappingController:
                 # Direct session object
                 db = self.db_context
                 # Get only valid permanent mappings from all suppliers (exclude temporary ones)
-                all_mappings = db.query(ItemsMapping).filter(
-                    ~ItemsMapping.mpi_code.like("UIDI%"),
-                    ItemsMapping.mpi_code != "No Match",
-                    ItemsMapping.mpi_code != "No Match / UIDI",
-                    ItemsMapping.mpi_code.isnot(None),
-                    ItemsMapping.mpi_code != ""
-                ).all()
+                result = await db.execute(
+                    select(ItemsMapping).where(
+                        ~ItemsMapping.mpi_code.like("UIDI%"),
+                        ItemsMapping.mpi_code != "No Match",
+                        ItemsMapping.mpi_code != "No Match / UIDI",
+                        ItemsMapping.mpi_code.isnot(None),
+                        ItemsMapping.mpi_code != ""
+                    )
+                )
+                all_mappings = result.scalars().all()
 
                 for mapping in all_mappings:
                     # Additional validation to ensure we don't include temporary mappings
@@ -207,7 +214,7 @@ class ItemsMappingController:
                             "description": mapping.description,
                             "google_sheet_name": mapping.google_sheet_name,
                             "match_type": "exact",
-                            "supplier_name": self._get_supplier_name(mapping.supplier_id)
+                            "supplier_name": await self._get_supplier_name(mapping.supplier_id)
                         })
                     # With suffix standardization, we only do exact matches
                     # No more suffix cleaning needed
@@ -227,7 +234,7 @@ class ItemsMappingController:
             raise Exception(
                 f"Failed to search clean item across suppliers: {str(e)}")
 
-    def _get_supplier_name(self, supplier_id: int) -> str:
+    async def _get_supplier_name(self, supplier_id: int) -> str:
         """
         Helper method to get supplier name by ID.
 
@@ -240,14 +247,17 @@ class ItemsMappingController:
         try:
             from mpi_backend.database.models import Supplier
             db = self._get_db_session()
-            supplier = db.query(Supplier).filter_by(id=supplier_id).first()
+            result = await db.execute(
+                select(Supplier).where(Supplier.id == supplier_id)
+            )
+            supplier = result.scalar_one_or_none()
             return supplier.supplier_name if supplier else f"Unknown Supplier (ID: {supplier_id})"
         except Exception as e:
             logger.warning(
                 f"Could not fetch supplier name for ID {supplier_id}: {str(e)}")
             return f"Unknown Supplier (ID: {supplier_id})"
 
-    def get_items_mappings(self, include_temporary: bool = False):
+    async def get_items_mappings(self, include_temporary: bool = False):
         """
         Get item mappings with option to filter out temporary mappings.
 
@@ -255,11 +265,11 @@ class ItemsMappingController:
             include_temporary (bool): If False (default), excludes temporary/UIDI mappings
         """
         db = self._get_db_session()
-        query = db.query(ItemsMapping)
+        query = select(ItemsMapping)
 
         # Filter out temporary mappings unless explicitly requested
         if not include_temporary:
-            query = query.filter(
+            query = query.where(
                 ~ItemsMapping.mpi_code.like("UIDI%"),
                 ItemsMapping.mpi_code != "No Match",
                 ItemsMapping.mpi_code != "No Match / UIDI",
@@ -267,7 +277,8 @@ class ItemsMappingController:
                 ItemsMapping.mpi_code != ""
             )
 
-        query_result = query.all()
+        result = await db.execute(query)
+        query_result = result.scalars().all()
 
         # Additional validation to catch any temporary mappings that slipped through
         filtered_results = []
@@ -286,7 +297,7 @@ class ItemsMappingController:
         items_mappings = pd.DataFrame(data, columns=columns)
         return items_mappings
 
-    def get_items_mappings_by_supplier_id(self, supplier_id: int, limit: int = 100,
+    async def get_items_mappings_by_supplier_id(self, supplier_id: int, limit: int = 100,
                                           offset: int = 0):
         """
         Retrieve a list of item mappings for a specific supplier with a limit for 
@@ -305,14 +316,14 @@ class ItemsMappingController:
                   'supplier_id'.
         """
         db = self._get_db_session()
-        return self._get_mappings_by_supplier_id(db, supplier_id, limit, offset)
+        return await self._get_mappings_by_supplier_id(db, supplier_id, limit, offset)
 
-    def _get_mappings_by_supplier_id(self, db, supplier_id: int, limit: int, offset: int):
+    async def _get_mappings_by_supplier_id(self, db, supplier_id: int, limit: int, offset: int):
         """Helper method to get mappings by supplier ID"""
-        query_result = (
-            db.query(ItemsMapping)
-            .filter_by(supplier_id=supplier_id)
-            .filter(
+        result = await db.execute(
+            select(ItemsMapping)
+            .where(ItemsMapping.supplier_id == supplier_id)
+            .where(
                 ~ItemsMapping.mpi_code.like("UIDI%"),
                 ItemsMapping.mpi_code != "No Match",
                 ItemsMapping.mpi_code != "No Match / UIDI",
@@ -321,8 +332,8 @@ class ItemsMappingController:
             )
             .limit(limit)
             .offset(offset)
-            .all()  # Fetch as a list instead of yielding
         )
+        query_result = result.scalars().all()
 
         # Additional validation to filter out any temporary mappings
         filtered_results = []
@@ -344,24 +355,27 @@ class ItemsMappingController:
             for item in filtered_results
         ]
 
-    def get_items_mappings_by_mpi_type(self):
+    async def get_items_mappings_by_mpi_type(self):
         db = self._get_db_session()
-        return self._get_mappings_by_mpi_type(db)
+        return await self._get_mappings_by_mpi_type(db)
 
-    def _get_mappings_by_mpi_type(self, db):
+    async def _get_mappings_by_mpi_type(self, db):
         """Helper method to get mappings by MPI type"""
         try:
             # Include valid mappings and also UIDI items (temporary placeholders)
             # Exclude only true invalids and explicit "No Match" variants
-            query_result = db.query(ItemsMapping).filter(
-                ItemsMapping.mpi_code.isnot(None),
-                ItemsMapping.mpi_code != "",
-                ItemsMapping.mpi_code != "No Match",
-            ).all()
+            query_result = await db.execute(
+                select(ItemsMapping).where(
+                    ItemsMapping.mpi_code.isnot(None),
+                    ItemsMapping.mpi_code != "",
+                    ItemsMapping.mpi_code != "No Match",
+                )
+            )
+            all_mappings = query_result.scalars().all()
 
             # Additional validation to filter out any temporary mappings
             data = {}
-            for item in query_result:
+            for item in all_mappings:
                 # If UIDI item (case-insensitive, ignore surrounding whitespace),
                 # include with type forcibly set to "UDI" and keep any description present
                 mpi_code_clean = str(item.mpi_code).strip()
@@ -384,9 +398,9 @@ class ItemsMappingController:
             # in invoice items as mpi_item values (e.g., No Match / UIDI or UIDI*** codes).
             # For these, we set type to "UDI" and use any available description.
             try:
-                invoice_uidi_items = (
-                    db.query(InvoiceItem.mpi_item, InvoiceItem.mpi_description, InvoiceItem.description)
-                    .filter(
+                result = await db.execute(
+                    select(InvoiceItem.mpi_item, InvoiceItem.mpi_description, InvoiceItem.description)
+                    .where(
                         InvoiceItem.mpi_item.isnot(None),
                         InvoiceItem.mpi_item != "",
                         # Include both explicit UIDI codes and the combined label
@@ -395,8 +409,8 @@ class ItemsMappingController:
                             InvoiceItem.mpi_item == "No Match / UIDI"
                         )
                     )
-                    .all()
                 )
+                invoice_uidi_items = result.all()
 
                 for mpi_item_value, mpi_desc, item_desc in invoice_uidi_items:
                     key = str(mpi_item_value).strip()
@@ -419,7 +433,7 @@ class ItemsMappingController:
             logger.error(f"Error getting mappings by MPI type: {e}")
             raise
 
-    def update_mapping(self, supplier_id: str, mapping_data: dict):
+    async def update_mapping(self, supplier_id: str, mapping_data: dict):
         """
         Update or create a mapping entry and propagate changes to related 
         InvoiceItems. Now includes validation to prevent temporary mappings 
@@ -432,17 +446,17 @@ class ItemsMappingController:
         db = self._get_db_session()
 
         # Validate supplier_id exists in database
-        if not self._validate_supplier_id(db, supplier_id):
+        if not await self._validate_supplier_id(db, supplier_id):
             logger.error(
-                f"Supplier ID {supplier_id} does not exist in database. Available suppliers: {self._get_available_supplier_ids(db)}")
+                f"Supplier ID {supplier_id} does not exist in database. Available suppliers: {await self._get_available_supplier_ids(db)}")
             return {
                 "status": "error",
                 "message": f"Supplier ID {supplier_id} does not exist in database"
             }
 
-        return self._perform_update_mapping(db, supplier_id, mapping_data)
+        return await self._perform_update_mapping(db, supplier_id, mapping_data)
 
-    def _perform_update_mapping(self, db, supplier_id: str, mapping_data: dict):
+    async def _perform_update_mapping(self, db, supplier_id: str, mapping_data: dict):
         try:
             # Clean and validate the mapping data
             cleaned_data = clean_mapping_data(mapping_data)
@@ -484,13 +498,13 @@ class ItemsMappingController:
                             "validation_errors": validation_errors
                         }
 
-                    self._save_to_temporary_storage(
+                    await self._save_to_temporary_storage(
                         db,
                         cleaned_data.get("supplier_item_ids", ""),
                         sheet_name,
                         int(supplier_id)
                     )
-                    db.commit()
+                    await db.commit()
                     return {
                         "status": "redirected_to_temporary",
                         "message": f"Temporary mapping saved to temporary storage for sheet assignment",
@@ -510,11 +524,14 @@ class ItemsMappingController:
             old_description = None
 
             # Check if mapping already exists (by supplier_id, supplier_item_ids, and mpi_code)
-            existing_mapping = db.query(ItemsMapping).filter_by(
-                supplier_id=supplier_id,
-                supplier_item_ids=cleaned_data["supplier_item_ids"],
-                mpi_code=cleaned_data["mpi_code"]
-            ).first()
+            result = await db.execute(
+                select(ItemsMapping).where(
+                    ItemsMapping.supplier_id == supplier_id,
+                    ItemsMapping.supplier_item_ids == cleaned_data["supplier_item_ids"],
+                    ItemsMapping.mpi_code == cleaned_data["mpi_code"]
+                )
+            )
+            existing_mapping = result.scalar_one_or_none()
 
             if existing_mapping:
                 # Mapping already exists with same data - no need to update
@@ -528,12 +545,14 @@ class ItemsMappingController:
                 }
 
             # Check if there's an existing mapping with same supplier_item_ids but different mpi_code
-            conflicting_mapping = db.query(ItemsMapping).filter_by(
-                supplier_id=supplier_id,
-                supplier_item_ids=cleaned_data["supplier_item_ids"]
-            ).filter(
-                ItemsMapping.mpi_code != cleaned_data["mpi_code"]
-            ).first()
+            result = await db.execute(
+                select(ItemsMapping).where(
+                    ItemsMapping.supplier_id == supplier_id,
+                    ItemsMapping.supplier_item_ids == cleaned_data["supplier_item_ids"],
+                    ItemsMapping.mpi_code != cleaned_data["mpi_code"]
+                )
+            )
+            conflicting_mapping = result.scalar_one_or_none()
 
             if conflicting_mapping:
                 # Update existing mapping with new mpi_code
@@ -580,13 +599,13 @@ class ItemsMappingController:
 
             # Commit the changes to the mapping
             try:
-                db.commit()
+                await db.commit()
             except Exception as commit_error:
                 # Handle duplicate key constraint violations
                 if "duplicate key value violates unique constraint" in str(commit_error):
                     logger.warning(
                         f"Duplicate key constraint violation for mapping {cleaned_data['supplier_item_ids']} -> {cleaned_data['mpi_code']}. Skipping this mapping.")
-                    db.rollback()
+                    await db.rollback()
                     return {
                         "status": "skipped_duplicate",
                         "message": f"Mapping skipped due to duplicate key constraint",
@@ -603,7 +622,7 @@ class ItemsMappingController:
                 old_description != cleaned_data.get("description")
             ):
                 try:
-                    self._propagate_mapping_changes(
+                    await self._propagate_mapping_changes(
                         db,
                         supplier_id,
                         cleaned_data["supplier_item_ids"],
@@ -626,11 +645,11 @@ class ItemsMappingController:
             }
 
         except Exception as e:
-            db.rollback()
+            await db.rollback()
             logger.error(f"Failed to update mapping: {str(e)}")
             raise
 
-    def _save_to_temporary_storage(self, db: Session, original_item: str,
+    async def _save_to_temporary_storage(self, db: AsyncSession, original_item: str,
                                    sheet_name: str, supplier_id: int):
         """
         Save mapping to temporary_item_mappings table instead of permanent table.
@@ -638,9 +657,10 @@ class ItemsMappingController:
         """
         try:
             # Check if temporary mapping already exists
-            existing_temp = db.query(TempItemMapping).filter_by(
-                original_item=original_item
-            ).first()
+            result = await db.execute(select(TempItemMapping).where(
+                TempItemMapping.original_item == original_item
+            ))
+            existing_temp = result.scalar_one_or_none()
 
             if existing_temp:
                 # Update existing temporary mapping
@@ -662,7 +682,7 @@ class ItemsMappingController:
             logger.error(f"Error saving to temporary storage: {str(e)}")
             raise
 
-    def update_no_match_uidi_mappings(self) -> Dict[str, Any]:
+    async def update_no_match_uidi_mappings(self) -> Dict[str, Any]:
         """
         Update only items with No Match / UIDI mappings.
 
@@ -689,20 +709,23 @@ class ItemsMappingController:
             }
 
         db = self._get_db_session()
-        return self._perform_uidi_update(db)
+        return await self._perform_uidi_update(db)
 
-    def _perform_uidi_update(self, db):
+    async def _perform_uidi_update(self, db):
         """Helper method to perform the actual UIDI update"""
         try:
             # Get items with No Match / UIDI mappings - FIXED: use mpi_item instead of mpi_code
-            no_match_items = db.query(InvoiceItem).filter(
-                or_(
-                    InvoiceItem.mpi_item.is_(None),
-                    InvoiceItem.mpi_item == "",
-                    InvoiceItem.mpi_item == "No Match",
-                    InvoiceItem.mpi_item.like("UIDI%")
+            no_match_items = await db.execute(
+                select(InvoiceItem).where(
+                    or_(
+                        InvoiceItem.mpi_item.is_(None),
+                        InvoiceItem.mpi_item == "",
+                        InvoiceItem.mpi_item == "No Match",
+                        InvoiceItem.mpi_item.like("UIDI%")
+                    )
                 )
-            ).all()
+            )
+            no_match_items = no_match_items.scalars().all()
 
             if not no_match_items:
                 logger.info("No items with No Match / UIDI found for update")
@@ -716,13 +739,16 @@ class ItemsMappingController:
 
             # Get valid permanent mappings for UIDI update (including those without sheet names)
             # We want real mappings, not temporary placeholders
-            valid_mappings = db.query(ItemsMapping).filter(
-                ~ItemsMapping.mpi_code.like("UIDI%"),
-                ItemsMapping.mpi_code != "No Match",
-                ItemsMapping.mpi_code != "No Match / UIDI",
-                ItemsMapping.mpi_code.isnot(None),
-                ItemsMapping.mpi_code != ""
-            ).all()
+            valid_mappings = await db.execute(
+                select(ItemsMapping).where(
+                    ~ItemsMapping.mpi_code.like("UIDI%"),
+                    ItemsMapping.mpi_code != "No Match",
+                    ItemsMapping.mpi_code != "No Match / UIDI",
+                    ItemsMapping.mpi_code.isnot(None),
+                    ItemsMapping.mpi_code != ""
+                )
+            )
+            valid_mappings = valid_mappings.scalars().all()
 
             if not valid_mappings:
                 logger.info(
@@ -737,7 +763,10 @@ class ItemsMappingController:
 
             # Get temporary mappings for additional matching
             from mpi_backend.database.models.TemporaryItemMapping import TempItemMapping
-            temp_mappings = db.query(TempItemMapping).all()
+            temp_mappings = await db.execute(
+                select(TempItemMapping)
+            )
+            temp_mappings = temp_mappings.scalars().all()
             logger.info(
                 f"Found {len(temp_mappings)} temporary mappings for additional matching")
 
@@ -885,7 +914,7 @@ class ItemsMappingController:
                     logger.debug(
                         f"No mapping found for item: '{clean_invoice_item}'")
 
-            db.commit()
+            await db.commit()
 
             logger.info(
                 f"UIDI update completed: {updated_count} items updated, {no_match_found_count} items remain unmatched")
@@ -905,13 +934,13 @@ class ItemsMappingController:
 
         except Exception as e:
             logger.error(f"Error in UIDI update: {str(e)}")
-            db.rollback()
+            await db.rollback()
             return {
                 "status": "error",
                 "message": f"Error in UIDI update: {str(e)}"
             }
 
-    def update_all_unmapped_items(self) -> Dict[str, Any]:
+    async def update_all_unmapped_items(self) -> Dict[str, Any]:
         """
         Comprehensive update for ALL unmapped items.
 
@@ -944,35 +973,38 @@ class ItemsMappingController:
             }
 
         db = self._get_db_session()
-        return self._perform_comprehensive_unmapped_update(db)
+        return await self._perform_comprehensive_unmapped_update(db)
 
-    def _perform_comprehensive_unmapped_update(self, db):
+    async def _perform_comprehensive_unmapped_update(self, db):
         """Helper method to perform comprehensive unmapped items update"""
         try:
             # Get ALL items that are unmapped - comprehensive query
-            unmapped_items = db.query(InvoiceItem).filter(
-                or_(
-                    # Items with no MPI item assigned
-                    InvoiceItem.mpi_item.is_(None),
-                    InvoiceItem.mpi_item == "",
-                    InvoiceItem.mpi_item == "No Match",
-                    InvoiceItem.mpi_item.like("UIDI%"),
-                    # Items with no sheet name (even if they have MPI item)
-                    InvoiceItem.sheet_name.is_(None),
-                    InvoiceItem.sheet_name == "",
-                    # Items that might have sheet name but no proper MPI mapping
-                    and_(
-                        InvoiceItem.sheet_name.isnot(None),
-                        InvoiceItem.sheet_name != "",
-                        or_(
-                            InvoiceItem.mpi_item.is_(None),
-                            InvoiceItem.mpi_item == "",
-                            InvoiceItem.mpi_item == "No Match",
-                            InvoiceItem.mpi_item.like("UIDI%")
+            unmapped_items = await db.execute(
+                select(InvoiceItem).where(
+                    or_(
+                        # Items with no MPI item assigned
+                        InvoiceItem.mpi_item.is_(None),
+                        InvoiceItem.mpi_item == "",
+                        InvoiceItem.mpi_item == "No Match",
+                        InvoiceItem.mpi_item.like("UIDI%"),
+                        # Items with no sheet name (even if they have MPI item)
+                        InvoiceItem.sheet_name.is_(None),
+                        InvoiceItem.sheet_name == "",
+                        # Items that might have sheet name but no proper MPI mapping
+                        and_(
+                            InvoiceItem.sheet_name.isnot(None),
+                            InvoiceItem.sheet_name != "",
+                            or_(
+                                InvoiceItem.mpi_item.is_(None),
+                                InvoiceItem.mpi_item == "",
+                                InvoiceItem.mpi_item == "No Match",
+                                InvoiceItem.mpi_item.like("UIDI%")
+                            )
                         )
                     )
                 )
-            ).all()
+            )
+            unmapped_items = unmapped_items.scalars().all()
 
             if not unmapped_items:
                 logger.info("No unmapped items found for comprehensive update")
@@ -985,13 +1017,16 @@ class ItemsMappingController:
                 f"Found {len(unmapped_items)} unmapped items for comprehensive update")
 
             # Get valid permanent mappings
-            valid_mappings = db.query(ItemsMapping).filter(
-                ~ItemsMapping.mpi_code.like("UIDI%"),
-                ItemsMapping.mpi_code != "No Match",
-                ItemsMapping.mpi_code != "No Match / UIDI",
-                ItemsMapping.mpi_code.isnot(None),
-                ItemsMapping.mpi_code != ""
-            ).all()
+            valid_mappings = await db.execute(
+                select(ItemsMapping).where(
+                    ~ItemsMapping.mpi_code.like("UIDI%"),
+                    ItemsMapping.mpi_code != "No Match",
+                    ItemsMapping.mpi_code != "No Match / UIDI",
+                    ItemsMapping.mpi_code.isnot(None),
+                    ItemsMapping.mpi_code != ""
+                )
+            )
+            valid_mappings = valid_mappings.scalars().all()
 
             if not valid_mappings:
                 logger.info(
@@ -1006,7 +1041,10 @@ class ItemsMappingController:
 
             # Get temporary mappings
             from mpi_backend.database.models.TemporaryItemMapping import TempItemMapping
-            temp_mappings = db.query(TempItemMapping).all()
+            temp_mappings = await db.execute(
+                select(TempItemMapping)
+            )
+            temp_mappings = temp_mappings.scalars().all()
             logger.info(
                 f"Found {len(temp_mappings)} temporary mappings for additional matching")
 
@@ -1143,7 +1181,7 @@ class ItemsMappingController:
 
             # Commit all changes
             try:
-                db.commit()
+                await db.commit()
                 logger.info(
                     f"Comprehensive update completed: {updated_count} items updated, {no_match_found_count} items remain unmatched")
                 logger.info(
@@ -1163,13 +1201,13 @@ class ItemsMappingController:
                 }
 
             except Exception as commit_error:
-                db.rollback()
+                await db.rollback()
                 logger.error(
                     f"Failed to commit comprehensive update: {str(commit_error)}")
                 raise
 
         except Exception as e:
-            db.rollback()
+            await db.rollback()
             logger.error(
                 f"Failed to perform comprehensive unmapped update: {str(e)}")
             raise
@@ -1196,7 +1234,7 @@ class ItemsMappingController:
                 return code, company
         return 1, "BMW Plumbing Supplies"  # Default
 
-    def update_all_mappings(self) -> Dict[str, Any]:
+    async def update_all_mappings(self) -> Dict[str, Any]:
         """
         Update all invoice items by applying the latest mappings.
 
@@ -1226,7 +1264,7 @@ class ItemsMappingController:
             # With suffix standardization, we use direct item code comparisons
 
             db = self._get_db_session()
-            return self._perform_all_mappings_update(db)
+            return await self._perform_all_mappings_update(db)
 
         except Exception as e:
             logger.error(f"Failed to update all mappings: {str(e)}")
@@ -1235,12 +1273,15 @@ class ItemsMappingController:
                 "message": f"Failed to update all mappings: {str(e)}"
             }
 
-    def _perform_all_mappings_update(self, db):
+    async def _perform_all_mappings_update(self, db):
         """Helper method to perform the actual all mappings update"""
         try:
             # Fetch ALL mappings from supplier table - this should apply everything in the mapping table
             # But when a mapping is temporary (UIDI/No Match/etc.), we will only assign sheet_name
-            all_mappings = db.query(ItemsMapping).all()
+            all_mappings = await db.execute(
+                select(ItemsMapping)
+            )
+            all_mappings = all_mappings.scalars().all()
 
             if not all_mappings:
                 logger.info("No mappings found in supplier table to apply")
@@ -1270,7 +1311,10 @@ class ItemsMappingController:
                 }
 
             # Get all invoice items for efficient processing
-            all_invoice_items = db.query(InvoiceItem).all()
+            all_invoice_items = await db.execute(
+                select(InvoiceItem)
+            )
+            all_invoice_items = all_invoice_items.scalars().all()
             logger.info(
                 f"Processing {len(valid_mappings)} mappings against {len(all_invoice_items)} invoice items")
 
@@ -1358,14 +1402,14 @@ class ItemsMappingController:
                     )
 
                     # Commit after each mapping batch to avoid large transactions
-                    db.commit()
+                    await db.commit()
 
                 except Exception as e:
                     logger.error(
                         f"Error updating items for mapping "
                         f"{mapping.supplier_item_ids}: {str(e)}"
                     )
-                    db.rollback()
+                    await db.rollback()
 
             logger.info(
                 f"Update complete: {total_updated_count} items updated from "
@@ -1384,7 +1428,7 @@ class ItemsMappingController:
                 "message": f"Failed to update all mappings: {str(e)}"
             }
 
-    def _propagate_mapping_changes(self, db, supplier_id, item_number,
+    async def _propagate_mapping_changes(self, db, supplier_id, item_number,
                                    new_mpi_code, new_description, sheet_name):
         """
         Propagate mapping changes to all matching InvoiceItems with exact matching.
@@ -1410,7 +1454,10 @@ class ItemsMappingController:
                 return
 
             # Get all invoice items for matching
-            all_invoice_items = db.query(InvoiceItem).all()
+            all_invoice_items = await db.execute(
+                select(InvoiceItem)
+            )
+            all_invoice_items = all_invoice_items.scalars().all()
 
             # Clean the mapping item
             clean_mapping_item = item_number.strip()
@@ -1453,7 +1500,7 @@ class ItemsMappingController:
 
                 # Assign account based on new mapping/sheet if applicable
                 try:
-                    self._assign_account_for_item(
+                    await self._assign_account_for_item(
                         db=db,
                         item_obj=item,
                         sheet_name=sheet_name,
@@ -1469,7 +1516,7 @@ class ItemsMappingController:
                         f"Overrode UIDI item {item.item} with permanent mapping {new_mpi_code}")
 
             # Commit the changes
-            db.commit()
+            await db.commit()
 
             log_message = f"Updated {updated_count} invoice items with new mapping data for {item_number}"
             if uidi_override_count > 0:
@@ -1478,10 +1525,10 @@ class ItemsMappingController:
 
         except Exception as e:
             logger.error(f"Error propagating mapping changes: {str(e)}")
-            db.rollback()
+            await db.rollback()
             raise
 
-    def _determine_account_letter(self, db: Session, sheet_name: Optional[str], current_account: Optional[str], mpi_item: Optional[str]) -> str:
+    async def _determine_account_letter(self, db: AsyncSession, sheet_name: Optional[str], current_account: Optional[str], mpi_item: Optional[str]) -> str:
         """
         Determine account letter (M/E) from sheet_name and mpi_item.
         - Preserve 'A'
@@ -1512,7 +1559,8 @@ class ItemsMappingController:
             if sheet:
                 try:
                     from mpi_backend.database.models.ItemClassification import ItemClassification as IC
-                    row = db.query(IC).filter(IC.item == sheet).first()
+                    result = await db.execute(select(IC).where(IC.item == sheet))
+                    row = result.scalar_one_or_none()
                     if row:
                         cat = (row.category or '').strip().upper()
                         if cat in ('M', 'E'):
@@ -1524,7 +1572,7 @@ class ItemsMappingController:
                 try:
                     from mpi_backend.database.controllers.ItemClassification import ItemClassificationController
                     icc = ItemClassificationController(db)
-                    qb_account = icc.get_classification(sheet)
+                    qb_account = await icc.get_classification(sheet)
                     qb_lower = (qb_account or '').lower()
                     if 'job materials purchased' in qb_lower:
                         return 'M'
@@ -1537,7 +1585,7 @@ class ItemsMappingController:
         except Exception:
             return (current_account or '').strip()
 
-    def _assign_account_for_item(self, db: Session, item_obj, sheet_name: Optional[str], mpi_item: Optional[str]) -> None:
+    async def _assign_account_for_item(self, db: AsyncSession, item_obj, sheet_name: Optional[str], mpi_item: Optional[str]) -> None:
         """
         Assign account letter to a single invoice item if missing or if it's a long QB path.
         Never overwrite explicit 'A'.
@@ -1559,7 +1607,7 @@ class ItemsMappingController:
 
         # If empty or not mapped, determine from classification
         if not current or current not in ('M', 'E'):
-            letter = self._determine_account_letter(db, sheet_name, current, mpi_item)
+            letter = await self._determine_account_letter(db, sheet_name, current, mpi_item)
             if letter in ('M', 'E') and letter != current:
                 item_obj.account = letter
 
@@ -1572,7 +1620,7 @@ class ItemsMappingController:
             # This is already a session object
             return self.db_context
 
-    def _validate_supplier_id(self, db: Session, supplier_id: str) -> bool:
+    async def _validate_supplier_id(self, db: AsyncSession, supplier_id: str) -> bool:
         """
         Validate that a supplier ID exists in the database.
 
@@ -1585,15 +1633,17 @@ class ItemsMappingController:
         """
         try:
             from mpi_backend.database.models.Suppliers import Supplier
-            supplier = db.query(Supplier).filter_by(
-                id=int(supplier_id)).first()
+            result = await db.execute(
+                select(Supplier).where(Supplier.id == int(supplier_id))
+            )
+            supplier = result.scalar_one_or_none()
             return supplier is not None
         except Exception as e:
             logger.error(
                 f"Error validating supplier ID {supplier_id}: {str(e)}")
             return False
 
-    def _get_available_supplier_ids(self, db: Session) -> List[int]:
+    async def _get_available_supplier_ids(self, db: AsyncSession) -> List[int]:
         """
         Get list of available supplier IDs in the database.
 
@@ -1605,13 +1655,14 @@ class ItemsMappingController:
         """
         try:
             from mpi_backend.database.models.Suppliers import Supplier
-            suppliers = db.query(Supplier).all()
+            result = await db.execute(select(Supplier))
+            suppliers = result.scalars().all()
             return [supplier.id for supplier in suppliers]
         except Exception as e:
             logger.error(f"Error getting available supplier IDs: {str(e)}")
             return []
 
-    def get_mapping_stats(self) -> Dict[str, Any]:
+    async def get_mapping_stats(self) -> Dict[str, Any]:
         """
         Get statistics about item mappings.
 
@@ -1619,34 +1670,51 @@ class ItemsMappingController:
             Dictionary with mapping statistics
         """
         db = self._get_db_session()
-        total_mappings = db.query(ItemsMapping).count()
+        total_mappings_result = await db.execute(
+            select(func.count(ItemsMapping.id))
+        )
+        total_mappings = total_mappings_result.scalar()
 
         # Get unique sheet names
-        sheet_names = db.query(ItemsMapping.google_sheet_name).distinct().all()
-        unique_sheets = [name[0] for name in sheet_names if name[0]]
+        sheet_names_result = await db.execute(
+            select(ItemsMapping.google_sheet_name).distinct()
+        )
+        sheet_names = sheet_names_result.scalars().all()
+        unique_sheets = [name for name in sheet_names if name]
 
         # Get mappings per sheet
         sheet_counts = {}
         for sheet_name in unique_sheets:
-            count = db.query(ItemsMapping).filter(
-                ItemsMapping.google_sheet_name == sheet_name
-            ).count()
-            sheet_counts[sheet_name] = count
+            count_result = await db.execute(
+                select(func.count(ItemsMapping.id)).where(
+                    ItemsMapping.google_sheet_name == sheet_name
+                )
+            )
+            sheet_counts[sheet_name] = count_result.scalar()
 
         # Get mapping types
-        permanent_mappings = db.query(ItemsMapping).filter(
-            ItemsMapping.mpi_code.isnot(None)
-        ).count()
+        permanent_mappings_result = await db.execute(
+            select(func.count(ItemsMapping.id)).where(
+                ItemsMapping.mpi_code.isnot(None)
+            )
+        )
+        permanent_mappings = permanent_mappings_result.scalar()
 
         # Count temporary mappings (those without mpi_code)
-        temporary_mappings = db.query(ItemsMapping).filter(
-            ItemsMapping.mpi_code.is_(None)
-        ).count()
+        temporary_mappings_result = await db.execute(
+            select(func.count(ItemsMapping.id)).where(
+                ItemsMapping.mpi_code.is_(None)
+            )
+        )
+        temporary_mappings = temporary_mappings_result.scalar()
 
         # Count invalid mappings (those without supplier_item_ids)
-        invalid_mappings = db.query(ItemsMapping).filter(
-            ItemsMapping.supplier_item_ids.is_(None)
-        ).count()
+        invalid_mappings_result = await db.execute(
+            select(func.count(ItemsMapping.id)).where(
+                ItemsMapping.supplier_item_ids.is_(None)
+            )
+        )
+        invalid_mappings = invalid_mappings_result.scalar()
 
         stats = {
             "total_mappings": total_mappings,

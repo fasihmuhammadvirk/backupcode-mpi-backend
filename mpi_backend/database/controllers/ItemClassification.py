@@ -1,12 +1,13 @@
 from mpi_backend.database.models import ItemClassification
 from fuzzywuzzy import fuzz
+from sqlalchemy import select
 
 
 class ItemClassificationController:
     def __init__(self, db):
         self.db_context = db
 
-    def get_classification(self, item):
+    async def get_classification(self, item):
         """
         Get classification for an item with fuzzy matching fallback.
         First tries exact match, then fuzzy match with 90% similarity
@@ -16,16 +17,16 @@ class ItemClassificationController:
             return ''
 
         # First try exact match
-        query = (
-            self.db_context.query(ItemClassification)
-            .filter(ItemClassification.item == item)
-            .first()
+        result = await self.db_context.execute(
+            select(ItemClassification)
+            .where(ItemClassification.item == item)
         )
+        query = result.scalar_one_or_none()
         if query:
             return self._get_account_from_category(query.category)
 
         # If no exact match, try fuzzy matching with 90% threshold
-        fuzzy_match = self._find_fuzzy_match(item, threshold=90)
+        fuzzy_match = await self._find_fuzzy_match(item, threshold=90)
         if fuzzy_match:
             return self._get_account_from_category(fuzzy_match.category)
 
@@ -46,7 +47,7 @@ class ItemClassificationController:
         else:
             return ''
 
-    def _find_fuzzy_match(self, target_item, threshold=90):
+    async def _find_fuzzy_match(self, target_item, threshold=90):
         """
         Find fuzzy match for target item using fuzzywuzzy with specified
         threshold. Uses multiple algorithms to find the best match:
@@ -56,7 +57,10 @@ class ItemClassificationController:
         score >= threshold.
         """
         # Get all classifications from database
-        all_classifications = self.db_context.query(ItemClassification).all()
+        result = await self.db_context.execute(
+            select(ItemClassification)
+        )
+        all_classifications = result.scalars().all()
 
         best_match = None
         best_score = 0
@@ -100,12 +104,15 @@ class ItemClassificationController:
 
         return best_match
 
-    def get_all_classifications(self):
+    async def get_all_classifications(self):
         """
         Get all item classifications for QuickBooks export.
 
         Returns:
             List of ItemClassification objects
         """
-        classifications = self.db_context.query(ItemClassification).all()
+        result = await self.db_context.execute(
+            select(ItemClassification)
+        )
+        classifications = result.scalars().all()
         return classifications

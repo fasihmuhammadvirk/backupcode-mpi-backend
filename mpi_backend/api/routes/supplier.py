@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
-from mpi_backend.database import get_db
+from mpi_backend.database import get_async_db
 from mpi_backend.database.controllers.Suppliers import SupplierController
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 
@@ -11,8 +11,10 @@ logger = logging.getLogger(__name__)
 
 
 @router.get("")
-def get_supplier_list(db: Session = Depends(get_db), 
-                     token: str = Depends(JWTBearer())):
+async def get_supplier_list(
+    db: AsyncSession = Depends(get_async_db),
+    token: str = Depends(JWTBearer())
+):
     """
     Get all suppliers in the system.
     
@@ -72,13 +74,14 @@ def get_supplier_list(db: Session = Depends(get_db),
     """
     logger.info("GET /supplier - Fetching supplier list")
     try:
-        suppliers = SupplierController(db).get_all_suppliers()
+        suppliers = await SupplierController(db).get_all_suppliers()
         supplier_dict = {
             str(supplier.id): supplier.supplier_name 
             for supplier in suppliers
         }
         logger.info(
-            f"GET /supplier - Successfully fetched {len(supplier_dict)} suppliers"
+            f"GET /supplier - Successfully fetched "
+            f"{len(supplier_dict)} suppliers"
         )
         return supplier_dict
     except Exception as e:

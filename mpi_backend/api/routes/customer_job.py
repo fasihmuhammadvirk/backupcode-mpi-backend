@@ -1,8 +1,10 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
-from sqlalchemy.orm import Session
-from mpi_backend.database import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+from mpi_backend.database import get_async_db
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
-from mpi_backend.database.controllers.CustomerJobMappingContorller import CustomerJobMappingController
+from mpi_backend.database.controllers.CustomerJobMappingContorller import (
+    CustomerJobMappingController
+)
 
 router = APIRouter(prefix="/customer-job", tags=["Customer Job Mapping"])
 
@@ -10,7 +12,7 @@ router = APIRouter(prefix="/customer-job", tags=["Customer Job Mapping"])
 @router.post("/update-mappings")
 async def update_customer_job_mappings(
         file: UploadFile = File(...),
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_async_db),
         token: str = Depends(JWTBearer())
 ):
     """
@@ -98,7 +100,9 @@ async def update_customer_job_mappings(
         # excel_file = file.file
 
         # You can add a check here if needed to validate contents
-        message = CustomerJobMappingController.add_new_mappings(excel_file=file.file, db=db)
+        message = await CustomerJobMappingController.add_new_mappings(
+            excel_file=file.file, db=db
+        )
 
         return {
             "status": "success",
@@ -118,5 +122,6 @@ async def update_customer_job_mappings(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"An unexpected error occurred while processing the file: {str(e)}"
+            detail=f"An unexpected error occurred while processing the file: "
+                   f"{str(e)}"
         )

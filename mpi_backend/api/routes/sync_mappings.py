@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, BackgroundTasks
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
-from mpi_backend.database import get_db
+from mpi_backend.database import get_async_db
 from mpi_backend.database.controllers import GoogleSheetSyncController
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.database.schemas import SyncMappingsResponse
@@ -16,9 +16,9 @@ router = APIRouter(prefix="/sync", tags=["Sync Mapping"])
 
 
 @router.post("/mapping", response_model=SyncMappingsResponse)
-def sync_mapping(
+async def sync_mapping(
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer())
 ):
     """
@@ -93,7 +93,7 @@ def sync_mapping(
     """
     # Use enhanced sync controller for better temporary/permanent mapping handling
     sync_controller = GoogleSheetSyncController(db)
-    status = sync_controller.get_sync_status()
+    status = await sync_controller.get_sync_status()
 
     if status["is_running"]:
         # Get detailed job information
@@ -134,7 +134,7 @@ def sync_mapping(
         GoogleSheetSyncController._execute_sync_task_worker, db, 'sync')
 
     # Include last-known update times in the response for visibility
-    status = sync_controller.get_sync_status()
+    status = await sync_controller.get_sync_status()
     return SyncMappingsResponse(
         success=True,
         message="Sync task started manually",
@@ -146,8 +146,8 @@ def sync_mapping(
 
 
 @router.get("/status")
-def sync_status(
-    db: Session = Depends(get_db),
+async def sync_status(
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer())
 ):
     """
@@ -228,7 +228,7 @@ def sync_status(
         - Useful for frontend progress indicators
     """
     sync_controller = GoogleSheetSyncController(db)
-    status = sync_controller.get_sync_status()
+    status = await sync_controller.get_sync_status()
 
     # Determine detailed current operation description
     current_operation = "No operation in progress"
@@ -283,9 +283,9 @@ def sync_status(
 
 
 @router.post("/update-no-match-uidi-mappings")
-def update_no_match_uidi_mappings(
+async def update_no_match_uidi_mappings(
         background_tasks: BackgroundTasks,
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_async_db),
         token: str = Depends(JWTBearer())
 ):
     """
@@ -416,7 +416,7 @@ def update_no_match_uidi_mappings(
         )
 
         # Include last-known update times
-        status = sync_controller.get_sync_status()
+        status = await sync_controller.get_sync_status()
         return {
             "status": "success",
             "message": "No Match / UIDI update task has been started in the background",
@@ -435,9 +435,9 @@ def update_no_match_uidi_mappings(
 
 
 @router.post("/update-all-mappings")
-def update_all_mappings(
+async def update_all_mappings(
         background_tasks: BackgroundTasks,
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_async_db),
         token: str = Depends(JWTBearer())
 ):
     """
@@ -571,7 +571,7 @@ def update_all_mappings(
         )
 
         # Include last-known update times
-        status = sync_controller.get_sync_status()
+        status = await sync_controller.get_sync_status()
         return {
             "status": "success",
             "message": "Full update task has been started in the background",

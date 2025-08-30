@@ -1,5 +1,5 @@
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, func, text
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, or_, func, text, select
 from typing import List, Optional, Dict, Any
 from datetime import date
 import logging
@@ -22,15 +22,16 @@ class MonthlyComparisonController:
     def __init__(self, db):
         self.db_context = db
 
-    def _get_db_session(self) -> Session:
+    def _get_db_session(self) -> AsyncSession:
         """Get a database session object, whether db_context is a factory or session."""
         # Check if it's already a session instance (has query, add, commit methods)
-        if hasattr(self.db_context, 'query') and hasattr(self.db_context, 'commit'):
+        if (hasattr(self.db_context, 'query') and 
+            hasattr(self.db_context, 'commit')):
             return self.db_context
         # Otherwise assume it's a session factory
         return self.db_context()
 
-    def get_items_in_date_range(
+    async def get_items_in_date_range(
         self, 
         from_date: date, 
         to_date: date,
@@ -54,17 +55,20 @@ class MonthlyComparisonController:
             db = self._get_db_session()
 
             # Count distinct mpi_item within filters for stable pagination metadata
-            total = db.query(func.count(func.distinct(InvoiceItem.mpi_item))).filter(
-                and_(
-                    InvoiceItem.date >= from_date,
-                    InvoiceItem.date <= to_date,
-                    InvoiceItem.mpi_item != 'No Match',
-                    InvoiceItem.mpi_description.notlike('%No Match%'),
-                    ~InvoiceItem.mpi_item.contains('UIDI'),
-                    ~InvoiceItem.mpi_description.contains('UIDI'),
-                    ~InvoiceItem.mpi_item.like('%10 Materials%')
+            result = await db.execute(
+                select(func.count(func.distinct(InvoiceItem.mpi_item))).where(
+                    and_(
+                        InvoiceItem.date >= from_date,
+                        InvoiceItem.date <= to_date,
+                        InvoiceItem.mpi_item != 'No Match',
+                        InvoiceItem.mpi_description.notlike('%No Match%'),
+                        ~InvoiceItem.mpi_item.contains('UIDI'),
+                        ~InvoiceItem.mpi_description.contains('UIDI'),
+                        ~InvoiceItem.mpi_item.like('%10 Materials%')
+                    )
                 )
-            ).scalar() or 0
+            )
+            total = result.scalar() or 0
 
             # Deterministic selection: one row per mpi_item (latest date, tie-break by id)
             # Using Postgres DISTINCT ON for stable, unique results
@@ -89,7 +93,7 @@ class MonthlyComparisonController:
             )
 
             offset_value = (page - 1) * size
-            rows = db.execute(
+            result = await db.execute(
                 distinct_sql,
                 {
                     "from_date": from_date,
@@ -97,7 +101,8 @@ class MonthlyComparisonController:
                     "offset": offset_value,
                     "limit": size,
                 },
-            ).fetchall()
+            )
+            rows = result.fetchall()
 
             # Calculate total pages
             pages = (total + size - 1) // size if size > 0 else 1
@@ -124,7 +129,7 @@ class MonthlyComparisonController:
             logger.error(f"Error fetching items in date range: {str(e)}")
             raise
 
-    def get_items_prices(self, items: List[ItemInfo]) -> List[ItemPriceResponse]:
+    async def get_items_prices(self, items: List[ItemInfo]) -> List[ItemPriceResponse]:
         """
         Get the lowest prices for the specified items across all suppliers.
         Returns a simplified response with only the required fields.
@@ -141,16 +146,19 @@ class MonthlyComparisonController:
 
             for item in items:
                 # Get the lowest price for the item
-                lowest_price = db.query(
-                    InvoiceItem.cost
-                ).filter(
-                    InvoiceItem.mpi_item == item.mpi_item,
-                    InvoiceItem.cost.isnot(None)  # Exclude items with no cost
-                ).order_by(
-                    InvoiceItem.cost.asc()
-                ).first()
+                price_result = await db.execute(
+                    select(
+                        InvoiceItem.cost
+                    ).where(
+                        InvoiceItem.mpi_item == item.mpi_item,
+                        InvoiceItem.cost.isnot(None)  # Exclude items with no cost
+                    ).order_by(
+                        InvoiceItem.cost.asc()
+                    )
+                )
+                lowest_price = price_result.scalar_one_or_none()
 
-                if not lowest_price or lowest_price.cost is None:
+                if not lowest_price or lowest_price is None:
                     continue  # Skip if no valid price found
                 
                 # Create response with only the required fields
@@ -160,7 +168,7 @@ class MonthlyComparisonController:
                         mpi_item=item.mpi_item or '',
                         original_item=item.original_item or '',
                         mpi_description=item.mpi_description or '',
-                        unit_price=format_currency(lowest_price.cost)
+                        unit_price=format_currency(lowest_price)
                     )
                 )
 
@@ -169,7 +177,7 @@ class MonthlyComparisonController:
             logger.error(f"Error fetching items prices: {str(e)}")
             raise
             
-    def search_mpi_items(
+    async def search_mpi_items(
         self,
         search_term: str,
         from_date: Optional[date] = None,
@@ -202,11 +210,11 @@ class MonthlyComparisonController:
                     total=0,
                     page=page,
                     size=size,
-                    pages=0
+                    pages=0,
                 )
             
             # Build base query with common filters - fetch full items for suffix calculation
-            query = db.query(InvoiceItem).filter(
+            query = select(InvoiceItem).where(
                 InvoiceItem.mpi_item != 'No Match',
                 InvoiceItem.mpi_item != '',
                 ~InvoiceItem.mpi_item.like('%10 Materials%'),
@@ -218,20 +226,21 @@ class MonthlyComparisonController:
                 InvoiceItem.mpi_item.like(f'{search_term}%'),  # Starts with
                 InvoiceItem.mpi_item.like(f'%{search_term}%')   # Contains
             )
-            query = query.filter(search_filter)
+            query = query.where(search_filter)
             
             # Add date range filters if provided
             if from_date:
-                query = query.filter(InvoiceItem.date >= from_date)
+                query = query.where(InvoiceItem.date >= from_date)
             if to_date:
-                query = query.filter(InvoiceItem.date <= to_date)
+                query = query.where(InvoiceItem.date <= to_date)
             
             # Get total count for pagination
-            total = query.distinct().count()
+            count_result = await db.execute(select(func.count()).select_from(query.subquery()))
+            total = count_result.scalar()
             
             # Apply pagination and ordering directly to the main query
             # For DISTINCT queries, we need to include ORDER BY expressions in the SELECT
-            items = query.distinct()\
+            query = query.distinct()\
                     .add_columns(
                         func.upper(InvoiceItem.mpi_item).like(f'{search_term}%').label('starts_with'),
                         func.upper(InvoiceItem.mpi_item).like(f'%{search_term}%').label('contains_term')
@@ -242,8 +251,10 @@ class MonthlyComparisonController:
                         InvoiceItem.mpi_item.asc()  # Then sort alphabetically
                     )\
                     .offset((page - 1) * size)\
-                    .limit(size)\
-                    .all()
+                    .limit(size)
+            
+            result = await db.execute(query)
+            items = result.all()
             
             # Extract the InvoiceItem objects from the result tuples
             invoice_items = [item[0] for item in items]
@@ -274,7 +285,7 @@ class MonthlyComparisonController:
             logger.error(f"Error in search_mpi_items: {str(e)}", exc_info=True)
             raise
             
-    def get_cheapest_prices_per_supplier(self, items: List[ItemInfo]) -> List[dict]:
+    async def get_cheapest_prices_per_supplier(self, items: List[ItemInfo]) -> List[dict]:
         """
         Get the lowest unit price per supplier for each item.
         
@@ -290,23 +301,25 @@ class MonthlyComparisonController:
             
             for item in items:
                 # Get the lowest price per supplier for this item with supplier ID
-                supplier_prices = db.query(
-                    InvoiceItem.vendor,
-                    InvoiceItem.cost,
-                    Supplier.id.label('supplier_id')
-                ).join(
-                    Supplier, 
-                    Supplier.supplier_name == InvoiceItem.vendor
-                ).filter(
-                    InvoiceItem.mpi_item == item.mpi_item,
-                    InvoiceItem.cost.isnot(None),
-                    InvoiceItem.vendor.isnot(None)
-                ).order_by(
-                    InvoiceItem.vendor,
-                    InvoiceItem.cost.asc()
-                ).distinct(
-                    InvoiceItem.vendor
-                ).all()
+                supplier_prices = await db.execute(
+                    select(
+                        InvoiceItem.vendor,
+                        InvoiceItem.cost,
+                        Supplier.id.label('supplier_id')
+                    ).join(
+                        Supplier, 
+                        Supplier.supplier_name == InvoiceItem.vendor
+                    ).where(
+                        InvoiceItem.mpi_item == item.mpi_item,
+                        InvoiceItem.cost.isnot(None),
+                        InvoiceItem.vendor.isnot(None)
+                    ).order_by(
+                        InvoiceItem.vendor,
+                        InvoiceItem.cost.asc()
+                    ).distinct(
+                        InvoiceItem.vendor
+                    )
+                )
                 
                 if not supplier_prices:
                     continue
@@ -339,7 +352,7 @@ class MonthlyComparisonController:
             logger.error(f"Error fetching cheapest prices per supplier: {str(e)}")
             raise
             
-    def get_enriched_items_with_suppliers(self, items: List[ItemInfo], page: int = 1, size: int = 10):
+    async def get_enriched_items_with_suppliers(self, items: List[ItemInfo], page: int = 1, size: int = 10):
         """
         OPTIMIZED: Get enriched item information with both the cheapest price and supplier details.
         Uses bulk SQL queries instead of individual item processing for better performance.
@@ -422,7 +435,7 @@ class MonthlyComparisonController:
             """)
             
             # Execute the optimized query
-            query_result = db.execute(price_query, {"mpi_items": mpi_items}).fetchall()
+            query_result = await db.execute(price_query, {"mpi_items": mpi_items})
             
             # Group results by mpi_item for efficient processing
             price_data = {}
@@ -492,7 +505,7 @@ class MonthlyComparisonController:
             logger.info("Falling back to legacy method...")
             return self._get_enriched_items_with_suppliers_legacy(items, page, size)
     
-    def _get_enriched_items_with_suppliers_legacy(self, items: List[ItemInfo], page: int = 1, size: int = 10):
+    async def _get_enriched_items_with_suppliers_legacy(self, items: List[ItemInfo], page: int = 1, size: int = 10):
         """
         Legacy implementation as fallback for get_enriched_items_with_suppliers.
         """
@@ -515,30 +528,33 @@ class MonthlyComparisonController:
                 item_id = item.id
                 if item_id is None:
                     # Look up the item ID based on mpi_item
-                    invoice_item = db.query(InvoiceItem.id).filter(
-                        InvoiceItem.mpi_item == item.mpi_item
-                    ).first()
+                    invoice_item_result = await db.execute(
+                        select(InvoiceItem.id).where(
+                            InvoiceItem.mpi_item == item.mpi_item
+                        )
+                    )
                     
-                    if invoice_item:
-                        item_id = invoice_item.id
-                    else:
+                    item_id = invoice_item_result.scalar_one_or_none()
+                    if item_id is None:
                         # If we still can't find an ID, use 0 as a placeholder
                         item_id = 0
                 
                 # Get all prices for this item across all suppliers
-                all_prices = db.query(
-                    InvoiceItem.vendor,
-                    InvoiceItem.cost,
-                    Supplier.id.label('supplier_id')
-                ).join(
-                    Supplier, 
-                    Supplier.supplier_name == InvoiceItem.vendor
-                ).filter(
-                    InvoiceItem.mpi_item == item.mpi_item,
-                    InvoiceItem.cost.isnot(None),
-                    InvoiceItem.vendor.isnot(None),
-                    InvoiceItem.cost > 0  # Exclude zero prices
-                ).all()
+                all_prices = await db.execute(
+                    select(
+                        InvoiceItem.vendor,
+                        InvoiceItem.cost,
+                        Supplier.id.label('supplier_id')
+                    ).join(
+                        Supplier, 
+                        Supplier.supplier_name == InvoiceItem.vendor
+                    ).where(
+                        InvoiceItem.mpi_item == item.mpi_item,
+                        InvoiceItem.cost.isnot(None),
+                        InvoiceItem.vendor.isnot(None),
+                        InvoiceItem.cost > 0  # Exclude zero prices
+                    )
+                )
                 
                 if not all_prices:
                     continue
@@ -596,7 +612,7 @@ class MonthlyComparisonController:
             logger.error(f"Error fetching enriched items with suppliers: {str(e)}", exc_info=True)
             raise
             
-    def get_items_by_date_range_with_suppliers(
+    async def get_items_by_date_range_with_suppliers(
         self,
         from_date: date,
         to_date: date,
@@ -624,7 +640,7 @@ class MonthlyComparisonController:
             excluded_list = [item.mpi_item for item in (unselected_items or []) if getattr(item, 'mpi_item', None)]
 
             # Total unique items by mpi_item under filters and exclusions
-            total_query = db.query(func.count(func.distinct(InvoiceItem.mpi_item))).filter(
+            total_query = select(func.count(func.distinct(InvoiceItem.mpi_item))).where(
                 and_(
                     InvoiceItem.date >= from_date,
                     InvoiceItem.date <= to_date,
@@ -636,8 +652,9 @@ class MonthlyComparisonController:
                 )
             )
             if excluded_list:
-                total_query = total_query.filter(~InvoiceItem.mpi_item.in_(excluded_list))
-            total = total_query.scalar() or 0
+                total_query = total_query.where(~InvoiceItem.mpi_item.in_(excluded_list))
+            total_result = await db.execute(total_query)
+            total = total_result.scalar() or 0
 
             # Deterministic page of unique items (one per mpi_item)
             # Use DISTINCT ON with stable ordering
@@ -674,18 +691,26 @@ class MonthlyComparisonController:
             if excluded_list:
                 params["excluded"] = excluded_list
 
-            rows = db.execute(text(base_sql), params).fetchall()
+            rows = await db.execute(text(base_sql), params)
 
             # Convert to ItemInfo list
-            item_infos = [
-                ItemInfo(
-                    id=row[0] or 0,
-                    mpi_item=row[1] or '',
-                    original_item=row[2] or '',
-                    mpi_description=row[3] or '',
+            item_infos = []
+            for row in rows:
+                item_id, mpi_item, original_item, mpi_description, date_val = row
+                item_id = item_id or 0
+                mpi_item = mpi_item or ''
+                original_item = original_item or ''
+                mpi_description = mpi_description or ''
+                date_val = date_val or date.min # Ensure date is not None
+
+                item_info = ItemInfo(
+                    id=item_id,
+                    mpi_item=mpi_item,
+                    original_item=original_item,
+                    mpi_description=mpi_description,
+                    date=date_val # Add date to ItemInfo
                 )
-                for row in rows
-            ]
+                item_infos.append(item_info)
 
             # Calculate total pages
             pages = (total + size - 1) // size if size > 0 else 1
@@ -696,21 +721,23 @@ class MonthlyComparisonController:
                 item_id = item.id or 0
 
                 # Get all prices for this item across all suppliers within date range
-                all_prices = db.query(
-                    InvoiceItem.vendor,
-                    InvoiceItem.cost,
-                    Supplier.id.label('supplier_id')
-                ).join(
-                    Supplier,
-                    Supplier.supplier_name == InvoiceItem.vendor
-                ).filter(
-                    InvoiceItem.mpi_item == item.mpi_item,
-                    InvoiceItem.cost.isnot(None),
-                    InvoiceItem.cost > 0,
-                    InvoiceItem.vendor.isnot(None),
-                    InvoiceItem.date >= from_date,
-                    InvoiceItem.date <= to_date
-                ).all()
+                all_prices = await db.execute(
+                    select(
+                        InvoiceItem.vendor,
+                        InvoiceItem.cost,
+                        Supplier.id.label('supplier_id')
+                    ).join(
+                        Supplier,
+                        Supplier.supplier_name == InvoiceItem.vendor
+                    ).where(
+                        InvoiceItem.mpi_item == item.mpi_item,
+                        InvoiceItem.cost.isnot(None),
+                        InvoiceItem.cost > 0,
+                        InvoiceItem.vendor.isnot(None),
+                        InvoiceItem.date >= from_date,
+                        InvoiceItem.date <= to_date
+                    )
+                )
 
                 # Keep the item in the result even if no supplier prices in range
                 if not all_prices:

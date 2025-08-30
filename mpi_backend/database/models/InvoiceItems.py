@@ -46,7 +46,7 @@ def _apply_active_filter(query):
     for desc in query.column_descriptions:
         if desc['type'] is InvoiceItem:
             # Show items where is_active is NOT FALSE
-            query = query.enable_assertions(False).filter(or_(
+            query = query.enable_assertions(False).where(or_(
                     InvoiceItem.is_active.is_(True),
                     InvoiceItem.is_active.is_(None)  # Include NULL values
                 )

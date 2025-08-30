@@ -15,9 +15,10 @@ from mpi_backend.utils.statement_extractor.extractor import StatementExtractor
 from mpi_backend.database.models.MonthlyStatement import (
     PlumbingSupplier, PlumbingStatement
 )
-from mpi_backend.database import db_context
+from mpi_backend.database import async_db_context
 from mpi_backend.utils.s3_utils import upload_file
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -238,42 +239,44 @@ def extract_statement_date_from_subject(subject: str) -> Optional[datetime]:
         return datetime.now().replace(day=1)
 
 
-def ensure_suppliers_exist(db: Session):
+async def ensure_suppliers_exist(db: AsyncSession):
     """Ensure all statement suppliers exist in database"""
     try:
         for supplier_name in STATEMENT_SUPPLIERS:
-            existing_supplier = db.query(PlumbingSupplier).filter(
-                PlumbingSupplier.name == supplier_name
-            ).first()
+            result = await db.execute(
+                select(PlumbingSupplier).where(PlumbingSupplier.name == supplier_name)
+            )
+            existing_supplier = result.scalar_one_or_none()
             
             if not existing_supplier:
                 new_supplier = PlumbingSupplier(
                     name=supplier_name,
                     is_active="Active"
                 )
-                db.add(new_supplier)
+                await db.add(new_supplier)
                 logger.info(f"Created supplier: {supplier_name}")
         
-        db.commit()
+        await db.commit()
         logger.info("All statement suppliers verified/created")
         
     except Exception as e:
         logger.error(f"Error ensuring suppliers exist: {str(e)}")
-        db.rollback()
+        await db.rollback()
         raise
 
 
-def statement_already_exists(
+async def statement_already_exists(
     supplier_name: str, 
     statement_date: datetime, 
-    db: Session
+    db: AsyncSession
 ) -> bool:
     """Check if statement already exists for supplier and month"""
     try:
         # Get supplier
-        supplier = db.query(PlumbingSupplier).filter(
-            PlumbingSupplier.name == supplier_name
-        ).first()
+        result = await db.execute(
+            select(PlumbingSupplier).where(PlumbingSupplier.name == supplier_name)
+        )
+        supplier = result.scalar_one_or_none()
         
         if not supplier:
             return False
@@ -282,11 +285,14 @@ def statement_already_exists(
         month_start = statement_date.replace(day=1)
         next_month = (month_start + timedelta(days=32)).replace(day=1)
         
-        existing_statement = db.query(PlumbingStatement).filter(
-            PlumbingStatement.supplier_id == supplier.id,
-            PlumbingStatement.statement_date >= month_start,
-            PlumbingStatement.statement_date < next_month
-        ).first()
+        result = await db.execute(
+            select(PlumbingStatement).where(
+                PlumbingStatement.supplier_id == supplier.id,
+                PlumbingStatement.statement_date >= month_start,
+                PlumbingStatement.statement_date < next_month
+            )
+        )
+        existing_statement = result.scalar_one_or_none()
         
         return existing_statement is not None
         
@@ -295,15 +301,16 @@ def statement_already_exists(
         return False
 
 
-def pdf_filename_already_exists(pdf_filename: str, db: Session) -> bool:
+async def pdf_filename_already_exists(pdf_filename: str, db: AsyncSession) -> bool:
     """
     Check if a PDF filename already exists in the database
     This prevents duplicate processing of the same PDF file
     """
     try:
-        existing_statement = db.query(PlumbingStatement).filter(
-            PlumbingStatement.pdf_filename == pdf_filename
-        ).first()
+        result = await db.execute(
+            select(PlumbingStatement).where(PlumbingStatement.pdf_filename == pdf_filename)
+        )
+        existing_statement = result.scalar_one_or_none()
         
         return existing_statement is not None
         
@@ -312,11 +319,11 @@ def pdf_filename_already_exists(pdf_filename: str, db: Session) -> bool:
         return False
 
 
-def should_skip_statement_processing(
+async def should_skip_statement_processing(
     supplier_name: str,
     statement_date: datetime, 
     pdf_filename: str,
-    db: Session
+    db: AsyncSession
 ) -> tuple:
     """
     Comprehensive check to determine if statement processing should be skipped
@@ -324,11 +331,11 @@ def should_skip_statement_processing(
     """
     try:
         # Check 1: PDF filename already exists (PRIMARY CHECK)
-        if pdf_filename_already_exists(pdf_filename, db):
+        if await pdf_filename_already_exists(pdf_filename, db):
             return True, f"PDF file '{pdf_filename}' already processed"
         
         # Check 2: Statement for supplier + date exists (SECONDARY CHECK)
-        if statement_already_exists(supplier_name, statement_date, db):
+        if await statement_already_exists(supplier_name, statement_date, db):
             return True, f"Statement for {supplier_name} on {statement_date.strftime('%Y-%m')} already exists"
         
         return False, ""
@@ -338,7 +345,7 @@ def should_skip_statement_processing(
         return False, f"Error checking duplicates: {str(e)}"
 
 
-def download_statement_attachments(email_message, base_folder_path: Path):
+async def download_statement_attachments(email_message, base_folder_path: Path):
     """Download statement attachments - using invoice downloader logic"""
     try:
         supplier_name = "unknown"
@@ -411,8 +418,8 @@ def download_statement_attachments(email_message, base_folder_path: Path):
                             f"{supplier_name}_{month_year}_{filename}"
                         )
                         
-                        with db_context() as db:
-                            should_skip, skip_reason = should_skip_statement_processing(
+                        async with async_db_context() as db:
+                            should_skip, skip_reason = await should_skip_statement_processing(
                                 supplier_name, statement_date, unique_filename, db
                             )
                             
@@ -575,7 +582,7 @@ def extract_supplier_from_filename(filename: str) -> Optional[str]:
         return None
 
 
-def process_statement_files(base_folder_path: Path):
+async def process_statement_files(base_folder_path: Path):
     """Process all downloaded statement files with improved supplier 
     detection"""
     try:
@@ -656,9 +663,9 @@ def process_statement_files(base_folder_path: Path):
                     )
                 
                 # Check for duplicates before processing
-                with db_context() as db:
+                async with async_db_context() as db:
                     # Use actual PDF filename for duplicate check
-                    should_skip, skip_reason = should_skip_statement_processing(
+                    should_skip, skip_reason = await should_skip_statement_processing(
                         final_supplier or "Unknown", 
                         datetime.now(),  # Will be properly detected in extractor
                         pdf_file.name, 
@@ -673,7 +680,7 @@ def process_statement_files(base_folder_path: Path):
                         continue
                 
                 # Extract data using statement extractor with supplier name
-                with db_context() as db:
+                async with async_db_context() as db:
                     extractor = StatementExtractor(
                         pdf_path=str(pdf_file),
                         save_to_db=True,  # Save to database
@@ -749,7 +756,7 @@ def process_statement_files(base_folder_path: Path):
         return 0
 
 
-def statement_download_background_task():
+async def statement_download_background_task():
     """Statement download background task - runs continuously without interruption"""
     # Statement downloader runs independently of all other operations
     logger.debug("Starting statement download background task")
@@ -757,8 +764,8 @@ def statement_download_background_task():
     mail = None
     try:
         # Ensure all suppliers exist in database
-        with db_context() as db:
-            ensure_suppliers_exist(db)
+        async with async_db_context() as db:
+            await ensure_suppliers_exist(db)
         
         # Setup directory structure (same as invoice downloader)
         try:
@@ -809,7 +816,7 @@ def statement_download_background_task():
                         raw_email = response[0][1].decode('latin-1')
                     
                     email_message = email.message_from_string(raw_email)
-                    download_statement_attachments(
+                    await download_statement_attachments(
                         email_message, base_folder_path
                     )
                     
@@ -829,7 +836,7 @@ def statement_download_background_task():
         # Post-processing (similar to invoice conversion)
         try:
             logger.info("Starting statement processing")
-            processed_count = process_statement_files(base_folder_path)
+            processed_count = await process_statement_files(base_folder_path)
             logger.info(
                 f"Statement processing complete. "
                 f"Successfully processed {processed_count} files"

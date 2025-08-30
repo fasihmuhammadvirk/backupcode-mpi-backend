@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from fastapi.responses import ORJSONResponse as JSONResponse
 from typing import List, Dict, Optional, Any
-from sqlalchemy.orm import Session
-from mpi_backend.database import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+from mpi_backend.database import get_async_db
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
 from mpi_backend.database.controllers.UnmappedItems import (
     UnmappedItemsController
@@ -215,7 +215,7 @@ def get_column_mappings():
 
 
 @router.get("/get-locations", response_model=List[str])
-def customer_job_filter(db: Session = Depends(get_db), 
+async def customer_job_filter(db: AsyncSession = Depends(get_async_db), 
                        token: str = Depends(JWTBearer())):
     """
     Get unique customer job locations for filtering and dropdown population.
@@ -275,7 +275,7 @@ def customer_job_filter(db: Session = Depends(get_db),
             LIMIT 200
         """)
         
-        result = db.execute(raw_query)
+        result = await db.execute(raw_query)
         locations = [row[0] for row in result.fetchall()]
         
         # Aggressive caching
@@ -349,8 +349,8 @@ def column_mappings(token: str = Depends(JWTBearer())):
 
 
 @router.post("/by-column")
-def get_column_data(
-    db: Session = Depends(get_db),
+async def get_column_data(
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer()),
     column_name: str = Query(None, description="Column name for data"),
     payload: Optional[Dict] = Body(None, description="Filter context")
@@ -436,7 +436,7 @@ def get_column_data(
 
         # Use optimized controller method with context
         controller = InvoiceItemController(db)
-        distinct_values = controller.get_data_by_column_name(
+        distinct_values = await controller.get_data_by_column_name(
             column_name, filter_context, comparison_filters
         )
 
@@ -457,8 +457,8 @@ def get_column_data(
 
 
 @router.post("/by-column-paginated")
-def get_column_data_paginated(
-    db: Session = Depends(get_db),
+async def get_column_data_paginated(
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer()),
     column_name: str = Query(..., description="Column name to get distinct values from"),
     payload: Dict = Body(..., description="Request payload containing pagination, search, and filter context")
@@ -608,7 +608,7 @@ def get_column_data_paginated(
 
         # Use ultra-optimized controller method
         controller = InvoiceItemController(db)
-        result = controller.get_data_by_column_name_paginated(
+        result = await controller.get_data_by_column_name_paginated(
             column_name=column_name,
             page=page,
             limit=limit,
@@ -657,7 +657,7 @@ async def filter_invoice_items(
     request: FilterRequest,
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=1000, description="Items per page"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     OPTIMIZED: Filter invoice items with resource-aware execution and efficient pagination
@@ -849,7 +849,7 @@ async def filter_invoice_items(
 async def filter_invoice_items_stream(
     request: FilterRequest,
     page_size: int = Query(100, ge=1, le=1000, description="Items per page"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     OPTIMIZED: Stream filtered invoice items for large datasets
@@ -1005,7 +1005,7 @@ async def filter_invoice_items_stream(
 @router.post("", response_model=PaginatedInvoiceItemsResponse)
 def filter_data(
     request: FilterRequest, 
-    db: Session = Depends(get_db), 
+    db: AsyncSession = Depends(get_async_db), 
     token: str = Depends(JWTBearer()),
     page: int = Query(1, ge=1),
     size: int = Query(10)
@@ -1148,7 +1148,7 @@ def filter_data(
 
 
 @router.post("/price-difference")
-def get_price_difference(request: FilterRequest, db: Session = Depends(get_db),
+async def get_price_difference(request: FilterRequest, db: AsyncSession = Depends(get_async_db),
                          # token: str = Depends(JWTBearer()),
                 page: int = Query(1, ge=1),
                 size: int = Query(10)):
@@ -1231,7 +1231,7 @@ def get_price_difference(request: FilterRequest, db: Session = Depends(get_db),
     
     try:
         # Get filtered data
-        filtered_data = InvoiceItemController(db).apply_filters(request, page, size)
+        filtered_data = await InvoiceItemController(db).apply_filters(request, page, size)
         controller = InvoiceItemController(db)
         
         # Extract item codes and vendor info for supplier-specific monthly comparison
@@ -1280,7 +1280,7 @@ def get_price_difference(request: FilterRequest, db: Session = Depends(get_db),
 
 
 @router.post("/price-history", response_model=List[PriceHistoryResponse])
-def get_price_history(request: PriceHistoryRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+async def get_price_history(request: PriceHistoryRequest, db: AsyncSession = Depends(get_async_db), token: str = Depends(JWTBearer())):
     """
     Get price history for a specific item and vendor.
     
@@ -1354,7 +1354,7 @@ def get_price_history(request: PriceHistoryRequest, db: Session = Depends(get_db
         logger.info(f"Price history request - Item: {request.item_number}, Vendor: {request.vendor}")
         
         # Get price history from controller
-        price_history = InvoiceItemController(db).get_price_history(request)
+        price_history = await InvoiceItemController(db).get_price_history(request)
         
         # Log result for debugging
         logger.info(f"Price history response - Found {len(price_history)} records")
@@ -1377,7 +1377,7 @@ def get_price_history(request: PriceHistoryRequest, db: Session = Depends(get_db
         )
 
 @router.post("/download-price-history")
-def download_price_history(request: PriceHistoryRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+async def download_price_history(request: PriceHistoryRequest, db: AsyncSession = Depends(get_async_db), token: str = Depends(JWTBearer())):
     """
     Export price history to Excel file and return download URL.
     
@@ -1425,7 +1425,7 @@ def download_price_history(request: PriceHistoryRequest, db: Session = Depends(g
         - Excel file includes all price history records for the item/vendor
         - File is automatically cleaned up by S3 lifecycle policies
     """
-    price_history = InvoiceItemController(db).get_price_history(request)
+    price_history = await InvoiceItemController(db).get_price_history(request)
 
     exported_file_path = export_price_history_to_excel(price_history)
     file_name = os.path.basename(exported_file_path)
@@ -1435,9 +1435,9 @@ def download_price_history(request: PriceHistoryRequest, db: Session = Depends(g
 
 
 @router.post("/get_aggregates")
-def get_aggregates(
+async def get_aggregates(
     request: FilterRequest, 
-    db: Session = Depends(get_db), 
+    db: AsyncSession = Depends(get_async_db), 
     token: str = Depends(JWTBearer())
 ):
     """
@@ -1506,7 +1506,7 @@ def get_aggregates(
             return create_optimized_response(cached_result)
         
         controller = InvoiceItemController(db)
-        aggregates = controller.get_aggregates(request)
+        aggregates = await controller.get_aggregates(request)
         
         # Cache the result
         _set_cached_response(cache_key, aggregates)
@@ -1624,7 +1624,7 @@ def clear_cache(token: str = Depends(JWTBearer())):
 @router.post("/unmapped-items", response_model=PaginatedUnmappedItemsResponse)
 def get_unmapped_items(
     request: UnmappedItemsFilterRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer()),
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     size: int = Query(10, ge=1, le=100, description="Number of items per page")
@@ -1962,7 +1962,7 @@ def export_all_unmapped_items(
     supplier_names: Optional[List[str]] = Body(None, description="List of supplier names to filter by"),
     excluded_items: Optional[List[str]] = Body(None, description="List of item IDs to exclude from export"),
     order_by: Optional[List[Dict[str, str]]] = Body(None, description="Optional ordering criteria"),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer())
 ):
     """
@@ -2159,7 +2159,7 @@ def export_all_unmapped_items(
 def export_selected_unmapped_items(
     item_ids: List[str] = Body(..., description="List of item IDs to export"),
     order_by: Optional[List[Dict[str, str]]] = Body(None, description="Optional ordering criteria"),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer())
 ):
     """

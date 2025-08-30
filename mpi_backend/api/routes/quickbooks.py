@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from uuid import UUID
 from typing import List
 import pandas as pd
@@ -7,7 +8,7 @@ import time
 import logging
 import traceback
 from contextlib import contextmanager
-from mpi_backend.database import get_qb_db
+from mpi_backend.database import get_async_qb_db
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
 from mpi_backend.database.controllers.Invoice import InvoiceController
 from mpi_backend.database.controllers.ItemClassification import (
@@ -100,9 +101,9 @@ def validate_invoice_ids(invoice_ids: List[UUID]) -> List[UUID]:
     return clean_ids
 
 
-def perform_database_updates_background(all_item_ids_for_status: List,
-                                        operation_id: str,
-                                        invoice_ids: List[UUID] = None):
+async def perform_database_updates_background(all_item_ids_for_status: List,
+                                            operation_id: str,
+                                            invoice_ids: List[UUID] = None):
     """
     Background task to handle ALL status updates after Excel generation.
     CRITICAL PRIORITY: Ensures status changes from Pending to Sent.
@@ -111,8 +112,8 @@ def perform_database_updates_background(all_item_ids_for_status: List,
     db = None
     try:
         # CRITICAL: Proper database session for background processing
-        from mpi_backend.database import SessionLocal
-        db = SessionLocal()
+        from mpi_backend.database import get_async_db
+        db = await get_async_db()
 
         update_progress(operation_id, "background_updating", 95,
                         "CRITICAL: Updating export statuses to 'Sent'")
@@ -141,9 +142,10 @@ def perform_database_updates_background(all_item_ids_for_status: List,
                 try:
                     # Enhanced validation: Check current status before updating
                     from mpi_backend.database.models import Invoice
-                    invoice = db.query(Invoice).filter(
-                        Invoice.id == str(invoice_id)
-                    ).first()
+                    result = await db.execute(
+                        select(Invoice).where(Invoice.id == str(invoice_id))
+                    )
+                    invoice = result.scalar_one_or_none()
                     
                     if invoice:
                         current_status = invoice.is_exported
@@ -151,7 +153,7 @@ def perform_database_updates_background(all_item_ids_for_status: List,
                         
                         if current_status != 'Sent':
                             # CRITICAL: Update invoice status to 'Sent'
-                            success = (
+                            success = await (
                                 invoice_controller.set_invoice_is_exported(
                                     str(invoice_id)
                                 )
@@ -183,7 +185,7 @@ def perform_database_updates_background(all_item_ids_for_status: List,
                         
                 except Exception as e:
                     if db:
-                        db.rollback()
+                        await db.rollback()
                     failed_invoices += 1
                     failed_operations += 1
                     logger.error(f"✗ Exception updating invoice {invoice_id}: {e}")
@@ -205,9 +207,12 @@ def perform_database_updates_background(all_item_ids_for_status: List,
                 
                 # Validate items exist and get current statuses
                 from mpi_backend.database.models import InvoiceItem
-                existing_items = db.query(InvoiceItem).filter(
-                    InvoiceItem.id.in_(all_item_ids_for_status)
-                ).all()
+                result = await db.execute(
+                    select(InvoiceItem).where(
+                        InvoiceItem.id.in_(all_item_ids_for_status)
+                    )
+                )
+                existing_items = result.scalars().all()
                 
                 logger.info(
                     f"Found {len(existing_items)} items out of "
@@ -226,7 +231,7 @@ def perform_database_updates_background(all_item_ids_for_status: List,
                 
                 # Use the controller method for batch update
                 invoice_item_controller = InvoiceItemController(db)
-                updated_items = (
+                updated_items = await (
                     invoice_item_controller.set_export_status_to_sent(
                         all_item_ids_for_status
                     )
@@ -290,9 +295,9 @@ def perform_database_updates_background(all_item_ids_for_status: List,
                 logger.error(f"Error closing background db session: {e}")
 
 
-def immediate_status_update(all_item_ids_for_status: List,
+async def immediate_status_update(all_item_ids_for_status: List,
                            invoice_ids: List[UUID],
-                           db: Session,
+                           db: AsyncSession,
                            operation_id: str) -> dict:
     """
     IMMEDIATE STATUS UPDATE: Perform status updates synchronously before returning.
@@ -321,13 +326,14 @@ def immediate_status_update(all_item_ids_for_status: List,
             for invoice_id in invoice_ids:
                 try:
                     from mpi_backend.database.models import Invoice
-                    invoice = db.query(Invoice).filter(
-                        Invoice.id == str(invoice_id)
-                    ).first()
+                    result = await db.execute(
+                        select(Invoice).where(Invoice.id == str(invoice_id))
+                    )
+                    invoice = result.scalar_one_or_none()
                     
                     if invoice:
                         if invoice.is_exported != 'Sent':
-                            success = invoice_controller.set_invoice_is_exported(
+                            success = await invoice_controller.set_invoice_is_exported(
                                 str(invoice_id)
                             )
                             if success:
@@ -355,7 +361,7 @@ def immediate_status_update(all_item_ids_for_status: List,
             
             try:
                 invoice_item_controller = InvoiceItemController(db)
-                updated_count = invoice_item_controller.set_export_status_to_sent(
+                updated_count = await invoice_item_controller.set_export_status_to_sent(
                     all_item_ids_for_status
                 )
                 results['items_updated'] = updated_count
@@ -397,9 +403,9 @@ def immediate_status_update(all_item_ids_for_status: List,
 
 
 @router.post("/migrate-all")
-def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
+async def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
                               background_tasks: BackgroundTasks,
-                              db: Session = Depends(get_qb_db)):
+                              db: AsyncSession = Depends(get_async_qb_db)):
     """
     Migrate all filtered invoices to QuickBooks with ultra-fast processing.
     
@@ -483,9 +489,9 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
             if (not invoice_ids or len(invoice_ids) == 0):
                 # If no invoice_ids, fetch all matching invoice IDs from the DB (old behavior)
                 from mpi_backend.database.models import Invoice
-                query = db.query(Invoice.id)
+                result = await db.execute(select(Invoice.id))
                 # Optionally apply filters from request here if needed
-                invoice_ids = [row.id for row in query.all()]
+                invoice_ids = [row.id for row in result.all()]
             
             if request.excluded_invoice_ids:
                 invoice_ids = [
@@ -520,7 +526,7 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
 async def migrate_invoice_to_QB(
     request: Request,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_qb_db),
+    db: AsyncSession = Depends(get_async_qb_db),
     order_by: list = None
 ):
     """
@@ -629,8 +635,8 @@ async def migrate_invoice_to_QB(
                 invoice_ids = body['invoice_ids']
             if invoice_ids is None:
                 from mpi_backend.database.models import Invoice
-                query = db.query(Invoice.id)
-                invoice_ids = [row.id for row in query.all()]
+                result = await db.execute(select(Invoice.id))
+                invoice_ids = [row.id for row in result.all()]
             logger.info(f"POST /quickbooks/migrate - Starting migration for {len(invoice_ids)} invoices")
             logger.info(f"Received invoice_ids: {invoice_ids}")
             invoice_ids = validate_invoice_ids(invoice_ids)
@@ -655,8 +661,8 @@ async def migrate_invoice_to_QB(
             raise
 
 
-def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
-                                     db: Session, operation_id: str,
+async def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
+                                     db: AsyncSession, operation_id: str,
                                      background_tasks: BackgroundTasks,
                                      update_mode: str = "background",
                                      item_order: list = None,
@@ -676,9 +682,10 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
 
     # ULTRA-FAST data retrieval - direct database query
     from mpi_backend.database.models import InvoiceItem
-    invoice_items = db.query(InvoiceItem).filter(
-        InvoiceItem.invoice_id.in_(invoice_ids)
-    ).all()
+    result = await db.execute(
+        select(InvoiceItem).where(InvoiceItem.invoice_id.in_(invoice_ids))
+    )
+    invoice_items = result.scalars().all()
 
     if not invoice_items:
         raise HTTPException(status_code=400, detail="No items found")
@@ -699,7 +706,7 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
     classification_cache = {'': '', None: ''}
     for sheet_name in unique_sheet_names:
         try:
-            classification_cache[sheet_name] = classification_controller.get_classification(sheet_name)
+            classification_cache[sheet_name] = await classification_controller.get_classification(sheet_name)
         except Exception:
             classification_cache[sheet_name] = ''
 
@@ -865,7 +872,10 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
         customer_job = invoice_items['customer_job'].iloc[0]
         tax_amount = invoice_items['tax_amount'].iloc[0]
         from mpi_backend.database.models import Invoice
-        db_invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        result = await db.execute(
+            select(Invoice).where(Invoice.id == invoice_id)
+        )
+        db_invoice = result.scalar_one_or_none()
         if db_invoice and hasattr(db_invoice, 'amount') and db_invoice.amount is not None:
             authoritative_total = float(db_invoice.amount)
         else:
@@ -986,7 +996,7 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
     if update_mode == "immediate":
         # IMMEDIATE STATUS UPDATE - Guaranteed before return
         logger.info("CRITICAL: Performing IMMEDIATE status updates")
-        status_results = immediate_status_update(
+        status_results = await immediate_status_update(
             all_item_ids_for_status, invoice_ids, db, operation_id
         )
         

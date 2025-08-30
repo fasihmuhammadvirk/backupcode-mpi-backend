@@ -1,5 +1,6 @@
 from mpi_backend.database.models.User import User
 from passlib.context import CryptContext
+from sqlalchemy import select
 
 
 class UserController:
@@ -13,9 +14,12 @@ class UserController:
     def verify_password(self, plain_password, hashed_password):
         return self.pwd_context.verify(plain_password, hashed_password)
 
-    def validate_credentials(self,username,password):
+    async def validate_credentials(self, username, password):
         try:
-            user = self.db.query(User).filter(User.username == username).first()
+            result = await self.db.execute(
+                select(User).where(User.username == username)
+            )
+            user = result.scalar_one_or_none()
             if user:
                 return self.verify_password(password, user.password)
             return False
@@ -24,14 +28,14 @@ class UserController:
             print(f"Error Validating User: {e}")
             return None
 
-    def create_user(self,username,password):
+    async def create_user(self, username, password):
         try:
             hashed_password = self.hash_password(password)
             new_user = User(username=username, password=hashed_password)
             self.db.add(new_user)
-            self.db.commit()
+            await self.db.commit()
             return True
         except Exception as e:
             print(f"Error Creating User: {e}")
-            self.db.rollback()
+            await self.db.rollback()
             return False

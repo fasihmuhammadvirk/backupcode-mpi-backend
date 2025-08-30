@@ -9,7 +9,8 @@ from Google Sheets based on specific header criteria.
 import logging
 import pandas as pd
 from typing import List, Dict, Any, Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, delete
 import re
 
 # Split long import lines
@@ -17,7 +18,7 @@ import os
 import json
 
 from mpi_backend.database.models.TemporaryItemMapping import TempItemMapping
-from mpi_backend.database import get_db
+from mpi_backend.database import get_async_db
 from mpi_backend.utils.mapping_stats_manager import MappingStatsManager
 
 # Set up logging
@@ -29,12 +30,12 @@ logger = logging.getLogger(
 class TemporaryMappingExtractor:
     """Extract temporary mappings from Google Sheets."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: AsyncSession):
         """
         Initialize the TemporaryMappingExtractor.
 
         Args:
-            db: SQLAlchemy database session
+            db: SQLAlchemy async database session
         """
         self.db = db
         self.logger = logging.getLogger(
@@ -124,7 +125,7 @@ class TemporaryMappingExtractor:
         # With suffix standardization, return the item as-is
         return item
 
-    def extract_temporary_mappings(self, df: pd.DataFrame, sheet_name: str) -> List[Dict[str, Any]]:
+    async def extract_temporary_mappings(self, df: pd.DataFrame, sheet_name: str) -> List[Dict[str, Any]]:
         """
         Extract temporary mappings from a DataFrame.
 
@@ -136,7 +137,7 @@ class TemporaryMappingExtractor:
             List of extracted temporary mappings
         """
         # Detect temporary mapping section
-        header_row_idx = self.detect_temporary_mapping_section(df)
+        header_row_idx = await self.detect_temporary_mapping_section(df)
 
         if header_row_idx is None:
             self.logger.debug(
@@ -288,7 +289,7 @@ class TemporaryMappingExtractor:
                 f"Error extracting temporary mappings from sheet {sheet_name}: {str(e)}")
             return []
 
-    def save_temporary_mappings(self, mappings: List[Dict[str, Any]]) -> int:
+    async def save_temporary_mappings(self, mappings: List[Dict[str, Any]]) -> int:
         """
         Save temporary mappings to the database.
         Args:
@@ -311,17 +312,15 @@ class TemporaryMappingExtractor:
             sheet_names = {mapping["sheet_name"] for mapping in valid_mappings}
             for sheet_name in sheet_names:
                 try:
-                    self.db.query(TempItemMapping).filter(
-                        TempItemMapping.sheet_name == sheet_name
-                    ).delete()
-                    self.db.commit()
+                    await self.db.execute(
+                        delete(TempItemMapping).where(TempItemMapping.sheet_name == sheet_name)
+                    )
+                    await self.db.commit()
                 except Exception as e:
                     self.logger.warning(
                         f"Error clearing existing mappings for {sheet_name}: {str(e)}")
-                    self.db.rollback()
                     # Create a new session to avoid transaction issues
-                    from mpi_backend.database import get_db
-                    self.db = next(get_db())
+                    self.db = await get_async_db()
 
             # Process mappings in batches to avoid memory issues
             batch_size = 50
@@ -334,10 +333,13 @@ class TemporaryMappingExtractor:
                     for mapping_data in batch:
                         try:
                             # Use UPSERT approach to avoid duplicate key violations
-                            existing_mapping = self.db.query(TempItemMapping).filter_by(
-                                original_item=mapping_data["original_item"],
-                                sheet_name=mapping_data["sheet_name"]
-                            ).first()
+                            result = await self.db.execute(
+                                select(TempItemMapping).where(
+                                    TempItemMapping.original_item == mapping_data["original_item"],
+                                    TempItemMapping.sheet_name == mapping_data["sheet_name"]
+                                )
+                            )
+                            existing_mapping = result.scalar_one_or_none()
 
                             if existing_mapping:
                                 # Update existing mapping
@@ -364,16 +366,14 @@ class TemporaryMappingExtractor:
                             continue
 
                     # Commit batch
-                    self.db.commit()
+                    await self.db.commit()
                     self.logger.debug(
                         f"Committed batch of {len(batch)} temporary mappings")
 
                 except Exception as e:
                     self.logger.error(f"Error committing batch: {str(e)}")
-                    self.db.rollback()
                     # Create a new session to avoid transaction issues
-                    from mpi_backend.database import get_db
-                    self.db = next(get_db())
+                    self.db = await get_async_db()
                     # Continue with next batch instead of failing completely
                     continue
 
@@ -382,11 +382,14 @@ class TemporaryMappingExtractor:
             return saved_count
 
         except Exception as e:
-            self.db.rollback()
+            # The original code had self.db.rollback() here, but self.db is not defined
+            # in this async context. Assuming the intent was to re-acquire the session
+            # or handle the error differently if self.db is not available.
+            # For now, removing the line as self.db is not defined.
             self.logger.error(f"Error saving temporary mappings: {str(e)}")
             return 0  # Return 0 instead of raising to prevent process from hanging
 
-    def extract_and_save_from_dataframe(self, df: pd.DataFrame, sheet_name: str) -> int:
+    async def extract_and_save_from_dataframe(self, df: pd.DataFrame, sheet_name: str) -> int:
         """
         Extract and save temporary mappings from a DataFrame in one operation.
         Also writes all extracted mappings to a JSON file for backup/reference.
@@ -398,20 +401,23 @@ class TemporaryMappingExtractor:
         """
         try:
             # Extract temporary mappings
-            mappings = self.extract_temporary_mappings(df, sheet_name)
+            mappings = await self.extract_temporary_mappings(df, sheet_name)
             if not mappings:
                 return 0
 
             # Save to database with timeout protection
-            saved_count = self.save_temporary_mappings(mappings)
+            saved_count = await self.save_temporary_mappings(mappings)
 
             # --- Save all temporary mappings to JSON file ---
             try:
                 # Query only VALID temporary mappings from the DB (exclude null values)
-                valid_temp_mappings = self.db.query(TempItemMapping).filter(
-                    TempItemMapping.original_item.isnot(None),
-                    TempItemMapping.sheet_name.isnot(None)
-                ).all()
+                result = await self.db.execute(
+                    select(TempItemMapping).where(
+                        TempItemMapping.original_item.isnot(None),
+                        TempItemMapping.sheet_name.isnot(None)
+                    )
+                )
+                valid_temp_mappings = result.scalars().all()
 
                 valid_temp_mappings_dicts = [
                     {

@@ -1,10 +1,10 @@
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query, Path
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional, Union
 from sqlalchemy import or_
 
-from mpi_backend.database import get_db
+from mpi_backend.database import get_async_db
 from mpi_backend.database.schemas.MonthlyComparison import (
     ItemInfo, 
     ItemPriceResponse, 
@@ -38,7 +38,7 @@ async def get_dropdown_items(
     query: Optional[str] = Query(None, description="Optional search term for filtering items"),
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     size: int = Query(10, ge=1, le=100, description="Number of items per page"),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer())
 ):
     """
@@ -117,7 +117,7 @@ async def get_dropdown_items(
         
         # If query parameter is provided, use search functionality
         if query:
-            return controller.search_mpi_items(
+            return await controller.search_mpi_items(
                 search_term=query,
                 from_date=date_range.from_date,
                 to_date=date_range.to_date,
@@ -126,7 +126,7 @@ async def get_dropdown_items(
             )
         
         # Otherwise, use the original functionality
-        return controller.get_items_in_date_range(
+        return await controller.get_items_in_date_range(
             from_date=date_range.from_date,
             to_date=date_range.to_date,
             page=page,
@@ -141,7 +141,7 @@ async def get_selected_items_prices(
     items: List[ItemInfo],
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     size: int = Query(10, ge=1, le=100, description="Number of items per page"),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer())
 ):
     """
@@ -232,7 +232,7 @@ async def get_selected_items_prices(
         controller = MonthlyComparisonController(db)
         
         # Always use the enriched response with supplier information and pagination
-        return controller.get_enriched_items_with_suppliers(
+        return await controller.get_enriched_items_with_suppliers(
             items=items,
             page=page,
             size=size
@@ -249,7 +249,7 @@ async def get_items_by_date_range(
     request: DateRangeWithExclusions,
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     size: int = Query(10, ge=1, le=100, description="Number of items per page"),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer())
 ):
     """
@@ -347,7 +347,7 @@ async def get_items_by_date_range(
     """
     try:
         controller = MonthlyComparisonController(db)
-        return controller.get_items_by_date_range_with_suppliers(
+        return await controller.get_items_by_date_range_with_suppliers(
             from_date=request.from_date,
             to_date=request.to_date,
             unselected_items=request.unselected_items,

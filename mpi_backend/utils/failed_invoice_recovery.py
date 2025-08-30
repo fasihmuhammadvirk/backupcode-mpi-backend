@@ -2,8 +2,8 @@
 """
 failed_invoice_recovery.py
 
-Enhanced utility for recovering failed invoices by searching the mailbox for missing attachments.
-This utility:
+Enhanced utility for recovering failed invoices by searching the mailbox 
+for missing attachments. This utility:
 1. Fetches ALL failed invoices from the system (status = 'Failed')
 2. Processes them in batches to handle large volumes efficiently
 3. Searches the mailbox for specific invoice numbers and suppliers
@@ -36,9 +36,6 @@ from email.utils import parsedate_to_datetime
 from datetime import datetime, timedelta, date
 from typing import List, Dict, Optional, Tuple, Generator
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
-from contextlib import contextmanager
 
 # Add project root to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -50,10 +47,7 @@ from mpi_backend.config import (
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.utils.invoice_convertor import convert_invoice_for_email
 from mpi_backend.database.controllers.StatementController import StatementController
-from mpi_backend.database import SessionLocal
-from mpi_backend.database import get_db
-from mpi_backend.database.models.Invoice import Invoice
-from mpi_backend.database.models.InvoiceItems import InvoiceItem
+from mpi_backend.database import get_async_db
 from mpi_backend.config.logging_config import get_missing_logger
 
 # Create logs directory
@@ -546,7 +540,7 @@ def download_email_attachments(email_message, base_folder_path, target_invoice_n
         logger.error(f"Error in download_email_attachments: {str(e)}\n{traceback.format_exc()}")
         return False
 
-def get_failed_invoices_batch(from_date: Optional[date] = None, to_date: Optional[date] = None, 
+async def get_failed_invoices_batch(from_date: Optional[date] = None, to_date: Optional[date] = None, 
                              page: int = 1, page_size: int = BATCH_SIZE) -> Tuple[List[Dict], int]:
     """
     Get failed invoices from the system in batches
@@ -561,11 +555,11 @@ def get_failed_invoices_batch(from_date: Optional[date] = None, to_date: Optiona
         Tuple of (failed_invoices_list, total_count)
     """
     try:
-        db = SessionLocal()
+        db = await get_async_db()
         controller = StatementController(db)
         
         # Get failed invoices using the existing API
-        result = controller.get_statement_invoice_data(
+        result = await controller.get_statement_invoice_data(
             from_date=from_date,
             to_date=to_date,
             status='failed',
@@ -575,7 +569,7 @@ def get_failed_invoices_batch(from_date: Optional[date] = None, to_date: Optiona
         
         if not result['success']:
             logger.error(f"Failed to get failed invoices: {result.get('error', 'Unknown error')}")
-            db.close()
+            await db.close()
             return [], 0
         
         failed_invoices = []
@@ -591,17 +585,17 @@ def get_failed_invoices_batch(from_date: Optional[date] = None, to_date: Optiona
                 })
         
         total_count = result.get('total', 0)
-        db.close()
+        await db.close()
         logger.info(f"Retrieved batch {page}: {len(failed_invoices)} failed invoices (Total: {total_count})")
         return failed_invoices, total_count
         
     except Exception as e:
         logger.error(f"Error getting failed invoices batch: {str(e)}\n{traceback.format_exc()}")
         if 'db' in locals():
-            db.close()
+            await db.close()
         return [], 0
 
-def get_all_failed_invoices(from_date: Optional[date] = None, to_date: Optional[date] = None) -> Generator[List[Dict], None, None]:
+async def get_all_failed_invoices(from_date: Optional[date] = None, to_date: Optional[date] = None) -> Generator[List[Dict], None, None]:
     """
     Generator to get all failed invoices in batches
     
@@ -616,7 +610,7 @@ def get_all_failed_invoices(from_date: Optional[date] = None, to_date: Optional[
     total_processed = 0
     
     while True:
-        batch, total_count = get_failed_invoices_batch(from_date, to_date, page, BATCH_SIZE)
+        batch, total_count = await get_failed_invoices_batch(from_date, to_date, page, BATCH_SIZE)
         
         if not batch:
             break
@@ -631,7 +625,7 @@ def get_all_failed_invoices(from_date: Optional[date] = None, to_date: Optional[
             
         page += 1
 
-def process_invoice_batch(batch: List[Dict], mail, base_folder_path: Path) -> List[str]:
+async def process_invoice_batch(batch: List[Dict], mail, base_folder_path: Path) -> List[str]:
     """
     Process a batch of failed invoices
     
@@ -662,7 +656,7 @@ def process_invoice_batch(batch: List[Dict], mail, base_folder_path: Path) -> Li
             logger.info(f"Processing failed invoice {idx}/{len(batch)}: {invoice_number} from {supplier_name}")
             
             # Search for emails containing this invoice
-            matching_email_ids = search_emails_for_invoice(mail, invoice_number, supplier_name, invoice_date)
+            matching_email_ids = await search_emails_for_invoice(mail, invoice_number, supplier_name, invoice_date)
             
             if not matching_email_ids:
                 logger.warning(f"No emails found for invoice {invoice_number} from {supplier_name}")
@@ -782,7 +776,7 @@ def process_invoice_batch(batch: List[Dict], mail, base_folder_path: Path) -> Li
     
     return successfully_processed_invoices
 
-def process_failed_invoice_recovery():
+async def process_failed_invoice_recovery():
     """Main function to process failed invoice recovery with enhanced batch processing"""
     logger.info("="*80)
     logger.info("STARTING ENHANCED FAILED INVOICE RECOVERY")
@@ -811,7 +805,7 @@ def process_failed_invoice_recovery():
             total_invoices = 0
             
             # Process all failed invoices in batches
-            for batch in get_all_failed_invoices(from_date=from_date):
+            async for batch in get_all_failed_invoices(from_date=from_date):
                 total_batches += 1
                 total_invoices += len(batch)
                 
@@ -827,7 +821,7 @@ def process_failed_invoice_recovery():
                     if mail is None:
                         mail = login()
                     
-                    batch_successful = process_invoice_batch(batch, mail, base_folder_path)
+                    batch_successful = await process_invoice_batch(batch, mail, base_folder_path)
                     all_successfully_processed_invoices.extend(batch_successful)
                     
                     logger.info(f"Batch {total_batches} completed: {len(batch_successful)}/{len(batch)} invoices recovered")

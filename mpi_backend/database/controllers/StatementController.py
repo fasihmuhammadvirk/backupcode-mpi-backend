@@ -2,8 +2,8 @@ import os
 import sys
 from datetime import datetime, date
 from typing import List, Optional, Dict, Any
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, or_, select, delete, func
 from math import ceil
 import pandas as pd
 # Setup temporary directory for reprocessing
@@ -28,30 +28,38 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 class StatementController:
     """Controller for managing statement operations and reconciliation"""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: AsyncSession):
         self.db = db
 
-    def get_supplier_by_name_or_id(self, supplier: str) -> Optional[PlumbingSupplier]:
+    async def get_supplier_by_name_or_id(self, supplier: str) -> Optional[PlumbingSupplier]:
         """Get supplier by name or ID"""
         try:
             # Try to get by ID first
             if supplier.isdigit():
-                supplier_obj = self.db.query(PlumbingSupplier).filter(
-                    PlumbingSupplier.id == int(supplier)
-                ).first()
+                result = await self.db.execute(
+                    select(PlumbingSupplier).where(
+                        PlumbingSupplier.id == int(supplier)
+                    )
+                )
+                supplier_obj = result.scalar_one_or_none()
                 if supplier_obj:
                     return supplier_obj
 
             # Try to get by name
-            return self.db.query(PlumbingSupplier).filter(
-                PlumbingSupplier.name.ilike(f"%{supplier}%")
-            ).first()
+            result = await self.db.execute(
+                select(PlumbingSupplier).where(
+                    PlumbingSupplier.name.ilike(
+                        f"%{supplier}%"
+                    )
+                )
+            )
+            return result.scalar_one_or_none()
 
         except Exception as e:
             logger.error(f"Error getting supplier: {str(e)}")
             return None
 
-    def get_statements_in_date_range(
+    async def get_statements_in_date_range(
         self,
         supplier_id: int,
         from_date: date,
@@ -59,30 +67,38 @@ class StatementController:
     ) -> List[PlumbingStatement]:
         """Get statements for a supplier within date range"""
         try:
-            return self.db.query(PlumbingStatement).filter(
-                and_(
-                    PlumbingStatement.supplier_id == supplier_id,
-                    PlumbingStatement.statement_date >= from_date,
-                    PlumbingStatement.statement_date <= to_date
+            result = await self.db.execute(
+                select(PlumbingStatement).where(
+                    and_(
+                        PlumbingStatement.supplier_id == supplier_id,
+                        PlumbingStatement.statement_date >= from_date,
+                        PlumbingStatement.statement_date <= to_date
+                    )
+                ).order_by(
+                    PlumbingStatement.statement_date.desc()
                 )
-            ).order_by(PlumbingStatement.statement_date.desc()).all()
+            )
+            return result.scalars().all()
 
         except Exception as e:
             logger.error(f"Error getting statements in date range: {str(e)}")
             return []
 
-    def get_statement_invoices(self, statement_id: int) -> List[PlumbingInvoice]:
+    async def get_statement_invoices(self, statement_id: int) -> List[PlumbingInvoice]:
         """Get all invoices for a specific statement"""
         try:
-            return self.db.query(PlumbingInvoice).filter(
-                PlumbingInvoice.statement_id == statement_id
-            ).all()
+            result = await self.db.execute(
+                select(PlumbingInvoice).where(
+                    PlumbingInvoice.statement_id == statement_id
+                )
+            )
+            return result.scalars().all()
 
         except Exception as e:
             logger.error(f"Error getting statement invoices: {str(e)}")
             return []
 
-    def check_invoice_exists_in_system(
+    async def check_invoice_exists_in_system(
         self,
         invoice_number: str,
         supplier_id: int,
@@ -94,7 +110,7 @@ class StatementController:
         """
         try:
             # First check in InvoiceItem table (main system invoices)
-            query = self.db.query(InvoiceItem).join(Invoice).filter(
+            query = select(InvoiceItem).join(Invoice).where(
                 and_(
                     InvoiceItem.ref_no == invoice_number,
                     Invoice.supplier_id == supplier_id
@@ -106,11 +122,12 @@ class StatementController:
                 date_start = datetime.combine(
                     invoice_date, datetime.min.time())
                 date_end = datetime.combine(invoice_date, datetime.max.time())
-                query = query.filter(
+                query = query.where(
                     InvoiceItem.date.between(date_start, date_end)
                 )
 
-            system_invoice = query.first()
+            result = await self.db.execute(query)
+            system_invoice = result.scalar_one_or_none()
 
             if system_invoice:
                 return {
@@ -143,7 +160,7 @@ class StatementController:
                 'error': str(e)
             }
 
-    def reconcile_statement_with_system(
+    async def reconcile_statement_with_system(
         self,
         supplier: str,
         from_date: str,
@@ -183,7 +200,7 @@ class StatementController:
                 }
 
             # Get statements in date range
-            statements = self.get_statements_in_date_range(
+            statements = await self.get_statements_in_date_range(
                 supplier_obj.id, from_date_obj, to_date_obj
             )
 
@@ -205,7 +222,7 @@ class StatementController:
             }
 
             for statement in statements:
-                statement_invoices = self.get_statement_invoices(statement.id)
+                statement_invoices = await self.get_statement_invoices(statement.id)
                 statement_result = {
                     'statement_id': statement.id,
                     'statement_date': statement.statement_date.isoformat() if statement.statement_date else None,
@@ -231,7 +248,7 @@ class StatementController:
                         pass
 
                     # Check if invoice exists in system
-                    match_result = self.check_invoice_exists_in_system(
+                    match_result = await self.check_invoice_exists_in_system(
                         stmt_invoice.invoice_number,
                         supplier_obj.id,
                         stmt_invoice.invoice_date
@@ -299,33 +316,39 @@ class StatementController:
                 'error': f'Reconciliation failed: {str(e)}'
             }
 
-    def get_all_suppliers(self) -> List[PlumbingSupplier]:
+    async def get_all_suppliers(self) -> List[PlumbingSupplier]:
         """Get all active statement suppliers"""
         try:
-            return self.db.query(PlumbingSupplier).filter(
-                PlumbingSupplier.is_active == "Active"
-            ).order_by(PlumbingSupplier.name).all()
+            result = await self.db.execute(
+                select(PlumbingSupplier).where(
+                    PlumbingSupplier.is_active == "Active"
+                ).order_by(PlumbingSupplier.name)
+            )
+            return result.scalars().all()
 
         except Exception as e:
             logger.error(f"Error getting suppliers: {str(e)}")
             return []
 
-    def get_statements_summary(
+    async def get_statements_summary(
         self,
         supplier_id: Optional[int] = None,
         limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Get summary of recent statements"""
         try:
-            query = self.db.query(PlumbingStatement).join(PlumbingSupplier)
+            query = select(PlumbingStatement).join(PlumbingSupplier)
 
             if supplier_id:
-                query = query.filter(
+                query = query.where(
                     PlumbingStatement.supplier_id == supplier_id)
 
-            statements = query.order_by(
-                PlumbingStatement.statement_date.desc()
-            ).limit(limit).all()
+            result = await self.db.execute(
+                query.order_by(
+                    PlumbingStatement.statement_date.desc()
+                ).limit(limit)
+            )
+            statements = result.scalars().all()
 
             return [
                 {
@@ -344,7 +367,7 @@ class StatementController:
             logger.error(f"Error getting statements summary: {str(e)}")
             return []
 
-    def get_statement_invoice_data(
+    async def get_statement_invoice_data(
         self,
         from_date: Optional[date] = None,
         to_date: Optional[date] = None,
@@ -398,7 +421,7 @@ class StatementController:
             # For Processed/Failed status: Compare PlumbingInvoice with InvoiceItem
             # Build base query joining all necessary tables
             query = (
-                self.db.query(
+                select(
                     PlumbingInvoice,
                     PlumbingStatement,
                     PlumbingSupplier,
@@ -416,9 +439,9 @@ class StatementController:
 
             # Apply date filters on invoice_date
             if from_date:
-                query = query.filter(PlumbingInvoice.invoice_date >= from_date)
+                query = query.where(PlumbingInvoice.invoice_date >= from_date)
             if to_date:
-                query = query.filter(PlumbingInvoice.invoice_date <= to_date)
+                query = query.where(PlumbingInvoice.invoice_date <= to_date)
 
             # Apply supplier filter - support ["All"], multiple supplier IDs, or supplier names
             if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
@@ -437,10 +460,11 @@ class StatementController:
                             PlumbingSupplier.name.ilike(f"%{supplier_name}%")
                         )
                 if supplier_conditions:
-                    query = query.filter(or_(*supplier_conditions))
+                    query = query.where(or_(*supplier_conditions))
 
             # Execute query and filter by status
-            all_results = query.all()
+            result = await self.db.execute(query)
+            all_results = result.all()
             filtered_results = []
             seen_keys = set()
             for plumbing_invoice, plumbing_statement, plumbing_supplier, system_invoice_id in all_results:
@@ -551,7 +575,7 @@ class StatementController:
                 }
             }
 
-    def get_statement_by_id(self, statement_id: int) -> Optional[Dict[str, Any]]:
+    async def get_statement_by_id(self, statement_id: int) -> Optional[Dict[str, Any]]:
         """
         Get statement by ID with supplier information for PDF download
 
@@ -562,12 +586,12 @@ class StatementController:
             Dict with statement and supplier info, or None if not found
         """
         try:
-            result = (
-                self.db.query(PlumbingStatement, PlumbingSupplier)
+            result = await self.db.execute(
+                select(PlumbingStatement, PlumbingSupplier)
                 .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
-                .filter(PlumbingStatement.id == statement_id)
-                .first()
+                .where(PlumbingStatement.id == statement_id)
             )
+            result_row = result.first()
 
             if not result:
                 return None
@@ -595,7 +619,7 @@ class StatementController:
                 f"Error getting statement by ID {statement_id}: {str(e)}")
             return None
 
-    def reprocess_statement(self, statement_id: int) -> Dict[str, Any]:
+    async def reprocess_statement(self, statement_id: int) -> Dict[str, Any]:
         """
         Reprocess a statement by downloading PDF from S3 and re-extracting data
 
@@ -607,7 +631,7 @@ class StatementController:
         """
         try:
             # Get statement details
-            statement_info = self.get_statement_by_id(statement_id)
+            statement_info = await self.get_statement_by_id(statement_id)
             if not statement_info:
                 return {
                     'success': False,
@@ -762,9 +786,12 @@ class StatementController:
                 f"Deleting existing records for statement {statement_id}")
             try:
                 # Check if statement still exists (might have been deleted by another process)
-                existing_statement = self.db.query(PlumbingStatement).filter(
-                    PlumbingStatement.id == statement_id
-                ).first()
+                result = await self.db.execute(
+                    select(PlumbingStatement).where(
+                        PlumbingStatement.id == statement_id
+                    )
+                )
+                existing_statement = result.scalar_one_or_none()
 
                 if not existing_statement:
                     logger.warning(
@@ -772,18 +799,26 @@ class StatementController:
                     # Continue with reprocessing - we'll create a new statement
                 else:
                     # Delete associated invoices first (foreign key constraint)
-                    invoice_count = self.db.query(PlumbingInvoice).filter(
-                        PlumbingInvoice.statement_id == statement_id
-                    ).count()
+                    result = await self.db.execute(
+                        select(func.count(PlumbingInvoice.id)).where(
+                            PlumbingInvoice.statement_id == statement_id
+                        )
+                    )
+                    invoice_count = result.scalar()
 
-                    self.db.query(PlumbingInvoice).filter(
-                        PlumbingInvoice.statement_id == statement_id
-                    ).delete()
+                    await self.db.execute(
+                        delete(PlumbingInvoice).where(
+                            PlumbingInvoice.statement_id == statement_id
+                        )
+                    )
 
                     # Delete the statement
-                    statement_deleted = self.db.query(PlumbingStatement).filter(
-                        PlumbingStatement.id == statement_id
-                    ).delete()
+                    result = await self.db.execute(
+                        delete(PlumbingStatement).where(
+                            PlumbingStatement.id == statement_id
+                        )
+                    )
+                    statement_deleted = result.rowcount > 0
 
                     if not statement_deleted:
                         logger.warning(
@@ -868,9 +903,12 @@ class StatementController:
                 # For now, we'll create the database records manually
                 try:
                     # Get or create supplier
-                    supplier = self.db.query(PlumbingSupplier).filter(
-                        PlumbingSupplier.name == final_supplier_name
-                    ).first()
+                    result = await self.db.execute(
+                        select(PlumbingSupplier).where(
+                            PlumbingSupplier.name == final_supplier_name
+                        )
+                    )
+                    supplier = result.scalar_one_or_none()
 
                     if not supplier:
                         logger.error(
@@ -979,7 +1017,7 @@ class StatementController:
             except:
                 pass
 
-    def _get_supplier_name_safe(self, statement: PlumbingStatement) -> str:
+    async def _get_supplier_name_safe(self, statement: PlumbingStatement) -> str:
         """Safely get supplier name from a statement, handling session issues"""
         try:
             if statement.supplier:
@@ -987,9 +1025,12 @@ class StatementController:
         except Exception:
             # If we can't access supplier relationship, try to get it from database
             try:
-                supplier_obj = self.db.query(PlumbingSupplier).filter(
-                    PlumbingSupplier.id == statement.supplier_id
-                ).first()
+                result = await self.db.execute(
+                    select(PlumbingSupplier).where(
+                        PlumbingSupplier.id == statement.supplier_id
+                    )
+                )
+                supplier_obj = result.scalar_one_or_none()
                 if supplier_obj:
                     return supplier_obj.name
             except Exception:
@@ -1010,14 +1051,17 @@ class StatementController:
                 f"Could not detect supplier from filename {filename}: {str(e)}")
             return None
 
-    def delete_existing_statement(self, supplier_name: str,
+    async def delete_existing_statement(self, supplier_name: str,
                                   statement_date: datetime) -> bool:
         """Delete existing statement and its records for supplier and month"""
         try:
             # Get supplier
-            supplier = self.db.query(PlumbingSupplier).filter(
-                PlumbingSupplier.name == supplier_name
-            ).first()
+            result = await self.db.execute(
+                select(PlumbingSupplier).where(
+                    PlumbingSupplier.name == supplier_name
+                )
+            )
+            supplier = result.scalar_one_or_none()
 
             if not supplier:
                 logger.warning(
@@ -1035,11 +1079,14 @@ class StatementController:
                     month=statement_date.month + 1, day=1
                 )
 
-            existing_statement = self.db.query(PlumbingStatement).filter(
-                PlumbingStatement.supplier_id == supplier.id,
-                PlumbingStatement.statement_date >= month_start.date(),
-                PlumbingStatement.statement_date < next_month.date()
-            ).first()
+            result = await self.db.execute(
+                select(PlumbingStatement).where(
+                    PlumbingStatement.supplier_id == supplier.id,
+                    PlumbingStatement.statement_date >= month_start.date(),
+                    PlumbingStatement.statement_date < next_month.date()
+                )
+            )
+            existing_statement = result.scalar_one_or_none()
 
             if existing_statement:
                 logger.info(
@@ -1048,17 +1095,26 @@ class StatementController:
                 )
 
                 # Delete associated invoices first (foreign key constraint)
-                invoice_count = self.db.query(PlumbingInvoice).filter(
-                    PlumbingInvoice.statement_id == existing_statement.id
-                ).count()
+                result = await self.db.execute(
+                    select(func.count(PlumbingInvoice.id)).where(
+                        PlumbingInvoice.statement_id == existing_statement.id
+                    )
+                )
+                invoice_count = result.scalar()
 
-                self.db.query(PlumbingInvoice).filter(
-                    PlumbingInvoice.statement_id == existing_statement.id
-                ).delete()
+                await self.db.execute(
+                    delete(PlumbingInvoice).where(
+                        PlumbingInvoice.statement_id == existing_statement.id
+                    )
+                )
 
                 # Delete the statement
-                self.db.delete(existing_statement)
-                self.db.commit()
+                await self.db.execute(
+                    delete(PlumbingStatement).where(
+                        PlumbingStatement.id == existing_statement.id
+                    )
+                )
+                await self.db.commit()
 
                 logger.info(
                     f"Deleted statement {existing_statement.id} and "
@@ -1078,7 +1134,7 @@ class StatementController:
             self.db.rollback()
             return False
 
-    def reprocess_all_statements(self, supplier_name: Optional[str] = None, max_statements: int = 100) -> Dict[str, Any]:
+    async def reprocess_all_statements(self, supplier_name: Optional[str] = None, max_statements: int = 100) -> Dict[str, Any]:
         """
         Reprocess multiple statements with optional filtering
 
@@ -1094,28 +1150,31 @@ class StatementController:
                 f"Starting bulk reprocessing - Supplier: {supplier_name or 'All'}, Max: {max_statements}")
 
             # Build query for statements to reprocess with eager loading of supplier
-            query = self.db.query(PlumbingStatement).options(
+            query = select(PlumbingStatement).options(
                 joinedload(PlumbingStatement.supplier))
 
             # Apply supplier filter if provided
             if supplier_name:
                 if supplier_name.isdigit():
-                    supplier_id = int(supplier_name)
+                    supplier_id = int(supplier_id)
                     # Handle supplier_id = 0 as "all suppliers" - skip filtering
                     if supplier_id != 0:
                         # Filter by specific supplier ID
-                        query = query.filter(
+                        query = query.where(
                             PlumbingStatement.supplier_id == supplier_id)
                     # If supplier_id == 0, don't apply any filter (all suppliers)
                 else:
                     # Filter by supplier name (partial match) - need to join for this
-                    query = query.join(PlumbingSupplier).filter(
+                    query = query.join(PlumbingSupplier).where(
                         PlumbingSupplier.name.ilike(f"%{supplier_name}%")
                     )
 
             # Order by most recent first and limit
-            statements = query.order_by(
-                PlumbingStatement.statement_date.desc()).limit(max_statements).all()
+            result = await self.db.execute(
+                query.order_by(
+                    PlumbingStatement.statement_date.desc()).limit(max_statements)
+            )
+            statements = result.scalars().all()
 
             if not statements:
                 return {
@@ -1142,10 +1201,10 @@ class StatementController:
                         f"Processing statement {idx}/{len(statements)} - ID: {statement.id}")
 
                     # Reprocess the statement
-                    result = self.reprocess_statement(statement.id)
+                    result = await self.reprocess_statement(statement.id)
 
                     # Track result with proper supplier information
-                    old_supplier_name = self._get_supplier_name_safe(statement)
+                    old_supplier_name = await self._get_supplier_name_safe(statement)
 
                     statement_result = {
                         'original_id': statement.id,
@@ -1257,7 +1316,7 @@ class StatementController:
                 }
             }
 
-    def delete_statement(self, statement_id: int) -> Dict[str, Any]:
+    async def delete_statement(self, statement_id: int) -> Dict[str, Any]:
         """
         Delete a statement and all its associated invoice items
 
@@ -1271,9 +1330,12 @@ class StatementController:
             logger.info(f"Starting deletion of statement ID: {statement_id}")
 
             # First, check if the statement exists
-            statement = self.db.query(PlumbingStatement).filter(
-                PlumbingStatement.id == statement_id
-            ).first()
+            result = await self.db.execute(
+                select(PlumbingStatement).where(
+                    PlumbingStatement.id == statement_id
+                )
+            )
+            statement = result.scalar_one_or_none()
 
             if not statement:
                 return {
@@ -1286,9 +1348,12 @@ class StatementController:
             statement_date = statement.statement_date
 
             # Count associated invoices before deletion
-            invoice_count = self.db.query(PlumbingInvoice).filter(
-                PlumbingInvoice.statement_id == statement_id
-            ).count()
+            result = await self.db.execute(
+                select(func.count(PlumbingInvoice.id)).where(
+                    PlumbingInvoice.statement_id == statement_id
+                )
+            )
+            invoice_count = result.scalar()
 
             logger.info(
                 f"Statement {statement_id} ({supplier_name}, {statement_date}) "
@@ -1296,14 +1361,20 @@ class StatementController:
             )
 
             # Delete all associated invoices first
-            deleted_invoices = self.db.query(PlumbingInvoice).filter(
-                PlumbingInvoice.statement_id == statement_id
-            ).delete()
+            result = await self.db.execute(
+                delete(PlumbingInvoice).where(
+                    PlumbingInvoice.statement_id == statement_id
+                )
+            )
+            deleted_invoices = result.rowcount
 
             # Delete the statement
-            deleted_statement = self.db.query(PlumbingStatement).filter(
-                PlumbingStatement.id == statement_id
-            ).delete()
+            result = await self.db.execute(
+                delete(PlumbingStatement).where(
+                    PlumbingStatement.id == statement_id
+                )
+            )
+            deleted_statement = result.rowcount
 
             # Commit the transaction
             self.db.commit()
@@ -1334,7 +1405,7 @@ class StatementController:
                 'error': f'Failed to delete statement: {str(e)}'
             }
 
-    def search_statement_invoice_data(
+    async def search_statement_invoice_data(
         self,
         search: str,
         from_date: Optional[date] = None,
@@ -1561,11 +1632,11 @@ class StatementController:
             # 1. Search in PlumbingInvoice (statement invoices)
             # Use OR condition to prioritize "starts with" matches first
             statement_query = (
-                self.db.query(PlumbingInvoice, PlumbingStatement,
+                select(PlumbingInvoice, PlumbingStatement,
                               PlumbingSupplier)
                 .join(PlumbingStatement, PlumbingInvoice.statement_id == PlumbingStatement.id)
                 .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
-                .filter(
+                .where(
                     or_(
                         PlumbingInvoice.invoice_number.ilike(
                             f"{search}%"),  # Starts with
@@ -1577,10 +1648,10 @@ class StatementController:
 
             # Apply filters to statement query
             if from_date:
-                statement_query = statement_query.filter(
+                statement_query = statement_query.where(
                     PlumbingInvoice.invoice_date >= from_date)
             if to_date:
-                statement_query = statement_query.filter(
+                statement_query = statement_query.where(
                     PlumbingInvoice.invoice_date <= to_date)
 
             # Apply supplier filter to statement query
@@ -1601,16 +1672,17 @@ class StatementController:
                         )
 
                 if supplier_conditions:
-                    statement_query = statement_query.filter(
+                    statement_query = statement_query.where(
                         or_(*supplier_conditions))
 
             # Get statement results
-            statement_results = statement_query.all()
+            result = await self.db.execute(statement_query)
+            statement_results = result.all()
 
             # Process statement invoices
             for plumbing_invoice, plumbing_statement, plumbing_supplier in statement_results:
                 # Check reconciliation status
-                match_result = self.check_invoice_exists_in_system(
+                match_result = await self.check_invoice_exists_in_system(
                     plumbing_invoice.invoice_number,
                     plumbing_supplier.id,
                     plumbing_invoice.invoice_date
@@ -1655,24 +1727,24 @@ class StatementController:
             from mpi_backend.database.models.Invoice import Invoice
 
             system_query = (
-                self.db.query(InvoiceItem, Invoice, PlumbingSupplier)
+                select(InvoiceItem, Invoice, PlumbingSupplier)
                 .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
                 .join(PlumbingSupplier, Invoice.supplier_id == PlumbingSupplier.id)
-                .filter(
+                .where(
                     or_(
                         InvoiceItem.ref_no.ilike(f"{search}%"),  # Starts with
                         InvoiceItem.ref_no.ilike(f"%{search}%")   # Contains
                     )
                 )
-                .filter(InvoiceItem.ref_no.isnot(None))
+                .where(InvoiceItem.ref_no.isnot(None))
             )
 
             # Apply filters to system query
             if from_date:
-                system_query = system_query.filter(
+                system_query = system_query.where(
                     InvoiceItem.date >= from_date)
             if to_date:
-                system_query = system_query.filter(InvoiceItem.date <= to_date)
+                system_query = system_query.where(InvoiceItem.date <= to_date)
 
             # Apply supplier filter to system query
             if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
@@ -1692,16 +1764,17 @@ class StatementController:
                         )
 
                 if supplier_conditions:
-                    system_query = system_query.filter(
+                    system_query = system_query.where(
                         or_(*supplier_conditions))
 
             # Exclude invoices that exist in statement data (PlumbingInvoice)
-            subquery = self.db.query(PlumbingInvoice.invoice_number).subquery()
-            system_query = system_query.filter(
+            subquery = select(PlumbingInvoice.invoice_number).subquery()
+            system_query = system_query.where(
                 ~InvoiceItem.ref_no.in_(select(subquery.c.invoice_number)))
 
             # Get system results
-            system_results = system_query.all()
+            result = await self.db.execute(system_query)
+            system_results = result.all()
 
             # Process system invoices (these are "Unlisted" status)
             for invoice_item, invoice, supplier in system_results:
@@ -1794,7 +1867,7 @@ class StatementController:
                 }
             }
 
-    def get_unlisted_invoices(
+    async def get_unlisted_invoices(
         self,
         from_date: Optional[date] = None,
         to_date: Optional[date] = None,
@@ -1813,7 +1886,7 @@ class StatementController:
 
             # Build optimized query with DISTINCT to avoid duplicates at database level
             query = (
-                self.db.query(
+                select(
                     InvoiceItem.ref_no,
                     InvoiceItem.date,
                     InvoiceItem.po_number,
@@ -1830,9 +1903,9 @@ class StatementController:
 
             # Apply date filters on InvoiceItem date
             if from_date:
-                query = query.filter(InvoiceItem.date >= from_date)
+                query = query.where(InvoiceItem.date >= from_date)
             if to_date:
-                query = query.filter(InvoiceItem.date <= to_date)
+                query = query.where(InvoiceItem.date <= to_date)
 
             # Apply supplier filter
             if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
@@ -1851,15 +1924,16 @@ class StatementController:
                             PlumbingSupplier.name.ilike(f"%{supplier_name}%")
                         )
                 if supplier_conditions:
-                    query = query.filter(or_(*supplier_conditions))
+                    query = query.where(or_(*supplier_conditions))
 
             # Exclude invoices that exist in statement data (PlumbingInvoice)
-            subquery = self.db.query(PlumbingInvoice.invoice_number).subquery()
-            query = query.filter(~InvoiceItem.ref_no.in_(
+            subquery = select(PlumbingInvoice.invoice_number).subquery()
+            query = query.where(~InvoiceItem.ref_no.in_(
                 select(subquery.c.invoice_number)))
 
             # Get total count for pagination
-            total_count = query.count()
+            count_result = await self.db.execute(select(func.count()).select_from(query.subquery()))
+            total_count = count_result.scalar()
 
             # Stable ordering to match DISTINCT key and tie-break by id/date
             query = query.order_by(
@@ -1872,7 +1946,8 @@ class StatementController:
             query = query.offset(offset).limit(page_size)
 
             # Execute query
-            results = query.all()
+            result = await self.db.execute(query)
+            results = result.all()
 
             # Process results
             invoice_data = []
@@ -1933,7 +2008,7 @@ class StatementController:
                 }
             }
 
-    def get_missing_invalid_invoices(
+    async def get_missing_invalid_invoices(
         self,
         from_date: Optional[date] = None,
         to_date: Optional[date] = None,
@@ -1988,7 +2063,7 @@ class StatementController:
 
             # OPTIMIZED: Build system invoices query with all needed fields and DISTINCT
             system_query = (
-                self.db.query(
+                select(
                     InvoiceItem.ref_no.label('invoice_number'),
                     InvoiceItem.date.label('invoice_date'),
                     InvoiceItem.po_number.label('customer_po'),
@@ -2008,12 +2083,12 @@ class StatementController:
 
             # Apply filters to system query
             if from_date:
-                system_query = system_query.filter(
+                system_query = system_query.where(
                     InvoiceItem.date >= from_date)
             if to_date:
-                system_query = system_query.filter(InvoiceItem.date <= to_date)
+                system_query = system_query.where(InvoiceItem.date <= to_date)
             if supplier_conditions_system:
-                system_query = system_query.filter(
+                system_query = system_query.where(
                     or_(*supplier_conditions_system))
 
             # Order system query to match DISTINCT ON stability: DISTINCT keys first, then tie-breakers
@@ -2026,7 +2101,7 @@ class StatementController:
 
             # OPTIMIZED: Build statement invoices query with all needed fields and DISTINCT
             statement_query = (
-                self.db.query(
+                select(
                     PlumbingInvoice.invoice_number,
                     PlumbingInvoice.invoice_date,
                     PlumbingInvoice.customer_po,
@@ -2045,13 +2120,13 @@ class StatementController:
 
             # Apply filters to statement query
             if from_date:
-                statement_query = statement_query.filter(
+                statement_query = statement_query.where(
                     PlumbingInvoice.invoice_date >= from_date)
             if to_date:
-                statement_query = statement_query.filter(
+                statement_query = statement_query.where(
                     PlumbingInvoice.invoice_date <= to_date)
             if supplier_conditions_statement:
-                statement_query = statement_query.filter(
+                statement_query = statement_query.where(
                     or_(*supplier_conditions_statement))
 
             # Order statement query to match DISTINCT ON stability: DISTINCT keys first, then tie-breakers
@@ -2063,8 +2138,10 @@ class StatementController:
             )
 
             # Execute both queries with consistent ordering
-            system_invoices = system_query.all()
-            statement_invoices = statement_query.all()
+            system_result = await self.db.execute(system_query)
+            system_invoices = system_result.all()
+            statement_result = await self.db.execute(statement_query)
+            statement_invoices = statement_result.all()
 
             # Ensure consistent ordering of raw data (stable and matches ORDER BY above)
             system_invoices = sorted(system_invoices, key=lambda x: (
@@ -2206,7 +2283,7 @@ class StatementController:
                 }
             }
 
-    def get_all_invoices_combined(
+    async def get_all_invoices_combined(
         self,
         from_date: Optional[date] = None,
         to_date: Optional[date] = None,
@@ -2262,7 +2339,7 @@ class StatementController:
 
             # OPTIMIZED: Single efficient query for system invoices with all needed data and DISTINCT
             system_base_query = (
-                self.db.query(
+                select(
                     InvoiceItem.ref_no.label('invoice_number'),
                     InvoiceItem.date.label('invoice_date'),
                     InvoiceItem.po_number.label('customer_po'),
@@ -2277,19 +2354,19 @@ class StatementController:
                 .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
                 .join(PlumbingSupplier, Invoice.supplier_id == PlumbingSupplier.id)
                 # Exclude null invoice numbers
-                .filter(InvoiceItem.ref_no.isnot(None))
+                .where(InvoiceItem.ref_no.isnot(None))
                 .distinct(InvoiceItem.ref_no, PlumbingSupplier.name, InvoiceItem.date)
             )
 
             # Apply filters to system query
             if from_date:
-                system_base_query = system_base_query.filter(
+                system_base_query = system_base_query.where(
                     InvoiceItem.date >= from_date)
             if to_date:
-                system_base_query = system_base_query.filter(
+                system_base_query = system_base_query.where(
                     InvoiceItem.date <= to_date)
             if supplier_conditions_system:
-                system_base_query = system_base_query.filter(
+                system_base_query = system_base_query.where(
                     or_(*supplier_conditions_system))
 
             # Order system invoices (no limit for comprehensive data)
@@ -2298,7 +2375,7 @@ class StatementController:
 
             # OPTIMIZED: Single query for statement invoices with all needed data and DISTINCT
             statement_base_query = (
-                self.db.query(
+                select(
                     PlumbingInvoice.invoice_number,
                     PlumbingInvoice.invoice_date,
                     PlumbingInvoice.customer_po,
@@ -2313,28 +2390,30 @@ class StatementController:
                 .join(PlumbingStatement, PlumbingInvoice.statement_id == PlumbingStatement.id)
                 .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
                 # Exclude null invoice numbers
-                .filter(PlumbingInvoice.invoice_number.isnot(None))
+                .where(PlumbingInvoice.invoice_number.isnot(None))
                 .distinct(PlumbingInvoice.invoice_number, PlumbingSupplier.name, PlumbingInvoice.invoice_date)
             )
 
             # Apply filters to statement query
             if from_date:
-                statement_base_query = statement_base_query.filter(
+                statement_base_query = statement_base_query.where(
                     PlumbingInvoice.invoice_date >= from_date)
             if to_date:
-                statement_base_query = statement_base_query.filter(
+                statement_base_query = statement_base_query.where(
                     PlumbingInvoice.invoice_date <= to_date)
             if supplier_conditions_statement:
-                statement_base_query = statement_base_query.filter(
-                    or_(*supplier_conditions_statement))
+                statement_base_query = statement_base_query.where(
+                    or_(*supplier_conditions_system))
 
             # Order statement invoices (no limit for comprehensive data)
             statement_base_query = statement_base_query.order_by(
                 PlumbingInvoice.invoice_date.desc())
 
             # Execute both queries
-            system_invoices = system_base_query.all()
-            statement_invoices = statement_base_query.all()
+            system_result = await self.db.execute(system_base_query)
+            system_invoices = system_result.all()
+            statement_result = await self.db.execute(statement_base_query)
+            statement_invoices = statement_result.all()
 
             logger.info(
                 f"Retrieved {len(system_invoices)} system invoices and {len(statement_invoices)} statement invoices")
@@ -2344,27 +2423,27 @@ class StatementController:
                 inv.invoice_number for inv in system_invoices if inv.invoice_number]
             statement_matches = set()
             if system_invoice_numbers:
-                matched_statements = (
-                    self.db.query(PlumbingInvoice.invoice_number)
-                    .filter(PlumbingInvoice.invoice_number.in_(system_invoice_numbers))
+                matched_statements_result = await self.db.execute(
+                    select(PlumbingInvoice.invoice_number)
+                    .where(PlumbingInvoice.invoice_number.in_(system_invoice_numbers))
                     .distinct()
-                    .all()
                 )
+                matched_statements = matched_statements_result.scalars().all()
                 statement_matches = {
-                    match.invoice_number for match in matched_statements}
+                    match for match in matched_statements}
 
             # OPTIMIZED: Bulk check for system matches using a single query
             statement_invoice_numbers = [
                 inv.invoice_number for inv in statement_invoices if inv.invoice_number]
             system_matches = set()
             if statement_invoice_numbers:
-                matched_systems = (
-                    self.db.query(InvoiceItem.ref_no)
-                    .filter(InvoiceItem.ref_no.in_(statement_invoice_numbers))
+                matched_systems_result = await self.db.execute(
+                    select(InvoiceItem.ref_no)
+                    .where(InvoiceItem.ref_no.in_(statement_invoice_numbers))
                     .distinct()
-                    .all()
                 )
-                system_matches = {match.ref_no for match in matched_systems}
+                matched_systems = matched_systems_result.scalars().all()
+                system_matches = {match for match in matched_systems}
 
             # Process all invoices efficiently (no Python-level deduplication needed due to DISTINCT)
             all_invoices = []

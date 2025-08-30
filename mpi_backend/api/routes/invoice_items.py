@@ -2,8 +2,8 @@ from typing import Optional, List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks
-from sqlalchemy.orm import Session
-from mpi_backend.database import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+from mpi_backend.database import get_async_db
 from datetime import datetime
 from fastapi_pagination import Page, paginate
 from datetime import date
@@ -22,8 +22,8 @@ router = APIRouter(prefix="/invoice-items",tags=["Invoice Items"])
 
 
 @router.get("/all", response_model=Page[InvoiceItems])
-def get_invoices(
-        db: Session = Depends(get_db),
+async def get_invoices(
+        db: AsyncSession = Depends(get_async_db),
         token: str = Depends(JWTBearer())
 ):
     """
@@ -79,7 +79,7 @@ def get_invoices(
         - Large datasets may require multiple page requests
     """
     try:
-        invoice_items = InvoiceItemController(db).get_invoice_items()
+        invoice_items = await InvoiceItemController(db).get_invoice_items()
 
         return paginate(invoice_items)
 
@@ -88,8 +88,8 @@ def get_invoices(
 
 
 @router.get("/id", response_model=Page[InvoiceItems])
-def get_invoices(
-        db: Session = Depends(get_db),
+async def get_invoices(
+        db: AsyncSession = Depends(get_async_db),
         invoice_id: Optional[UUID] = Query(None, description="Filter by invoice_id"),
         token: str = Depends(JWTBearer())
 ):
@@ -160,8 +160,8 @@ def get_invoices(
 
 
 @router.get("/supplier-date", response_model=PaginatedInvoiceItemsResponse)
-def get_invoices(
-        db: Session = Depends(get_db),
+async def get_invoices(
+        db: AsyncSession = Depends(get_async_db),
         supplier_name: List[str] = Query(None),
         from_date: date = Query(None),
         to_date: date = Query(None),
@@ -241,7 +241,7 @@ def get_invoices(
         - Empty filters return all invoice items (subject to pagination)
     """
     try:
-        invoice_items = InvoiceItemController(db).get_invoice_items_by_filters(supplier=supplier_name,
+        invoice_items = await InvoiceItemController(db).get_invoice_items_by_filters(supplier=supplier_name,
                                                                                from_date=from_date,
                                                                                to_date=to_date,
                                                                                job_location=job_location,
@@ -254,7 +254,7 @@ def get_invoices(
 
 
 @router.put("/update")
-def update_invoice_items(items: List[UpdateInvoiceItemRequest], background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def update_invoice_items(items: List[UpdateInvoiceItemRequest], background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_async_db)):
     """
     Update multiple invoice items with background task processing.
     
@@ -312,9 +312,9 @@ def update_invoice_items(items: List[UpdateInvoiceItemRequest], background_tasks
 
 
 @router.put("/toggle-visibility", status_code=200)
-def toggle_visibility(
+async def toggle_visibility(
     request: ToggleVisibilityRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer())
 ):
     """
@@ -367,13 +367,13 @@ def toggle_visibility(
         - Use /hidden-items endpoint to view hidden items
     """
     controller = InvoiceItemController(db)
-    updated_count = controller.toggle_visibility(request.ids, request.make_visible)
+    updated_count = await controller.toggle_visibility(request.ids, request.make_visible)
     return {"status": f"Updated visibility for {updated_count} items"}
 
 
 @router.get("/hidden-items", response_model=Page[InvoiceItems])
-def get_hidden_items(
-    db: Session = Depends(get_db),
+async def get_hidden_items(
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer())
 ):
     """
@@ -441,7 +441,7 @@ def get_hidden_items(
     return paginate(controller.get_hidden_items())
 
 @router.get("/count")
-def count_invoice_items(db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+async def count_invoice_items(db: AsyncSession = Depends(get_async_db), token: str = Depends(JWTBearer())):
     """
     Get total count of active invoice items.
     
@@ -487,11 +487,11 @@ def count_invoice_items(db: Session = Depends(get_db), token: str = Depends(JWTB
         - Count is calculated in real-time
         - Useful for monitoring system data volume
     """
-    no_of_line_items = InvoiceItemController(db).count_line_items()
+    no_of_line_items = await InvoiceItemController(db).count_line_items()
     return {"count": no_of_line_items}
 
 @router.get("/sort", response_model=Page[InvoiceItems])
-def sort_invoices(db: Session = Depends(get_db), column_name: str = Query(None),
+async def sort_invoices(db: AsyncSession = Depends(get_async_db), column_name: str = Query(None),
                    sort_order: str = Query('ascending', description="Sort By (ascending, descending)")):
     """
     Sort invoice items by specified column with pagination.
@@ -604,11 +604,11 @@ def sort_invoices(db: Session = Depends(get_db), column_name: str = Query(None),
     return paginate(invoice_items)
 
 @router.post("/export")
-def export_invoices(
+async def export_invoices(
         ids: List[int],
         columns: Optional[List[str]] = None,
         order_by: Optional[List[OrderByFilter]] = None,
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_async_db),
         token: str = Depends(JWTBearer()),
 ):
     """
@@ -764,8 +764,8 @@ def export_invoices(
 
 
 @router.post("/export-all")
-def export_all_invoices(request: ExportToExcelFilterRequest,
-        db: Session = Depends(get_db),
+async def export_all_invoices(request: ExportToExcelFilterRequest,
+        db: AsyncSession = Depends(get_async_db),
         token: str = Depends(JWTBearer()),
 ):
     """
@@ -831,7 +831,7 @@ def export_all_invoices(request: ExportToExcelFilterRequest,
         start_time = time.time()
         
         # Get filtered IDs efficiently
-        ids = InvoiceItemController(db).apply_filters(request, page=1, size=0, col_param='id')
+        ids = await InvoiceItemController(db).apply_filters(request, page=1, size=0, col_param='id')
         
         if request.excluded_rows_ids:
             ids = list(set(ids) - set(request.excluded_rows_ids))

@@ -1,10 +1,11 @@
 import json
 from mpi_backend.database.models import CustomerJobMapping
 import logging
-from mpi_backend.database import get_db
-from contextlib import contextmanager
+from mpi_backend.database import get_async_db
+from contextlib import asynccontextmanager
 import sys
 from pathlib import Path
+from sqlalchemy import select
 
 # Add the parent directory to the path so we can import mpi_backend
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
@@ -16,7 +17,17 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 
-def insert_customer_job_in_db(session):
+@asynccontextmanager
+async def get_db_session():
+    """Get database session for customer job mapping operations"""
+    db = await get_async_db()
+    try:
+        yield db
+    finally:
+        await db.close()
+
+
+async def insert_customer_job_in_db():
     """
     Inserts new customer job mappings into the database from a JSON file.
 
@@ -24,8 +35,7 @@ def insert_customer_job_in_db(session):
     only the new mappings into the database. It first loads the JSON data, then
     compares it with existing mappings in the database to identify new entries.
     New mappings are added in bulk to the database. If any errors occur during
-    the process, the transaction is rolled back. Finally, the database session
-    is closed.
+    the process, the transaction is rolled back.
 
     Raises:
         FileNotFoundError: If the JSON file is not found.
@@ -34,71 +44,82 @@ def insert_customer_job_in_db(session):
         Exception: If there is an error fetching existing mappings from the database
                    or inserting new mappings.
     """
-    try:
-        # Load JSON data
+    async with get_db_session() as session:
         try:
-            with open('mpi_backend/storage/fixtures/customer-job-mapping.json', 'r') as file:
-                json_mappings = json.load(file)
-        except FileNotFoundError:
-            logger.error("Mapping JSON file not found at expected location.")
-            raise
-        except json.JSONDecodeError:
-            logger.error("JSON file is corrupted or contains invalid syntax.")
-            raise ValueError("JSON file is corrupted or contains invalid syntax.")
-
-        logger.info("Loaded %d customer job mappings from JSON.", len(json_mappings))
-
-        # Fetch all existing mappings from the DB
-        try:
-            existing_mappings = session.query(CustomerJobMapping).all()
-        except Exception as e:
-            logger.error("Error fetching existing mappings from DB: %s", str(e))
-            raise
-
-        # Build a set of (customer_job, updated_customer_job) pairs for quick lookup
-        existing_set = set(
-            (mapping.customer_job.strip().lower(), mapping.updated_customer_job.strip().lower())
-            for mapping in existing_mappings
-        )
-
-        # Filter only the new ones
-        new_entries = []
-        for mapping in json_mappings:
+            # Load JSON data
             try:
-                pair = (
-                    str(mapping['customer_job']).strip().lower(),
-                    str(mapping['updated_customer_job']).strip().lower()
+                with open('mpi_backend/storage/fixtures/customer-job-mapping.json', 'r') as file:
+                    json_mappings = json.load(file)
+            except FileNotFoundError:
+                logger.error("Mapping JSON file not found at expected location.")
+                raise
+            except json.JSONDecodeError:
+                logger.error("JSON file is corrupted or contains invalid syntax.")
+                raise ValueError("JSON file is corrupted or contains invalid syntax.")
+
+            logger.info("Loaded %d customer job mappings from JSON.", len(json_mappings))
+
+            # Fetch all existing mappings from the DB
+            try:
+                result = await session.execute(
+                    select(CustomerJobMapping)
                 )
-                if pair not in existing_set:
-                    new_entries.append(CustomerJobMapping(
-                        customer_job=mapping['customer_job'],
-                        updated_customer_job=mapping['updated_customer_job']
-                    ))
-            except KeyError as ke:
-                logger.error("Missing expected fields in JSON: %s", str(ke))
-                raise ValueError(f"Missing expected fields in JSON: {str(ke)}")
+                existing_mappings = result.scalars().all()
+            except Exception as e:
+                logger.error("Error fetching existing mappings from DB: %s", str(e))
+                raise
 
-        # Bulk insert all new mappings
-        if new_entries:
-            session.add_all(new_entries)
-            session.commit()
-            logger.info("Inserted %d new customer job mappings.", len(new_entries))
-        else:
-            logger.info("No new customer job mappings to insert.")
+            # Build a set of (customer_job, updated_customer_job) pairs for quick lookup
+            existing_set = set(
+                (mapping.customer_job.strip().lower(), mapping.updated_customer_job.strip().lower())
+                for mapping in existing_mappings
+            )
 
-        # Count total mappings now
-        total_count = session.query(CustomerJobMapping).count()
-        logger.info("Total Customer Job Mappings in DB: %d", total_count)
+            # Filter only the new ones
+            new_entries = []
+            for mapping in json_mappings:
+                try:
+                    pair = (
+                        str(mapping['customer_job']).strip().lower(),
+                        str(mapping['updated_customer_job']).strip().lower()
+                    )
+                    if pair not in existing_set:
+                        new_entries.append(CustomerJobMapping(
+                            customer_job=mapping['customer_job'],
+                            updated_customer_job=mapping['updated_customer_job']
+                        ))
+                except KeyError as ke:
+                    logger.error("Missing expected fields in JSON: %s", str(ke))
+                    raise ValueError(f"Missing expected fields in JSON: {str(ke)}")
 
-    except Exception as e:
-        session.rollback()
-        logger.error("Error inserting customer job mappings into DB: %s", str(e))
-        raise
+            # Bulk insert all new mappings
+            if new_entries:
+                session.add_all(new_entries)
+                await session.commit()
+                logger.info("Inserted %d new customer job mappings.", len(new_entries))
+            else:
+                logger.info("No new customer job mappings to insert.")
 
-    finally:
-        session.close()
+            # Count total mappings now
+            result = await session.execute(
+                select(CustomerJobMapping)
+            )
+            total_count = result.scalar()
+            logger.info("Total Customer Job Mappings in DB: %d", total_count)
+
+        except Exception as e:
+            await session.rollback()
+            logger.error("Error inserting customer job mappings into DB: %s", str(e))
+            raise
+
+
+# Legacy sync wrapper for backward compatibility
+def insert_customer_job_in_db_sync():
+    """Synchronous wrapper for backward compatibility"""
+    import asyncio
+    return asyncio.run(insert_customer_job_in_db())
 
 
 if __name__ == "__main__":
-    session = contextmanager(get_db)
-    insert_customer_job_in_db(session)
+    import asyncio
+    asyncio.run(insert_customer_job_in_db())

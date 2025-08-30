@@ -29,8 +29,8 @@ missing_logger = get_missing_logger()
 # Setup missing emails/attachments tracker
 def log_missing_email_or_attachment(email_subject, sender, reason, date_str):
     """Log missing emails or attachments to the centralized missing log"""
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    log_entry = f"MISSING: {reason} | Date: {date_str} | Sender: {sender} | Subject: {email_subject} | Reason: {reason}"
+    log_entry = (f"MISSING: {reason} | Date: {date_str} | Sender: {sender} | "
+                 f"Subject: {email_subject} | Reason: {reason}")
     missing_logger.info(log_entry)
 
 
@@ -61,7 +61,7 @@ EXCLUDED_SENDERS = [  # suppliers marked as read after download
 ]
 
 
-def login():
+async def login():
     """Establish IMAP connection with error handling"""
     try:
         mail = imaplib.IMAP4_SSL(SMTP_SERVER)
@@ -74,14 +74,16 @@ def login():
         raise
 
 
-def search_previous_week_emails(mail):
+async def search_previous_week_emails(mail):
     """Search for emails from the last 7 days"""
     try:
-        # Search for emails from 7 days ago to yesterday
-        start_date = (datetime.now(TIMEZONE) - timedelta(days=7)).strftime('%d-%b-%Y')
+                # Search for emails from 7 days ago to yesterday
+        start_date = (datetime.now(TIMEZONE) - 
+                     timedelta(days=7)).strftime('%d-%b-%Y')
         end_date = datetime.now(TIMEZONE).strftime('%d-%b-%Y')
         
-        logger.info(f"Searching for emails from last 7 days: {start_date} to {end_date}")
+        logger.info(f"Searching for emails from last 7 days: "
+                   f"{start_date} to {end_date}")
         search_criteria = f'(SINCE "{start_date}" BEFORE "{end_date}")'
         result, data = mail.uid('search', None, search_criteria)
 
@@ -95,13 +97,17 @@ def search_previous_week_emails(mail):
         filtered_email_ids = []
         for idx, email_id in enumerate(raw_email_ids, 1):
             try:
-                email_id = email_id.decode('utf-8') if isinstance(email_id, bytes) else email_id
-                logger.debug(f"Processing email {idx}/{len(raw_email_ids)} - UID: {email_id}")
+                email_id = (email_id.decode('utf-8') if isinstance(email_id, bytes)
+                           else email_id)
+                logger.debug(f"Processing email {idx}/{len(raw_email_ids)} - "
+                           f"UID: {email_id}")
 
-                result, msg_data = mail.uid('fetch', email_id, '(BODY.PEEK[HEADER.FIELDS (FROM)])')
+                result, msg_data = mail.uid('fetch', email_id,
+                                          '(BODY.PEEK[HEADER.FIELDS (FROM)])')
 
                 if result != 'OK':
-                    logger.warning(f"Failed to fetch headers for UID {email_id}: {result}")
+                    logger.warning(f"Failed to fetch headers for UID "
+                                 f"{email_id}: {result}")
                     continue
 
                 raw_email = msg_data[0][1]
@@ -110,19 +116,24 @@ def search_previous_week_emails(mail):
 
                 if from_email in EXCLUDED_SENDERS:
                     filtered_email_ids.append(email_id)
-                    logger.debug(f"Email UID {email_id} from excluded sender: {from_email}")
+                    logger.debug(f"Email UID {email_id} from excluded sender: "
+                               f"{from_email}")
                 else:
-                    logger.debug(f"Email UID {email_id} from non-excluded sender: {from_email}")
+                    logger.debug(f"Email UID {email_id} from non-excluded sender: "
+                               f"{from_email}")
 
             except Exception as e:
-                logger.error(f"Error processing email UID {email_id}: {str(e)}\n{traceback.format_exc()}")
+                logger.error(f"Error processing email UID {email_id}: "
+                           f"{str(e)}\n{traceback.format_exc()}")
                 continue
 
-        logger.info(f"Found {len(filtered_email_ids)} emails from excluded senders in last 7 days")
+        logger.info(f"Found {len(filtered_email_ids)} emails from excluded "
+                   f"senders in last 7 days")
         return filtered_email_ids
 
     except Exception as e:
-        logger.error(f"Error in search_previous_week_emails: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"Error in search_previous_week_emails: "
+                   f"{str(e)}\n{traceback.format_exc()}")
         return []
 
 
@@ -500,7 +511,7 @@ def download_email_attachments(email_message, base_folder_path):
         return False
 
 
-def missing_email_download_background_task():
+async def missing_email_download_background_task():
     """Daily missing invoice download task - downloads last 7 days, NO EMAIL MARKING"""
     logger.info("="*80)
     logger.info("STARTING MISSING INVOICE DOWNLOADER")
@@ -523,8 +534,8 @@ def missing_email_download_background_task():
 
         # Email processing
         try:
-            mail = login()
-            filtered_ids = search_previous_week_emails(mail)
+            mail = await login()
+            filtered_ids = await search_previous_week_emails(mail)
 
             if not filtered_ids:
                 logger.info("No emails from last 7 days to process")

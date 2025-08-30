@@ -134,7 +134,7 @@ class TestExportUtils:
         assert len(df) == 1
         assert df.iloc[0]['Description'] is None
 
-    def test_convert_items_to_dataframe_optimized_basic(self):
+    async def test_convert_items_to_dataframe_optimized_basic(self):
         """Test optimized DataFrame conversion."""
         # Mock SQLAlchemy ORM query behavior
         mock_query = Mock()
@@ -150,7 +150,7 @@ class TestExportUtils:
         mock_query.filter.return_value = mock_query
         mock_query.order_by.return_value = mock_query
 
-        df = convert_items_to_dataframe_optimized(
+        df = await convert_items_to_dataframe_optimized(
             mock_db_session, 
             [1, 2], 
             ['item', 'description', 'qty', 'cost', 'amount']
@@ -161,14 +161,14 @@ class TestExportUtils:
         assert 'Item' in df.columns
         assert 'Description' in df.columns
 
-    def test_convert_items_to_dataframe_optimized_empty_ids(self):
+    async def test_convert_items_to_dataframe_optimized_empty_ids(self):
         """Test optimized conversion with empty ID list."""
         mock_db_session = Mock()
-        df = convert_items_to_dataframe_optimized(mock_db_session, [])
+        df = await convert_items_to_dataframe_optimized(mock_db_session, [])
         assert isinstance(df, pd.DataFrame)
         assert len(df) == 0
 
-    def test_convert_items_to_dataframe_optimized_no_columns(self):
+    async def test_convert_items_to_dataframe_optimized_no_columns(self):
         """Test optimized conversion without specifying columns."""
         # Mock SQLAlchemy ORM query behavior
         mock_query = Mock()
@@ -181,7 +181,7 @@ class TestExportUtils:
         mock_db_session.query.return_value = mock_query
         mock_query.filter.return_value = mock_query
 
-        df = convert_items_to_dataframe_optimized(mock_db_session, [1])
+        df = await convert_items_to_dataframe_optimized(mock_db_session, [1])
         assert isinstance(df, pd.DataFrame)
         assert len(df) == 1
 
@@ -250,7 +250,7 @@ class TestExportUtils:
         assert 'Description' in df.columns
         assert len(df.columns) == 2
 
-    def test_convert_items_to_dataframe_optimized_with_order_by(self):
+    async def test_convert_items_to_dataframe_optimized_with_order_by(self):
         """Test optimized conversion with order_by parameter."""
         # Mock SQLAlchemy ORM query behavior
         mock_query = Mock()
@@ -269,7 +269,7 @@ class TestExportUtils:
         mock_order_by[0].column = 'item'
         mock_order_by[0].order = 'asc'
         
-        df = convert_items_to_dataframe_optimized(
+        df = await convert_items_to_dataframe_optimized(
             mock_db_session, 
             [1], 
             order_by=mock_order_by

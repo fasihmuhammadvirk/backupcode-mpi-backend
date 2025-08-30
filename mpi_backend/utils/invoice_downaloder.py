@@ -30,7 +30,7 @@ missing_logger = get_missing_logger()
 def log_missing_email_or_attachment(email_subject, sender, reason, date_str):
     """Log missing emails or attachments to the centralized missing log"""
     log_entry = (f"MISSING: {reason} | Date: {date_str} | Sender: {sender} | "
-                f"Subject: {email_subject} | Reason: {reason}")
+                 f"Subject: {email_subject} | Reason: {reason}")
     missing_logger.info(log_entry)
 
 
@@ -61,7 +61,7 @@ EXCLUDED_SENDERS = [  # suppliers marked as read after download
 ]
 
 
-def login():
+async def login():
     """Establish IMAP connection with error handling"""
     mail = None
     try:
@@ -80,7 +80,7 @@ def login():
         raise
 
 
-def search_new_emails(mail):
+async def search_new_emails(mail):
     """Search for new emails with error handling"""
     try:
 
@@ -99,16 +99,16 @@ def search_new_emails(mail):
         for idx, email_id in enumerate(raw_email_ids, 1):
             try:
                 email_id = (email_id.decode('utf-8') if isinstance(email_id, bytes)
-                           else email_id)
+                            else email_id)
                 logger.debug(f"Processing email {idx}/{len(raw_email_ids)} - "
-                           f"UID: {email_id}")
+                            f"UID: {email_id}")
 
                 result, msg_data = mail.uid('fetch', email_id,
-                                          '(BODY.PEEK[HEADER.FIELDS (FROM)])')
+                                           '(BODY.PEEK[HEADER.FIELDS (FROM)])')
 
                 if result != 'OK':
-                    logger.warning(f"Failed to fetch headers for UID {email_id}: "
-                                 f"{result}")
+                    logger.warning(f"Failed to fetch headers for UID "
+                                 f"{email_id}: {result}")
                     continue
 
                 raw_email = msg_data[0][1]
@@ -118,11 +118,11 @@ def search_new_emails(mail):
                 if from_email in EXCLUDED_SENDERS:
                     filtered_email_ids.append(email_id)
                     logger.debug(f"Email UID {email_id} from excluded sender: "
-                               f"{from_email}")
+                                f"{from_email}")
 
                 else:
                     logger.debug(f"Email UID {email_id} from non-excluded sender: "
-                               f"{from_email}")
+                                f"{from_email}")
 
             except Exception as e:
                 logger.error(f"Error processing email UID {email_id}: {str(e)}"
@@ -134,7 +134,8 @@ def search_new_emails(mail):
         return filtered_email_ids
 
     except Exception as e:
-        logger.error(f"Error in search_new_emails: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"Error in search_new_emails: {str(e)}"
+                   f"\n{traceback.format_exc()}")
         return []
 
 
@@ -172,29 +173,35 @@ def get_supplier(email_subject, supplier_email) -> str:
             return SUPPLIERS[1]
 
         # Y & S Plumbing Supply - multiple patterns
-        elif any(pattern in subject for pattern in ["y&s", "y and s",
-                                                   "ys plumbing", "y s plumbing","Y&S Plumbing & Heating Supply" ]):
+        elif any(pattern in subject for pattern in [
+            "y&s", "y and s", "ys plumbing", "y s plumbing",
+            "Y&S Plumbing & Heating Supply"
+        ]):
             return SUPPLIERS[2]
 
         # Supreme Plumbing Supply - multiple patterns
-        elif any(pattern in subject for pattern in ["supreme plumbing",
-                                                   "invoice # i-", "supremeplumbing"]):
+        elif any(pattern in subject for pattern in [
+            "supreme plumbing", "invoice # i-", "supremeplumbing"
+        ]):
             return SUPPLIERS[3]
 
         # Pyramid Plumbing - multiple patterns
-        elif any(pattern in subject for pattern in ["pyramid plumbing",
-                                                   "pyramidps"]):
+        elif any(pattern in subject for pattern in [
+            "pyramid plumbing", "pyramidps"
+        ]):
             return SUPPLIERS[4]
 
         # ABC Opus Services - multiple patterns
-        elif any(pattern in subject for pattern in ["abc opus", "opusoperations",
-                                                   "abc opus services"]):
+        elif any(pattern in subject for pattern in [
+            "abc opus", "opusoperations", "abc opus services"
+        ]):
             return SUPPLIERS[5]
 
         # Park Plumbing Supply - multiple patterns
-        elif any(pattern in subject for pattern in ["park plumbing",
-                                                   "parkplumbingsupply",
-                                                   "park plumbing & heating supply"]):
+        elif any(pattern in subject for pattern in [
+            "park plumbing", "parkplumbingsupply",
+            "park plumbing & heating supply"
+        ]):
             return SUPPLIERS[6]
 
         # FW Webb Plumbing Supply - multiple patterns
@@ -557,7 +564,7 @@ def download_email_attachments(email_message, base_folder_path):
         return False
 
 
-def email_download_background_task():
+async def email_download_background_task():
     """Invoice download background task - runs continuously without interruption"""
     logger.info("="*80)
     logger.info("STARTING REGULAR INVOICE DOWNLOADER")
@@ -580,8 +587,8 @@ def email_download_background_task():
 
         # Email processing
         try:
-            mail = login()
-            filtered_ids = search_new_emails(mail)
+            mail = await login()
+            filtered_ids = await search_new_emails(mail)
 
             if not filtered_ids:
                 logger.info("No new emails to process")

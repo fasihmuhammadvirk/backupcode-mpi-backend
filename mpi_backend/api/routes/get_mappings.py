@@ -1,7 +1,7 @@
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
-from mpi_backend.database import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+from mpi_backend.database import get_async_db
 from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
 from mpi_backend.database.schemas import ItemMappingsResponse, UpdateMappingRequest
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
@@ -10,7 +10,11 @@ router = APIRouter(prefix="/mapping", tags=['Item Mappings'])
 
 
 @router.post("")
-def update_item_mappings(request: UpdateMappingRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+async def update_item_mappings(
+    request: UpdateMappingRequest, 
+    db: AsyncSession = Depends(get_async_db), 
+    token: str = Depends(JWTBearer())
+):
     """
     Update item mappings with validation and temporary mapping handling.
     
@@ -92,7 +96,7 @@ def update_item_mappings(request: UpdateMappingRequest, db: Session = Depends(ge
                     "action": "no_change"
                 })
                 continue
-            result = ItemsMappingController(db).update_mapping(
+            result = await ItemsMappingController(db).update_mapping(
                 request.supplier_id, mapping)
             results.append(result)
 
@@ -120,10 +124,10 @@ def update_item_mappings(request: UpdateMappingRequest, db: Session = Depends(ge
 
 
 @router.get("/search-item")
-def search_item_mapping(
+async def search_item_mapping(
     item: str = Query(...,
                       description="Clean item code from invoice to search for"),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer())
 ):
     """
@@ -193,7 +197,7 @@ def search_item_mapping(
         - Useful for finding duplicate items across suppliers
     """
     try:
-        result = ItemsMappingController(db).search_clean_item_across_suppliers(
+        result = await ItemsMappingController(db).search_clean_item_across_suppliers(
             clean_item=item
         )
         return result
@@ -203,7 +207,7 @@ def search_item_mapping(
 
 
 @router.get("/mpi_types")
-def get_mapping_by_mpi_type(db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+async def get_mapping_by_mpi_type(db: AsyncSession = Depends(get_async_db), token: str = Depends(JWTBearer())):
     """
     Get all MPI type mappings organized by MPI code.
     
@@ -274,7 +278,7 @@ def get_mapping_by_mpi_type(db: Session = Depends(get_db), token: str = Depends(
         if not db:
             raise HTTPException(status_code=500, detail="Database connection error")
             
-        mappings = ItemsMappingController(db).get_items_mappings_by_mpi_type()
+        mappings = await ItemsMappingController(db).get_items_mappings_by_mpi_type()
         
         # Return empty dict if no mappings found
         if mappings is None:
@@ -295,8 +299,8 @@ def get_mapping_by_mpi_type(db: Session = Depends(get_db), token: str = Depends(
 
 
 @router.get("/{supplier_id}", response_model=List[ItemMappingsResponse])
-def get_mapping_by_supplier_id(
-    supplier_id: int, db: Session = Depends(get_db), token: str = Depends(JWTBearer())
+async def get_mapping_by_supplier_id(
+    supplier_id: int, db: AsyncSession = Depends(get_async_db), token: str = Depends(JWTBearer())
 ):
     """
     Retrieve item mappings for a specific supplier ID with pagination.
@@ -369,7 +373,7 @@ def get_mapping_by_supplier_id(
         offset = 0
 
         while True:
-            batch = ItemsMappingController(db).get_items_mappings_by_supplier_id(
+            batch = await ItemsMappingController(db).get_items_mappings_by_supplier_id(
                 supplier_id, limit=batch_size, offset=offset)
             if not batch:
                 break

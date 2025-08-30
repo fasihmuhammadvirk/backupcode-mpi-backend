@@ -8,8 +8,8 @@ by matching them against temporary mappings and assigning the appropriate sheet_
 
 import logging
 from typing import Dict, List, Any
-from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import or_, select
 
 from mpi_backend.database.models.InvoiceItems import InvoiceItem
 from mpi_backend.database.models.TemporaryItemMapping import TempItemMapping
@@ -21,17 +21,17 @@ logger = logging.getLogger(__name__)
 class TemporaryMappingUpdater:
     """Updates invoice items using temporary mappings."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: AsyncSession):
         """
         Initialize the TemporaryMappingUpdater.
         
         Args:
-            db: SQLAlchemy database session
+            db: SQLAlchemy async database session
         """
         self.db = db
         self.logger = logging.getLogger(f"{__name__}")
 
-    def get_unmapped_invoice_items(self) -> List[InvoiceItem]:
+    async def get_unmapped_invoice_items(self) -> List[InvoiceItem]:
         """
         Get invoice items that need sheet_name assignment.
         
@@ -45,7 +45,7 @@ class TemporaryMappingUpdater:
         """
         try:
             # Query for items that need sheet_name assignment
-            query = self.db.query(InvoiceItem).filter(
+            query = select(InvoiceItem).where(
                 # No sheet_name or empty sheet_name
                 or_(
                     InvoiceItem.sheet_name.is_(None),
@@ -64,7 +64,8 @@ class TemporaryMappingUpdater:
                 )
             )
             
-            items = query.all()
+            result = await self.db.execute(query)
+            items = result.scalars().all()
             self.logger.info(f"Found {len(items)} invoice items that need sheet_name assignment")
             return items
             
@@ -72,7 +73,7 @@ class TemporaryMappingUpdater:
             self.logger.error(f"Error getting unmapped invoice items: {str(e)}")
             raise
 
-    def get_temporary_mappings(self) -> Dict[str, str]:
+    async def get_temporary_mappings(self) -> Dict[str, str]:
         """
         Get all temporary mappings as a lookup dictionary.
         
@@ -80,7 +81,10 @@ class TemporaryMappingUpdater:
             Dictionary mapping original_item to sheet_name
         """
         try:
-            mappings = self.db.query(TempItemMapping).all()
+            result = await self.db.execute(
+                select(TempItemMapping)
+            )
+            mappings = result.scalars().all()
             
             # Create lookup dictionary: original_item -> sheet_name
             lookup = {}
@@ -95,7 +99,7 @@ class TemporaryMappingUpdater:
             self.logger.error(f"Error getting temporary mappings: {str(e)}")
             raise
 
-    def get_temporary_mappings_with_supplier_context(self) -> Dict[str, List[Dict[str, str]]]:
+    async def get_temporary_mappings_with_supplier_context(self) -> Dict[str, List[Dict[str, str]]]:
         """
         Get temporary mappings organized by item with supplier context awareness.
         
@@ -103,7 +107,10 @@ class TemporaryMappingUpdater:
             Dictionary mapping original_item to list of {sheet_name, context_info}
         """
         try:
-            mappings = self.db.query(TempItemMapping).all()
+            result = await self.db.execute(
+                select(TempItemMapping)
+            )
+            mappings = result.scalars().all()
             
             # Create lookup dictionary: original_item -> [{sheet_name, sheet_info}, ...]
             lookup = {}
@@ -183,7 +190,7 @@ class TemporaryMappingUpdater:
         
         return is_no_match or is_uidi or has_no_sheet_name
 
-    def update_invoice_items_with_temporary_mappings(self) -> Dict[str, Any]:
+    async def update_invoice_items_with_temporary_mappings(self) -> Dict[str, Any]:
         """
         Update invoice items using temporary mappings with supplier-aware logic.
         
@@ -197,7 +204,7 @@ class TemporaryMappingUpdater:
         """
         try:
             # Get unmapped invoice items
-            unmapped_items = self.get_unmapped_invoice_items()
+            unmapped_items = await self.get_unmapped_invoice_items()
             
             if not unmapped_items:
                 self.logger.info("No unmapped invoice items found")
@@ -209,7 +216,7 @@ class TemporaryMappingUpdater:
                 }
             
             # Get temporary mappings with supplier context
-            temp_mappings_lookup = self.get_temporary_mappings_with_supplier_context()
+            temp_mappings_lookup = await self.get_temporary_mappings_with_supplier_context()
             
             if not temp_mappings_lookup:
                 self.logger.info("No temporary mappings found")
@@ -267,7 +274,7 @@ class TemporaryMappingUpdater:
                     continue
             
             # Commit changes
-            self.db.commit()
+            await self.db.commit()
             
             result = {
                 "success": True,
@@ -295,7 +302,7 @@ class TemporaryMappingUpdater:
             return result
             
         except Exception as e:
-            self.db.rollback()
+            await self.db.rollback()
             self.logger.error(f"Error updating invoice items with temporary mappings: {str(e)}")
             return {
                 "success": False,

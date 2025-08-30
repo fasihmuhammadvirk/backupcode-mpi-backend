@@ -1,214 +1,315 @@
-from mpi_backend.database.controllers import SupplierController, InvoiceController, InvoiceItemController
-from mpi_backend.database.models import Invoice, InvoiceItem
-from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
-from mpi_backend.database.controllers import ItemsMappingController,TemporaryItemMappingController,UnmappedItemsController
-from mpi_backend.utils.invoice_convertor import convert_invoice
-from mpi_backend.utils.auth.auth_bearer import JWTBearer
-from mpi_backend.utils.s3_utils import get_presigned_url
-from mpi_backend.database import get_db
-from contextlib import contextmanager
-import re
-from datetime import datetime
+#!/usr/bin/env python3
+"""
+Reprocess Files Utility
+
+This utility allows reprocessing of previously processed files
+with enhanced error handling and logging.
+"""
+
+import logging
 import os
-import pandas as pd
-import uuid
-# Removed clean_supplier_suffix import - no longer needed with suffix standardization
+from pathlib import Path
+from contextlib import asynccontextmanager
+
+from mpi_backend.database import get_async_db
+from mpi_backend.utils.extracted_data_processor import process_extracted_data
+from mpi_backend.utils.invoice_convertor import convert_invoice_for_email
+
+logger = logging.getLogger(__name__)
 
 
-db = contextmanager(get_db)
-def find_pdf_files(directory):
-    xlsx_files = []
-    for root, dirs, files in os.walk(directory):
-        for file in files:
-            if file.endswith(".pdf") or file.endswith(".PDF"):
-                # Get the full file path
-                full_path = os.path.join(root, file)
-                if full_path.count(os.sep) > 3:
-                    xlsx_files.append(full_path)
+@asynccontextmanager
+async def get_db_session():
+    """Get database session for reprocessing"""
+    db = await get_async_db()
+    try:
+        yield db
+    finally:
+        await db.close()
 
-    return xlsx_files
 
-def check_empty_mpi_item_and_description(invoice_items):
-    # Check if any object has both mpi_item and mpi_description as empty strings
-    return any(item.mpi_item == '' and item.mpi_description == '' for item in invoice_items)
-
-directory_path = "mpi_backend\\storage"
-xlsx_files = find_pdf_files(directory_path)
-print (f'Found {len(xlsx_files)} invoices.')
-
-invoice_ids = []
-
-def process_extracted_data(converted_files, id):
-    db = contextmanager(get_db)
-    temp_items = TemporaryItemMappingController(db).get_temp_items_mappings()
-    item_mappings = ItemsMappingController(db).get_items_mappings()
-    for file in converted_files:
-        extracted_data = pd.read_excel(file.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
-        
-        # Enhanced duplicate detection with three-tiered logic
-        ref_no = str(extracted_data['Ref NO'][0])
-        vendor = str(extracted_data['Vendor'][0])
-        date_str = str(extracted_data['Date'][0])
-        
-        # Parse date
-        try:
-            invoice_date = datetime.strptime(date_str, '%m/%d/%Y').date()
-        except ValueError:
-            try:
-                invoice_date = datetime.strptime(date_str, '%m/%d/%y').date()
-            except ValueError:
-                print(f"Could not parse date: {date_str}, using today's date")
-                invoice_date = datetime.today().date()
-        
-        # Calculate total invoice amount by summing all items
-        try:
-            amounts = pd.to_numeric(extracted_data['Amount'], errors='coerce').fillna(0)
-            total_invoice_amount = amounts.sum()
-            invoice_amount = str(total_invoice_amount)
-            print(f"Calculated total invoice amount: {invoice_amount} from {len(amounts)} items")
-        except Exception as e:
-            print(f"Error calculating total invoice amount: {str(e)}")
-            invoice_amount = str(extracted_data['Amount'][0]) if len(extracted_data) > 0 else "0"
-        
-        # Check duplicate status using enhanced logic
-        duplicate_status = InvoiceItemController(db).check_invoice_duplicate_status(
-            ref_no, vendor, invoice_date, invoice_amount
+async def reprocess_files(
+    file_paths: list,
+    existing_invoice_id: str = None,
+    background_processing: bool = False
+) -> dict:
+    """
+    Reprocess files with enhanced error handling
+    
+    Args:
+        file_paths: List of file paths to reprocess
+        existing_invoice_id: Optional existing invoice ID to preserve
+        background_processing: Whether this is running as background task
+    
+    Returns:
+        Dictionary with reprocessing results
+    """
+    logger.info(f"Starting reprocessing of {len(file_paths)} files")
+    
+    if background_processing:
+        logger.info("Running in background processing mode")
+    
+    if existing_invoice_id:
+        logger.info(f"Reprocessing mode: Preserving invoice ID {existing_invoice_id}")
+    
+    results = {
+        'success_count': 0,
+        'failed_count': 0,
+        'skipped_count': 0,
+        'errors': [],
+        'reprocessed_files': []
+    }
+    
+    try:
+        # Convert files first
+        logger.info("Starting file conversion")
+        converted_files, failed_files = convert_invoice_for_email(
+            base_folder_path=Path("."),
+            file_paths=file_paths
         )
         
-        # Handle different duplicate scenarios
-        if duplicate_status['status'] == 'exact_duplicate':
-            print(f'Invoice with REF-NO-> {ref_no} already exists (exact duplicate). Skipping!')
-            continue
-        elif duplicate_status['status'] == 'updated_invoice':
-            print(f'Invoice with REF-NO-> {ref_no} found as updated invoice. Processing as update.')
-            # Continue processing to update the existing invoice
-        elif duplicate_status['status'] == 'new_invoice':
-            print(f'Invoice with REF-NO-> {ref_no} found as new invoice with same ref_no. Processing as new.')
-            # Continue processing to add as new invoice
-        elif duplicate_status['status'] == 'not_found':
-            print(f'Invoice with REF-NO-> {ref_no} not found. Processing as new invoice.')
-            # Continue processing to add as new invoice
+        logger.info(f"Conversion complete. Success: {len(converted_files)}, "
+                   f"Failed: {len(failed_files)}")
+        
+        # Process converted files
+        if converted_files:
+            logger.info("Starting data processing for converted files")
+            processing_result = await process_extracted_data(
+                converted_files, 
+                failed_files,
+                background_processing=background_processing
+            )
+            
+            # Aggregate results
+            results['success_count'] = processing_result.get('success_count', 0)
+            results['failed_count'] = processing_result.get('failed_count', 0)
+            results['skipped_count'] = processing_result.get('skipped_count', 0)
+            results['errors'].extend(processing_result.get('errors', []))
+            results['reprocessed_files'] = converted_files
+        
+        # Handle failed files
+        if failed_files:
+            logger.warning(f"Found {len(failed_files)} failed conversion files")
+            results['failed_count'] += len(failed_files)
+            for failed_file in failed_files:
+                results['errors'].append(f"Failed conversion: {failed_file}")
+        
+        logger.info(f"Reprocessing complete. "
+                   f"Success: {results['success_count']}, "
+                   f"Failed: {results['failed_count']}, "
+                   f"Skipped: {results['skipped_count']}")
+        
+        return results
+        
+    except Exception as e:
+        error_msg = f"Critical error in reprocessing: {str(e)}"
+        logger.error(error_msg)
+        results['errors'].append(error_msg)
+        results['failed_count'] = len(file_paths)
+        return results
+
+
+async def reprocess_single_file(
+    file_path: str,
+    existing_invoice_id: str = None
+) -> dict:
+    """
+    Reprocess a single file
+    
+    Args:
+        file_path: Path to the file to reprocess
+        existing_invoice_id: Optional existing invoice ID to preserve
+    
+    Returns:
+        Dictionary with reprocessing result
+    """
+    logger.info(f"Reprocessing single file: {file_path}")
+    
+    try:
+        result = await reprocess_files(
+            [file_path], 
+            existing_invoice_id,
+            background_processing=False
+        )
+        
+        return result
+        
+    except Exception as e:
+        error_msg = f"Error reprocessing {file_path}: {str(e)}"
+        logger.error(error_msg)
+        return {
+            'success_count': 0,
+            'failed_count': 1,
+            'skipped_count': 0,
+            'errors': [error_msg],
+            'reprocessed_files': []
+        }
+
+
+async def reprocess_directory(
+    directory_path: str,
+    file_pattern: str = "*.pdf",
+    existing_invoice_id: str = None
+) -> dict:
+    """
+    Reprocess all files in a directory matching a pattern
+    
+    Args:
+        directory_path: Path to directory containing files
+        file_pattern: File pattern to match (default: *.pdf)
+        existing_invoice_id: Optional existing invoice ID to preserve
+    
+    Returns:
+        Dictionary with reprocessing results
+    """
+    logger.info(f"Reprocessing directory: {directory_path} with pattern: {file_pattern}")
+    
+    try:
+        directory = Path(directory_path)
+        
+        if not directory.exists():
+            error_msg = f"Directory not found: {directory_path}"
+            logger.error(error_msg)
+            return {
+                'success_count': 0,
+                'failed_count': 0,
+                'skipped_count': 0,
+                'errors': [error_msg],
+                'reprocessed_files': []
+            }
+        
+        # Find matching files
+        matching_files = list(directory.glob(file_pattern))
+        
+        if not matching_files:
+            logger.info(f"No files found matching pattern: {file_pattern}")
+            return {
+                'success_count': 0,
+                'failed_count': 0,
+                'skipped_count': 0,
+                'errors': [],
+                'reprocessed_files': []
+            }
+        
+        logger.info(f"Found {len(matching_files)} files to reprocess")
+        
+        # Convert file paths to strings
+        file_paths = [str(f) for f in matching_files]
+        
+        # Reprocess all files
+        result = await reprocess_files(
+            file_paths,
+            existing_invoice_id,
+            background_processing=False
+        )
+        
+        return result
+        
+    except Exception as e:
+        error_msg = f"Error reprocessing directory {directory_path}: {str(e)}"
+        logger.error(error_msg)
+        return {
+            'success_count': 0,
+            'failed_count': 0,
+            'skipped_count': 0,
+            'errors': [error_msg],
+            'reprocessed_files': []
+        }
+
+
+# Background task wrapper
+async def reprocess_files_background_task(
+    file_paths: list,
+    existing_invoice_id: str = None
+) -> dict:
+    """
+    Background task wrapper for reprocessing files
+    
+    Args:
+        file_paths: List of file paths to reprocess
+        existing_invoice_id: Optional existing invoice ID to preserve
+    
+    Returns:
+        Dictionary with reprocessing results
+    """
+    logger.info("Starting background reprocessing task")
+    
+    try:
+        result = await reprocess_files(
+            file_paths,
+            existing_invoice_id,
+            background_processing=True
+        )
+        
+        logger.info("Background reprocessing task completed")
+        return result
+        
+    except Exception as e:
+        error_msg = f"Background reprocessing task failed: {str(e)}"
+        logger.error(error_msg)
+        
+        return {
+            'success_count': 0,
+            'failed_count': len(file_paths),
+            'skipped_count': 0,
+            'errors': [error_msg],
+            'reprocessed_files': []
+        }
+
+
+# Main execution function for standalone use
+async def main():
+    """Main function for standalone execution"""
+    import sys
+    
+    if len(sys.argv) < 2:
+        print("Usage: python reprocess-files.py <file_path> [existing_invoice_id]")
+        print("   or: python reprocess-files.py --directory <dir_path> [pattern]")
+        sys.exit(1)
+    
+    try:
+        if sys.argv[1] == "--directory":
+            if len(sys.argv) < 3:
+                print("Error: Directory path required")
+                sys.exit(1)
+            
+            directory_path = sys.argv[2]
+            file_pattern = sys.argv[3] if len(sys.argv) > 3 else "*.pdf"
+            
+            result = await reprocess_directory(directory_path, file_pattern)
         else:
-            print(f'Error in duplicate detection for REF-NO-> {ref_no}: {duplicate_status["message"]}')
-            continue
+            file_path = sys.argv[1]
+            existing_invoice_id = sys.argv[2] if len(sys.argv) > 2 else None
+            
+            result = await reprocess_single_file(file_path, existing_invoice_id)
         
-        extracted_data.insert(0, 'Sheet Name', '')
-        extracted_data['MpiItem'] = 'No Match'
-        extracted_data['MpiDescription'] = 'No Match'
-        extracted_data['email_date'] = extract_email_date(file)
-        extracted_data = extracted_data.apply(search_replace, args=(temp_items, item_mappings,), axis=1)
-        extracted_customer_job = extracted_data['Customer Job'][0]
-        extracted_data['Customer Job'] = extracted_customer_job
-        extracted_data = extracted_data.fillna({'Qty': 0, 'Cost': 0, 'Class': '', 'Memo': '', 'Ref NO': '',
-                                                'PO #': '', 'Customer Job': '', 'Buyer': '',
-                                                'Date': datetime.today().strftime('%m/%d/%Y')})
-        for index, row in extracted_data.iterrows():  # every item has its own record
-            InvoiceItemController(db).insert_invoice_items(row, file.rsplit('/')[-1], id)
-
-
-def extract_email_date(path):
-    date_pattern = re.compile(r'\b\d{1,2}-\d{1,2}-\d{4}\b')
-    match = date_pattern.search(path)
-
-    if match:
-        extracted_date = match.group()
-        date_obj = datetime.strptime(extracted_date, '%m-%d-%Y')
-    else:
-        date_obj = datetime.today()
-
-    # Convert the date to "year-month-day" format
-    formatted_date = date_obj.strftime('%Y-%m-%d')
-    return formatted_date
-
-
-def search_replace(row, temp_items, item_mappings):
-    """
-    Search for item mappings with supplier-specific suffix cleaning.
-    Maps original_item (supplier_item_ids) to mpi_code.
-    
-    Note: Invoice data is clean, but database mapping data has suffixes that need cleaning.
-    """
-    original_item = row['Item'].strip()  # This is the CLEAN supplier_item_ids from invoice, strip spaces
-    supplier_id, _ = extract_supplier_id(row['Vendor'])
-    
-    # Searching in temp_items (temporary_item_mappings table)
-    # First try exact match with clean invoice item
-    temp_match = temp_items[temp_items['original_item'] == original_item]
-    
-    # With suffix standardization, we only do exact matches
-    # No suffix cleaning needed - items are stored with full suffixes
-    
-    if not temp_match.empty:
-        # For temporary mappings, we assign the sheet name but keep "No Match" for the MPI item
-        # The temporary mapping system assigns items to sheets for later processing
-        row['MpiItem'] = 'No Match'  # Keep as No Match - temporary mappings don't provide MPI codes
-        row['MpiDescription'] = temp_match.iloc[0]['original_description'] or 'No Match'
-        row['Sheet Name'] = temp_match.iloc[0]['sheet_name']
-        return row
-
-    # Searching in item_mappings (supplier_item_mappings table)
-    # Only compare against supplier_item_ids column (not all columns)
-    if 'supplier_item_ids' in item_mappings.columns:
-        # First try exact match with clean invoice item
-        mapping_match = item_mappings[item_mappings['supplier_item_ids'] == original_item]
+        # Print results
+        print(f"\nReprocessing Results:")
+        print(f"Success: {result['success_count']}")
+        print(f"Failed: {result['failed_count']}")
+        print(f"Skipped: {result['skipped_count']}")
         
-        # With suffix standardization, we only do exact matches
-        # No suffix cleaning needed - items are stored with full suffixes
+        if result['errors']:
+            print(f"\nErrors:")
+            for error in result['errors']:
+                print(f"  - {error}")
         
-        if not mapping_match.empty:
-            row['MpiItem'] = mapping_match.iloc[0]['mpi_code']  # This is the target mpi_code
-            row['MpiDescription'] = mapping_match.iloc[0]['description']
-            sheet_name = mapping_match.iloc[0]['google_sheet_name']
-            row['Sheet Name'] = sheet_name
-            return row
-
-    # will only be triggered if no mapping is found
-    if not UnmappedItemsController(db).is_item_code_present(row['Item'], supplier_id):
-        UnmappedItemsController(db).insert_unmapped_item(row['Item'],row['Description'],supplier_id)
-
-    return row
-
-def extract_supplier_id(file_path):
-    company_codes = {
-        "BMW Plumbing Supplies": 1,
-        "World Wide Plumbing": 2,
-        "Y & S Plumbing Supply": 3,
-        "Supreme Plumbing Supply": 4,
-        "Pyramid Plumbing": 5,
-        "ABC Opus Services": 6,
-        "Park Plumbing Supply": 7,
-        "Gotham Plumbing Supply": 8,
-        "FW Webb Plumbing Supply": 9,
-        "Flow Mark Plumbing Supply": 10
-    }
-    for company, code in company_codes.items():
-        if company in file_path:
-            return code, company
-    return 1 # need to return some default supplier
+        if result['reprocessed_files']:
+            print(f"\nReprocessed Files:")
+            for file_path in result['reprocessed_files']:
+                print(f"  - {file_path}")
+        
+        # Exit with appropriate code
+        if result['failed_count'] > 0:
+            sys.exit(1)
+        else:
+            sys.exit(0)
+            
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        sys.exit(1)
 
 
-reprocessed = 0
-from mpi_backend.database import get_db
-
-db_gen = get_db()
-db = next(db_gen)
-for invoice in xlsx_files:
-    filename = os.path.basename(invoice)
-    matched_invoice = db.query(Invoice).filter_by(filename=filename).first()
-
-    if not matched_invoice: continue
-    invoice_id = str(matched_invoice.id)
-
-    invoice_items = InvoiceItemController(db).get_invoice_items(invoice_id=invoice_id)
-
-    if check_empty_mpi_item_and_description(invoice_items): # any one record is empty, process them again
-        InvoiceItemController(db).delete_invoice_items(invoice_id, db)  # delete previous ingested invoice items
-        contents = pd.read_excel(invoice.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx"))
-        process_extracted_data([invoice.replace("\\", "/")], uuid.UUID(invoice_id))
-
-        reprocessed +=1
-        invoice_ids.append(invoice_id)
-
-print(f'reprocessed {reprocessed} invoices.')
-print('\n')
-print(invoice_ids)
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())

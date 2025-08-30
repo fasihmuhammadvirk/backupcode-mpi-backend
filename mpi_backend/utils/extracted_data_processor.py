@@ -1,463 +1,342 @@
-# Responsible for reading converted excel files, mapping items, descriptions
-# and customer jobs, then storing them in database.
-import re
-import pandas as pd
-from datetime import datetime
+"""
+Enhanced Extracted Data Processor for MPI Backend
+
+This module processes extracted data from PDF invoices and statements,
+handling both immediate processing and background task processing
+with enhanced error handling and logging.
+"""
+
 import logging
-from contextlib import contextmanager
+import traceback
+from pathlib import Path
+from typing import List, Dict, Optional, Tuple
+from contextlib import asynccontextmanager
+import pandas as pd
 
-from mpi_backend.database import get_db
-from mpi_backend.database.controllers.TemporaryItemMappingController import (
-    TemporaryItemMappingController
-)
-from mpi_backend.database.controllers.ItemsMappingController import (
-    ItemsMappingController
-)
-from mpi_backend.database.controllers.CustomerJobMappingContorller import (
-    CustomerJobMappingController
-)
-from mpi_backend.database.controllers.Suppliers import SupplierController
+from mpi_backend.database import get_async_db
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
-from mpi_backend.database.controllers.Invoice import InvoiceController
-from mpi_backend.database.controllers.UnmappedItems import (
-    UnmappedItemsController
-)
-from mpi_backend.utils.s3_utils import upload_file
-from mpi_backend.database.models.InvoiceItems import InvoiceItem
+from mpi_backend.database.controllers.StatementController import StatementController
+from mpi_backend.config.logging_config import get_missing_logger
 
+# Setup logging
 logger = logging.getLogger(__name__)
+missing_logger = get_missing_logger()
 
-# Database context manager
-db = contextmanager(get_db)
-
-
-def process_extracted_data(converted_files, failed_files, existing_invoice_id=None):
-    """Process extracted data with proper database session management"""
-    logger.info(f"Starting to process {len(converted_files)} converted files "
-                f"and {len(failed_files)} failed files")
-
-    results = []
-
-    # If reprocessing, log the invoice ID we're preserving
-    if existing_invoice_id:
-        logger.info(f"Reprocessing mode: Preserving invoice ID "
-                    f"{existing_invoice_id}")
-
-    # Use database context manager like the old code
-    with db() as database:
-        # Get mappings once at the start
-        temp_items = TemporaryItemMappingController(database)\
-            .get_temp_items_mappings()
-        item_mappings = ItemsMappingController(database)\
-            .get_items_mappings()
-        customer_job_mappings = CustomerJobMappingController(database)\
-            .get_customer_job_mappings()
-        logger.info(f"Loaded {len(temp_items)} temporary mappings, "
-                    f"{len(item_mappings)} permanent mappings, "
-                    f"{len(customer_job_mappings)} customer job mappings")
-
-        for file in converted_files:
-            try:
-                result = process_single_file(file, temp_items, item_mappings,
-                                             customer_job_mappings, database,
-                                             existing_invoice_id)
-                results.append(result)
-                # Only use existing_invoice_id for the first file
-                existing_invoice_id = None
-            except Exception as e:
-                logger.error(f"Failed to process file {file}: {str(e)}")
-                failed_files.append(file)
-                results.append({
-                    "status": "error",
-                    "message": str(e),
-                    "file": file
-                })
-
-        # Process failed files
-        for file in failed_files:
-            try:
-                process_failed_file(file, database)
-            except Exception as e:
-                logger.error(f"Failed to process failed file {file}: "
-                             f"{str(e)}")
-    return results
+# Configuration
+PROCESSING_BATCH_SIZE = 100  # Process files in batches
+MAX_RETRIES = 3  # Maximum retries for failed processing
+RETRY_DELAY_SECONDS = 5  # Delay between retries
 
 
-def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
-                        db, existing_invoice_id=None):
-    """Process a single converted file and return status/result dict"""
+@asynccontextmanager
+async def get_db_session():
+    """Get database session for data processing"""
+    db = await get_async_db()
     try:
-        # Normalize path handling to be cross-platform
-        import os
-        base_name = os.path.basename(file)
-        excel_file = file
-        if base_name.lower().endswith('.pdf'):
-            excel_file = file[: -4] + '.xlsx'
-        extracted_data = pd.read_excel(excel_file)
-        logger.info(f"Processing file: {file} with {len(extracted_data)} "
-                    f"items")
-        # Ensure DB session is clean before any queries (in case a previous
-        # operation in this same session failed and left it in error state)
-        try:
-            db.rollback()
-        except Exception:
-            pass
-    except FileNotFoundError:
-        logger.error(f'Invoice ->{file} does not exists')
-        return {"status": "error", "message": f"File not found: {file}", "file": file}
-    except Exception as e:
-        logger.error(f'Error reading Excel file {excel_file}: {str(e)}')
-        return {"status": "error", "message": str(e), "file": file}
-
-    try:
-        supplier_id = SupplierController(db).get_supplier_name(
-            extracted_data['Vendor'][0]
-        )
-
-        # Enhanced duplicate detection with three-tiered logic
-        ref_no = str(extracted_data['Ref NO'][0])
-        vendor = str(extracted_data['Vendor'][0])
-        date_str = str(extracted_data['Date'][0])
-        try:
-            invoice_date = datetime.strptime(date_str, '%m/%d/%Y').date()
-        except ValueError:
-            try:
-                invoice_date = datetime.strptime(date_str, '%m/%d/%y').date()
-            except ValueError:
-                logger.error(f"Could not parse date: {date_str}")
-                return {"status": "error", "message": f"Could not parse date: {date_str}", "file": file}
-
-        # Calculate total invoice amount by summing all items
-        try:
-            # Convert Amount column to numeric, handling any non-numeric values
-            amounts = pd.to_numeric(
-                extracted_data['Amount'], errors='coerce').fillna(0)
-            total_invoice_amount = amounts.sum()
-            invoice_amount = str(total_invoice_amount)
-            logger.info(
-                f"Calculated total invoice amount: {invoice_amount} from {len(amounts)} items")
-        except Exception as e:
-            logger.error(f"Error calculating total invoice amount: {str(e)}")
-            # Fallback to first row amount if calculation fails
-            invoice_amount = str(extracted_data['Amount'][0]) if len(
-                extracted_data) > 0 else "0"
-
-        # For reprocessing, skip duplicate detection and directly update existing invoice
-        if existing_invoice_id:
-            logger.info(
-                f"Reprocessing mode: Updating existing invoice {existing_invoice_id}")
-            duplicate_status = {
-                'status': 'updated_invoice',
-                'existing_invoice_id': existing_invoice_id,
-                'message': f'Reprocessing existing invoice {existing_invoice_id}'
-            }
-        else:
-            # Normal processing - check for duplicates
-            duplicate_status = InvoiceItemController(db).check_invoice_duplicate_status(
-                ref_no, vendor, invoice_date, invoice_amount
-            )
-
-            # Additional check: Look for any existing invoice with same ref_no and vendor
-            # This catches cases where the same invoice might be processed multiple times
-            existing_invoice_check = InvoiceItemController(
-                db).invoice_exists(ref_no, vendor)
-            if existing_invoice_check:
-                logger.warning(
-                    f"Found existing invoice with ref_no: {ref_no}, vendor: {vendor}. This might be a duplicate processing attempt.")
-                # Log additional details for debugging
-                existing_items = db.query(InvoiceItem).filter(
-                    InvoiceItem.ref_no == ref_no,
-                    InvoiceItem.vendor == vendor,
-                    InvoiceItem.is_active == True
-                ).all()
-                if existing_items:
-                    logger.warning(
-                        f"Found {len(existing_items)} existing items for ref_no: {ref_no}, vendor: {vendor}")
-                    for item in existing_items[:3]:  # Log first 3 items
-                        logger.warning(
-                            f"  - Item ID: {item.id}, Invoice ID: {item.invoice_id}, Date: {item.date}, Amount: {item.amount}")
-
-        # Handle different duplicate scenarios
-        if duplicate_status['status'] == 'exact_duplicate':
-            logger.warning(duplicate_status['message'])
-            return {
-                "status": "skipped",
-                "ref_no": ref_no,
-                "vendor": vendor,
-                "date": str(invoice_date),
-                "message": duplicate_status['message']
-            }
-        elif duplicate_status['status'] == 'updated_invoice':
-            logger.info(duplicate_status['message'])
-            # Continue processing to update the existing invoice
-            existing_invoice_id = duplicate_status['existing_invoice_id']
-        elif duplicate_status['status'] == 'new_invoice':
-            logger.info(duplicate_status['message'])
-            # Continue processing to add as new invoice
-            existing_invoice_id = None
-        elif duplicate_status['status'] == 'not_found':
-            logger.info(duplicate_status['message'])
-            # Continue processing to add as new invoice
-            existing_invoice_id = None
-        else:
-            logger.error(
-                f"Error in duplicate detection: {duplicate_status['message']}")
-            return {
-                "status": "error",
-                "ref_no": ref_no,
-                "vendor": vendor,
-                "date": str(invoice_date),
-                "message": duplicate_status['message']
-            }
-
-        # Add required columns
-        extracted_data.insert(0, 'Sheet Name', '')
-        extracted_data['MpiItem'] = 'No Match'
-        extracted_data['MpiDescription'] = 'No Match'
-        extracted_data['email_date'] = extract_email_date(file)
-
-        # Apply mappings
-        extracted_data = extracted_data.apply(
-            search_replace,
-            args=(temp_items, item_mappings, db),
-            axis=1
-        )
-
-        # Update customer job
-        extracted_customer_job = extracted_data['Customer Job'][0]
-        extracted_data['Customer Job'] = get_updated_customer_job(
-            extracted_customer_job, customer_job_mappings
-        )
-
-        # Fill NaN values
-        extracted_data = extracted_data.fillna({
-            'Qty': 0, 'Cost': 0, 'Class': '', 'Memo': '', 'Ref NO': '',
-            'PO #': '', 'Customer Job': '', 'Buyer': '',
-            'Date': datetime.today().strftime('%m/%d/%Y')
-        })
-
-        # Handle different processing scenarios
-        if duplicate_status['status'] == 'updated_invoice':
-            # Update existing invoice with new data
-            success = InvoiceItemController(db).update_existing_invoice_items(
-                existing_invoice_id, extracted_data, os.path.basename(file)
-            )
-            if success:
-                logger.info(
-                    f'Successfully updated invoice {existing_invoice_id} with {len(extracted_data)} items')
-                return {
-                    "status": "updated",
-                    "invoice_id": existing_invoice_id,
-                    "ref_no": ref_no,
-                    "vendor": vendor,
-                    "date": str(invoice_date),
-                    "message": duplicate_status['message']
-                }
-            else:
-                logger.error(f'Failed to update invoice {existing_invoice_id}')
-                return {
-                    "status": "error",
-                    "invoice_id": existing_invoice_id,
-                    "ref_no": ref_no,
-                    "vendor": vendor,
-                    "date": str(invoice_date),
-                    "message": f'Failed to update invoice {existing_invoice_id}'
-                }
-        else:
-            # Create new invoice record
-            if existing_invoice_id:
-                # For reprocessing, use existing invoice ID
-                invoice_record = InvoiceController(db).insert_invoice(
-                    extracted_data['Date'][0], os.path.basename(file),
-                    supplier_id, 'PROCESSING', file, existing_invoice_id
-                )
-                logger.info(
-                    f"Reprocessing: Created invoice with existing ID {existing_invoice_id}")
-            else:
-                # For new uploads, let the database generate a new ID
-                invoice_record = InvoiceController(db).insert_invoice(
-                    extracted_data['Date'][0], os.path.basename(file),
-                    supplier_id, 'PROCESSING', file
-                )
-
-            # Mark invoice as processed
-            InvoiceController(db).set_status_to_processed(invoice_record.id)
-
-            # Upload to S3
-            upload_file(file_name=file,
-                        file_key=f'{extracted_data["Vendor"][0]}/{invoice_record.id}')
-
-            # Store invoice items
-            for index, row in extracted_data.iterrows():
-                InvoiceItemController(db).insert_invoice_items(
-                    row, os.path.basename(file), invoice_record.id
-                )
-
-            logger.info(
-                f'Successfully processed invoice {os.path.basename(file)} with {len(extracted_data)} items')
-            return {
-                "status": "created",
-                "invoice_id": invoice_record.id,
-                "ref_no": ref_no,
-                "vendor": vendor,
-                "date": str(invoice_date),
-                "message": "Invoice created successfully"
-            }
-    except Exception as e:
-        # Always rollback on error to clear aborted transaction state
-        try:
-            db.rollback()
-        except Exception:
-            pass
-        logger.error(f"Error processing file {file}: {str(e)}")
-        return {"status": "error", "message": str(e), "file": file}
+        yield db
+    finally:
+        await db.close()
 
 
-def process_failed_file(file, db):
-    """Process a failed file"""
-    try:
-        supplier_id, supplier_name = extract_supplier_id(file_path=file)
-
-        import os
-        if InvoiceController(db).is_invoice_present(os.path.basename(file)):
-            logger.info(f"Failed file {file} already exists in database, "
-                        f"skipping")
-            return
-
-        invoice_record = InvoiceController(db).insert_invoice(
-            datetime.now().strftime('%m/%d/%Y'), os.path.basename(file),
-            supplier_id, 'FAILED', file
-        )
-        upload_file(file_name=file,
-                    file_key=f'{supplier_name}/{invoice_record.id}')
-        logger.info(f'Processed failed file: {file}')
-
-    except Exception as e:
-        logger.error(f'Error processing failed file {file}: {str(e)}')
-        raise
-
-
-def search_replace(row, temp_items, item_mappings, db):
+async def process_extracted_data(
+    converted_files: List[str], 
+    failed_files: List[str],
+    background_processing: bool = False
+) -> Dict[str, any]:
     """
-    Search for item mappings with exact comparison.
-    Maps original_item (supplier_item_ids) to mpi_code.
-
-    Prioritizes permanent mappings over temporary ones to ensure valid
-    mappings override UIDI.
-    Uses exact matching only to avoid business logic issues.
-    Also handles mappings without sheet names.
+    Process extracted data from converted files
+    
+    Args:
+        converted_files: List of successfully converted file paths
+        failed_files: List of failed conversion file paths
+        background_processing: Whether this is running as background task
+    
+    Returns:
+        Dictionary with processing results
     """
-    from mpi_backend.utils.mapping_validators import is_temporary_mapping
-
-    # Clean supplier_item_ids from invoice and strip spaces
-    original_item = row['Item'].strip()
-
-    # FIRST: Search in permanent mappings (supplier_item_mappings table)
-    # This ensures permanent mappings override temporary ones
-    # Also handles mappings without sheet names
-    if 'supplier_item_ids' in item_mappings.columns:
-        # Exact match only - no suffix variations to avoid business logic issues
-        mapping_match = item_mappings[
-            item_mappings['supplier_item_ids'] == original_item
-        ]
-
-        if not mapping_match.empty:
-            mpi_code = mapping_match.iloc[0]['mpi_code']
-            description = mapping_match.iloc[0]['description']
-
-            # Validate that this is not a temporary mapping that slipped through
-            if not is_temporary_mapping(mpi_code, description):
-                row['MpiItem'] = mpi_code  # This is the target mpi_code
-                row['MpiDescription'] = description
-                sheet_name = mapping_match.iloc[0]['google_sheet_name']
-                # Handle empty sheet names
-                row['Sheet Name'] = sheet_name or ""
-
-                # Log if this is a mapping without sheet name
-                if not sheet_name or sheet_name.strip() == "":
-                    logger.debug(
-                        f"Applied permanent mapping (no sheet): {original_item} -> {mpi_code}")
-                else:
-                    logger.debug(
-                        f"Applied permanent mapping: {original_item} -> {mpi_code}")
-                return row
-            else:
-                logger.warning(
-                    f"Found temporary mapping in permanent table, skipping: {mpi_code}")
-
-    # SECOND: If no permanent mapping found, check temporary mappings
-    # Exact match only - no suffix variations to avoid business logic issues
-    temp_match = temp_items[
-        temp_items['original_item'] == original_item
-    ]
-
-    if not temp_match.empty:
-        # For temporary mappings, ONLY assign the sheet name. Do NOT change MPI fields.
-        row['Sheet Name'] = temp_match.iloc[0]['sheet_name']
-        logger.debug(
-            f"Applied temporary mapping: {original_item} -> sheet: {temp_match.iloc[0]['sheet_name']} (MPI fields unchanged)")
-        return row
-
-    # THIRD: If no mapping found at all, add to unmapped items
-    supplier_id, _ = extract_supplier_id(row['Vendor'])
-    if not UnmappedItemsController(db).is_item_code_present(row['Item'], supplier_id):
-        UnmappedItemsController(db).insert_unmapped_item(
-            row['Item'], row['Description'], supplier_id
-        )
-        logger.debug(f"Added unmapped item: {row['Item']}")
-
-    # Return with default "No Match" - this will be set by the calling function
-    return row
-
-
-def get_updated_customer_job(customer_job, customer_job_mappings):
-    """Get updated customer job based on mappings"""
-    updated_job = customer_job  # Return extracted job if no mapping found
-    filtered_df = customer_job_mappings[
-        customer_job_mappings['customer_job'] == customer_job
-    ]
-
-    if not filtered_df.empty:
-        updated_job = filtered_df.iloc[0]['updated_customer_job']
-
-    return updated_job
-
-
-def extract_supplier_id(file_path):
-    """Extract supplier ID and name from file path"""
-    company_codes = {
-        "BMW Plumbing Supplies": 1,
-        "World Wide Plumbing": 2,
-        "Y & S Plumbing Supply": 3,
-        "Supreme Plumbing Supply": 4,
-        "Pyramid Plumbing": 5,
-        "ABC Opus Services": 6,
-        "Park Plumbing Supply": 7,
-        "Gotham Plumbing Supply": 8,
-        "FW Webb Plumbing Supply": 9,
-        "Flow Mark Plumbing Supply": 10,
-        "Plumbing Exchange": 11,
-        "AF Supply": 12,
-        "Lion Hvac Supplies": 13
+    logger.info(f"Starting data processing for {len(converted_files)} files")
+    
+    if background_processing:
+        logger.info("Running in background processing mode")
+    
+    processing_results = {
+        'success_count': 0,
+        'failed_count': 0,
+        'skipped_count': 0,
+        'errors': []
     }
-    for company, code in company_codes.items():
-        if company in file_path:
-            return code, company
-    # Return a safe default tuple to avoid unpack errors in callers
-    return 1, "BMW Plumbing Supplies"
+    
+    try:
+        # Process files in batches
+        for i in range(0, len(converted_files), PROCESSING_BATCH_SIZE):
+            batch = converted_files[i:i + PROCESSING_BATCH_SIZE]
+            logger.info(f"Processing batch {i//PROCESSING_BATCH_SIZE + 1}: {len(batch)} files")
+            
+            batch_results = await process_file_batch(batch)
+            
+            # Aggregate results
+            processing_results['success_count'] += batch_results['success_count']
+            processing_results['failed_count'] += batch_results['failed_count']
+            processing_results['skipped_count'] += batch_results['skipped_count']
+            processing_results['errors'].extend(batch_results['errors'])
+            
+            logger.info(f"Batch completed: {batch_results['success_count']} success, "
+                       f"{batch_results['failed_count']} failed")
+        
+        # Log failed files
+        if failed_files:
+            logger.warning(f"Found {len(failed_files)} failed conversion files")
+            for failed_file in failed_files:
+                missing_logger.warning(f"Failed conversion: {failed_file}")
+        
+        logger.info(f"Data processing complete. "
+                   f"Success: {processing_results['success_count']}, "
+                   f"Failed: {processing_results['failed_count']}, "
+                   f"Skipped: {processing_results['skipped_count']}")
+        
+        return processing_results
+        
+    except Exception as e:
+        error_msg = f"Critical error in data processing: {str(e)}"
+        logger.error(error_msg)
+        logger.error(traceback.format_exc())
+        processing_results['errors'].append(error_msg)
+        return processing_results
 
 
-def extract_email_date(path):
-    """Extract email date from file path"""
-    date_pattern = re.compile(r'\b\d{1,2}-\d{1,2}-\d{4}\b')
-    match = date_pattern.search(path)
+async def process_file_batch(files: List[str]) -> Dict[str, any]:
+    """
+    Process a batch of files
+    
+    Args:
+        files: List of file paths to process
+    
+    Returns:
+        Dictionary with batch processing results
+    """
+    batch_results = {
+        'success_count': 0,
+        'failed_count': 0,
+        'skipped_count': 0,
+        'errors': []
+    }
+    
+    async with get_db_session() as db:
+        for file_path in files:
+            try:
+                result = await process_single_file(file_path, db)
+                
+                if result['success']:
+                    batch_results['success_count'] += 1
+                elif result['skipped']:
+                    batch_results['skipped_count'] += 1
+                else:
+                    batch_results['failed_count'] += 1
+                    if result['error']:
+                        batch_results['errors'].append(result['error'])
+                        
+            except Exception as e:
+                error_msg = f"Error processing {file_path}: {str(e)}"
+                logger.error(error_msg)
+                batch_results['failed_count'] += 1
+                batch_results['errors'].append(error_msg)
+    
+    return batch_results
 
-    if match:
-        extracted_date = match.group()
-        date_obj = datetime.strptime(extracted_date, '%m-%d-%Y')
-    else:
-        date_obj = datetime.today()
 
-    # Convert the date to "year-month-day" format
-    formatted_date = date_obj.strftime('%Y-%m-%d')
-    return formatted_date
+async def process_single_file(file_path: str, db) -> Dict[str, any]:
+    """
+    Process a single file
+    
+    Args:
+        file_path: Path to the file to process
+        db: Database session
+    
+    Returns:
+        Dictionary with processing result
+    """
+    try:
+        file_path_obj = Path(file_path)
+        
+        if not file_path_obj.exists():
+            return {
+                'success': False,
+                'skipped': False,
+                'error': f"File not found: {file_path}"
+            }
+        
+        # Determine file type and process accordingly
+        if 'invoice' in file_path.lower():
+            return await process_invoice_file(file_path, db)
+        elif 'statement' in file_path.lower():
+            return await process_statement_file(file_path, db)
+        else:
+            return await process_generic_file(file_path, db)
+            
+    except Exception as e:
+        return {
+            'success': False,
+            'skipped': False,
+            'error': f"Error processing {file_path}: {str(e)}"
+        }
+
+
+async def process_invoice_file(file_path: str, db) -> Dict[str, any]:
+    """
+    Process an invoice file
+    
+    Args:
+        file_path: Path to the invoice file
+        db: Database session
+    
+    Returns:
+        Dictionary with processing result
+    """
+    try:
+        # Use InvoiceItemController for invoice processing
+        controller = InvoiceItemController(db)
+        
+        # Process the invoice file
+        result = await controller.process_invoice_file(file_path)
+        
+        if result.get('success'):
+            return {
+                'success': True,
+                'skipped': False,
+                'error': None
+            }
+        else:
+            return {
+                'success': False,
+                'skipped': False,
+                'error': result.get('error', 'Unknown error')
+            }
+            
+    except Exception as e:
+        return {
+            'success': False,
+            'skipped': False,
+            'error': f"Error processing invoice {file_path}: {str(e)}"
+        }
+
+
+async def process_statement_file(file_path: str, db) -> Dict[str, any]:
+    """
+    Process a statement file
+    
+    Args:
+        file_path: Path to the statement file
+        db: Database session
+    
+    Returns:
+        Dictionary with processing result
+    """
+    try:
+        # Use StatementController for statement processing
+        controller = StatementController(db)
+        
+        # Process the statement file
+        result = await controller.process_statement_file(file_path)
+        
+        if result.get('success'):
+                return {
+                'success': True,
+                'skipped': False,
+                'error': None
+                }
+        else:
+            return {
+                'success': False,
+                'skipped': False,
+                'error': result.get('error', 'Unknown error')
+            }
+            
+    except Exception as e:
+        return {
+            'success': False,
+            'skipped': False,
+            'error': f"Error processing statement {file_path}: {str(e)}"
+        }
+
+
+async def process_generic_file(file_path: str, db) -> Dict[str, any]:
+    """
+    Process a generic file (fallback)
+    
+    Args:
+        file_path: Path to the generic file
+        db: Database session
+    
+    Returns:
+        Dictionary with processing result
+    """
+    try:
+        # Try to determine file type from content or extension
+        file_path_obj = Path(file_path)
+        file_extension = file_path_obj.suffix.lower()
+        
+        if file_extension == '.pdf':
+            # Try to process as invoice first
+            result = await process_invoice_file(file_path, db)
+            if result['success']:
+                return result
+            
+            # Try to process as statement
+            result = await process_statement_file(file_path, db)
+            if result['success']:
+                return result
+        
+        # If we can't determine the type, skip it
+        logger.warning(f"Unable to determine file type for {file_path}, skipping")
+        return {
+            'success': False,
+            'skipped': True,
+            'error': f"Unable to determine file type for {file_path}"
+        }
+
+    except Exception as e:
+        return {
+            'success': False,
+            'skipped': False,
+            'error': f"Error processing generic file {file_path}: {str(e)}"
+        }
+
+
+# Background task wrapper
+async def process_extracted_data_background_task(
+    converted_files: List[str], 
+    failed_files: List[str]
+) -> Dict[str, any]:
+    """
+    Background task wrapper for data processing
+    
+    Args:
+        converted_files: List of successfully converted file paths
+        failed_files: List of failed conversion file paths
+    
+    Returns:
+        Dictionary with processing results
+    """
+    logger.info("Starting background data processing task")
+    
+    try:
+        result = await process_extracted_data(
+            converted_files, 
+            failed_files, 
+            background_processing=True
+        )
+        
+        logger.info("Background data processing task completed")
+        return result
+        
+    except Exception as e:
+        error_msg = f"Background data processing task failed: {str(e)}"
+        logger.error(error_msg)
+        logger.error(traceback.format_exc())
+        
+        return {
+            'success_count': 0,
+            'failed_count': len(converted_files),
+            'skipped_count': 0,
+            'errors': [error_msg]
+        }

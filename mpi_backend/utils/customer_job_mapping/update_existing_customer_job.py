@@ -1,92 +1,120 @@
-import sys
+import json
 import logging
+from mpi_backend.database import get_async_db
+from mpi_backend.database.models import CustomerJobMapping
+from contextlib import asynccontextmanager
+import sys
 from pathlib import Path
+from sqlalchemy import select
 
 # Add the parent directory to the path so we can import mpi_backend
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
 from mpi_backend.config.logging_config import setup_logging
-from mpi_backend.database.models import CustomerJobMapping, InvoiceItem
-from mpi_backend.database import SessionLocal
 
 # Setup centralized logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
 
-def update_existing_invoice_items(db):
+@asynccontextmanager
+async def get_db_session():
+    """Get database session for customer job mapping operations"""
+    db = await get_async_db()
+    try:
+        yield db
+    finally:
+        await db.close()
+
+
+async def update_existing_customer_job_in_db():
     """
-    Update existing invoice items in the database by mapping old customer job
-    identifiers to new ones based on the CustomerJobMapping table.
+    Updates existing customer job mappings in the database from a JSON file.
 
-    This function retrieves all customer job mappings and invoice items from the
-    database. It updates the `customer_job` field of each invoice item if a new
-    mapping exists. After updating, it commits the changes to the database and logs
-    the number of updated items. If any error occurs during the process, it logs
-    the error and raises an exception.
-
-    Args:
-        db: A SQLAlchemy session object for database interaction.
+    This function reads customer job mappings from a specified JSON file and updates
+    existing mappings in the database. It first loads the JSON data, then compares
+    it with existing mappings to identify entries that need updating.
+    Updates are applied in bulk to the database. If any errors occur during
+    the process, the transaction is rolled back.
 
     Raises:
-        Exception: If there is an error fetching data, updating items, or committing
-        changes to the database.
+        FileNotFoundError: If the JSON file is not found.
+        ValueError: If the JSON file is corrupted or contains invalid syntax, or
+                    if expected fields are missing in the JSON data.
+        Exception: If there is an error fetching existing mappings from the database
+                   or updating mappings.
     """
-    try:
-        # Fetch customer job mappings
+    async with get_db_session() as session:
         try:
-            mappings = db.query(CustomerJobMapping).all()
-            logger.info("Fetched %d customer job mappings.", len(mappings))
+            # Load JSON data
+            try:
+                with open('mpi_backend/storage/fixtures/customer-job-mapping.json', 'r') as file:
+                    json_mappings = json.load(file)
+            except FileNotFoundError:
+                logger.error("Mapping JSON file not found at expected location.")
+                raise
+            except json.JSONDecodeError:
+                logger.error("JSON file is corrupted or contains invalid syntax.")
+                raise ValueError("JSON file is corrupted or contains invalid syntax.")
+
+            logger.info("Loaded %d customer job mappings from JSON.", len(json_mappings))
+
+            # Fetch all existing mappings from the DB
+            try:
+                result = await session.execute(
+                    select(CustomerJobMapping)
+                )
+                existing_mappings = result.scalars().all()
+            except Exception as e:
+                logger.error("Error fetching existing mappings from DB: %s", str(e))
+                raise
+
+            # Build a dictionary for quick lookup
+            existing_dict = {
+                mapping.customer_job.strip().lower(): mapping
+                for mapping in existing_mappings
+            }
+
+            # Update existing mappings
+            updated_count = 0
+            for mapping in json_mappings:
+                try:
+                    customer_job = str(mapping['customer_job']).strip().lower()
+                    if customer_job in existing_dict:
+                        existing_mapping = existing_dict[customer_job]
+                        existing_mapping.updated_customer_job = mapping['updated_customer_job']
+                        updated_count += 1
+                except KeyError as ke:
+                    logger.error("Missing expected fields in JSON: %s", str(ke))
+                    raise ValueError(f"Missing expected fields in JSON: {str(ke)}")
+
+            # Commit updates
+            if updated_count > 0:
+                await session.commit()
+                logger.info("Updated %d existing customer job mappings.", updated_count)
+            else:
+                logger.info("No existing customer job mappings to update.")
+
+            # Count total mappings now
+            result = await session.execute(
+                select(CustomerJobMapping)
+            )
+            total_count = result.scalar()
+            logger.info("Total Customer Job Mappings in DB: %d", total_count)
+
         except Exception as e:
-            raise Exception(f"Error fetching customer job mappings: {str(e)}")
-
-        mapping_dict = {
-            m.customer_job: m.updated_customer_job
-            for m in mappings
-        }
-
-        # Fetch all invoice items
-        try:
-            invoice_items = db.query(InvoiceItem).all()
-            logger.info("Fetched %d invoice items.", len(invoice_items))
-        except Exception as e:
-            raise Exception(f"Error fetching invoice items: {str(e)}")
-
-        updated_count = 0
-
-        for item in invoice_items:
-            if item.customer_job in mapping_dict:
-                new_job = mapping_dict[item.customer_job]
-                if new_job != item.customer_job:
-                    item.customer_job = new_job
-                    updated_count += 1
-
-        # Commit the updates
-        try:
-            db.commit()
-            logger.info("Updated %d invoice items.", updated_count)
-        except Exception as e:
-            db.rollback()
-            raise Exception(f"Error committing updated invoice items: {str(e)}")
-
-    except Exception as e:
-        logger.error("Error updating invoice items: %s", str(e))
-        raise
+            await session.rollback()
+            logger.error("Error updating customer job mappings in DB: %s", str(e))
+            raise
 
 
-def main():
-    # Setup DB connection
-    db = SessionLocal()
-
-    try:
-        update_existing_invoice_items(db)
-        logger.info("Invoice update completed successfully.")
-    except Exception as e:
-        logger.error("Failed in main: %s", str(e))
-    finally:
-        db.close()
-        logger.info("Database session closed.")
+# Legacy sync wrapper for backward compatibility
+def update_existing_customer_job_in_db_sync():
+    """Synchronous wrapper for backward compatibility"""
+    import asyncio
+    return asyncio.run(update_existing_customer_job_in_db())
 
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(update_existing_customer_job_in_db())

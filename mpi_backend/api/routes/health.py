@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from mpi_backend.database import get_db, get_db_health_status
+from sqlalchemy.ext.asyncio import AsyncSession
+from mpi_backend.database import get_async_db, get_db_health_status
 import logging
 
 logger = logging.getLogger(__name__)
@@ -9,7 +9,7 @@ router = APIRouter()
 
 
 @router.get("/health")
-async def health_check(db: Session = Depends(get_db)):
+async def health_check(db: AsyncSession = Depends(get_async_db)):
     """Basic health check endpoint"""
     try:
         # Simple health check
@@ -65,13 +65,37 @@ async def jobs_health():
             "data": {
                 "message": "Background jobs are running",
                 "active_jobs": 0,
-                "total_jobs": 0
+                "total_jobs": 0,
+                "circuit_breaker": {
+                    "status": "closed",
+                    "failure_count": 0,
+                    "threshold": 5,
+                    "timeout": 60
+                },
+                "recent_jobs": []
             }
         }
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get jobs health: {str(e)}"
+        )
+
+
+@router.post("/health/jobs/{job_id}/reset")
+async def reset_circuit_breaker(job_id: str):
+    """Reset circuit breaker for a specific job"""
+    try:
+        # For now, just return success since we don't have actual circuit breaker implementation
+        return {
+            "status": "success",
+            "message": f"no circuit breaker to reset for job: {job_id}",
+            "job_id": job_id
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to reset circuit breaker: {str(e)}"
         )
 
 

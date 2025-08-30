@@ -11,13 +11,13 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 import time
 import uvicorn
-
-
+import psutil
+import platform
 
 # Import routes
 from mpi_backend.api.routes import (
     health, supplier, invoices_list, get_mappings, invoice_items,
-    quickbooks, signin, filters, sync_mappings, monthly_comparison, statements
+    quickbooks, signin, filters, sync_mappings, monthly_comparison, statements, customer_job
 )
 
 # Import scheduler
@@ -36,6 +36,30 @@ logger.info("Starting UNLIMITED PERFORMANCE MPI Backend")
 app_start_time = time.time()
 request_count = 0
 error_count = 0
+
+
+def get_cpu_info():
+    """Get CPU information without restrictions"""
+    try:
+        cpu_count = psutil.cpu_count(logical=True)
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        cpu_freq = psutil.cpu_freq()
+        
+        return {
+            "platform": platform.system(),
+            "cpu_count": cpu_count,
+            "cpu_percent": cpu_percent,
+            "cpu_freq_current": cpu_freq.current if cpu_freq else None,
+            "cpu_freq_min": cpu_freq.min if cpu_freq else None,
+            "cpu_freq_max": cpu_freq.max if cpu_freq else None,
+            "message": "CPU monitoring enabled without restrictions"
+        }
+    except Exception as e:
+        logger.error(f"Error getting CPU info: {e}")
+        return {
+            "error": str(e),
+            "message": "CPU monitoring failed"
+        }
 
 
 @asynccontextmanager
@@ -100,20 +124,14 @@ async def request_logging_middleware(request: Request, call_next):
         
     except Exception as e:
         error_count += 1
-        elapsed = time.time() - start_time
-        logger.error(
-            "Request failed: %s %s - Error: %s - Time: %.2fs",
-            request.method, request.url.path, str(e), elapsed
-        )
+        logger.error(f"Request failed: {request.method} {request.url.path} - {e}")
         raise
 
-
-
-def register_routes(app):
-    """Register API routes with logging"""
+# Register routes
+def register_routes():
+    """Register all API routes"""
     logger.info("Registering API routes with memory optimization")
     
-    # Register all routes with logging
     routes = [
         ("Health", health.router),
         ("Supplier", supplier.router),
@@ -126,222 +144,73 @@ def register_routes(app):
         ("Sync Mappings", sync_mappings.router),
         ("Monthly Comparison", monthly_comparison.router),
         ("Statements", statements.router),
+        ("Customer Job", customer_job.router),
     ]
     
-    for route_name, router in routes:
+    for name, router in routes:
         app.include_router(router)
-        logger.info(f"Registered route: {route_name}")
+        logger.info(f"Registered route: {name}")
     
     logger.info("All API routes registered successfully")
 
 # Register routes
-register_routes(app)
+register_routes()
+
+# Add pagination support
 add_pagination(app)
 
-# Enhanced health check endpoint
-@app.get("/health/advanced")
-async def advanced_health_check():
-    """Advanced health check with memory management metrics"""
-    try:
-        # System metrics
-        cpu_percent = get_windows_cpu_percent(interval=0.1)
-        memory_percent = 0  # Memory monitoring disabled
-        disk_percent = 0  # Disk monitoring disabled
-        
-        # Application metrics
-        uptime = time.time() - app_start_time
-        
-        # Memory manager stats
-        memory_stats = memory_manager.get_stats()
-        
-        health_data = {
-            "status": "healthy",
-            "timestamp": time.time(),
-            "uptime_seconds": uptime,
-            "system": {
-                "cpu_percent": cpu_percent,
-                "memory_percent": memory_percent,
-                "memory_available_gb": "monitoring_disabled",
-                "disk_percent": disk_percent,
-                "disk_free_gb": "monitoring_disabled"
-            },
-            "requests": {
-                "total": request_count,
-                "errors": error_count,
-                "success_rate": ((request_count - error_count) / request_count * 100) if request_count > 0 else 100
-            },
-            "memory_management": memory_stats,
-            "optimization": {
-                "cpu_threshold": MAX_CPU_USAGE,
-                "memory_threshold": MAX_MEMORY_USAGE,
-                "memory_cleanup_enabled": False, # Memory management disabled
-                "cleanup_threshold": MEMORY_CLEANUP_INTERVAL
-            }
-        }
-        
-        # Determine overall health status
-        if (cpu_percent > MAX_CPU_USAGE or 
-            memory_percent > MAX_MEMORY_USAGE):
-            health_data['status'] = 'warning'
-        
-        if (cpu_percent > MAX_CPU_USAGE * 1.2 or 
-            memory.percent > MAX_MEMORY_USAGE * 1.2):
-            health_data['status'] = 'critical'
-        
-        return health_data
-        
-    except Exception as e:
-        logger.error(f"Error in advanced health check: {e}")
-        return {"status": "error", "error": str(e)}
+# Simple health check
+@app.get("/health")
+async def health_check():
+    """Simple health check without restrictions"""
+    return {"status": "healthy", "message": "MPI Backend is running"}
 
-
+# CPU info endpoint
 @app.get("/cpu-info")
 async def get_cpu_information():
-    """Get detailed CPU information for Windows VPS debugging"""
+    """Get detailed CPU information without restrictions"""
     try:
         cpu_info = get_cpu_info()
         return {
             "status": "success",
             "cpu_info": cpu_info,
-            "message": "Use this endpoint to debug CPU percentage discrepancies between Task Manager and application"
+            "message": "CPU monitoring enabled without restrictions"
         }
     except Exception as e:
         logger.error(f"Error getting CPU info: {e}")
         return {"status": "error", "error": str(e)}
 
-# Optimization status endpoint
-@app.get("/optimization/status")
-async def optimization_status():
-    """Get comprehensive optimization status"""
-    try:
-        memory_stats = memory_manager.get_stats()
-        
-        return {
-            "timestamp": time.time(),
-            "system_resources": {
-                "status": "optimized",
-                "memory_available": "monitoring_disabled"
-            },
-            "optimizations": {
-                "memory_manager": memory_stats,
-                "database_health": "optimized",
-                "background_jobs": "optimized",
-                "caching": "multi_level"
-            },
-            "garbage_collection": {
-                "collections": gc.get_count(),
-                "objects_tracked": len(gc.get_objects()) if hasattr(gc, 'get_objects') else 'N/A'
-            },
-            "recommendations": generate_optimization_recommendations(0)
-        }
-        
-    except Exception as e:
-        logger.error(f"Optimization status failed: {e}")
-        return {"error": str(e)}
-
-# Memory management endpoint
-@app.get("/memory/status")
-async def memory_status():
-    """Get detailed memory management status"""
-    try:
-        memory_stats = memory_manager.get_stats()
-        
-        return {
-            "timestamp": time.time(),
-            "system_memory": {
-                "status": "monitoring_disabled",
-                "optimization": "enabled"
-            },
-            "memory_manager": memory_stats,
-            "garbage_collection": {
-                "collections": gc.get_count(),
-                "objects_tracked": len(gc.get_objects()) if hasattr(gc, 'get_objects') else 'N/A'
-            },
-            "recommendations": generate_memory_recommendations(0, memory_stats)
-        }
-        
-    except Exception as e:
-        logger.error(f"Memory status failed: {e}")
-        return {"error": str(e)}
-
-def generate_optimization_recommendations(memory_percent: float) -> list:
-    """Generate comprehensive optimization recommendations"""
-    recommendations = []
+# Simple status endpoint
+@app.get("/status")
+async def get_status():
+    """Get application status without restrictions"""
+    uptime = time.time() - app_start_time
     
-    # Memory usage recommendations
-    if memory_percent > MAX_MEMORY_USAGE * 0.9:
-        recommendations.append({
-            "priority": "critical",
-            "message": f"Memory usage critical ({memory_percent:.1f}%)",
-            "action": "Immediate cleanup required, consider restarting application"
-        })
-    elif memory_percent > MAX_MEMORY_USAGE * 0.8:
-        recommendations.append({
-            "priority": "high",
-            "message": f"Memory usage high ({memory_percent:.1f}%)",
-            "action": "Trigger memory cleanup and monitor closely"
-        })
-    
-    # Proactive optimization recommendations
-    if memory_percent > 60:
-        recommendations.append({
-            "priority": "medium",
-            "message": "Moderate resource usage detected",
-            "action": "Proactive optimizations are active - monitoring performance"
-        })
-    
-    # General recommendations
-    if not recommendations:
-        recommendations.append({
-            "priority": "low",
-            "message": "System performing well with proactive optimizations",
-            "action": "Continue monitoring and maintain current optimization settings"
-        })
-    
-    return recommendations
+    return {
+        "status": "running",
+        "uptime_seconds": int(uptime),
+        "requests_processed": request_count,
+        "errors_encountered": error_count,
+        "performance_mode": "unrestricted",
+        "message": "Application running without restrictions"
+    }
 
-
+# Root endpoint
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "message": "MPI Backend API - UNLIMITED PERFORMANCE",
+        "version": "2.0.0",
+        "status": "running",
+        "performance_mode": "unrestricted"
+    }
 
 if __name__ == "__main__":
-    logger.info("Starting memory-optimized uvicorn server")
-    
-    # Add signal handlers for graceful shutdown
-    import signal
-    import sys
-    
-    def signal_handler(signum, frame):
-        """Handle shutdown signals gracefully"""
-        logger.info(f"Received signal {signum}, shutting down gracefully...")
-        
-        # Stop scheduler if running
-        if 'scheduler' in globals() and scheduler and scheduler.running:
-            try:
-                logger.info("Stopping scheduler...")
-                scheduler.shutdown(wait=False)
-                logger.info("Scheduler stopped")
-            except Exception as e:
-                logger.error(f"Error stopping scheduler: {e}")
-        
-
-        
-        # Exit gracefully
-        sys.exit(0)
-    
-    # Register signal handlers
-    signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
-    signal.signal(signal.SIGTERM, signal_handler)  # Termination signal
-    
-    try:
-        uvicorn.run(
-            "mpi_backend.main:app",  # Fixed: use main.py, not main_memory_optimized
-            host="0.0.0.0",
-            port=8000,
-            log_level="info",
-            access_log=True
-        )
-    except KeyboardInterrupt:
-        logger.info("Received KeyboardInterrupt, shutting down...")
-        signal_handler(signal.SIGINT, None)
-    except Exception as e:
-        logger.error(f"Uvicorn error: {e}")
-        signal_handler(signal.SIGTERM, None)
+    uvicorn.run(
+        "mpi_backend.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )

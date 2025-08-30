@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional, List
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 import logging
 import boto3
 
-from mpi_backend.database import get_db
+from mpi_backend.database import get_async_db
 from mpi_backend.database.controllers.StatementController import (
     StatementController
 )
@@ -36,7 +36,7 @@ def parse_date_ddmmyyyy(date_str: str) -> datetime.date:
 
 
 @router.get("/invoice-data")
-def get_statement_invoice_data(
+async def get_statement_invoice_data(
     search: Optional[str] = Query(
         None,
         description="Search term to look for in invoice numbers (full or partial match)",
@@ -71,7 +71,7 @@ def get_statement_invoice_data(
         le=100,
         description="Number of items per page (1-100)"
     ),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer())
 ):
     """
@@ -189,7 +189,7 @@ def get_statement_invoice_data(
         
         # Use search method if search term is provided
         if search:
-            result = controller.search_statement_invoice_data(
+            result = await controller.search_statement_invoice_data(
                 search=search,
                 from_date=from_date_obj,
                 to_date=to_date_obj,
@@ -199,7 +199,7 @@ def get_statement_invoice_data(
                 page_size=page_size
             )
         else:
-            result = controller.get_statement_invoice_data(
+            result = await controller.get_statement_invoice_data(
                 from_date=from_date_obj,
                 to_date=to_date_obj,
                 supplier_names=supplier_names,
@@ -236,12 +236,12 @@ def get_statement_invoice_data(
 
 
 @router.get("/download")
-def download_statement_pdf(
+async def download_statement_pdf(
     statement_id: int = Query(
         ..., 
         description="ID of the statement to download"
     ),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer())
 ):
     """
@@ -284,7 +284,7 @@ def download_statement_pdf(
         
         # Get statement details
         controller = StatementController(db)
-        statement_info = controller.get_statement_by_id(statement_id)
+        statement_info = await controller.get_statement_by_id(statement_id)
         
         if not statement_info:
             raise HTTPException(
@@ -349,7 +349,7 @@ def download_statement_pdf(
         )
         
 @router.post("/reprocess")
-def reprocess_statement(
+async def reprocess_statement(
     statement_id: Optional[str] = Query(
         None, 
         description="ID of the statement to reprocess (optional)"
@@ -364,7 +364,7 @@ def reprocess_statement(
         le=1000,
         description="Maximum number of statements to reprocess in bulk (1-1000)"
     ),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer())
 ):
     """
@@ -415,7 +415,7 @@ def reprocess_statement(
         if statement_id and statement_id.isdigit():
             logger.info(f"Reprocessing single statement with ID: {statement_id}")
             
-            result = controller.reprocess_statement(int(statement_id))
+            result = await controller.reprocess_statement(int(statement_id))
             
             if not result['success']:
                 raise HTTPException(
@@ -439,7 +439,7 @@ def reprocess_statement(
             else:
                 logger.info(f"Starting bulk reprocessing - Supplier: {supplier_name or 'All'}, Max: {max_statements}")
             
-            result = controller.reprocess_all_statements(
+            result = await controller.reprocess_all_statements(
                 supplier_name=supplier_name,
                 max_statements=max_statements
             )
@@ -467,9 +467,9 @@ def reprocess_statement(
 
 
 @router.delete("/{statement_id}")
-def delete_statement(
+async def delete_statement(
     statement_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer())
 ):
     """
@@ -505,7 +505,7 @@ def delete_statement(
         logger.info(f"Delete request for statement ID: {statement_id}")
         
         controller = StatementController(db)
-        result = controller.delete_statement(statement_id)
+        result = await controller.delete_statement(statement_id)
         
         if not result['success']:
             if 'not found' in result.get('error', '').lower():

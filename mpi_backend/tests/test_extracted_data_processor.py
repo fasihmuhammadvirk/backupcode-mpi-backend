@@ -17,25 +17,21 @@ class TestExtractedDataProcessor:
         converted_files = ["test1.xlsx", "test2.xlsx"]
         failed_files = []
         
-        with patch('mpi_backend.utils.extracted_data_processor.db') as mock_db:
-            mock_db.return_value.__enter__.return_value = Mock()
-            mock_db.return_value.__exit__.return_value = None
+        # Mock the controllers
+        with patch('mpi_backend.utils.extracted_data_processor.TemporaryItemMappingController') as mock_temp_controller, \
+             patch('mpi_backend.utils.extracted_data_processor.ItemsMappingController') as mock_item_controller, \
+             patch('mpi_backend.utils.extracted_data_processor.CustomerJobMappingController') as mock_customer_controller:
             
-            # Mock the controllers
-            with patch('mpi_backend.utils.extracted_data_processor.TemporaryItemMappingController') as mock_temp_controller, \
-                 patch('mpi_backend.utils.extracted_data_processor.ItemsMappingController') as mock_item_controller, \
-                 patch('mpi_backend.utils.extracted_data_processor.CustomerJobMappingController') as mock_customer_controller:
+            mock_temp_controller.return_value.get_temp_items_mappings.return_value = []
+            mock_item_controller.return_value.get_items_mappings.return_value = []
+            mock_customer_controller.return_value.get_customer_job_mappings.return_value = []
+            
+            # Mock process_single_file
+            with patch('mpi_backend.utils.extracted_data_processor.process_single_file') as mock_process:
+                mock_process.return_value = {"status": "success", "file": "test1.xlsx"}
                 
-                mock_temp_controller.return_value.get_temp_items_mappings.return_value = []
-                mock_item_controller.return_value.get_items_mappings.return_value = []
-                mock_customer_controller.return_value.get_customer_job_mappings.return_value = []
-                
-                # Mock process_single_file
-                with patch('mpi_backend.utils.extracted_data_processor.process_single_file') as mock_process:
-                    mock_process.return_value = {"status": "success", "file": "test1.xlsx"}
-                    
-                    results = process_extracted_data(converted_files, failed_files)
-        
+                results = process_extracted_data(converted_files, failed_files)
+    
         assert isinstance(results, list)
         assert len(results) == 2
 

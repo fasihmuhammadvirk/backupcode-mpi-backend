@@ -1,18 +1,18 @@
-from datetime import datetime
 from typing import List, Optional
-from sqlalchemy.orm import joinedload, aliased
+from sqlalchemy.orm import aliased
 from datetime import date
 from math import ceil
 import os
 import logging
 
 from fastapi import HTTPException
-from sqlalchemy import or_, asc, desc
+from sqlalchemy import or_, asc, desc, select, update
 from mpi_backend.database.models import Invoice, InvoiceItem
 from mpi_backend.database.schemas import Invoice as InvoiceResponse
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 
 logger = logging.getLogger(__name__)
+
 
 class InvoiceController:
     def __init__(self, db):
@@ -21,19 +21,20 @@ class InvoiceController:
     def _get_db_session(self):
         """Get a database session object, whether db_context is a factory or session."""
         # Check if it's already a session instance (has query, add, commit methods)
-        if hasattr(self.db_context, 'query') and hasattr(self.db_context, 'commit'):
+        if (hasattr(self.db_context, 'query') and 
+            hasattr(self.db_context, 'commit')):
             return self.db_context
         # Otherwise assume it's a session factory
         return self.db_context()
 
-    def add_invoice(self, invoice):
+    async def add_invoice(self, invoice):
         db = self._get_db_session()
         db.add(invoice)
-        db.commit()
-        db.refresh(invoice)
+        await db.commit()
+        await db.refresh(invoice)
         return invoice
 
-    def insert_invoice(self, date, filename, supplier_id, status, storage_path, 
+    async def insert_invoice(self, date, filename, supplier_id, status, storage_path, 
                        existing_invoice_id=None):
         """
         Insert a new invoice record (maintains compatibility with old code).
@@ -74,11 +75,11 @@ class InvoiceController:
             )
         
         db.add(invoice)
-        db.commit()
-        db.refresh(invoice)
+        await db.commit()
+        await db.refresh(invoice)
         return invoice
 
-    def get_invoices(
+    async def get_invoices(
             self, db,
             supplier_ids: Optional[List[int]] = None,
             from_date: date = None,
@@ -90,37 +91,43 @@ class InvoiceController:
             page_size: int = 10,
     ):
         InvoiceItemAlias = aliased(InvoiceItem)
-        query = db.query(
+        query = select(
             Invoice,
             InvoiceItemAlias.ref_no,
             InvoiceItemAlias.customer_job
         ).outerjoin(InvoiceItemAlias, Invoice.id == InvoiceItemAlias.invoice_id).distinct()
 
         if supplier_ids is not None and supplier_ids and 0 not in supplier_ids:
-            query = query.filter(Invoice.supplier_id.in_(supplier_ids))
+            query = query.where(Invoice.supplier_id.in_(supplier_ids))
 
         if from_date:
-            query = query.filter(Invoice.date >= from_date)
+            query = query.where(Invoice.date >= from_date)
         if to_date:
-            query = query.filter(Invoice.date <= to_date)
+            query = query.where(Invoice.date <= to_date)
 
         if job_location:
-            query = query.filter(InvoiceItemAlias.customer_job == job_location)
+            query = query.where(InvoiceItemAlias.customer_job == job_location)
 
         if status == 'processed':
-            query = query.filter(Invoice.status == 'PROCESSED')
+            query = query.where(Invoice.status == 'PROCESSED')
         elif status == 'unprocessed':
-            query = query.filter(or_(Invoice.status == 'PROCESSING', Invoice.status == 'FAILED'))
+            query = query.where(or_(Invoice.status == 'PROCESSING', Invoice.status == 'FAILED'))
 
         if export_status == 'Pending':
-            query = query.filter(Invoice.is_exported == 'Pending')
+            query = query.where(Invoice.is_exported == 'Pending')
         elif export_status == 'Sent':
-            query =  query.filter(Invoice.is_exported == 'Sent')
+            query = query.where(Invoice.is_exported == 'Sent')
 
         query = query.order_by(Invoice.date.desc()) # show latest data first
-        total = query.count()
-        query = query.limit(page_size).offset((page - 1) * page_size) # database level pagination
-        invoices = query.all()
+        
+        # Get total count
+        count_result = await db.execute(query)
+        total = len(count_result.all())
+        
+        # Apply pagination
+        query = query.limit(page_size).offset((page - 1) * page_size)
+        result = await db.execute(query)
+        invoices = result.all()
 
         invoices_list = []
         for invoice, ref_no, customer_job in invoices:
@@ -143,21 +150,22 @@ class InvoiceController:
             "pages": ceil(total / page_size)
         }
 
-    def get_all_invoices(self, db, status: str = 'all',): # deprecated
+    async def get_all_invoices(self, db, status: str = 'all',): # deprecated
 
         InvoiceItemAlias = aliased(InvoiceItem)
-        query = db.query(
+        query = select(
             Invoice,
             InvoiceItemAlias.ref_no,
             InvoiceItemAlias.customer_job
         ).outerjoin(InvoiceItemAlias, Invoice.id == InvoiceItemAlias.invoice_id)
 
         if status == 'processed':
-            query = query.filter(Invoice.status == 'PROCESSED')
+            query = query.where(Invoice.status == 'PROCESSED')
         elif status == 'unprocessed':
-            query = query.filter(or_(Invoice.status == 'PROCESSING', Invoice.status == 'FAILED'))
+            query = query.where(or_(Invoice.status == 'PROCESSING', Invoice.status == 'FAILED'))
 
-        invoices = query.all()
+        result = await db.execute(query)
+        invoices = result.all()
 
         invoices_list = []
         for invoice, ref_no, customer_job in invoices:
@@ -175,20 +183,26 @@ class InvoiceController:
 
         return invoices_list
 
-    def set_status_to_processed(self, inserted_id, db_ref= None):
+    async def set_status_to_processed(self, inserted_id, db_ref= None):
         if db_ref:
-            invoice = db_ref.query(Invoice).filter(Invoice.id == inserted_id).first() # source -> endpoint
+            result = await db_ref.execute(
+                select(Invoice).where(Invoice.id == inserted_id)
+            )
+            invoice = result.scalar_one_or_none()  # source -> endpoint
             if invoice:
                 invoice.status = 'PROCESSED'
-                db_ref.commit()
+                await db_ref.commit()
         else:
             db = self._get_db_session()
-            invoice = db.query(Invoice).filter(Invoice.id == inserted_id).first() # source -> background task
+            result = await db.execute(
+                select(Invoice).where(Invoice.id == inserted_id)
+            )
+            invoice = result.scalar_one_or_none()  # source -> background task
             if invoice:
                 invoice.status = 'PROCESSED'
-                db.commit()
+                await db.commit()
 
-    def set_invoice_is_exported(self, invoice_id):
+    async def set_invoice_is_exported(self, invoice_id):
         """
         Updates the is_exported column of the Invoice with the given ID to 'Sent'.
 
@@ -199,20 +213,29 @@ class InvoiceController:
             bool: True if the update was successful, False otherwise.
         """
         db = self._get_db_session()
-        query = db.query(Invoice).filter(Invoice.id == invoice_id)
-
-        invoice = query.first()
+        result = await db.execute(
+            select(Invoice).where(Invoice.id == invoice_id)
+        )
+        invoice = result.scalar_one_or_none()
         if not invoice:
             return False  # Invoice not found
-        query.update({"is_exported": "Sent"}, synchronize_session='fetch')
+        
+        await db.execute(
+            update(Invoice)
+            .where(Invoice.id == invoice_id)
+            .values(is_exported="Sent")
+        )
 
-        db.commit()
+        await db.commit()
 
         return True
 
-    def delete_invoice(self, invoice_id,db):
+    async def delete_invoice(self, invoice_id, db):
 
-        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        result = await db.execute(
+            select(Invoice).where(Invoice.id == invoice_id)
+        )
+        invoice = result.scalar_one_or_none()
         if not invoice:
             raise HTTPException(status_code=404, detail="Invoice not found")
 
@@ -224,15 +247,15 @@ class InvoiceController:
             os.remove(file_path)
 
         try:
-            db.delete(invoice)
-            db.commit()
+            await db.delete(invoice)
+            await db.commit()
         except Exception as e:
             return print(f"Failed to delete Invoice: Error {e}")
 
         return invoice_id
 
 
-    def delete_invoices(self, invoice_ids, db):
+    async def delete_invoices(self, invoice_ids, db):
         """
         Delete multiple invoices by their IDs. Continues on not-found invoices.
         Returns a summary of deleted and not-found IDs.
@@ -245,7 +268,7 @@ class InvoiceController:
 
         for single_id in invoice_ids:
             try:
-                self.delete_invoice(single_id, db)
+                await self.delete_invoice(single_id, db)
                 deleted_ids.append(single_id)
             except HTTPException as exc:
                 if getattr(exc, "status_code", None) == 404:
@@ -257,10 +280,13 @@ class InvoiceController:
         return {"deleted_ids": deleted_ids, "not_found_ids": not_found_ids}
 
 
-    def get_invoice_by_invoiceID(self, invoice_id,db):
-        return db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    async def get_invoice_by_invoiceID(self, invoice_id, db):
+        result = await db.execute(
+            select(Invoice).where(Invoice.id == invoice_id)
+        )
+        return result.scalar_one_or_none()
 
-    def get_invoices_by_ids(self, invoice_ids):
+    async def get_invoices_by_ids(self, invoice_ids):
         """
         Get invoices by a list of invoice IDs for QuickBooks export.
         
@@ -281,17 +307,22 @@ class InvoiceController:
             else:
                 processed_invoice_ids.append(invoice_id)
         
-        invoices = self._get_db_session().query(Invoice).filter(
-            Invoice.id.in_(processed_invoice_ids)
-        ).all()
+        db = self._get_db_session()
+        result = await db.execute(
+            select(Invoice).where(Invoice.id.in_(processed_invoice_ids))
+        )
+        invoices = result.scalars().all()
         
         logger.debug(f"Retrieved {len(invoices)} invoices for {len(processed_invoice_ids)} invoice IDs")
         return invoices
 
-    def is_invoice_present(self,filename):
+    async def is_invoice_present(self, filename):
         try:
-            with self._get_db_session() as db:
-                invoice = db.query(Invoice).filter_by(filename=filename).first()
+            db = self._get_db_session()
+            result = await db.execute(
+                select(Invoice).where(Invoice.filename == filename)
+            )
+            invoice = result.scalar_one_or_none()
             if invoice:
                 return True
             else:
@@ -300,7 +331,7 @@ class InvoiceController:
             print(f'Failed invoice could not be inserted ->{e}')
             return False
 
-    def sort(self, db, column, sort_order):
+    async def sort(self, db, column, sort_order):
         if sort_order == 'ascending':
             order = asc(column)
         elif sort_order == 'descending':
@@ -309,13 +340,14 @@ class InvoiceController:
             raise HTTPException(status_code=400, detail="Invalid sort order")
 
         InvoiceItemAlias = aliased(InvoiceItem)
-        query = db.query(
+        query = select(
             Invoice,
             InvoiceItemAlias.ref_no,
             InvoiceItemAlias.customer_job
         ).outerjoin(InvoiceItemAlias, Invoice.id == InvoiceItemAlias.invoice_id)
 
-        invoices = query.order_by(order).all()
+        result = await db.execute(query.order_by(order))
+        invoices = result.all()
 
         invoices_list = []
         for invoice, ref_no, customer_job in invoices:

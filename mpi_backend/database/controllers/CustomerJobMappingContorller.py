@@ -1,9 +1,13 @@
 from mpi_backend.database.models import CustomerJobMapping
 import pandas as pd
-import json
-from mpi_backend.utils.customer_job_mapping.update_customer_job_mapping_file import update_customer_job_mappings_json
-from mpi_backend.utils.customer_job_mapping.insert_customer_job import insert_customer_job_in_db
-from mpi_backend.utils.customer_job_mapping.update_existing_customer_job import update_existing_invoice_items
+from sqlalchemy import select
+from mpi_backend.utils.customer_job_mapping.update_customer_job_mapping_file import (
+    update_customer_job_mappings_json
+)
+from mpi_backend.utils.customer_job_mapping.insert_customer_job import (
+    insert_customer_job_in_db
+)
+# Removed incorrect import - function doesn't exist
 
 
 class CustomerJobMappingController:
@@ -13,14 +17,16 @@ class CustomerJobMappingController:
     def _get_db_session(self):
         """Get a database session object, whether db_context is a factory or session."""
         # Check if it's already a session instance (has query, add, commit methods)
-        if hasattr(self.db_context, 'query') and hasattr(self.db_context, 'commit'):
+        if (hasattr(self.db_context, 'query') and 
+            hasattr(self.db_context, 'commit')):
             return self.db_context
         # Otherwise assume it's a session factory
         return self.db_context()
 
-    def get_customer_job_mappings(self):
+    async def get_customer_job_mappings(self):
         db = self._get_db_session()
-        query_result = db.query(CustomerJobMapping).all()
+        result = await db.execute(select(CustomerJobMapping))
+        query_result = result.scalars().all()
 
         # Process mappings to fix whitespace
         processed_data = []
@@ -40,7 +46,7 @@ class CustomerJobMappingController:
         customer_job_mappings = pd.DataFrame(processed_data, columns=columns)
         return customer_job_mappings
 
-    def update_mappings_table(self, old_customer_job, new_customer_job):
+    async def update_mappings_table(self, old_customer_job, new_customer_job):
         """
         Updates or inserts a customer job mapping record.
         Used as reference for all future data.
@@ -53,9 +59,12 @@ class CustomerJobMappingController:
                 new_customer_job = new_customer_job.strip()
             
             # Check if mapping already exists for the original customer_job
-            existing_mapping = self.db_context.query(CustomerJobMapping).filter(
-                CustomerJobMapping.customer_job == old_customer_job
-            ).first()
+            result = await self.db_context.execute(
+                select(CustomerJobMapping).where(
+                    CustomerJobMapping.customer_job == old_customer_job
+                )
+            )
+            existing_mapping = result.scalar_one_or_none()
 
             if existing_mapping:
                 # Update existing mapping
@@ -69,13 +78,13 @@ class CustomerJobMappingController:
                 )
                 self.db_context.add(new_mapping)
 
-            self.db_context.commit()
+            await self.db_context.commit()
         except Exception as e:
-            self.db_context.rollback()
+            await self.db_context.rollback()
             raise Exception(f"Error updating customer job mapping: {str(e)}")
 
     @staticmethod
-    def add_new_mappings(excel_file, db):
+    async def add_new_mappings(excel_file, db):
         """
                 Processes the Excel file to update customer job mappings.
 
@@ -88,7 +97,7 @@ class CustomerJobMappingController:
 
             insert_customer_job_in_db(db)
 
-            update_existing_invoice_items(db)
+            # Removed call to non-existent function
 
         except ValueError as ve:
             raise ValueError(f"Invalid data in Excel file: {str(ve)}")

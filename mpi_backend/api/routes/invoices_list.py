@@ -2,8 +2,9 @@ from fastapi import (
     APIRouter, Depends, HTTPException, Query, UploadFile, File
 )
 from typing import List, Optional
-from sqlalchemy.orm import Session
-from mpi_backend.database import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from mpi_backend.database import get_async_db
 from fastapi_pagination import Page, paginate
 from datetime import date
 import os
@@ -42,8 +43,8 @@ router = APIRouter(prefix="/invoice", tags=["Invoices"])
 
 
 @router.get("", response_model=PaginatedInvoiceResponse)
-def get_invoices(
-        db: Session = Depends(get_db),
+async def get_invoices(
+        db: AsyncSession = Depends(get_async_db),
         supplier_id: Optional[List[int]] = Query(None),
         from_date: date = Query(None),
         to_date: date = Query(None),
@@ -130,7 +131,7 @@ def get_invoices(
     """
     logger.info(f"GET /invoice - Fetching invoices with filters: supplier_id={supplier_id}, status={status}, page={page}, size={size}")
     try:
-        invoices = InvoiceController(db).get_invoices(
+        invoices = await InvoiceController(db).get_invoices(
             db=db,
             supplier_ids=supplier_id,
             from_date=from_date,
@@ -161,8 +162,8 @@ def get_invoices(
 
 
 @router.get("/all")
-def get_all_invoices(
-    db: Session = Depends(get_db), 
+async def get_all_invoices(
+    db: AsyncSession = Depends(get_async_db), 
     token: str = Depends(JWTBearer())
 ):
     """
@@ -222,7 +223,7 @@ def get_all_invoices(
     """
     logger.info("GET /invoice/all - Fetching all invoices")
     try:
-        invoices = InvoiceController(db).get_all_invoices(db=db)
+        invoices = await InvoiceController(db).get_all_invoices(db=db)
         # Safely log the number of invoices
         try:
             if invoices is not None:
@@ -242,8 +243,8 @@ def get_all_invoices(
 
 
 @router.get("/download")
-def download_invoice(
-    db: Session = Depends(get_db), 
+async def download_invoice(
+    db: AsyncSession = Depends(get_async_db), 
     invoice_id: str = Query(None)
 ):
     """
@@ -308,7 +309,7 @@ def download_invoice(
 async def upload_and_process_invoice(
     supplier_id: int, 
     file: UploadFile = File(...), 
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer())
 ):
     """
@@ -460,16 +461,22 @@ async def upload_and_process_invoice(
                 "supplier": supplier
             }
         elif status in ("updated", "created") and invoice_id:
-            created_invoice = db.query(Invoice).filter_by(id=invoice_id).first()
+            result = await db.execute(
+                select(Invoice).where(Invoice.id == invoice_id)
+            )
+            created_invoice = result.scalar_one_or_none()
         elif status == "error":
             logger.error(f"POST /invoice/upload - {message}")
             raise HTTPException(status_code=500, detail=message)
         # Fallback: try to fetch by filename (legacy)
         if not created_invoice:
-            created_invoice = db.query(Invoice).filter_by(
-                filename=file.filename, 
-                supplier_id=supplier_id
-            ).order_by(Invoice.id.desc()).first()
+            result = await db.execute(
+                select(Invoice).where(
+                    Invoice.filename == file.filename, 
+                    Invoice.supplier_id == supplier_id
+                ).order_by(Invoice.id.desc())
+            )
+            created_invoice = result.scalar_one_or_none()
 
         if not created_invoice:
             logger.error(f"POST /invoice/upload - Failed to retrieve invoice record for: {file.filename}")
@@ -519,7 +526,7 @@ async def upload_and_process_invoice(
 @router.post("/process")
 async def process_again(
     invoice_id: str, 
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer())
 ):
     """
@@ -679,8 +686,8 @@ async def process_again(
 
 
 @router.get("/sort", response_model=Page[Invoice])
-def sort_invoices(
-    db: Session = Depends(get_db), 
+async def sort_invoices(
+    db: AsyncSession = Depends(get_async_db), 
     column_name: str = Query(None),
     sort_order: str = Query(
         'ascending', 
@@ -766,7 +773,7 @@ def sort_invoices(
 
     column = column_mapping.get(column_name, 'date')
 
-    invoices = InvoiceController(db).sort(db, column, sort_order)
+    invoices = await InvoiceController(db).sort(db, column, sort_order)
     return paginate(invoices)
 
 
@@ -776,7 +783,7 @@ async def delete_invoice(
         ..., 
         description="Invoice ID(s) to delete. Can be a single ID or multiple comma-separated IDs (e.g., '778cc73f-845a-491d-b1a2-c1bece2ca146' or '778cc73f-845a-491d-b1a2-c1bece2ca146,9a8b7c6d-5e4f-3g2h-1i0j-k1l2m3n4o5p6')"
     ),
-    db: Session = Depends(get_db), 
+    db: AsyncSession = Depends(get_async_db), 
     token: str = Depends(JWTBearer())
 ):
     """

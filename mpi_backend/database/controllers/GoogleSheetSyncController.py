@@ -1,26 +1,20 @@
 #!/usr/bin/env python3
 """
-Enhanced Google Sheet Sync Controller - Fixed version with proper temporary/permanent mapping handling.
+Enhanced Google Sheet Sync Controller - Fixed version with proper 
+temporary/permanent mapping handling.
 
-This controller provides enhanced synchronization functionality with proper validation
-and categorization of temporary vs permanent mappings.
+This controller provides enhanced synchronization functionality with proper 
+validation and categorization of temporary vs permanent mappings.
 """
 
-import os
-import json
 import logging
 from datetime import datetime
-from typing import Dict, List, Any, Optional
-from sqlalchemy.orm import Session
-import asyncio
-import threading
+from typing import Dict, Any
+from sqlalchemy.ext.asyncio import AsyncSession
 from concurrent.futures import ThreadPoolExecutor
 
 from mpi_backend.utils.google_sheets.enhanced_sheet_data_extractor import (
     EnhancedGoogleSheetDataExtractor
-)
-from mpi_backend.utils.google_sheets.temporary_mapping_extractor import (
-    TemporaryMappingExtractor
 )
 from mpi_backend.utils.sync_mapping.temporary_mapping_sync import (
     TemporaryMappingSync
@@ -74,7 +68,7 @@ class GoogleSheetSyncController:
     _executor = ThreadPoolExecutor(
         max_workers=2, thread_name_prefix="sync_worker")
 
-    def __init__(self, db: Session):
+    def __init__(self, db: AsyncSession):
         """
         Initialize the EnhancedGoogleSheetSyncController.
 
@@ -88,7 +82,7 @@ class GoogleSheetSyncController:
         self.logger = logging.getLogger(f"{__name__}")
 
     @classmethod
-    def execute_sync_task(cls, db: Session = None, operation: str = 'sync'):
+    async def execute_sync_task(cls, db: AsyncSession = None, operation: str = 'sync'):
         """
         Execute a sync task with proper error handling and status tracking.
         This method now runs asynchronously to prevent blocking the application.
@@ -122,7 +116,7 @@ class GoogleSheetSyncController:
         }
 
     @classmethod
-    def _execute_sync_task_worker(cls, db: Session = None, operation: str = 'sync'):
+    async def _execute_sync_task_worker(cls, db: AsyncSession = None, operation: str = 'sync'):
         """
         Internal worker method that actually performs the sync task.
         This runs in a separate thread to prevent blocking the application.

@@ -1,7 +1,8 @@
 from mpi_backend.database.models import TempItemMapping
 import pandas as pd
 from typing import Dict, List, Any
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, delete
 import logging
 from mpi_backend.utils.mapping_stats_manager import MappingStatsManager
 
@@ -12,7 +13,7 @@ class TemporaryItemMappingController:
     def __init__(self, db):
         self.db_context = db
 
-    def _get_db_session(self) -> Session:
+    def _get_db_session(self) -> AsyncSession:
         """Get a database session object, whether db_context is a factory or 
         session."""
         # Check if it is already a session instance (has query, add, commit
@@ -23,7 +24,7 @@ class TemporaryItemMappingController:
         # Otherwise assume it's a session factory
         return self.db_context()
 
-    def create_temporary_mapping(
+    async def create_temporary_mapping(
         self,
         original_item: str,
         original_description: str,
@@ -44,10 +45,13 @@ class TemporaryItemMappingController:
             db = self._get_db_session()
 
             # Check if mapping already exists
-            existing_mapping = db.query(TempItemMapping).filter(
-                TempItemMapping.original_item == original_item,
-                TempItemMapping.sheet_name == sheet_name
-            ).first()
+            result = await db.execute(
+                select(TempItemMapping).where(
+                    TempItemMapping.original_item == original_item,
+                    TempItemMapping.sheet_name == sheet_name
+                )
+            )
+            existing_mapping = result.scalar_one_or_none()
 
             if existing_mapping:
                 # Update existing mapping
@@ -69,7 +73,7 @@ class TemporaryItemMappingController:
                     f"{original_item} -> {sheet_name}"
                 )
 
-            db.commit()
+            await db.commit()
             return True
 
         except Exception as e:
@@ -77,12 +81,12 @@ class TemporaryItemMappingController:
                 f"Error creating temporary mapping: {str(e)}"
             )
             try:
-                db.rollback()
+                await db.rollback()
             except Exception:
                 pass
             return False
 
-    def get_temp_items_mappings(self):
+    async def get_temp_items_mappings(self):
         """
         Get all temporary item mappings.
 
@@ -90,7 +94,8 @@ class TemporaryItemMappingController:
             DataFrame with temporary mappings
         """
         db = self._get_db_session()
-        query_result = db.query(TempItemMapping).all()
+        result = await db.execute(select(TempItemMapping))
+        query_result = result.scalars().all()
 
         data = [
             (item.original_item,
@@ -102,7 +107,7 @@ class TemporaryItemMappingController:
         temp_items_mappings = pd.DataFrame(data, columns=columns)
         return temp_items_mappings
 
-    def get_temp_mappings_by_sheet(self, sheet_name: str) -> List[
+    async def get_temp_mappings_by_sheet(self, sheet_name: str) -> List[
         Dict[str, Any]
     ]:
         """
@@ -115,9 +120,12 @@ class TemporaryItemMappingController:
             List of temporary mapping dictionaries
         """
         db = self._get_db_session()
-        query_result = db.query(TempItemMapping).filter(
-            TempItemMapping.sheet_name == sheet_name
-        ).all()
+        result = await db.execute(
+            select(TempItemMapping).where(
+                TempItemMapping.sheet_name == sheet_name
+            )
+        )
+        query_result = result.scalars().all()
 
         return [
             {
@@ -131,7 +139,7 @@ class TemporaryItemMappingController:
             for item in query_result
         ]
 
-    def clear_temp_mappings_by_sheet(self, sheet_name: str) -> int:
+    async def clear_temp_mappings_by_sheet(self, sheet_name: str) -> int:
         """
         Clear temporary mappings for a specific sheet.
 
@@ -142,18 +150,28 @@ class TemporaryItemMappingController:
             Number of mappings deleted
         """
         db = self._get_db_session()
-        deleted_count = db.query(TempItemMapping).filter(
-            TempItemMapping.sheet_name == sheet_name
-        ).delete()
+        result = await db.execute(
+            select(TempItemMapping).where(
+                TempItemMapping.sheet_name == sheet_name
+            )
+        )
+        deleted_count = len(result.scalars().all())
+        
+        # Delete the mappings
+        await db.execute(
+            delete(TempItemMapping).where(
+                TempItemMapping.sheet_name == sheet_name
+            )
+        )
 
-        db.commit()
+        await db.commit()
         logger.info(
             f"Cleared {deleted_count} temporary mappings for "
             f"sheet: {sheet_name}"
         )
         return deleted_count
 
-    def get_mapping_stats(self) -> Dict[str, Any]:
+    async def get_mapping_stats(self) -> Dict[str, Any]:
         """
         Get statistics about temporary mappings.
 
@@ -161,18 +179,25 @@ class TemporaryItemMappingController:
             Dictionary with mapping statistics
         """
         db = self._get_db_session()
-        total_mappings = db.query(TempItemMapping).count()
+        result = await db.execute(select(TempItemMapping))
+        total_mappings = len(result.scalars().all())
 
         # Get unique sheet names
-        sheet_names = db.query(TempItemMapping.sheet_name).distinct().all()
-        unique_sheets = [name[0] for name in sheet_names if name[0]]
+        result = await db.execute(
+            select(TempItemMapping.sheet_name).distinct()
+        )
+        sheet_names = result.scalars().all()
+        unique_sheets = [name for name in sheet_names if name]
 
         # Get mappings per sheet
         sheet_counts = {}
         for sheet_name in unique_sheets:
-            count = db.query(TempItemMapping).filter(
-                TempItemMapping.sheet_name == sheet_name
-            ).count()
+            result = await db.execute(
+                select(TempItemMapping).where(
+                    TempItemMapping.sheet_name == sheet_name
+                )
+            )
+            count = len(result.scalars().all())
             sheet_counts[sheet_name] = count
 
         stats = {

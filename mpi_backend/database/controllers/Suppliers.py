@@ -1,46 +1,59 @@
 from mpi_backend.database.models.Suppliers import Supplier
 from mpi_backend.config import PROCESSABLE_SUPPLIERS
+from sqlalchemy import select
 
 
 class SupplierController:
     def __init__(self, db):
         self.db = db
 
-    def get_all_suppliers(self):
+    async def get_all_suppliers(self):
         try:
-            suppliers = self.db.query(Supplier).all()
+            result = await self.db.execute(
+                select(Supplier)
+            )
+            suppliers = result.scalars().all()
             return suppliers
         except Exception as e:
             print(f"Error Getting Suppliers: {e}")
             return None
 
-    def get_supplier_by_id(self,supplier_id):
+    async def get_supplier_by_id(self, supplier_id):
         try:
-            supplier = self.db.query(Supplier).filter(Supplier.id == supplier_id).first()
-            return supplier.supplier_name
+            result = await self.db.execute(
+                select(Supplier).where(Supplier.id == supplier_id)
+            )
+            supplier = result.scalar_one_or_none()
+            return supplier.supplier_name if supplier else None
         except Exception as e:
             print(f"Error Getting Suppliers With ID: {e}")
             return None
 
-    def get_supplier_name(self, supplier_name):
+    async def get_supplier_name(self, supplier_name):
         try:
-            supplier = self.db.query(Supplier).filter(Supplier.supplier_name == supplier_name).first()
-            return supplier.id
+            result = await self.db.execute(
+                select(Supplier).where(Supplier.supplier_name == supplier_name)
+            )
+            supplier = result.scalar_one_or_none()
+            return supplier.id if supplier else None
         except Exception as e:
             print(f"Error Getting Suppliers With ID: {e}")
             return None
 
-    def populate_suppliers(self):
+    async def populate_suppliers(self):
         try:
-            if not self.db.query(Supplier).first():
+            result = await self.db.execute(
+                select(Supplier)
+            )
+            if not result.scalar_one_or_none():
                 # Only Insert if table is empty
                 for supplier_name in PROCESSABLE_SUPPLIERS:
                     supplier = Supplier(supplier_name=supplier_name)
                     self.db.add(supplier)
-                self.db.commit()
+                await self.db.commit()
                 print("Suppliers inserted successfully.")
             else:
                 print("Supplier table is not empty. Skipping insertion.")
         except Exception as e:
-            self.db.rollback()
+            await self.db.rollback()
             print(f"Error Populating Supplier Table: {e}")

@@ -1,5 +1,5 @@
 import pandas as pd
-from sqlalchemy import func
+from sqlalchemy import func, select
 from mpi_backend.utils.item_utils import is_empty_or_invalid_item
 
 
@@ -55,7 +55,7 @@ def convert_items_to_dataframe(items, use_suffix=True):
     return df
 
 
-def convert_items_to_dataframe_optimized(db_session, ids, columns=None, order_by=None, use_suffix=True):
+async def convert_items_to_dataframe_optimized(db_session, ids, columns=None, order_by=None, use_suffix=True):
     """
     Optimized DataFrame conversion using raw SQL for better performance.
     
@@ -98,25 +98,14 @@ def convert_items_to_dataframe_optimized(db_session, ids, columns=None, order_by
     
     # Determine which columns to select
     if columns:
-        # Map display column names back to database columns
-        reverse_mapping = {v: k for k, v in column_mapping.items()}
-        db_columns = []
-        for col in columns:
-            db_col = reverse_mapping.get(col, col.lower().replace(' ', '_'))
-            if db_col in column_mapping:
-                db_columns.append(db_col)
-        selected_columns = db_columns
+        selected_columns = [col for col in columns if col in column_mapping]
     else:
-        # Default columns for export - match original convert_items_to_dataframe
-        selected_columns = ['item', 'description', 'qty', 'cost', 'amount', 'date', 
-                          'ref_no', 'po_number', 'customer_job', 'bill', 'vendor', 'class_', 'account', 'memo',
-                          'buyer', 'filename', 'sheet_name', 'mpi_item', 'mpi_description', 'date_added']
+        selected_columns = list(column_mapping.keys())
     
-    # Always include vendor for suffix calculation if needed
-    if use_suffix and 'vendor' not in selected_columns:
-        selected_columns.append('vendor')
+    if not selected_columns:
+        return pd.DataFrame()
     
-    # Build the SQL query
+    # Import here to avoid circular imports
     from mpi_backend.database.models.InvoiceItems import InvoiceItem
     
     # Build SELECT clause
@@ -126,10 +115,10 @@ def convert_items_to_dataframe_optimized(db_session, ids, columns=None, order_by
             select_columns.append(getattr(InvoiceItem, col))
     
     # Base query with empty item filter
-    query = db_session.query(*select_columns).filter(InvoiceItem.id.in_(ids))
+    query = select(*select_columns).where(InvoiceItem.id.in_(ids))
     
     # Filter out empty, null, or just dot item codes
-    query = query.filter(
+    query = query.where(
         InvoiceItem.item.isnot(None),
         InvoiceItem.item != "",
         InvoiceItem.item != ".",
@@ -148,7 +137,8 @@ def convert_items_to_dataframe_optimized(db_session, ids, columns=None, order_by
                     query = query.order_by(column.desc())
     
     # Execute query and convert to DataFrame
-    results = query.all()
+    result = await db_session.execute(query)
+    results = result.all()
     
     if not results:
         return pd.DataFrame()
@@ -360,7 +350,7 @@ def prepare_invoice_items_for_display(data, supplier_info=None, context="display
     return data
 
 
-def convert_items_to_dataframe_batch(db_session, ids, columns=None, order_by=None, use_suffix=True, batch_size=1000):
+async def convert_items_to_dataframe_batch(db_session, ids, columns=None, order_by=None, use_suffix=True, batch_size=1000):
     """
     Batch processing version for very large exports to handle memory efficiently.
     
@@ -380,13 +370,13 @@ def convert_items_to_dataframe_batch(db_session, ids, columns=None, order_by=Non
     
     # Process in batches if dataset is large
     if len(ids) <= batch_size:
-        return convert_items_to_dataframe_optimized(db_session, ids, columns, order_by, use_suffix)
+        return await convert_items_to_dataframe_optimized(db_session, ids, columns, order_by, use_suffix)
     
     # Process large datasets in batches
     dataframes = []
     for i in range(0, len(ids), batch_size):
         batch_ids = ids[i:i + batch_size]
-        batch_df = convert_items_to_dataframe_optimized(
+        batch_df = await convert_items_to_dataframe_optimized(
             db_session, batch_ids, columns, order_by, use_suffix
         )
         if not batch_df.empty:
