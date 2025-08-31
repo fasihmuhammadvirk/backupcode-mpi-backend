@@ -25,10 +25,7 @@ engine = create_async_engine(
     pool_timeout=60,  # Increased timeout for high load
     pool_recycle=7200,  # Recycle connections every 2 hours
     echo=False,  # Keep logging disabled
-    connect_args={
-        "connect_timeout": 60,  # Increased connection timeout
-        "application_name": "mpi_backend_unlimited"
-    }
+    connect_args={}
 )
 
 # QuickBooks database engine - UNLIMITED PERFORMANCE
@@ -40,10 +37,7 @@ qb_engine = create_async_engine(
     pool_timeout=60,  # Increased timeout for high load
     pool_recycle=7200,  # Recycle connections every 2 hours
     echo=False,  # Keep logging disabled
-    connect_args={
-        "connect_timeout": 60,  # Increased connection timeout
-        "application_name": "mpi_backend_qb_unlimited"
-    }
+    connect_args={}
 )
 
 AsyncSessionLocal = sessionmaker(

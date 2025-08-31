@@ -1003,7 +1003,7 @@ async def filter_invoice_items_stream(
 
 
 @router.post("", response_model=PaginatedInvoiceItemsResponse)
-def filter_data(
+async def filter_data(
     request: FilterRequest, 
     db: AsyncSession = Depends(get_async_db), 
     token: str = Depends(JWTBearer()),
@@ -1106,7 +1106,7 @@ def filter_data(
 
         # Use ultra-optimized controller
         controller = InvoiceItemController(db)
-        filtered_data = controller.apply_filters(request, page, size)
+        filtered_data = await controller.apply_filters(request, page, size)
         
         # Cache simple requests aggressively
         if not request.filters and not request.comparison_filters and size <= 50:
@@ -1250,7 +1250,7 @@ async def get_price_difference(request: FilterRequest, db: AsyncSession = Depend
             result = []
         else:
             # Calculate price increase with supplier-specific method
-            price_increase = controller.calculate_price_increase(
+            price_increase = await controller.calculate_price_increase(
                 item_numbers=None, 
                 item_vendor_pairs=item_vendor_pairs
             )
@@ -1496,7 +1496,7 @@ async def get_aggregates(
     
     try:
         # Cache key for aggregates
-        request_hash = hashlib.md5(request.json().encode()).hexdigest()
+        request_hash = hashlib.md5(str(request.dict()).encode()).hexdigest()
         cache_key = f"aggregates_{request_hash}"
         
         # Check cache
@@ -1622,7 +1622,7 @@ def clear_cache(token: str = Depends(JWTBearer())):
 
 
 @router.post("/unmapped-items", response_model=PaginatedUnmappedItemsResponse)
-def get_unmapped_items(
+async def get_unmapped_items(
     request: UnmappedItemsFilterRequest,
     db: AsyncSession = Depends(get_async_db),
     token: str = Depends(JWTBearer()),
@@ -1897,11 +1897,11 @@ def get_unmapped_items(
             params['offset'] = 0
         
         # Execute count query
-        count_result = db.execute(text(count_sql), params)
+        count_result = await db.execute(text(count_sql), params)
         total_count = count_result.scalar()
         
         # Execute main query
-        main_result = db.execute(text(base_sql), params)
+        main_result = await db.execute(text(base_sql), params)
         
         # Convert to response models - ensure proper string formatting
         items = []
@@ -1955,7 +1955,7 @@ def get_unmapped_items(
 
 
 @router.post("/unmapped-items/export-all")
-def export_all_unmapped_items(
+async def export_all_unmapped_items(
     item_type: str = Body(..., description="Type of items: 'temporary', 'unmapped', or 'no_temporary'"),
     date_from: Optional[str] = Body(None, description="Start date filter (YYYY-MM-DD)"),
     date_to: Optional[str] = Body(None, description="End date filter (YYYY-MM-DD)"),

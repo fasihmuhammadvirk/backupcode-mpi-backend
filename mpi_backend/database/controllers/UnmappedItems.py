@@ -378,7 +378,7 @@ class UnmappedItemsController:
         # Use a CTE to aggregate unique items per supplier on the DB side
         from sqlalchemy import func
         base = (
-            query.with_entities(
+            select(
                 InvoiceItem.vendor.label("supplier"),
                 InvoiceItem.item.label("original_item_id"),
                 func.min(InvoiceItem.description).label("original_description"),

@@ -29,7 +29,9 @@ class MonthlyComparisonController:
             hasattr(self.db_context, 'commit')):
             return self.db_context
         # Otherwise assume it's a session factory
-        return self.db_context()
+        if callable(self.db_context):
+            return self.db_context()
+        return self.db_context
 
     async def get_items_in_date_range(
         self, 
@@ -503,7 +505,7 @@ class MonthlyComparisonController:
         except Exception as e:
             logger.error(f"Error in optimized enriched items with suppliers: {str(e)}", exc_info=True)
             logger.info("Falling back to legacy method...")
-            return self._get_enriched_items_with_suppliers_legacy(items, page, size)
+            return await self._get_enriched_items_with_suppliers_legacy(items, page, size)
     
     async def _get_enriched_items_with_suppliers_legacy(self, items: List[ItemInfo], page: int = 1, size: int = 10):
         """

@@ -228,7 +228,7 @@ async def sync_status(
         - Useful for frontend progress indicators
     """
     sync_controller = GoogleSheetSyncController(db)
-    status = await sync_controller.get_sync_status()
+    status = sync_controller.get_sync_status()
 
     # Determine detailed current operation description
     current_operation = "No operation in progress"

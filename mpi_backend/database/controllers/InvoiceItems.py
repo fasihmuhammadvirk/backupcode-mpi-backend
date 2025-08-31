@@ -239,7 +239,7 @@ class InvoiceItemController:
         except Exception as e:
             logger.error(f"Error in ultra-optimized distinct values: {e}")
             # Fallback to simple query
-            return self._fallback_distinct_query(column)
+            return await self._fallback_distinct_query(column)
 
     async def _fallback_distinct_query(self, column: str) -> List[str]:
         """Fallback method for distinct queries if optimization fails."""
@@ -363,7 +363,7 @@ class InvoiceItemController:
 
             # Get total count with optimized counting
             count_start = time.time()
-            total_count = self._get_optimized_count(base_query)
+            total_count = await self._get_optimized_count(base_query)
             logger.info(f"Count query took {time.time() - count_start:.3f}s")
 
             # Apply pagination with offset optimization
@@ -583,7 +583,7 @@ class InvoiceItemController:
             logger.error(f"Fallback filter query failed: {e}")
             return [], 0
 
-    def get_data_by_column_name(
+    async def get_data_by_column_name(
         self,
         column_name: str,
         filter_context: Optional[Dict] = None,
@@ -611,12 +611,12 @@ class InvoiceItemController:
             'vendor', 'customer_job', 'class_', 'export_status']
         if column_name in cacheable_columns and not filter_context and not comparison_filters:
             try:
-                return self._get_cached_distinct_values(column_name, filter_hash, comparison_hash)
+                return await self._get_cached_distinct_values(column_name, filter_hash, comparison_hash)
             except:
                 pass  # Fall back to non-cached version if caching fails
 
         # Use the optimized implementation
-        result = self._get_distinct_values_optimized(
+        result = await self._get_distinct_values_optimized(
             column_name, filter_context, comparison_filters or [])
 
         logging.info(
@@ -1011,7 +1011,7 @@ class InvoiceItemController:
             query = self._apply_priority_ordering(query, request.order_by)
 
             # Execute query to get specific column values
-            result = await self.db.execute(query.with_entities(column_attr))
+            result = await self.db.execute(select(column_attr).select_from(query.subquery()))
             results = result.all()
             column_values = [row[0] for row in results if row[0] is not None]
 
@@ -1025,7 +1025,7 @@ class InvoiceItemController:
         query = self._apply_priority_ordering(query, request.order_by)
 
         # Get total count efficiently using subquery-based count
-        total = self._get_optimized_count(query)
+        total = await self._get_optimized_count(query)
 
         # Apply pagination if size > 0
         if size > 0:
@@ -1094,7 +1094,7 @@ class InvoiceItemController:
                 current = (item.account or '').strip()
                 if current:
                     continue
-                new_letter = self._auto_assign_account(
+                new_letter = await self._auto_assign_account(
                     sheet_name=getattr(item, 'sheet_name', ''),
                     current_account=current,
                     mpi_item=getattr(item, 'mpi_item', '')
@@ -2246,14 +2246,14 @@ class InvoiceItemController:
         return customer_jobs
 
     @lru_cache(maxsize=128)
-    def _get_cached_distinct_values(self, column_name: str, filter_context_hash: str, comparison_filters_hash: str):
+    async def _get_cached_distinct_values(self, column_name: str, filter_context_hash: str, comparison_filters_hash: str):
         """
         Cached version of distinct value fetching for better performance.
         Uses hashed filter context to enable caching while maintaining filter functionality.
         """
         # Parse the hashes back to original data (in production, you might want a more sophisticated cache)
         # For now, we'll implement the core optimization without relying on the hash parsing
-        return self._get_distinct_values_ultra_optimized(column_name, filter_context_hash)
+        return await self._get_distinct_values_ultra_optimized(column_name, filter_context_hash)
 
     def _create_filter_hash(self, filter_context: Dict, comparison_filters: List) -> tuple:
         """Create a hash from filter context and comparison filters for caching."""
@@ -2732,11 +2732,11 @@ class InvoiceItemController:
 
         # Execute query with proper aggregation
         try:
-            result = await self.db.execute(query.with_entities(
+            result = await self.db.execute(select(
                 func.sum(InvoiceItem.qty).label('total_qty'),
                 func.sum(calculated_amount_case).label('total_amount'),
                 func.avg(InvoiceItem.cost).label('average_cost')
-            ))
+            ).select_from(query.subquery()))
             aggregates = result.first()
         except Exception as e:
             logger.error(f"Database error in get_aggregates: {str(e)}")
@@ -3512,7 +3512,7 @@ class InvoiceItemController:
             query = self._apply_filters_to_query(query, filter_request)
             
             # Get total count first (optimized)
-            count_query = query.with_entities(func.count(InvoiceItem.id))
+            count_query = select(func.count(InvoiceItem.id)).select_from(query.subquery())
             count_result = await self.db.execute(count_query)
             total_count = count_result.scalar()
             
