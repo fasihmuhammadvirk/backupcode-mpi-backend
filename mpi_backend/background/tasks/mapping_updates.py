@@ -1,30 +1,30 @@
 """
-Mapping Updates Task for MPI Backend
-UNLIMITED PERFORMANCE - No restrictions
+Mapping Updates Task for Background Scheduler
+Updates UIDI/NO matches and all mappings automatically
 """
 
 import logging
 
 logger = logging.getLogger(__name__)
 
-
 def update_uidi_no_match():
-    """Update UIDI/NO Match mappings - UNLIMITED PERFORMANCE"""
+    """Update UIDI/NO matches"""
     try:
-        logger.info("Starting UIDI/NO Match update - UNLIMITED PERFORMANCE")
-        # TODO: Implement UIDI/NO Match update logic
-        logger.info("UIDI/NO Match update completed - UNLIMITED PERFORMANCE")
+        logger.info("Starting UIDI/NO match update task")
+        # TODO: Implement UIDI/NO match update logic
+        logger.info("UIDI/NO match update task completed successfully")
+        
     except Exception as e:
-        logger.error(f"UIDI/NO Match update failed: {e}")
+        logger.error(f"UIDI/NO match update task failed: {e}")
         raise
 
-
 def update_all_mappings():
-    """Update all mappings - UNLIMITED PERFORMANCE"""
+    """Update all mappings"""
     try:
-        logger.info("Starting all mappings update - UNLIMITED PERFORMANCE")
+        logger.info("Starting all mappings update task")
         # TODO: Implement all mappings update logic
-        logger.info("All mappings update completed - UNLIMITED PERFORMANCE")
+        logger.info("All mappings update task completed successfully")
+        
     except Exception as e:
-        logger.error(f"All mappings update failed: {e}")
+        logger.error(f"All mappings update task failed: {e}")
         raise

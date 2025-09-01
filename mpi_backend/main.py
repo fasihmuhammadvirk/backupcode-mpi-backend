@@ -21,7 +21,7 @@ from mpi_backend.api.routes import (
 )
 
 # Import scheduler
-from mpi_backend.background.scheduler import init_scheduler
+from mpi_backend.background.scheduler import start_scheduler
 
 # Setup logging first
 from mpi_backend.config.logging_config import setup_logging, get_missing_logger
@@ -67,12 +67,15 @@ async def lifespan(app: FastAPI):
     """Application lifespan management - UNLIMITED PERFORMANCE"""
     logger.info("Starting UNLIMITED PERFORMANCE MPI Backend")
     
-    # Initialize scheduler with unlimited performance
+    # Initialize and start scheduler with unlimited performance
     try:
-        init_scheduler()
-        logger.info("Scheduler initialized with unlimited performance")
+        scheduler = start_scheduler()
+        if scheduler:
+            logger.info("Scheduler started with unlimited performance")
+        else:
+            logger.error("Failed to start scheduler")
     except Exception as e:
-        logger.error(f"Failed to initialize scheduler: {e}")
+        logger.error(f"Failed to start scheduler: {e}")
     
     yield
     

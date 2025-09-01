@@ -1,19 +1,27 @@
 """
-Email Download Task for MPI Backend
-UNLIMITED PERFORMANCE - No restrictions
+Email Download Task for Background Scheduler
+Downloads emails and processes invoices automatically
 """
 
 import logging
 
 logger = logging.getLogger(__name__)
 
-
 def download_emails():
-    """Download emails - UNLIMITED PERFORMANCE"""
+    """Download emails and process invoices"""
     try:
-        logger.info("Starting email download - UNLIMITED PERFORMANCE")
-        # TODO: Implement email download logic
-        logger.info("Email download completed - UNLIMITED PERFORMANCE")
+        logger.info("Starting email download task")
+        
+        # Import the actual invoice downloader logic
+        from mpi_backend.utils.invoice_downaloder import (
+            email_download_background_task
+        )
+        
+        # Run the invoice downloader
+        email_download_background_task()
+        
+        logger.info("Email download task completed successfully")
+        
     except Exception as e:
-        logger.error(f"Email download failed: {e}")
+        logger.error(f"Email download task failed: {e}")
         raise
