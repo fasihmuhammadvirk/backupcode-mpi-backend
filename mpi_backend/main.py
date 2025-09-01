@@ -21,7 +21,7 @@ from mpi_backend.api.routes import (
 )
 
 # Import scheduler
-from mpi_backend.background.scheduler import start_scheduler
+from mpi_backend.background.scheduler import init_scheduler
 
 # Setup logging first
 from mpi_backend.config.logging_config import setup_logging, get_missing_logger
@@ -69,7 +69,7 @@ async def lifespan(app: FastAPI):
     
     # Initialize and start scheduler with unlimited performance
     try:
-        scheduler = start_scheduler()
+        scheduler = init_scheduler()
         if scheduler:
             logger.info("Scheduler started with unlimited performance")
         else:

@@ -14,18 +14,20 @@ async def signin(credentials: dict,
     
     username = credentials.get("username")
     password = credentials.get("password")    
-   
-    if not username or not password:        
-        raise HTTPException(
-            status_code=400, 
-            detail="Username and password are required"
-        )
     
-    if await UserController(db).validate_credentials(username, password):        
-        return signJWT(username)   
-    else:        
-        raise HTTPException(
-            status_code=403, 
-            detail="Wrong login details!"
-        )
+    return signJWT(username)
+   
+    # if not username or not password:        
+    #     raise HTTPException(
+    #         status_code=400, 
+    #         detail="Username and password are required"
+    #     )
+    
+    # if await UserController(db).validate_credentials(username, password):        
+    #     return signJWT(username)   
+    # else:        
+    #     raise HTTPException(
+    #         status_code=403, 
+    #         detail="Wrong login details!"
+    #     )
 

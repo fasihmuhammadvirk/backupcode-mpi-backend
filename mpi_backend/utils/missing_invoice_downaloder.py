@@ -646,7 +646,7 @@ async def missing_email_download_background_task():
             logger.info(f"Missing invoice conversion complete. Success: {len(converted_files)}, Failed: {len(failed_files)}")
 
             logger.info("Starting missing invoice data processing")
-            process_extracted_data(converted_files, failed_files)
+            await process_extracted_data(converted_files, failed_files)
             logger.info("Missing invoice data processing complete")
 
         except Exception as post_error:

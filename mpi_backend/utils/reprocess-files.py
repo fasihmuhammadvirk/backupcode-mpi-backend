@@ -21,11 +21,11 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def get_db_session():
     """Get database session for reprocessing"""
-    db = await get_async_db()
-    try:
-        yield db
-    finally:
-        await db.close()
+    async for db in get_async_db():
+        try:
+            yield db
+        finally:
+            await db.close()
 
 
 async def reprocess_files(

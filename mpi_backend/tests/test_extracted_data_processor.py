@@ -88,7 +88,7 @@ class TestExtractedDataProcessor:
                 with patch('mpi_backend.utils.extracted_data_processor.process_single_file') as mock_process:
                     mock_process.return_value = {"status": "success", "file": "test1.xlsx"}
                     
-                    results = process_extracted_data(converted_files, failed_files, existing_invoice_id)
+                    results = process_extracted_data(converted_files, failed_files)
                     
                     assert isinstance(results, list)
                     assert len(results) == 1

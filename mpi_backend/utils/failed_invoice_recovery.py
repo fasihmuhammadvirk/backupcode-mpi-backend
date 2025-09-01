@@ -853,7 +853,7 @@ async def process_failed_invoice_recovery():
                 logger.info(f"Conversion complete. Success: {len(converted_files)}, Failed: {len(failed_files)}")
 
                 logger.info("Starting data processing for recovered files")
-                process_extracted_data(converted_files, failed_files)
+                await process_extracted_data(converted_files, failed_files)
                 logger.info("Data processing complete for recovered files")
             else:
                 logger.info("No files to convert or process")

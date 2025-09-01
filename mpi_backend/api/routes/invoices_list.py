@@ -164,21 +164,25 @@ async def get_invoices(
 @router.get("/all")
 async def get_all_invoices(
     db: AsyncSession = Depends(get_async_db), 
-    token: str = Depends(JWTBearer())
+    token: str = Depends(JWTBearer()),
+    limit: int = Query(1000, ge=1, le=5000, description="Maximum number of invoices to return (1-5000)")
 ):
     """
-    Get all invoices without pagination or filtering.
+    Get all invoices with optional limit for performance.
     
     **Summary:**
-        Retrieves all invoices from the database without any pagination or
-        filtering. This endpoint is useful for bulk operations or when all
-        invoice data is needed at once.
+        Retrieves invoices from the database with an optional limit to prevent
+        performance issues. This endpoint is useful for bulk operations while
+        maintaining reasonable response times.
+        
+    **Query Parameters:**
+        - **limit** (`int`, default=1000): Maximum number of invoices to return (1-5000)
         
     **Authentication:**
         - Requires valid JWT token in Authorization header
         
     **Returns:**
-        - **List[Invoice]**: Array of all invoice objects in the database
+        - **List[Invoice]**: Array of invoice objects in the database (limited)
         
     **Response Example:**
     ```json
@@ -207,23 +211,23 @@ async def get_all_invoices(
     ```
     
     **Performance Considerations:**
-        - Returns all invoices without pagination
-        - May be slow for large datasets
-        - Use with caution in production environments
+        - Limited to 5000 invoices maximum for performance
+        - Default limit of 1000 invoices
+        - Use paginated endpoint for better performance with large datasets
         - Consider using the paginated endpoint for large datasets
         
     **Error Codes:**
         - **500**: Internal server error during data retrieval
         
     **Notes:**
-        - No filtering or pagination applied
+        - Limited results to prevent timeouts
         - Returns complete invoice records
-        - Suitable for data export or bulk processing
+        - Suitable for data export or bulk processing with limits
         - Use paginated endpoint for better performance with large datasets
     """
-    logger.info("GET /invoice/all - Fetching all invoices")
+    logger.info(f"GET /invoice/all - Fetching invoices with limit: {limit}")
     try:
-        invoices = await InvoiceController(db).get_all_invoices(db=db)
+        invoices = await InvoiceController(db).get_all_invoices(db=db, limit=limit)
         # Safely log the number of invoices
         try:
             if invoices is not None:
@@ -288,10 +292,10 @@ async def download_invoice(
     """
     logger.info(f"GET /invoice/download - Downloading invoice: {invoice_id}")
     try:
-        invoice = InvoiceController(db).get_invoice_by_invoiceID(
+        invoice = await InvoiceController(db).get_invoice_by_invoiceID(
             invoice_id, db
         )
-        supplier_name = SupplierController(db).get_supplier_by_id(
+        supplier_name = await SupplierController(db).get_supplier_by_id(
             invoice.supplier_id
         )
         url = get_presigned_url(file_key=f'{supplier_name}/{invoice_id}')
@@ -403,7 +407,7 @@ async def upload_and_process_invoice(
             )
 
         # Get supplier info
-        supplier = SupplierController(db).get_supplier_by_id(supplier_id)
+        supplier = await SupplierController(db).get_supplier_by_id(supplier_id)
         if not supplier:
             logger.error(f"POST /invoice/upload - Supplier not found: {supplier_id}")
             raise HTTPException(
@@ -434,7 +438,7 @@ async def upload_and_process_invoice(
             )
 
         # Process extracted data and get result
-        results = process_extracted_data(converted_files, failed_files)
+        results = await process_extracted_data(converted_files, failed_files)
         result = results[0] if results else None
         if not result:
             logger.error(f"POST /invoice/upload - No result from processing for: {file.filename}")
@@ -589,7 +593,7 @@ async def process_again(
     logger.info(f"POST /invoice/process - Reprocessing invoice: {invoice_id}")
     try:
         # Get invoice and supplier info
-        invoice = InvoiceController(db).get_invoice_by_invoiceID(
+        invoice = await InvoiceController(db).get_invoice_by_invoiceID(
             invoice_id, db
         )
         if not invoice:
@@ -599,7 +603,7 @@ async def process_again(
                 detail=f"Invoice with ID {invoice_id} not found"
             )
 
-        supplier = SupplierController(db).get_supplier_by_id(
+        supplier = await SupplierController(db).get_supplier_by_id(
             invoice.supplier_id
         )
         if not supplier:
@@ -650,12 +654,22 @@ async def process_again(
                 detail=f"Failed to convert invoice: {failed_files}"
             )
 
-        # Process extracted data with existing invoice ID
+        # Process extracted data
         # The enhanced duplicate detection logic will handle updating existing invoice items
         # without deleting the invoice record itself
-        process_extracted_data(
-            converted_files, failed_files, existing_invoice_id=invoice_id
+        processing_result = await process_extracted_data(
+            converted_files, failed_files
         )
+
+        # Update invoice status based on processing result
+        if processing_result['success_count'] > 0:
+            # Update invoice status to PROCESSED
+            invoice.status = "PROCESSED"
+            await db.commit()
+            logger.info(f"Updated invoice status to PROCESSED for: {invoice.filename}")
+        else:
+            # Keep status as FAILED if processing failed
+            logger.warning(f"Processing failed for invoice: {invoice.filename}, keeping FAILED status")
 
         # Clean up files after processing (handle files and directories)
         for entry in os.listdir(upload_folder):
@@ -880,7 +894,7 @@ async def delete_invoice(
         
         if len(ids_to_delete) == 1:
             # Single invoice deletion
-            deleted_id = invoice_controller.delete_invoice(ids_to_delete[0], db)
+            deleted_id = await invoice_controller.delete_invoice(ids_to_delete[0], db)
             return {
                 "deleted_ids": [deleted_id],
                 "not_found_ids": [],
@@ -888,7 +902,7 @@ async def delete_invoice(
             }
         else:
             # Multiple invoice deletion
-            summary = invoice_controller.delete_invoices(ids_to_delete, db)
+            summary = await invoice_controller.delete_invoices(ids_to_delete, db)
             return {
                 "deleted_ids": summary["deleted_ids"],
                 "not_found_ids": summary["not_found_ids"],

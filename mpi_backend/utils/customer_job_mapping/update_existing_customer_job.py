@@ -20,11 +20,11 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def get_db_session():
     """Get database session for customer job mapping operations"""
-    db = await get_async_db()
-    try:
-        yield db
-    finally:
-        await db.close()
+    async for db in get_async_db():
+        try:
+            yield db
+        finally:
+            await db.close()
 
 
 async def update_existing_customer_job_in_db():

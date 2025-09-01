@@ -738,7 +738,7 @@ async def email_download_background_task():
                        f"Failed: {len(failed_files)}")
 
             logger.info("Starting data processing")
-            process_extracted_data(converted_files, failed_files)
+            await process_extracted_data(converted_files, failed_files)
             logger.info("Data processing complete")
 
         except Exception as post_error:

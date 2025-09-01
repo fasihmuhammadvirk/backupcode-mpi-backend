@@ -31,11 +31,11 @@ RETRY_DELAY_SECONDS = 5  # Delay between retries
 @asynccontextmanager
 async def get_db_session():
     """Get database session for data processing"""
-    db = await get_async_db()
-    try:
-        yield db
-    finally:
-        await db.close()
+    async for db in get_async_db():
+        try:
+            yield db
+        finally:
+            await db.close()
 
 
 async def process_extracted_data(

@@ -438,7 +438,7 @@ async def get_hidden_items(
         - Hidden items maintain all original data
     """
     controller = InvoiceItemController(db)
-    return paginate(controller.get_hidden_items())
+    return paginate(await controller.get_hidden_items())
 
 @router.get("/count")
 async def count_invoice_items(db: AsyncSession = Depends(get_async_db), token: str = Depends(JWTBearer())):
@@ -570,6 +570,7 @@ async def sort_invoices(db: AsyncSession = Depends(get_async_db), column_name: s
         - Only active (visible) invoice items are included
     """
     column_mapping = {
+        "ID": "id",
         "File Name": "filename",
         "Sheet Name": "sheet_name",
         "Item": "item",
@@ -590,7 +591,6 @@ async def sort_invoices(db: AsyncSession = Depends(get_async_db), column_name: s
         "Date Added": "date_added",
         "Original Item": "mpi_item", # will be removed adding beacuse of incorect naming on frontend
         "Original Description": "mpi_description", # will be removed adding beacuse of incorect naming on frontend
-        "Date Added": "date_added",
         "MPI Item": "mpi_item",
         "MPI Description": "mpi_description",
     }
@@ -600,7 +600,7 @@ async def sort_invoices(db: AsyncSession = Depends(get_async_db), column_name: s
 
     column = column_mapping.get(column_name, 'date')
 
-    invoice_items = InvoiceItemController(db).sort(db, column, sort_order)
+    invoice_items = await InvoiceItemController(db).sort(db, column, sort_order)
     return paginate(invoice_items)
 
 @router.post("/export")
@@ -716,7 +716,7 @@ async def export_invoices(
             # Use standard method for small exports or when optimization is disabled
             print(f"Using standard export for {record_count} records")
             controller = InvoiceItemController(db)
-            items = controller.get_invoice_items_by_ids(ids, order_by=order_by)
+            items = await controller.get_invoice_items_by_ids(ids, order_by=order_by)
             items_df = convert_items_to_dataframe(items)
             method_used = "standard"
         

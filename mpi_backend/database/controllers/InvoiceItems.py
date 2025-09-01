@@ -34,7 +34,7 @@ class InvoiceItemController:
         self._setup_query_cache()
         # Allowed columns whitelist for dynamic operations
         self._allowed_distinct_columns = {
-            'filename', 'sheet_name', 'item', 'description', 'qty', 'cost',
+            'id', 'filename', 'sheet_name', 'item', 'description', 'qty', 'cost',
             'amount', 'date', 'ref_no', 'po_number', 'customer_job', 'bill',
             'vendor', 'class_', 'account', 'memo', 'buyer', 'date_added',
             'mpi_item', 'mpi_description', 'export_status'
@@ -668,15 +668,25 @@ class InvoiceItemController:
                     if cf.get('column') == 'date' and cf.get('value'):
                         operator = cf.get('operator', '=')
                         param_name = f"date_{i}"
+                        
+                        # Convert string date to proper date object
+                        date_value = cf['value']
+                        if isinstance(date_value, str):
+                            try:
+                                date_value = date.fromisoformat(date_value[:10])  # Take first 10 chars for YYYY-MM-DD
+                            except ValueError:
+                                logger.warning(f"Invalid date format: {date_value}, skipping date filter")
+                                continue
+                        
                         if operator == 'gte':
                             where_conditions.append(f"date >= :{param_name}")
-                            query_params[param_name] = cf['value']
+                            query_params[param_name] = date_value
                         elif operator == 'lte':
                             where_conditions.append(f"date <= :{param_name}")
-                            query_params[param_name] = cf['value']
+                            query_params[param_name] = date_value
                         elif operator == '=':
                             where_conditions.append(f"date = :{param_name}")
-                            query_params[param_name] = cf['value']
+                            query_params[param_name] = date_value
             
             # Apply context filters
             if filter_context:
@@ -1155,7 +1165,7 @@ class InvoiceItemController:
             return
 
         # Determine account assignment based on item classification
-        auto_account = self._auto_assign_account(
+        auto_account = await self._auto_assign_account(
             sheet_name=row.get('Sheet Name', ''),
             current_account=row.get('Account', ''),
             mpi_item=row.get('MpiItem', '')
@@ -2218,10 +2228,19 @@ class InvoiceItemController:
             logger.error(f"Error in update_mappings_table: {str(e)}")
 
     async def sort(self, db, column, sort_order):
+        # Validate column name against allowed columns
+        if column not in self._allowed_distinct_columns:
+            raise HTTPException(status_code=400, detail="Invalid column name")
+        
+        # Get the actual column from the model
+        column_attr = getattr(InvoiceItem, column, None)
+        if column_attr is None:
+            raise HTTPException(status_code=400, detail="Invalid column name")
+        
         if sort_order == 'ascending':
-            order = asc(column)
+            order = asc(column_attr)
         elif sort_order == 'descending':
-            order = desc(column)
+            order = desc(column_attr)
         else:
             raise HTTPException(status_code=400, detail="Invalid sort order")
 
@@ -2480,6 +2499,9 @@ class InvoiceItemController:
                             return datetime.strptime(raw, "%m/%d/%Y").date()
                         except Exception:
                             pass
+                        # If all parsing fails, return None to skip this filter
+                        logger.warning(f"Could not parse date: {raw}")
+                        return None
                 return raw
         return comp_filter['value']
 
@@ -2487,6 +2509,10 @@ class InvoiceItemController:
         """
         Optimized operator filter application.
         """
+        # Skip filter if value is None (failed date parsing)
+        if value is None:
+            return query
+            
         op = (operator or '').strip().lower()
         operator_map = {
             "gt": column > value,
@@ -2700,52 +2726,132 @@ class InvoiceItemController:
         # This prevents double-counting and gives accurate totals
         # Also handle tax lines and ensure proper rounding
 
-        # Convert amount string to float with proper validation
-        # Universal solution that includes all tax lines and adjustment items
-        # Enhanced validation to filter out malformed amount strings
-        # Use a more robust approach to handle conversion errors
+        # Simplified amount conversion to prevent hanging queries
+        # Use basic validation without complex regex that can cause performance issues
         calculated_amount_case = case(
             (
                 and_(
                     InvoiceItem.amount.isnot(None),
                     InvoiceItem.amount != '',
-                    # Simple validation - amount should be reasonable length
-                    func.length(InvoiceItem.amount) < 100,
+                    func.length(InvoiceItem.amount) < 50,  # Reduced length limit
                     func.length(InvoiceItem.amount) > 0,
-                    # Filter out malformed strings that contain non-numeric text
-                    # This excludes strings like "Merchandise0.000Freight0.00..."
+                    # Basic filtering without complex regex
                     ~InvoiceItem.amount.like('%Merchandise%'),
                     ~InvoiceItem.amount.like('%Freight%'),
                     ~InvoiceItem.amount.like('%MiscCharges%'),
                     ~InvoiceItem.amount.like('%SubTotal%'),
                     ~InvoiceItem.amount.like('%Taxable%'),
                     ~InvoiceItem.amount.like('%Tax(%'),
-                    ~InvoiceItem.amount.like('%Tax)%'),
-                    # Additional validation to ensure the string can be converted to numeric
-                    func.replace(InvoiceItem.amount, ',', '').regexp_match(
-                        '^-?[0-9]*\.?[0-9]+$')
+                    ~InvoiceItem.amount.like('%Tax)%')
                 ),
                 cast(func.replace(InvoiceItem.amount, ',', ''), Float)
             ),
             else_=0.0
         )
 
-        # Execute query with proper aggregation
+        # Execute query with proper aggregation and timeout protection
         try:
-            result = await self.db.execute(select(
-                func.sum(InvoiceItem.qty).label('total_qty'),
-                func.sum(calculated_amount_case).label('total_amount'),
-                func.avg(InvoiceItem.cost).label('average_cost')
-            ).select_from(query.subquery()))
+            # Add timeout protection to prevent hanging queries
+            import asyncio
+            start_time = time.time()
+            
+            # Use a more efficient approach: apply filters directly in the aggregation query
+            logger.info("Using efficient filtered aggregation with amount validation")
+            
+            # Build WHERE conditions for filters
+            where_conditions = [InvoiceItem.is_active.is_(True)]
+            
+            # Apply filters efficiently
+            if hasattr(request, 'filters') and request.filters:
+                for column, values in request.filters.items():
+                    if hasattr(InvoiceItem, column) and values:
+                        if isinstance(values, list):
+                            where_conditions.append(getattr(InvoiceItem, column).in_(values))
+                        else:
+                            where_conditions.append(getattr(InvoiceItem, column) == values)
+            
+            # Apply comparison filters efficiently
+            if hasattr(request, 'comparison_filters') and request.comparison_filters:
+                for cf in request.comparison_filters:
+                    if hasattr(cf, 'column') and hasattr(cf, 'value') and hasattr(cf, 'operator'):
+                        column = getattr(InvoiceItem, cf.column)
+                        value = cf.value
+                        
+                        # Convert string date to proper date object
+                        if cf.column == 'date' and isinstance(value, str):
+                            try:
+                                value = date.fromisoformat(value[:10])
+                            except ValueError:
+                                logger.warning(f"Invalid date format: {value}, skipping date filter")
+                                continue
+                        
+                        if cf.operator == 'gte':
+                            where_conditions.append(column >= value)
+                        elif cf.operator == 'lte':
+                            where_conditions.append(column <= value)
+                        elif cf.operator == '=':
+                            where_conditions.append(column == value)
+                        elif cf.operator == 'gt':
+                            where_conditions.append(column > value)
+                        elif cf.operator == 'lt':
+                            where_conditions.append(column < value)
+                        elif cf.operator == 'ne':
+                            where_conditions.append(column != value)
+            
+            # Combine all conditions
+            combined_where = and_(*where_conditions)
+            
+            result = await asyncio.wait_for(
+                self.db.execute(select(
+                    func.sum(InvoiceItem.qty).label('total_qty'),
+                    func.sum(
+                        case(
+                            (
+                                and_(
+                                    InvoiceItem.amount.isnot(None),
+                                    InvoiceItem.amount != '',
+                                    func.length(InvoiceItem.amount) < 50,
+                                    ~InvoiceItem.amount.like('%Merchandise%'),
+                                    ~InvoiceItem.amount.like('%Freight%'),
+                                    ~InvoiceItem.amount.like('%MiscCharges%'),
+                                    ~InvoiceItem.amount.like('%SubTotal%'),
+                                    ~InvoiceItem.amount.like('%Taxable%'),
+                                    ~InvoiceItem.amount.like('%Tax(%'),
+                                    ~InvoiceItem.amount.like('%Tax)%'),
+                                    func.replace(InvoiceItem.amount, ',', '').regexp_match('^-?[0-9]*\.?[0-9]+$')
+                                ),
+                                cast(func.replace(InvoiceItem.amount, ',', ''), Float)
+                            ),
+                            else_=0.0
+                        )
+                    ).label('total_amount'),
+                    func.avg(InvoiceItem.cost).label('average_cost')
+                ).where(combined_where)),
+                timeout=30.0  # 30 second timeout
+            )
+            
+            execution_time = time.time() - start_time
+            logger.info(f"get_aggregates query executed in {execution_time:.2f}s")
+            
             aggregates = result.first()
+        except asyncio.TimeoutError:
+            logger.error("get_aggregates query timed out after 30 seconds")
+            logger.info("Falling back to simple aggregation method")
+            # Rollback any pending transaction before fallback
+            try:
+                await self.db.rollback()
+            except Exception as rollback_error:
+                logger.warning(f"Rollback error: {rollback_error}")
+            return await self._get_aggregates_simple(request)
         except Exception as e:
             logger.error(f"Database error in get_aggregates: {str(e)}")
-            # Return default values if query fails
-            return {
-                "total_qty": 0,
-                "total_amount": 0.0,
-                "average_cost": 0.0
-            }
+            logger.info("Falling back to simple aggregation method")
+            # Rollback any pending transaction before fallback
+            try:
+                await self.db.rollback()
+            except Exception as rollback_error:
+                logger.warning(f"Rollback error: {rollback_error}")
+            return await self._get_aggregates_simple(request)
 
         # Handle null values and ensure proper type conversion with better logging
         total_qty = 0 if aggregates.total_qty is None else int(
@@ -2843,18 +2949,20 @@ class InvoiceItemController:
             # Determine if we should use supplier-specific comparison
             if item_vendor_pairs:
                 # Use supplier-specific SQL query with dynamic time periods
+                # Use a simpler approach with ANY operator for arrays
+                items_list = [pair[0] for pair in item_vendor_pairs]
+                vendors_list = [pair[1] for pair in item_vendor_pairs]
+                
                 price_increase_query = text("""
-                    WITH item_vendor_pairs_table AS (
-                        SELECT unnest(:items) as item, unnest(:vendors) as vendor
-                    ),
-                    item_vendor_dates AS (
+                    WITH item_vendor_dates AS (
                         SELECT DISTINCT 
                             ii.item,
                             ii.vendor,
                             MAX(ii.date) OVER (PARTITION BY ii.item, ii.vendor) as most_recent_date
                         FROM invoice_items ii
-                        JOIN item_vendor_pairs_table ivp ON ii.item = ivp.item AND ii.vendor = ivp.vendor
-                        WHERE ii.cost IS NOT NULL 
+                        WHERE ii.item = ANY(:items)
+                        AND ii.vendor = ANY(:vendors)
+                        AND ii.cost IS NOT NULL 
                         AND ii.cost > 0
                     ),
                     item_price_data AS (
@@ -2905,8 +3013,6 @@ class InvoiceItemController:
                 """)
 
                 # Execute with separate item and vendor lists
-                items_list = [pair[0] for pair in item_vendor_pairs]
-                vendors_list = [pair[1] for pair in item_vendor_pairs]
                 query_result = await self.db.execute(price_increase_query, {
                     "items": items_list,
                     "vendors": vendors_list
@@ -3024,7 +3130,7 @@ class InvoiceItemController:
             logger.info("Falling back to legacy method...")
 
             # Fallback to original method if SQL optimization fails
-            return self._calculate_price_increase_legacy(item_numbers)
+            return await self._calculate_price_increase_legacy(item_numbers)
 
     async def _calculate_price_increase_legacy(self, item_numbers):
         """
@@ -3564,3 +3670,277 @@ class InvoiceItemController:
         except Exception as e:
             logger.error(f"Error applying filters: {e}")
             return query
+
+    def _apply_filters_to_query_generic(self, query, filters):
+        """Apply generic filters to the query"""
+        for column, values in filters.items():
+            if hasattr(InvoiceItem, column) and values:
+                if isinstance(values, list):
+                    # Use IN clause for multiple values
+                    query = query.where(getattr(InvoiceItem, column).in_(values))
+                else:
+                    # Single value
+                    query = query.where(getattr(InvoiceItem, column) == values)
+        return query
+
+    def _apply_comparison_filters_to_query(self, query, comparison_filters):
+        """Apply comparison filters to the query"""
+        for cf in comparison_filters:
+            if cf.get('column') and cf.get('value') and cf.get('operator'):
+                column = getattr(InvoiceItem, cf['column'])
+                value = cf['value']
+                
+                # Convert string date to proper date object
+                if cf['column'] == 'date' and isinstance(value, str):
+                    try:
+                        value = date.fromisoformat(value[:10])
+                    except ValueError:
+                        logger.warning(f"Invalid date format: {value}, skipping date filter")
+                        continue
+                
+                if cf['operator'] == 'gte':
+                    query = query.where(column >= value)
+                elif cf['operator'] == 'lte':
+                    query = query.where(column <= value)
+                elif cf['operator'] == '=':
+                    query = query.where(column == value)
+                elif cf['operator'] == 'gt':
+                    query = query.where(column > value)
+                elif cf['operator'] == 'lt':
+                    query = query.where(column < value)
+                elif cf['operator'] == 'ne':
+                    query = query.where(column != value)
+        
+        return query
+
+    async def _get_aggregates_simple(self, request):
+        """
+        Simple fallback method for get_aggregates when the complex query fails.
+        Uses basic aggregation without complex filtering to prevent hanging.
+        """
+        try:
+            logger.info("Using simple aggregation fallback method")
+            
+            # Simple base query without complex filtering
+            base_query = select(InvoiceItem).where(InvoiceItem.is_active.is_(True))
+            
+            # Apply only basic filters that won't cause performance issues
+            if hasattr(request, 'filters') and request.filters:
+                for column_name, values in request.filters.items():
+                    if column_name in ['vendor', 'customer_job', 'item'] and values:
+                        # Only apply simple filters for performance
+                        column = getattr(InvoiceItem, column_name, None)
+                        if column:
+                            base_query = base_query.where(column.in_(values))
+            
+            # Simple aggregation without complex amount conversion
+            result = await self.db.execute(select(
+                func.sum(InvoiceItem.qty).label('total_qty'),
+                func.sum(cast(func.replace(InvoiceItem.amount, ',', ''), Float)).label('total_amount'),
+                func.avg(InvoiceItem.cost).label('average_cost')
+            ).select_from(base_query.subquery()))
+            
+            aggregates = result.first()
+            
+            # Handle results
+            total_qty = int(aggregates.total_qty) if aggregates.total_qty else 0
+            total_amount = float(aggregates.total_amount) if aggregates.total_amount else 0.0
+            average_cost = float(aggregates.average_cost) if aggregates.average_cost else 0.0
+            
+            return {
+                "total_qty": total_qty,
+                "total_amount": format_currency(total_amount),
+                "average_cost": format_currency(average_cost)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in simple aggregation fallback: {str(e)}")
+            # Rollback any pending transaction
+            try:
+                await self.db.rollback()
+            except Exception as rollback_error:
+                logger.warning(f"Rollback error in fallback: {rollback_error}")
+            # Return safe default values
+            return {
+                "total_qty": 0,
+                "total_amount": format_currency(0.0),
+                "average_cost": format_currency(0.0)
+            }
+
+    async def process_invoice_file(self, file_path: str) -> Dict[str, any]:
+        """
+        Process an invoice file (Excel file converted from PDF)
+        
+        Args:
+            file_path: Path to the Excel file to process
+            
+        Returns:
+            Dictionary with processing result
+        """
+        try:
+            import pandas as pd
+            from pathlib import Path
+            from mpi_backend.database.models import Invoice
+            from mpi_backend.database.controllers.Invoice import InvoiceController
+            
+            logger.info(f"Starting to process invoice file: {file_path}")
+            
+            file_path_obj = Path(file_path)
+            if not file_path_obj.exists():
+                logger.error(f"File not found: {file_path}")
+                return {
+                    'success': False,
+                    'error': f"File not found: {file_path}"
+                }
+            
+            # Read the Excel file
+            try:
+                logger.info(f"Reading Excel file: {file_path}")
+                # Try to read all sheets
+                excel_file = pd.ExcelFile(file_path)
+                logger.info(f"Excel file has sheets: {excel_file.sheet_names}")
+                all_data = []
+                
+                for sheet_name in excel_file.sheet_names:
+                    df = pd.read_excel(file_path, sheet_name=sheet_name)
+                    logger.info(f"Sheet '{sheet_name}' has {len(df)} rows and columns: {list(df.columns)}")
+                    if not df.empty:
+                        # Add sheet name to each row
+                        df['Sheet Name'] = sheet_name
+                        all_data.append(df)
+                
+                if not all_data:
+                    logger.error(f"No data found in file: {file_path}")
+                    return {
+                        'success': False,
+                        'error': f"No data found in file: {file_path}"
+                    }
+                
+                # Combine all sheets
+                combined_df = pd.concat(all_data, ignore_index=True)
+                logger.info(f"Combined data has {len(combined_df)} rows")
+                
+            except Exception as e:
+                logger.error(f"Error reading Excel file {file_path}: {str(e)}")
+                return {
+                    'success': False,
+                    'error': f"Error reading Excel file {file_path}: {str(e)}"
+                }
+            
+            # Process each row
+            processed_count = 0
+            error_count = 0
+            invoice_id = None
+            
+            for index, row in combined_df.iterrows():
+                try:
+                    logger.info(f"Processing row {index}")
+                    # Convert row to dictionary and handle NaN values with proper data types
+                    row_dict = {}
+                    for col in row.index:
+                        value = row[col]
+                        if pd.isna(value):
+                            row_dict[col] = None
+                        else:
+                            # Convert to appropriate data types
+                            if col == 'Qty':
+                                # Convert quantity to integer
+                                try:
+                                    row_dict[col] = int(float(value)) if value is not None else None
+                                except (ValueError, TypeError):
+                                    row_dict[col] = None
+                            elif col == 'Cost':
+                                # Convert cost to float
+                                try:
+                                    row_dict[col] = float(value) if value is not None else None
+                                except (ValueError, TypeError):
+                                    row_dict[col] = None
+                            else:
+                                row_dict[col] = str(value) if isinstance(value, (int, float)) else value
+                    
+                    # Add missing fields that are expected by insert_invoice_items
+                    row_dict['MpiItem'] = 'No Match'  # Default MPI item code
+                    row_dict['MpiDescription'] = 'No Match'  # Default MPI description
+                    row_dict['email_date'] = date.today()  # Default email date
+                    
+                    logger.info(f"Row {index} data: {row_dict}")
+                    
+                    # Extract invoice information from the first row
+                    if index == 0:
+                        logger.info("Creating invoice record for first row")
+                        
+                        # Extract invoice date
+                        invoice_date = None
+                        if 'Date' in row_dict and row_dict['Date']:
+                            try:
+                                if isinstance(row_dict['Date'], str):
+                                    # Try different date formats
+                                    for fmt in ['%m/%d/%Y', '%m/%d/%y', '%Y-%m-%d']:
+                                        try:
+                                            invoice_date = datetime.strptime(row_dict['Date'], fmt).date()
+                                            break
+                                        except ValueError:
+                                            continue
+                                elif hasattr(row_dict['Date'], 'date'):
+                                    invoice_date = row_dict['Date'].date()
+                            except Exception as e:
+                                logger.warning(f"Error parsing date '{row_dict['Date']}': {str(e)}")
+                                invoice_date = date.today()
+                        
+                        if not invoice_date:
+                            invoice_date = date.today()
+                        
+                        logger.info(f"Using invoice date: {invoice_date}")
+                        
+                        # Create invoice record directly using the database session
+                        from mpi_backend.database.models import Invoice
+                        invoice = Invoice(
+                            date=invoice_date,
+                            filename=file_path_obj.name,
+                            supplier_id=1,  # Default supplier ID, should be extracted from context
+                            status="PROCESSED",
+                            storage_path=str(file_path_obj),
+                            is_exported='Pending'
+                        )
+                        
+                        self.db.add(invoice)
+                        await self.db.commit()
+                        await self.db.refresh(invoice)
+                        
+                        invoice_id = invoice.id
+                        logger.info(f"Created invoice with ID: {invoice_id}")
+                    
+                    # Insert invoice item
+                    logger.info(f"Inserting invoice item for row {index}")
+                    await self.insert_invoice_items(row_dict, file_path_obj.name, invoice_id)
+                    processed_count += 1
+                    logger.info(f"Successfully processed row {index}")
+                    
+                except Exception as e:
+                    logger.error(f"Error processing row {index} in {file_path}: {str(e)}")
+                    logger.error(f"Row data: {row_dict}")
+                    error_count += 1
+                    continue
+            
+            logger.info(f"Processing complete. Processed: {processed_count}, Errors: {error_count}")
+            
+            if processed_count > 0:
+                return {
+                    'success': True,
+                    'processed_count': processed_count,
+                    'error_count': error_count,
+                    'error': None
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': f"No rows processed successfully. Errors: {error_count}"
+                }
+                
+        except Exception as e:
+            logger.error(f"Error processing invoice file {file_path}: {str(e)}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            return {
+                'success': False,
+                'error': f"Error processing invoice file {file_path}: {str(e)}"
+            }

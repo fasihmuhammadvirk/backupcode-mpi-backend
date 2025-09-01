@@ -1505,8 +1505,21 @@ async def get_aggregates(
             logger.info("Returning cached aggregates")
             return create_optimized_response(cached_result)
         
+        # Add timeout protection to prevent hanging
+        import asyncio
         controller = InvoiceItemController(db)
-        aggregates = await controller.get_aggregates(request)
+        
+        try:
+            aggregates = await asyncio.wait_for(
+                controller.get_aggregates(request),
+                timeout=45.0  # 45 second timeout for the entire operation
+            )
+        except asyncio.TimeoutError:
+            logger.error("get_aggregates endpoint timed out after 45 seconds")
+            raise HTTPException(
+                status_code=408, 
+                detail="Request timeout - aggregates calculation took too long"
+            )
         
         # Cache the result
         _set_cached_response(cache_key, aggregates)

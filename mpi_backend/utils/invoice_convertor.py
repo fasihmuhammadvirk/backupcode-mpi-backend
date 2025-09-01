@@ -87,16 +87,24 @@ def convert_single_file(file_path, supplier):
         
         # Process the file using the main extraction logic
         split_filepaths = extract_data(file_path, output_path, supplier)
-        # Only include the original file if it was processed as a single invoice
-        if not split_filepaths:
-            converted_paths.append(file_path)
+        
+        # Check if the Excel file was actually created
+        if os.path.exists(output_path):
+            converted_paths.append(output_path)
+            logger.info(f"Excel file created: {output_path}")
+        else:
+            logger.warning(f"Excel file was not created: {output_path}")
         
         # Handle split invoices if any
-        if split_filepaths:
+        if split_filepaths and isinstance(split_filepaths, list):
             for split_file_path in split_filepaths:
                 split_output_path = split_file_path.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
                 extract_data(split_file_path, split_output_path, supplier)
-                converted_paths.append(split_file_path)
+                if os.path.exists(split_output_path):
+                    converted_paths.append(split_output_path)
+                    logger.info(f"Split Excel file created: {split_output_path}")
+                else:
+                    logger.warning(f"Split Excel file was not created: {split_output_path}")
                 
         logger.info(f"Successfully processed file: {filename}")
         return converted_paths, failed_files
