@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Last 4 Days Invoice Downloader Script
+August 25 to Current Time Invoice Downloader Script
 
-This script downloads invoices from the last 4 days using the exact same concept
+This script downloads invoices from August 25, 2025 to the current time using the exact same concept
 as the regular email downloader, including email marking behavior.
 
 Usage:
     python download_past_49_hours.py
 
 Features:
-    - Downloads invoices from last 4 days
+    - Downloads invoices from August 25, 2025 to current time
     - Uses same supplier detection logic
     - Same attachment processing
     - Same email marking behavior (marks as read after successful download)
@@ -95,20 +95,20 @@ def login():
             mail.logout()
         raise
 
-def search_last_4_days_emails(mail):
-    """Search for emails from the last 4 days with error handling"""
+def search_august_25_to_current_emails(mail):
+    """Search for emails from August 25, 2025 to current time with error handling"""
     try:
-        # Calculate time range: last 4 days
+        # Calculate time range: August 25, 2025 to current time
         now = datetime.now(TIMEZONE)
-        last_4_days = now - timedelta(days=4)
+        august_25 = datetime(2025, 8, 25, tzinfo=TIMEZONE)
         
         # Format for IMAP search
-        time_frame = last_4_days.strftime('%d-%b-%Y')
-        logger.info(f"SEARCH: Searching for emails since {time_frame} (last 4 days)")
-        logger.info(f"   From: {last_4_days.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        time_frame = august_25.strftime('%d-%b-%Y')
+        logger.info(f"SEARCH: Searching for emails since {time_frame} (Aug 25 to current)")
+        logger.info(f"   From: {august_25.strftime('%Y-%m-%d %H:%M:%S %Z')}")
         logger.info(f"   To:   {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
-        # Search for emails in the last 4 days (not just unseen)
+        # Search for emails from August 25 to current time (not just unseen)
         result, data = mail.uid('search', None, f'(SINCE {time_frame})')
         if result != 'OK':
             logger.error(f"❌ Email search failed: {result}")
@@ -350,12 +350,12 @@ def download_invoice_attachments_from_thread(mail, thread_email_ids, base_folder
         logger.error(f"ERROR: Error processing email thread: {str(e)}")
         return False, 0
 
-def download_last_4_days_invoices():
-    """Main function to download invoices from last 4 days"""
-    logger.info("STARTING: STARTING LAST 4 DAYS INVOICE DOWNLOADER")
+def download_august_25_to_current_invoices():
+    """Main function to download invoices from August 25, 2025 to current time"""
+    logger.info("STARTING: STARTING AUGUST 25 TO CURRENT INVOICE DOWNLOADER")
     logger.info("=" * 80)
     logger.info(f"Session started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info("Scope: Last 4 days, ALL emails (not just unseen)")
+    logger.info("Scope: August 25, 2025 to current time, ALL emails (not just unseen)")
     logger.info("Behavior: EXACTLY like regular email downloader - marks as read after success")
 
     mail = None
@@ -363,9 +363,9 @@ def download_last_4_days_invoices():
         # Setup directory structure
         try:
             now = datetime.now(TIMEZONE)
-            last_4_days = now - timedelta(days=4)
+            august_25 = datetime(2025, 8, 25, tzinfo=TIMEZONE)
             
-            base_folder = f"LAST_4_DAYS_{last_4_days.strftime('%d-%b-%Y_%H-%M-%S')}_to_{now.strftime('%d-%b-%Y_%H-%M-%S')}"
+            base_folder = f"AUGUST_25_TO_CURRENT_{august_25.strftime('%d-%b-%Y_%H-%M-%S')}_to_{now.strftime('%d-%b-%Y_%H-%M-%S')}"
             base_folder_path = Path(INVOICE_DOWNLOAD_FOLDER) / base_folder
             base_folder_path.mkdir(parents=True, exist_ok=True)
             logger.info(f"DIRECTORY: Created download directory: {base_folder_path}")
@@ -376,14 +376,14 @@ def download_last_4_days_invoices():
         # Email processing
         try:
             mail = login()
-            filtered_ids = search_last_4_days_emails(mail)
+            filtered_ids = search_august_25_to_current_emails(mail)
 
             if not filtered_ids:
-                logger.info("EMAILS: No emails found in last 4 days")
+                logger.info("EMAILS: No emails found from August 25 to current time")
                 logger.info("=" * 80)
                 return
 
-            logger.info(f"EMAILS: Processing {len(filtered_ids)} emails from last 4 days")
+            logger.info(f"EMAILS: Processing {len(filtered_ids)} emails from August 25 to current time")
             logger.info("-" * 80)
             successfully_processed_emails = []
 
@@ -494,14 +494,14 @@ def download_last_4_days_invoices():
             logger.info(f"   Failed: {len(filtered_ids) - len(successfully_processed_emails)}")
             logger.info(f"   Download folder: {base_folder_path}")
             logger.info("=" * 80)
-            logger.info("SUCCESS: LAST 4 DAYS INVOICE DOWNLOAD COMPLETED")
+            logger.info("SUCCESS: AUGUST 25 TO CURRENT INVOICE DOWNLOAD COMPLETED")
 
         except Exception as processing_error:
             logger.error(f"ERROR: Email processing failed: {str(processing_error)}")
             raise
 
     except Exception as e:
-        logger.error(f"ERROR: LAST 4 DAYS DOWNLOAD FAILED: {str(e)}")
+        logger.error(f"ERROR: AUGUST 25 TO CURRENT DOWNLOAD FAILED: {str(e)}")
         logger.error(traceback.format_exc())
         raise
 
@@ -515,14 +515,14 @@ def download_last_4_days_invoices():
 
 if __name__ == "__main__":
     try:
-        print("STARTING: Starting Last 4 Days Invoice Downloader")
+        print("STARTING: Starting August 25 to Current Time Invoice Downloader")
         print("=" * 60)
-        print("This script will download invoices from the last 4 days")
+        print("This script will download invoices from August 25, 2025 to current time")
         print("using the same logic as your regular email downloader.")
         print()
         
         # Run the download
-        download_last_4_days_invoices()
+        download_august_25_to_current_invoices()
         
         print("\nSUCCESS: Script completed successfully!")
         print("Check the log file 'past_49_hours_download.log' for details.")

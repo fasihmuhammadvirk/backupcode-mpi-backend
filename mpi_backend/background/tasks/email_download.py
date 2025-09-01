@@ -12,11 +12,13 @@ def download_emails():
     try:
         logger.info("Starting email download task")
         
-        # Import the actual download logic
-        from download_past_49_hours import download_last_4_days_invoices
+        # Import the actual invoice downloader logic
+        from mpi_backend.utils.invoice_downaloder import (
+            email_download_background_task
+        )
         
-        # Run the download
-        download_last_4_days_invoices()
+        # Run the invoice downloader
+        email_download_background_task()
         
         logger.info("Email download task completed successfully")
         
