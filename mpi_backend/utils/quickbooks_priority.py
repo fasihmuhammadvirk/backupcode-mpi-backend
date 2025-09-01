@@ -43,6 +43,12 @@ def set_scheduler_instance(scheduler: BackgroundScheduler):
     logger.info("Scheduler instance registered for dynamic job control")
 
 
+def get_scheduler_instance():
+    """Get the global scheduler instance for dynamic job control"""
+    global scheduler_instance
+    return scheduler_instance
+
+
 def pause_background_jobs():
     """ENHANCED: Signal to pause non-critical background jobs"""
     global qb_export_active

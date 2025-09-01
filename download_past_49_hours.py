@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Past 49 Hours Invoice Downloader Script
+Last 4 Days Invoice Downloader Script
 
-This script downloads invoices from the past 49 hours using the exact same concept
+This script downloads invoices from the last 4 days using the exact same concept
 as the regular email downloader, including email marking behavior.
 
 Usage:
     python download_past_49_hours.py
 
 Features:
-    - Downloads invoices from past 49 hours
+    - Downloads invoices from last 4 days
     - Uses same supplier detection logic
     - Same attachment processing
     - Same email marking behavior (marks as read after successful download)
@@ -95,20 +95,20 @@ def login():
             mail.logout()
         raise
 
-def search_past_49_hours_emails(mail):
-    """Search for emails from the past 49 hours with error handling"""
+def search_last_4_days_emails(mail):
+    """Search for emails from the last 4 days with error handling"""
     try:
-        # Calculate time range: past 49 hours
+        # Calculate time range: last 4 days
         now = datetime.now(TIMEZONE)
-        past_49_hours = now - timedelta(hours=49)
+        last_4_days = now - timedelta(days=4)
         
         # Format for IMAP search
-        time_frame = past_49_hours.strftime('%d-%b-%Y')
-        logger.info(f"SEARCH: Searching for emails since {time_frame} (past 49 hours)")
-        logger.info(f"   From: {past_49_hours.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        time_frame = last_4_days.strftime('%d-%b-%Y')
+        logger.info(f"SEARCH: Searching for emails since {time_frame} (last 4 days)")
+        logger.info(f"   From: {last_4_days.strftime('%Y-%m-%d %H:%M:%S %Z')}")
         logger.info(f"   To:   {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
-        # Search for emails in the past 49 hours (not just unseen)
+        # Search for emails in the last 4 days (not just unseen)
         result, data = mail.uid('search', None, f'(SINCE {time_frame})')
         if result != 'OK':
             logger.error(f"❌ Email search failed: {result}")
@@ -350,12 +350,12 @@ def download_invoice_attachments_from_thread(mail, thread_email_ids, base_folder
         logger.error(f"ERROR: Error processing email thread: {str(e)}")
         return False, 0
 
-def download_past_49_hours_invoices():
-    """Main function to download invoices from past 49 hours"""
-    logger.info("STARTING: STARTING PAST 49 HOURS INVOICE DOWNLOADER")
+def download_last_4_days_invoices():
+    """Main function to download invoices from last 4 days"""
+    logger.info("STARTING: STARTING LAST 4 DAYS INVOICE DOWNLOADER")
     logger.info("=" * 80)
     logger.info(f"Session started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info("Scope: Past 49 hours, ALL emails (not just unseen)")
+    logger.info("Scope: Last 4 days, ALL emails (not just unseen)")
     logger.info("Behavior: EXACTLY like regular email downloader - marks as read after success")
 
     mail = None
@@ -363,9 +363,9 @@ def download_past_49_hours_invoices():
         # Setup directory structure
         try:
             now = datetime.now(TIMEZONE)
-            past_49_hours = now - timedelta(hours=49)
+            last_4_days = now - timedelta(days=4)
             
-            base_folder = f"PAST_49_HOURS_{past_49_hours.strftime('%d-%b-%Y_%H-%M-%S')}_to_{now.strftime('%d-%b-%Y_%H-%M-%S')}"
+            base_folder = f"LAST_4_DAYS_{last_4_days.strftime('%d-%b-%Y_%H-%M-%S')}_to_{now.strftime('%d-%b-%Y_%H-%M-%S')}"
             base_folder_path = Path(INVOICE_DOWNLOAD_FOLDER) / base_folder
             base_folder_path.mkdir(parents=True, exist_ok=True)
             logger.info(f"DIRECTORY: Created download directory: {base_folder_path}")
@@ -376,14 +376,14 @@ def download_past_49_hours_invoices():
         # Email processing
         try:
             mail = login()
-            filtered_ids = search_past_49_hours_emails(mail)
+            filtered_ids = search_last_4_days_emails(mail)
 
             if not filtered_ids:
-                logger.info("EMAILS: No emails found in past 49 hours")
+                logger.info("EMAILS: No emails found in last 4 days")
                 logger.info("=" * 80)
                 return
 
-            logger.info(f"EMAILS: Processing {len(filtered_ids)} emails from past 49 hours")
+            logger.info(f"EMAILS: Processing {len(filtered_ids)} emails from last 4 days")
             logger.info("-" * 80)
             successfully_processed_emails = []
 
@@ -494,14 +494,14 @@ def download_past_49_hours_invoices():
             logger.info(f"   Failed: {len(filtered_ids) - len(successfully_processed_emails)}")
             logger.info(f"   Download folder: {base_folder_path}")
             logger.info("=" * 80)
-            logger.info("SUCCESS: PAST 49 HOURS INVOICE DOWNLOAD COMPLETED")
+            logger.info("SUCCESS: LAST 4 DAYS INVOICE DOWNLOAD COMPLETED")
 
         except Exception as processing_error:
             logger.error(f"ERROR: Email processing failed: {str(processing_error)}")
             raise
 
     except Exception as e:
-        logger.error(f"ERROR: PAST 49 HOURS DOWNLOAD FAILED: {str(e)}")
+        logger.error(f"ERROR: LAST 4 DAYS DOWNLOAD FAILED: {str(e)}")
         logger.error(traceback.format_exc())
         raise
 
@@ -515,14 +515,14 @@ def download_past_49_hours_invoices():
 
 if __name__ == "__main__":
     try:
-        print("STARTING: Starting Past 49 Hours Invoice Downloader")
+        print("STARTING: Starting Last 4 Days Invoice Downloader")
         print("=" * 60)
-        print("This script will download invoices from the past 49 hours")
+        print("This script will download invoices from the last 4 days")
         print("using the same logic as your regular email downloader.")
         print()
         
         # Run the download
-        download_past_49_hours_invoices()
+        download_last_4_days_invoices()
         
         print("\nSUCCESS: Script completed successfully!")
         print("Check the log file 'past_49_hours_download.log' for details.")
