@@ -61,7 +61,7 @@ async def get_async_db():
         db = AsyncSessionLocal()
         yield db
     except (OperationalError, DBAPIError, Psycopg2OperationalError) as e:
-        logger.error(f"Error in main DB session: {e}")
+        logger.error(f"Database connection error: {e}")
         if db:
             try:
                 await db.rollback()
@@ -69,12 +69,8 @@ async def get_async_db():
                 pass
         raise
     except Exception as e:
-        logger.error(f"Unexpected error in main DB session: {e}")
-        if db:
-            try:
-                await db.rollback()
-            except Exception:
-                pass
+        # Only log the error, don't rollback - let the endpoint handle its own transactions
+        logger.error(f"Error in database session: {e}")
         raise
     finally:
         if db:
@@ -91,7 +87,7 @@ async def get_async_qb_db():
         db = QBAsyncSessionLocal()
         yield db
     except (OperationalError, DBAPIError, Psycopg2OperationalError) as e:
-        logger.error(f"Error in QB DB session: {e}")
+        logger.error(f"QB Database connection error: {e}")
         if db:
             try:
                 await db.rollback()
@@ -99,12 +95,8 @@ async def get_async_qb_db():
                 pass
         raise
     except Exception as e:
-        logger.error(f"Unexpected error in QB DB session: {e}")
-        if db:
-            try:
-                await db.rollback()
-            except Exception:
-                pass
+        # Only log the error, don't rollback - let the endpoint handle its own transactions
+        logger.error(f"Error in QB database session: {e}")
         raise
     finally:
         if db:

@@ -148,10 +148,30 @@ class GoogleSheetSyncController:
                 thread_db = SessionLocal()
 
                 try:
-                    controller = cls(thread_db)
-                    result = controller.perform_sync_task(operation)
-                    logger.info(f"Sync task completed: {operation}")
-                    return result
+                    # Convert sync session to async session for the controller
+                    from mpi_backend.database import get_async_db
+                    import asyncio
+                    
+                    async def run_async_task():
+                        # Get async db session using the generator
+                        async_db_gen = get_async_db()
+                        async_db = await async_db_gen.__anext__()
+                        try:
+                            controller = cls(async_db)
+                            return await controller.perform_sync_task(operation)
+                        finally:
+                            if async_db:
+                                await async_db.close()
+                    
+                    # Run the async task in the thread
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        result = loop.run_until_complete(run_async_task())
+                        logger.info(f"Sync task completed: {operation}")
+                        return result
+                    finally:
+                        loop.close()
                 finally:
                     thread_db.close()
 
@@ -363,7 +383,7 @@ class GoogleSheetSyncController:
         if step_name:
             cls._current_sub_operation = step_name
 
-    def perform_sync_task(self, operation: str = 'sync') -> Dict[str, Any]:
+    async def perform_sync_task(self, operation: str = 'sync') -> Dict[str, Any]:
         """
         Perform the specified sync task with enhanced validation.
 
@@ -378,12 +398,12 @@ class GoogleSheetSyncController:
 
             # Handle different operations
             if operation == 'update_no_match_uidi':
-                return self._perform_uidi_update_operation()
+                return await self._perform_uidi_update_operation()
             elif operation == 'update_all':
-                return self._perform_full_update_operation()
+                return await self._perform_full_update_operation()
             else:
                 # Default to syncing from Google Sheets only
-                return self._perform_google_sheets_sync_operation()
+                return await self._perform_google_sheets_sync_operation()
 
         except Exception as e:
             self.logger.error(
@@ -395,7 +415,7 @@ class GoogleSheetSyncController:
                 "operation": operation
             }
 
-    def _perform_google_sheets_sync_operation(self) -> Dict[str, Any]:
+    async def _perform_google_sheets_sync_operation(self) -> Dict[str, Any]:
         """
         Perform Google Sheets sync operation with enhanced validation.
 
@@ -416,7 +436,7 @@ class GoogleSheetSyncController:
 
         # Step 2: Process and save mappings with proper categorization
         self.__class__._update_progress(2, 3, "processing_mappings", 0)
-        process_result = self._process_and_save_mappings(extract_result)
+        process_result = await self._process_and_save_mappings(extract_result)
         
         # Update step progress to 100% when processing completes
         self.__class__._update_step_progress(100, "processing_mappings")
@@ -424,7 +444,7 @@ class GoogleSheetSyncController:
         # Step 3: Sync temporary mappings
         self.__class__._current_sub_operation = "syncing_temporary_mappings"
         self.__class__._update_progress(3, 3, "syncing_temporary_mappings", 0)
-        temp_result = self._sync_temporary_mappings()
+        temp_result = await self._sync_temporary_mappings()
         
         # Update step progress to 100% when temporary sync completes
         self.__class__._update_step_progress(100, "syncing_temporary_mappings")
@@ -460,7 +480,7 @@ class GoogleSheetSyncController:
 
         return final_result
 
-    def _perform_uidi_update_operation(self) -> Dict[str, Any]:
+    async def _perform_uidi_update_operation(self) -> Dict[str, Any]:
         """
         Perform UIDI update operation with enhanced validation.
 
@@ -470,7 +490,7 @@ class GoogleSheetSyncController:
         # Step 1: Sync from Google Sheets to get latest mappings
         self.__class__._current_sub_operation = "syncing_google_sheets"
         self.__class__._update_progress(1, 3, "syncing_google_sheets", 0)
-        sync_result = self._perform_google_sheets_sync_operation()
+        sync_result = await self._perform_google_sheets_sync_operation()
         
         # Update step progress to 100% when sync completes
         self.__class__._update_step_progress(100, "syncing_google_sheets")
@@ -481,7 +501,7 @@ class GoogleSheetSyncController:
         # Step 2: Sync temporary mappings and save to temp-item-mapping.json
         self.__class__._current_sub_operation = "syncing_temporary_mappings"
         self.__class__._update_progress(2, 3, "syncing_temporary_mappings", 0)
-        temp_result = self._sync_temporary_mappings()
+        temp_result = await self._sync_temporary_mappings()
         
         # Update step progress to 100% when temporary sync completes
         self.__class__._update_step_progress(100, "syncing_temporary_mappings")
@@ -520,7 +540,7 @@ class GoogleSheetSyncController:
             "operation": "update_no_match_uidi"
         }
 
-    def _perform_full_update_operation(self) -> Dict[str, Any]:
+    async def _perform_full_update_operation(self) -> Dict[str, Any]:
         """
         Perform full update operation with enhanced validation.
 
@@ -530,7 +550,7 @@ class GoogleSheetSyncController:
         # Step 1: Sync from Google Sheets to get latest mappings
         self.__class__._current_sub_operation = "syncing_google_sheets"
         self.__class__._update_progress(1, 3, "syncing_google_sheets", 0)
-        sync_result = self._perform_google_sheets_sync_operation()
+        sync_result = await self._perform_google_sheets_sync_operation()
         
         # Update step progress to 100% when sync completes
         self.__class__._update_step_progress(100, "syncing_google_sheets")
@@ -541,7 +561,7 @@ class GoogleSheetSyncController:
         # Step 2: Sync temporary mappings and save to temp-item-mapping.json
         self.__class__._current_sub_operation = "syncing_temporary_mappings"
         self.__class__._update_progress(2, 3, "syncing_temporary_mappings", 0)
-        temp_result = self._sync_temporary_mappings()
+        temp_result = await self._sync_temporary_mappings()
         
         # Update step progress to 100% when temporary sync completes
         self.__class__._update_step_progress(100, "syncing_temporary_mappings")
@@ -636,7 +656,7 @@ class GoogleSheetSyncController:
                 }
             }
 
-    def _process_and_save_mappings(self, extract_result: Dict[str, Any]) -> Dict[str, Any]:
+    async def _process_and_save_mappings(self, extract_result: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process and save mappings with proper categorization.
 
@@ -685,7 +705,7 @@ class GoogleSheetSyncController:
                         "supplier_id": mapping["supplier_id"]
                     }
 
-                    result = self.mapping_controller.update_mapping(
+                    result = await self.mapping_controller.update_mapping(
                         supplier_id=mapping["supplier_id"],
                         mapping_data=mapping_data
                     )
@@ -728,7 +748,7 @@ class GoogleSheetSyncController:
             for mapping in temporary_mappings:
                 try:
                     # Save to temporary storage
-                    self.temp_mapping_controller.create_temporary_mapping(
+                    await self.temp_mapping_controller.create_temporary_mapping(
                         original_item=mapping["supplier_item_ids"],
                         original_description=mapping["description"],
                         sheet_name=mapping["google_sheet_name"]
@@ -774,7 +794,7 @@ class GoogleSheetSyncController:
                 "invalid_count": 0
             }
 
-    def _sync_temporary_mappings(self) -> Dict[str, Any]:
+    async def _sync_temporary_mappings(self) -> Dict[str, Any]:
         """
         Sync temporary mappings and update invoice items.
 
@@ -786,7 +806,7 @@ class GoogleSheetSyncController:
                 "Syncing temporary mappings and updating invoice items")
 
             # Use the existing temporary mapping sync functionality
-            result = self.temp_mapping_sync.perform_complete_temporary_mapping_sync(
+            result = await self.temp_mapping_sync.perform_complete_temporary_mapping_sync(
                 sheet_id=DEFAULT_SHEET_ID,
                 api_key=GOOGLE_API_KEY,
                 skip_sheets=SKIP_SHEETS

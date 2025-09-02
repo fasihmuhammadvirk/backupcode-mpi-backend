@@ -34,8 +34,7 @@ class UnmappedItemsController:
         return self.db_context()
 
     async def get_items_mappings(self):
-        db = self._get_db_session()
-        result = await db.execute(select(UnmappedItems))
+        result = await self.db_context.execute(select(UnmappedItems))
         query_result = result.scalars().all()
         data = [
             (
@@ -58,7 +57,6 @@ class UnmappedItemsController:
         return items_mappings
 
     async def insert_unmapped_item(self, item_code, description, supplier_id):
-        db = self._get_db_session()
         new_item = UnmappedItems(
             google_sheet_name='',
             mpi_code='',
@@ -67,32 +65,32 @@ class UnmappedItemsController:
             supplier_id=supplier_id,
         )
         try:
-            db.add(new_item)
-            await db.commit()
+            self.db_context.add(new_item)
+            await self.db_context.commit()
         except IntegrityError as ie:
             logger.error(
                 f"UnmappedItems insert failed with IntegrityError: {ie}. Attempting sequence resync and retry."
             )
-            await db.rollback()
+            await self.db_context.rollback()
             try:
                 # Resync sequence to max(id) to avoid duplicate primary key values
-                await db.execute(
+                await self.db_context.execute(
                     text(
                         "SELECT setval(pg_get_serial_sequence('unmapped_items','id'), "
                         "COALESCE((SELECT MAX(id) FROM unmapped_items), 1), true)"
                     )
                 )
-                db.add(new_item)
-                await db.commit()
+                self.db_context.add(new_item)
+                await self.db_context.commit()
                 logger.info("UnmappedItems insert succeeded after sequence resync")
             except Exception as inner:
                 logger.error(
                     f"UnmappedItems insert retry failed: {inner}. Skipping this unmapped item."
                 )
-                await db.rollback()
+                await self.db_context.rollback()
         except Exception as e:
             logger.error(f"UnmappedItems insert failed: {e}")
-            await db.rollback()
+            await self.db_context.rollback()
 
     async def is_item_code_present(self, item_code, supplier_id=None):
         """
@@ -106,9 +104,8 @@ class UnmappedItemsController:
             bool: True if item is present, False otherwise
         """
         try:
-            db = self._get_db_session()
             # Get all unmapped items
-            result = await db.execute(select(UnmappedItems))
+            result = await self.db_context.execute(select(UnmappedItems))
             all_unmapped = result.scalars().all()
             
             # Check for exact match only
@@ -148,9 +145,8 @@ class UnmappedItemsController:
             Dict with items, pagination metadata
         """
         try:
-            db = self._get_db_session()
             return await self._get_unmapped_items_query(
-                db,
+                self.db_context,
                 item_type,
                 date_from,
                 date_to,

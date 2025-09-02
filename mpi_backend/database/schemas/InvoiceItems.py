@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, validator
 import re
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Union
 from datetime import date
 from uuid import UUID
 
@@ -14,7 +14,7 @@ class InvoiceItems(BaseModel):
     item: Optional[str]
     description: Optional[str]
     qty: Optional[int]
-    cost: Optional[str]  # Changed from float to str for formatted display
+    cost: Optional[Union[str, float]]  # Accept both string and float, convert to float for DB
     amount: Optional[str]
     date: Optional[str]
     ref_no: Optional[str]
@@ -36,6 +36,33 @@ class InvoiceItems(BaseModel):
         orm_mode = True  # v1
         from_attributes = True  # v2
 
+    @validator('cost', pre=True)
+    def format_cost_field(cls, value):
+        """Convert cost values to float for database storage"""
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return None
+        return None
+    
+    @validator('amount', pre=True)
+    def format_amount_field(cls, value):
+        """Convert numeric amount values to formatted strings"""
+        if value is None:
+            return "0.00"
+        if isinstance(value, (int, float)):
+            # Format as currency string with 2 decimal places
+            return f"{float(value):.2f}"
+        if isinstance(value, str):
+            # Return as-is if already a string
+            return value
+        return str(value)
+    
     @validator('date', 'date_added', pre=True)
     def format_date(cls, value):
         if value is None:
@@ -140,25 +167,25 @@ class PaginatedInvoiceItemsResponse(BaseModel):
 
 class UpdateInvoiceItemRequest(BaseModel):
     id: int
-    filename: str = None
-    sheet_name: str = None
-    mpi_item: str = None
-    mpi_description: str = None
-    item: str = None
-    description: str = None
-    qty: int = None
-    cost: str = None  # Changed from float to str for consistency
-    amount: str = None
-    date: str = None
-    ref_no: str = None
-    po_number: str = None
-    customer_job: str = None
-    bill: str = None
-    vendor: str = None
-    class_: str = None
-    account: str = None  # New account field for account mapping
-    memo: str = None
-    buyer: str = None
+    filename: Optional[str] = None
+    sheet_name: Optional[str] = None
+    mpi_item: Optional[str] = None
+    mpi_description: Optional[str] = None
+    item: Optional[str] = None
+    description: Optional[str] = None
+    qty: Optional[int] = None
+    cost: Optional[Union[str, float]] = None  # Accept both string and float
+    amount: Optional[str] = None
+    date: Optional[str] = None
+    ref_no: Optional[str] = None
+    po_number: Optional[str] = None
+    customer_job: Optional[str] = None
+    bill: Optional[str] = None
+    vendor: Optional[str] = None
+    class_: Optional[str] = None
+    account: Optional[str] = None  # New account field for account mapping
+    memo: Optional[str] = None
+    buyer: Optional[str] = None
     date_added: str = None
     invoice_id: str = None
     is_active: bool = None
@@ -174,14 +201,41 @@ class UnmappedItemResponse(BaseModel):
     """Response model for individual unmapped item"""
     original_item_id: str
     original_description: Optional[str]
-    cost: Optional[str]  # Changed from float to str for formatted display
-    amount: Optional[str]  # Changed from float to str for formatted display
+    cost: Optional[Union[str, float]]  # Accept both string and float
+    amount: Optional[str]  # Keep as string for display
     quantity: Optional[int]
     sheet_name: Optional[str]
     supplier: Optional[str]
 
     class Config:
         from_attributes = True
+        
+    @validator('cost', pre=True)
+    def format_cost_field(cls, value):
+        """Convert cost values to float for database storage"""
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return None
+        return None
+    
+    @validator('amount', pre=True)
+    def format_amount_field(cls, value):
+        """Convert numeric amount values to formatted strings"""
+        if value is None:
+            return "0.00"
+        if isinstance(value, (int, float)):
+            # Format as currency string with 2 decimal places
+            return f"{float(value):.2f}"
+        if isinstance(value, str):
+            # Return as-is if already a string
+            return value
+        return str(value)
 
 
 class UnmappedItemsFilterRequest(BaseModel):

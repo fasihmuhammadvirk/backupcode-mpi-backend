@@ -8,6 +8,7 @@ from mpi_backend.database.models import InvoiceItem
 from mpi_backend.database.schemas import InvoiceItems as InvoiceItemsResponse
 from mpi_backend.database.schemas import PriceHistoryResponse
 from mpi_backend.database.schemas.Filters import FilterRequest
+from mpi_backend.database.controllers.CustomerJobMappingContorller import CustomerJobMappingController
 from mpi_backend.utils.export_utils import extract_supplier_id
 from mpi_backend.utils.number_formatter import format_currency
 import math
@@ -932,6 +933,9 @@ class InvoiceItemController:
             InvoiceItem.export_status.isnot(None),
             func.trim(InvoiceItem.export_status) != ''
         )
+        
+        # Explicitly filter for active items only
+        query = query.where(InvoiceItem.is_active == True)
 
         # Apply 'IN' filters dynamically
         for column_name, values in request.filters.items():
@@ -1265,7 +1269,7 @@ class InvoiceItemController:
                     ItemClassificationController,
                 )
                 icc = ItemClassificationController(self.db)
-                qb_account = icc.get_classification(sheet)
+                qb_account = await icc.get_classification(sheet)
                 # Map QB account string to our letter codes; only accept M/E
                 qb_lower = (qb_account or '').lower()
                 if 'job materials purchased' in qb_lower:
@@ -2081,7 +2085,8 @@ class InvoiceItemController:
             new_mpi_item = item_data.get('mpi_item', item.mpi_item)
 
             # Disallow updating mpi_item to empty/whitespace or None if it was previously non-empty
-            if 'mpi_item' in item_data:
+            # Only validate if mpi_item is explicitly provided and not None
+            if 'mpi_item' in item_data and item_data['mpi_item'] is not None:
                 incoming_mpi_item = item_data.get('mpi_item')
                 was_non_empty = bool(item.mpi_item) and str(item.mpi_item).strip() != ""
                 becomes_empty = (incoming_mpi_item is None) or (
@@ -2143,25 +2148,74 @@ class InvoiceItemController:
                 if 'sheet_name' not in item_data:
                     item_data['sheet_name'] = item.sheet_name
 
-                background_tasks.add_task(
-                    self.update_mappings_table, item_data)
+                # Update mappings table synchronously to avoid session conflicts
+                try:
+                    await self.update_mappings_table(item_data)
+                except Exception as e:
+                    logger.warning(f"Failed to update mappings table: {e}")
+                    # Don't fail the main update if mapping update fails
 
             # Process customer job updates
             if 'customer_job' in item_data and item_data['customer_job'] != item.customer_job:
                 background_tasks.add_task(self.update_customer_job, item.customer_job, 'customer_job',
                                           item_data['customer_job'])
-                CustomerJobMappingController(self.db).update_mappings_table(
+                await CustomerJobMappingController(self.db).update_mappings_table(
                     old_customer_job=item.customer_job,
                     new_customer_job=item_data['customer_job']
                 )
 
             # Update the item with all provided fields
             for key, value in item_data.items():
-                if hasattr(item, key):  # Only update fields that exist on the model
+                if hasattr(item, key) and key in item_data:  # Only update fields that exist on the model and are provided in request
+                    # Convert data types for numeric fields
+                    if key == 'cost' and value is not None and value != '':
+                        try:
+                            # Convert string to float for cost field (database expects FLOAT)
+                            if isinstance(value, str):
+                                value = float(value)
+                        except (ValueError, TypeError):
+                            logger.warning(f"Could not convert {key} value '{value}' to float, keeping as string")
+                    elif key == 'amount' and value is not None:
+                        try:
+                            # Keep amount as string (database expects VARCHAR)
+                            if isinstance(value, (int, float)):
+                                value = str(value)
+                        except (ValueError, TypeError):
+                            logger.warning(f"Could not convert {key} value '{value}' to string, keeping as is")
+                    elif key == 'qty' and value is not None and value != '':
+                        try:
+                            # Convert string to int for quantity
+                            if isinstance(value, str):
+                                value = int(float(value))  # Handle "1.0" -> 1
+                        except (ValueError, TypeError):
+                            logger.warning(f"Could not convert {key} value '{value}' to int, keeping as string")
+                    elif key in ['date', 'date_added'] and value is not None and value != '':
+                        try:
+                            # Convert string dates to date objects
+                            if isinstance(value, str):
+                                from datetime import datetime
+                                if len(value) == 10 and value.count('/') == 2:  # MM/DD/YYYY format
+                                    value = datetime.strptime(value, '%m/%d/%Y').date()
+                                elif len(value) == 10 and value.count('-') == 2:  # YYYY-MM-DD format
+                                    value = datetime.strptime(value, '%Y-%m-%d').date()
+                        except (ValueError, TypeError):
+                            logger.warning(f"Could not convert {key} value '{value}' to date, keeping as string")
+                    
                     setattr(item, key, value)
 
             self.db.add(item)
+            logger.info(f"Added item {item_id} to session for update")
+        
+        logger.info(f"Committing {len(items)} items to database")
         await self.db.commit()
+        logger.info(f"Successfully committed {len(items)} items to database")
+        
+        # Refresh the session to ensure data is properly persisted
+        try:
+            await self.db.flush()
+            logger.info("Session flushed successfully")
+        except Exception as e:
+            logger.warning(f"Session flush failed: {e}")
 
     async def update_mpi_field(self, item_value: str, field_name: str, new_value: str):
         # If updating mpi_description, enforce that we never change it for No Match or UIDI items
@@ -2183,7 +2237,7 @@ class InvoiceItemController:
             InvoiceItem.customer_job == item_value).values(**{field_name: new_value}))
         await self.db.commit()
 
-    def update_mappings_table(self, updated_values: dict):
+    async def update_mappings_table(self, updated_values: dict):
         try:
             supplier_id, _ = extract_supplier_id(
                 updated_values.get('vendor', ''))
@@ -2217,7 +2271,7 @@ class InvoiceItemController:
             if supplier_id and mapping_data["supplier_item_ids"]:
                 # Lazy import to avoid circular imports
                 from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
-                ItemsMappingController(self.db).update_mapping(
+                await ItemsMappingController(self.db).update_mapping(
                     supplier_id, mapping_data)
             else:
                 logger.error(

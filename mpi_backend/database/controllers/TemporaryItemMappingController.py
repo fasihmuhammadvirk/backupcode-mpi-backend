@@ -42,10 +42,8 @@ class TemporaryItemMappingController:
             bool: True if successfully created, False otherwise
         """
         try:
-            db = self._get_db_session()
-
             # Check if mapping already exists
-            result = await db.execute(
+            result = await self.db_context.execute(
                 select(TempItemMapping).where(
                     TempItemMapping.original_item == original_item,
                     TempItemMapping.sheet_name == sheet_name
@@ -67,13 +65,13 @@ class TemporaryItemMappingController:
                     original_description=original_description,
                     sheet_name=sheet_name
                 )
-                db.add(temp_mapping)
+                self.db_context.add(temp_mapping)
                 logger.debug(
                     f"Created new temporary mapping: "
                     f"{original_item} -> {sheet_name}"
                 )
 
-            await db.commit()
+            await self.db_context.commit()
             return True
 
         except Exception as e:
@@ -81,7 +79,7 @@ class TemporaryItemMappingController:
                 f"Error creating temporary mapping: {str(e)}"
             )
             try:
-                await db.rollback()
+                await self.db_context.rollback()
             except Exception:
                 pass
             return False
@@ -93,8 +91,7 @@ class TemporaryItemMappingController:
         Returns:
             DataFrame with temporary mappings
         """
-        db = self._get_db_session()
-        result = await db.execute(select(TempItemMapping))
+        result = await self.db_context.execute(select(TempItemMapping))
         query_result = result.scalars().all()
 
         data = [
@@ -119,8 +116,7 @@ class TemporaryItemMappingController:
         Returns:
             List of temporary mapping dictionaries
         """
-        db = self._get_db_session()
-        result = await db.execute(
+        result = await self.db_context.execute(
             select(TempItemMapping).where(
                 TempItemMapping.sheet_name == sheet_name
             )
@@ -149,8 +145,7 @@ class TemporaryItemMappingController:
         Returns:
             Number of mappings deleted
         """
-        db = self._get_db_session()
-        result = await db.execute(
+        result = await self.db_context.execute(
             select(TempItemMapping).where(
                 TempItemMapping.sheet_name == sheet_name
             )
@@ -158,13 +153,13 @@ class TemporaryItemMappingController:
         deleted_count = len(result.scalars().all())
         
         # Delete the mappings
-        await db.execute(
+        await self.db_context.execute(
             delete(TempItemMapping).where(
                 TempItemMapping.sheet_name == sheet_name
             )
         )
 
-        await db.commit()
+        await self.db_context.commit()
         logger.info(
             f"Cleared {deleted_count} temporary mappings for "
             f"sheet: {sheet_name}"
@@ -178,12 +173,11 @@ class TemporaryItemMappingController:
         Returns:
             Dictionary with mapping statistics
         """
-        db = self._get_db_session()
-        result = await db.execute(select(TempItemMapping))
+        result = await self.db_context.execute(select(TempItemMapping))
         total_mappings = len(result.scalars().all())
 
         # Get unique sheet names
-        result = await db.execute(
+        result = await self.db_context.execute(
             select(TempItemMapping.sheet_name).distinct()
         )
         sheet_names = result.scalars().all()
@@ -192,7 +186,7 @@ class TemporaryItemMappingController:
         # Get mappings per sheet
         sheet_counts = {}
         for sheet_name in unique_sheets:
-            result = await db.execute(
+            result = await self.db_context.execute(
                 select(TempItemMapping).where(
                     TempItemMapping.sheet_name == sheet_name
                 )

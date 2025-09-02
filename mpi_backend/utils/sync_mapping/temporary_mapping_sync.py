@@ -34,7 +34,7 @@ class TemporaryMappingSync:
         self.temp_updater = TemporaryMappingUpdater(db)
         self.logger = logging.getLogger(f"{__name__}")
 
-    def extract_temporary_mappings_from_sheets(
+    async def extract_temporary_mappings_from_sheets(
         self,
         sheet_id: str,
         api_key: str = None,
@@ -103,7 +103,7 @@ class TemporaryMappingSync:
 
                     # Extract temporary mappings from this sheet with timeout protection
                     try:
-                        mappings_count = self.temp_extractor.extract_and_save_from_dataframe(
+                        mappings_count = await self.temp_extractor.extract_and_save_from_dataframe(
                             df, clean_sheet_name
                         )
 
@@ -186,7 +186,7 @@ class TemporaryMappingSync:
             self.logger.error(f"Error loading sheet {gid}: {str(e)}")
             return None
 
-    def update_invoice_items_with_temporary_mappings(self) -> Dict[str, Any]:
+    async def update_invoice_items_with_temporary_mappings(self) -> Dict[str, Any]:
         """
         Update invoice items using temporary mappings.
 
@@ -197,7 +197,7 @@ class TemporaryMappingSync:
             self.logger.info(
                 "Starting invoice item updates using temporary mappings")
 
-            result = self.temp_updater.update_invoice_items_with_temporary_mappings()
+            result = await self.temp_updater.update_invoice_items_with_temporary_mappings()
 
             if result["success"]:
                 self.logger.info(
@@ -219,7 +219,7 @@ class TemporaryMappingSync:
                 "items_updated": 0
             }
 
-    def perform_complete_temporary_mapping_sync(
+    async def perform_complete_temporary_mapping_sync(
         self,
         sheet_id: str,
         api_key: str = None,
@@ -240,7 +240,7 @@ class TemporaryMappingSync:
             self.logger.info("Starting complete temporary mapping sync")
 
             # Step 1: Extract temporary mappings from Google Sheets
-            extract_result = self.extract_temporary_mappings_from_sheets(
+            extract_result = await self.extract_temporary_mappings_from_sheets(
                 sheet_id, api_key, skip_sheets
             )
 
@@ -253,7 +253,7 @@ class TemporaryMappingSync:
                 }
 
             # Step 2: Update invoice items using temporary mappings
-            update_result = self.update_invoice_items_with_temporary_mappings()
+            update_result = await self.update_invoice_items_with_temporary_mappings()
 
             # Combine results
             result = {

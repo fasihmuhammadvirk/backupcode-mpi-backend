@@ -161,8 +161,8 @@ class ItemsMappingController:
                     continue
 
                 # Clean both items for comparison (strip whitespace)
-                clean_mapping_item = mapping.supplier_item_ids.strip()
-                clean_search_item = clean_item.strip()
+                clean_mapping_item = (mapping.supplier_item_ids or '').strip()
+                clean_search_item = (clean_item or '').strip()
 
                 # First try exact match (clean item vs clean database item)
                 if clean_mapping_item == clean_search_item:
@@ -201,8 +201,8 @@ class ItemsMappingController:
                         continue
 
                     # Clean both items for comparison (strip whitespace)
-                    clean_mapping_item = mapping.supplier_item_ids.strip()
-                    clean_search_item = clean_item.strip()
+                    clean_mapping_item = (mapping.supplier_item_ids or '').strip()
+                    clean_search_item = (clean_item or '').strip()
 
                     # First try exact match (clean item vs clean database item)
                     if clean_mapping_item == clean_search_item:
@@ -781,13 +781,13 @@ class ItemsMappingController:
                         f"Skipping temporary mapping in permanent table: {mapping.mpi_code}")
                     continue
 
-                clean_mapping_item = mapping.supplier_item_ids.strip()
+                clean_mapping_item = (mapping.supplier_item_ids or '').strip()
                 if clean_mapping_item:
                     # Store the mapping with the clean item as key - exact match only
                     mappings_lookup[clean_mapping_item] = mapping
 
                     # Track mappings without sheet names for special handling
-                    if not mapping.google_sheet_name or mapping.google_sheet_name.strip() == "":
+                    if not mapping.google_sheet_name or (mapping.google_sheet_name or '').strip() == "":
                         mappings_without_sheet[clean_mapping_item] = mapping
 
             # Add temporary mappings to lookup (lower priority than permanent)
@@ -797,7 +797,7 @@ class ItemsMappingController:
                 if temp_mapping.original_item is None:
                     continue
 
-                clean_temp_item = temp_mapping.original_item.strip()
+                clean_temp_item = (temp_mapping.original_item or '').strip()
                 if clean_temp_item and clean_temp_item not in mappings_lookup:  # Don't override permanent mappings
                     temp_lookup[clean_temp_item] = temp_mapping
 
@@ -822,7 +822,7 @@ class ItemsMappingController:
 
             for idx, item in enumerate(no_match_items, 1):
                 # Clean the invoice item for comparison
-                clean_invoice_item = str(item.item).strip()
+                clean_invoice_item = str(item.item or '').strip()
 
                 if not clean_invoice_item:
                     continue
@@ -1061,12 +1061,12 @@ class ItemsMappingController:
                         f"Skipping temporary mapping in permanent table: {mapping.mpi_code}")
                     continue
 
-                clean_mapping_item = mapping.supplier_item_ids.strip()
+                clean_mapping_item = (mapping.supplier_item_ids or '').strip()
                 if clean_mapping_item:
                     permanent_lookup[clean_mapping_item] = mapping
 
                     # Track mappings without sheet names
-                    if not mapping.google_sheet_name or mapping.google_sheet_name.strip() == "":
+                    if not mapping.google_sheet_name or (mapping.google_sheet_name or '').strip() == "":
                         mappings_without_sheet[clean_mapping_item] = mapping
 
             # Build temporary mappings lookup (don't override permanent)
@@ -1074,7 +1074,7 @@ class ItemsMappingController:
                 if temp_mapping.original_item is None:
                     continue
 
-                clean_temp_item = temp_mapping.original_item.strip()
+                clean_temp_item = (temp_mapping.original_item or '').strip()
                 if clean_temp_item and clean_temp_item not in permanent_lookup:
                     temp_lookup[clean_temp_item] = temp_mapping
 
@@ -1100,7 +1100,7 @@ class ItemsMappingController:
 
             for idx, item in enumerate(unmapped_items, 1):
                 # Clean the invoice item for comparison
-                clean_invoice_item = str(item.item).strip()
+                clean_invoice_item = str(item.item or '').strip()
 
                 if not clean_invoice_item:
                     continue
@@ -1342,7 +1342,7 @@ class ItemsMappingController:
                 
                 try:
                     # Strip whitespace from mapping item
-                    clean_mapping_item = mapping.supplier_item_ids.strip()
+                    clean_mapping_item = (mapping.supplier_item_ids or '').strip()
 
                     if not clean_mapping_item:
                         logger.warning(
@@ -1354,7 +1354,7 @@ class ItemsMappingController:
 
                     for invoice_item in all_invoice_items:
                         # Clean the invoice item by stripping whitespace
-                        clean_invoice_item = invoice_item.item.strip()
+                        clean_invoice_item = (invoice_item.item or '').strip()
 
                         if not clean_invoice_item:
                             continue
@@ -1460,7 +1460,7 @@ class ItemsMappingController:
             all_invoice_items = all_invoice_items.scalars().all()
 
             # Clean the mapping item
-            clean_mapping_item = item_number.strip()
+            clean_mapping_item = (item_number or '').strip()
 
             if not clean_mapping_item:
                 logger.warning(
@@ -1590,7 +1590,7 @@ class ItemsMappingController:
         Assign account letter to a single invoice item if missing or if it's a long QB path.
         Never overwrite explicit 'A'.
         """
-        current = (getattr(item_obj, 'account', '') or '').strip()
+        current = (getattr(item_obj, 'account', None) or '').strip()
         if current.upper() == 'A':
             return
         # Normalize long QB paths to letters

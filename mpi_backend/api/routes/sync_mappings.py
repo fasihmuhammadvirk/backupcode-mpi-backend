@@ -93,7 +93,7 @@ async def sync_mapping(
     """
     # Use enhanced sync controller for better temporary/permanent mapping handling
     sync_controller = GoogleSheetSyncController(db)
-    status = await sync_controller.get_sync_status()
+    status = sync_controller.get_sync_status()
 
     if status["is_running"]:
         # Get detailed job information
@@ -134,7 +134,7 @@ async def sync_mapping(
         GoogleSheetSyncController._execute_sync_task_worker, db, 'sync')
 
     # Include last-known update times in the response for visibility
-    status = await sync_controller.get_sync_status()
+    status = sync_controller.get_sync_status()
     return SyncMappingsResponse(
         success=True,
         message="Sync task started manually",
@@ -416,7 +416,7 @@ async def update_no_match_uidi_mappings(
         )
 
         # Include last-known update times
-        status = await sync_controller.get_sync_status()
+        status = sync_controller.get_sync_status()
         return {
             "status": "success",
             "message": "No Match / UIDI update task has been started in the background",
@@ -571,7 +571,7 @@ async def update_all_mappings(
         )
 
         # Include last-known update times
-        status = await sync_controller.get_sync_status()
+        status = sync_controller.get_sync_status()
         return {
             "status": "success",
             "message": "Full update task has been started in the background",

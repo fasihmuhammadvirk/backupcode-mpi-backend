@@ -505,7 +505,7 @@ async def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
             logger.info(f"QB Migrate-All: Processing {len(invoice_ids)} invoices with STATUS PRIORITY")
 
             # ULTRA-FAST PROCESSING: Generate Excel and ensure status updates
-            result = migrate_invoice_to_QB_ultra_fast(
+            result = await migrate_invoice_to_QB_ultra_fast(
                 invoice_ids, db=db, operation_id=operation_id,
                 background_tasks=background_tasks, update_mode="immediate",
                 item_order=None,
@@ -644,7 +644,7 @@ async def migrate_invoice_to_QB(
             logger.info(f"QB Migrate: Processing {len(invoice_ids)} invoices with STATUS PRIORITY")
 
             # Use ultra-fast method with immediate status updates for regular migrations
-            result = migrate_invoice_to_QB_ultra_fast(
+            result = await migrate_invoice_to_QB_ultra_fast(
                 invoice_ids, db=db, operation_id=operation_id,
                 background_tasks=background_tasks, update_mode="immediate",
                 item_order=None,

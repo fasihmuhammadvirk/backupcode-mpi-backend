@@ -137,7 +137,7 @@ class TemporaryMappingExtractor:
             List of extracted temporary mappings
         """
         # Detect temporary mapping section
-        header_row_idx = await self.detect_temporary_mapping_section(df)
+        header_row_idx = self.detect_temporary_mapping_section(df)
 
         if header_row_idx is None:
             self.logger.debug(

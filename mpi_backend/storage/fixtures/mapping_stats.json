@@ -8,15 +8,16 @@
     "last_sync_time": null
   },
   "item_mapping_stats": {
-    "total_mappings": 0,
+    "total_mappings": 27149,
     "unique_sheets": 0,
     "sheet_names": [],
     "mappings_per_sheet": {},
-    "permanent_mappings": 0,
-    "temporary_mappings": 0,
-    "invalid_mappings": 0,
-    "last_updated": null,
-    "last_sync_time": null
+    "permanent_mappings": 16373,
+    "temporary_mappings": 10775,
+    "invalid_mappings": 1,
+    "last_updated": "2025-09-02T18:56:06.204507",
+    "last_sync_time": "2025-09-02T18:56:06.205274",
+    "sheets_processed": 66
   },
   "overall_stats": {
     "total_items": 0,

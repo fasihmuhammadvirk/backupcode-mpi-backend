@@ -295,12 +295,23 @@ async def download_invoice(
         invoice = await InvoiceController(db).get_invoice_by_invoiceID(
             invoice_id, db
         )
+        
+        if not invoice:
+            logger.error(f"GET /invoice/download - Invoice not found: {invoice_id}")
+            raise HTTPException(
+                status_code=404, 
+                detail="Invoice not found"
+            )
+        
         supplier_name = await SupplierController(db).get_supplier_by_id(
             invoice.supplier_id
         )
         url = get_presigned_url(file_key=f'{supplier_name}/{invoice_id}')
         logger.info(f"GET /invoice/download - Successfully generated download URL for invoice: {invoice_id}")
         return {"link": url}
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
         logger.error(f"GET /invoice/download - Error downloading invoice {invoice_id}: {str(e)}")
         raise HTTPException(

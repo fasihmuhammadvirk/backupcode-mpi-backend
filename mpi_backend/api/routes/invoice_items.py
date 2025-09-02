@@ -254,7 +254,7 @@ async def get_invoices(
 
 
 @router.put("/update")
-async def update_invoice_items(items: List[UpdateInvoiceItemRequest], background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_async_db)):
+async def update_invoice_items(items: List[UpdateInvoiceItemRequest], background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_async_db), token: str = Depends(JWTBearer())):
     """
     Update multiple invoice items with background task processing.
     
@@ -306,9 +306,15 @@ async def update_invoice_items(items: List[UpdateInvoiceItemRequest], background
         - Consider adding authentication if required
         - Updates are processed in database transaction
     """
-    controller = InvoiceItemController(db)
-    controller.update_invoice_items([item.dict() for item in items], background_tasks)
-    return {"status": "invoices updated successfully"}
+    try:
+        controller = InvoiceItemController(db)
+        await controller.update_invoice_items([item.dict() for item in items], background_tasks)
+        
+        return {"status": "invoices updated successfully"}
+    except Exception as e:
+        # Rollback on any error
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Update failed: {str(e)}")
 
 
 @router.put("/toggle-visibility", status_code=200)

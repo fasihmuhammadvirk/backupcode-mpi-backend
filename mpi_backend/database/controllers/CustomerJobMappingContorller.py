@@ -24,8 +24,7 @@ class CustomerJobMappingController:
         return self.db_context()
 
     async def get_customer_job_mappings(self):
-        db = self._get_db_session()
-        result = await db.execute(select(CustomerJobMapping))
+        result = await self.db_context.execute(select(CustomerJobMapping))
         query_result = result.scalars().all()
 
         # Process mappings to fix whitespace
@@ -95,7 +94,7 @@ class CustomerJobMappingController:
 
             total_entries = update_customer_job_mappings_json(excel_file)
 
-            insert_customer_job_in_db(db)
+            await insert_customer_job_in_db()
 
             # Removed call to non-existent function
 

@@ -1789,16 +1789,18 @@ async def get_unmapped_items(
             try:
                 if isinstance(request.date_from, str):
                     if len(request.date_from) == 10 and request.date_from.count('-') == 2:
+                        # Convert string to date object for PostgreSQL
+                        from datetime import datetime
+                        date_obj = datetime.strptime(request.date_from, '%Y-%m-%d').date()
                         where_conditions.append("ii.date >= :date_from")
-                        params['date_from'] = request.date_from
+                        params['date_from'] = date_obj
                     else:
                         logger.warning(f"Invalid date_from format: {request.date_from}")
                 elif hasattr(request.date_from, 'strftime'):
                     # Handle datetime.date objects
-                    date_str = request.date_from.strftime('%Y-%m-%d')
                     where_conditions.append("ii.date >= :date_from")
-                    params['date_from'] = date_str
-                    logger.info(f"Converted date_from from {type(request.date_from)} to string: {date_str}")
+                    params['date_from'] = request.date_from
+                    logger.info(f"Using date_from as date object: {request.date_from}")
                 else:
                     logger.warning(f"Unsupported date_from type: {type(request.date_from)}")
             except Exception as e:
@@ -1809,16 +1811,18 @@ async def get_unmapped_items(
             try:
                 if isinstance(request.date_to, str):
                     if len(request.date_to) == 10 and request.date_to.count('-') == 2:
+                        # Convert string to date object for PostgreSQL
+                        from datetime import datetime
+                        date_obj = datetime.strptime(request.date_to, '%Y-%m-%d').date()
                         where_conditions.append("ii.date <= :date_to")
-                        params['date_to'] = request.date_to
+                        params['date_to'] = date_obj
                     else:
                         logger.warning(f"Invalid date_to format: {request.date_to}")
                 elif hasattr(request.date_to, 'strftime'):
                     # Handle datetime.date objects
-                    date_str = request.date_to.strftime('%Y-%m-%d')
                     where_conditions.append("ii.date <= :date_to")
-                    params['date_to'] = date_str
-                    logger.info(f"Converted date_to from {type(request.date_to)} to string: {date_str}")
+                    params['date_to'] = request.date_to
+                    logger.info(f"Using date_to as date object: {request.date_to}")
                 else:
                     logger.warning(f"Unsupported date_to type: {type(request.date_to)}")
             except Exception as e:
