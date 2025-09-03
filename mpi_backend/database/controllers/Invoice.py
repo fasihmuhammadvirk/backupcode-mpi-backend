@@ -28,10 +28,9 @@ class InvoiceController:
         return self.db_context()
 
     async def add_invoice(self, invoice):
-        db = self._get_db_session()
-        db.add(invoice)
-        await db.commit()
-        await db.refresh(invoice)
+        self.db_context.add(invoice)
+        await self.db_context.commit()
+        await self.db_context.refresh(invoice)
         return invoice
 
     async def insert_invoice(self, date, filename, supplier_id, status, storage_path, 
@@ -50,8 +49,6 @@ class InvoiceController:
         Returns:
             Invoice object
         """
-        db = self._get_db_session()
-        
         if existing_invoice_id:
             # For reprocessing, use the existing invoice ID
             invoice = Invoice(
@@ -74,9 +71,9 @@ class InvoiceController:
                 is_exported='Pending'
             )
         
-        db.add(invoice)
-        await db.commit()
-        await db.refresh(invoice)
+        self.db_context.add(invoice)
+        await self.db_context.commit()
+        await self.db_context.refresh(invoice)
         return invoice
 
     async def get_invoices(
@@ -202,23 +199,53 @@ class InvoiceController:
             return mock_invoices
 
     async def set_status_to_processed(self, inserted_id, db_ref= None):
-        if db_ref:
-            result = await db_ref.execute(
-                select(Invoice).where(Invoice.id == inserted_id)
-            )
-            invoice = result.scalar_one_or_none()  # source -> endpoint
-            if invoice:
-                invoice.status = 'PROCESSED'
-                await db_ref.commit()
-        else:
-            db = self._get_db_session()
-            result = await db.execute(
-                select(Invoice).where(Invoice.id == inserted_id)
-            )
-            invoice = result.scalar_one_or_none()  # source -> background task
-            if invoice:
-                invoice.status = 'PROCESSED'
-                await db.commit()
+        try:
+            if db_ref:
+                result = await db_ref.execute(
+                    select(Invoice).where(Invoice.id == inserted_id)
+                )
+                invoice = result.scalar_one_or_none()  # source -> endpoint
+                if invoice:
+                    invoice.status = 'PROCESSED'
+                    await db_ref.commit()
+                    logger.info(f"Updated invoice {inserted_id} status to PROCESSED")
+                else:
+                    logger.warning(f"Invoice {inserted_id} not found for status update")
+            else:
+                result = await self.db_context.execute(
+                    select(Invoice).where(Invoice.id == inserted_id)
+                )
+                invoice = result.scalar_one_or_none()  # source -> background task
+                if invoice:
+                    invoice.status = 'PROCESSED'
+                    await self.db_context.commit()
+                    logger.info(f"Updated invoice {inserted_id} status to PROCESSED")
+                else:
+                    logger.warning(f"Invoice {inserted_id} not found for status update")
+        except Exception as e:
+            logger.error(f"Error updating invoice {inserted_id} status to PROCESSED: {str(e)}")
+            # Try to mark as failed instead
+            try:
+                if db_ref:
+                    result = await db_ref.execute(
+                        select(Invoice).where(Invoice.id == inserted_id)
+                    )
+                    invoice = result.scalar_one_or_none()
+                    if invoice:
+                        invoice.status = 'FAILED'
+                        await db_ref.commit()
+                        logger.info(f"Updated invoice {inserted_id} status to FAILED due to error")
+                else:
+                    result = await self.db_context.execute(
+                        select(Invoice).where(Invoice.id == inserted_id)
+                    )
+                    invoice = result.scalar_one_or_none()
+                    if invoice:
+                        invoice.status = 'FAILED'
+                        await self.db_context.commit()
+                        logger.info(f"Updated invoice {inserted_id} status to FAILED due to error")
+            except Exception as fail_error:
+                logger.error(f"Failed to update invoice {inserted_id} status to FAILED: {str(fail_error)}")
 
     async def set_invoice_is_exported(self, invoice_id):
         """

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import time
 from functools import lru_cache
 import hashlib
+import pandas as pd
 import json
 import traceback
 import gc
@@ -1175,28 +1176,38 @@ class InvoiceItemController:
             mpi_item=row.get('MpiItem', '')
         )
 
+        # Convert and clean data types for database
+        qty_val = int(row['Qty']) if pd.notna(row['Qty']) and str(row['Qty']).strip() else None
+        cost_val = float(row['Cost']) if pd.notna(row['Cost']) and str(row['Cost']).strip() else None
+        
+        # Clean string fields to handle nan values
+        def clean_str(val):
+            if pd.isna(val) or str(val).lower() == 'nan':
+                return ""
+            return str(val).strip()
+        
         new_item = InvoiceItem(
             filename=filename,
-            sheet_name=row['Sheet Name'],
+            sheet_name=clean_str(row['Sheet Name']),
             invoice_id=invoice_id,
-            mpi_item=row['MpiItem'],
-            mpi_description=row['MpiDescription'],
+            mpi_item=clean_str(row['MpiItem']),
+            mpi_description=clean_str(row['MpiDescription']),
             item=item_with_suffix,  # Use item with proper suffix
-            description=row['Description'],
-            qty=row['Qty'],
-            cost=row['Cost'],
-            amount=amount_val,
+            description=clean_str(row['Description']),
+            qty=qty_val,
+            cost=cost_val,
+            amount=amount_val,  # already cleaned above
             date=parsed_date,
-            ref_no=ref_no_val,
-            po_number=row['PO #'],
-            customer_job=row['Customer Job'],
-            bill=row['Bill'],
-            vendor=vendor_val,
-            class_=row['Class'],
+            ref_no=ref_no_val,  # already cleaned above
+            po_number=clean_str(row['PO #']),
+            customer_job=clean_str(row['Customer Job']),
+            bill=clean_str(row['Bill']),
+            vendor=vendor_val,  # already cleaned above
+            class_=clean_str(row['Class']),
             account=auto_account,
-            memo=row['Memo'],
-            buyer=row['Buyer'],
-            date_added=row['email_date'],
+            memo=clean_str(row['Memo']),
+            buyer=clean_str(row['Buyer']),
+            date_added=datetime.now().date(),
             export_status="Pending"
         )
         self.db.add(new_item)
@@ -3619,28 +3630,39 @@ class InvoiceItemController:
                         logger.error(f"Could not parse date: {date_str}")
                         parsed_date = None
 
+                # Convert and clean data types for database
+                qty_val = int(row['Qty']) if pd.notna(row['Qty']) and str(row['Qty']).strip() else None
+                cost_val = float(row['Cost']) if pd.notna(row['Cost']) and str(row['Cost']).strip() else None
+                amount_val = str(row['Amount']) if pd.notna(row['Amount']) and str(row['Amount']).strip() else ""
+                
+                # Clean string fields to handle nan values
+                def clean_str(val):
+                    if pd.isna(val) or str(val).lower() == 'nan':
+                        return ""
+                    return str(val).strip()
+                
                 new_item = InvoiceItem(
                     filename=filename,
-                    sheet_name=row['Sheet Name'],
+                    sheet_name=clean_str(row['Sheet Name']),
                     invoice_id=invoice_id,
-                    mpi_item=row['MpiItem'],
-                    mpi_description=row['MpiDescription'],
+                    mpi_item=clean_str(row['MpiItem']),
+                    mpi_description=clean_str(row['MpiDescription']),
                     item=item_with_suffix,
-                    description=row['Description'],
-                    qty=row['Qty'],
-                    cost=row['Cost'],
-                    amount=row['Amount'],
+                    description=clean_str(row['Description']),
+                    qty=qty_val,
+                    cost=cost_val,
+                    amount=amount_val,
                     date=parsed_date,
-                    ref_no=row['Ref NO'],
-                    po_number=row['PO #'],
-                    customer_job=row['Customer Job'],
-                    bill=row['Bill'],
-                    vendor=row['Vendor'],
-                    class_=row['Class'],
-                    account=row.get('Account', ''),  # New account field with default empty string
-                    memo=row['Memo'],
-                    buyer=row['Buyer'],
-                    date_added=row['email_date'],
+                    ref_no=clean_str(row['Ref NO']),
+                    po_number=clean_str(row['PO #']),
+                    customer_job=clean_str(row['Customer Job']),
+                    bill=clean_str(row['Bill']),
+                    vendor=clean_str(row['Vendor']),
+                    class_=clean_str(row['Class']),
+                    account=row.get('Account', '') if pd.notna(row.get('Account', '')) else '',
+                    memo=clean_str(row['Memo']),
+                    buyer=clean_str(row['Buyer']),
+                    date_added=datetime.now().date(),
                     export_status="Pending",
                     is_active=True
                 )

@@ -306,7 +306,31 @@ async def download_invoice(
         supplier_name = await SupplierController(db).get_supplier_by_id(
             invoice.supplier_id
         )
-        url = get_presigned_url(file_key=f'{supplier_name}/{invoice_id}')
+        
+        # Generate S3 key with explicit PDF extension
+        s3_key = f'{supplier_name}/{invoice_id}.pdf'
+        url = get_presigned_url(file_key=s3_key)
+        
+        if not url:
+            # If PDF not found, try to find any file with this invoice ID
+            logger.warning(f"PDF not found for {s3_key}, checking for other file types...")
+            
+            # Try common file extensions that might exist from old uploads
+            possible_extensions = ['.xlsx', '.xls', '.PDF', '.pdf.pdf']
+            for ext in possible_extensions:
+                test_key = f'{supplier_name}/{invoice_id}{ext}'
+                test_url = get_presigned_url(file_key=test_key, is_invoice=False)
+                if test_url:
+                    logger.warning(f"Found old file type {ext} for invoice {invoice_id}, returning it")
+                    return {"link": test_url, "warning": f"Old file format detected: {ext}"}
+            
+            # If no file found at all, return error
+            logger.error(f"No file found in S3 for invoice {invoice_id}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"No file found for invoice {invoice_id}"
+            )
+        
         logger.info(f"GET /invoice/download - Successfully generated download URL for invoice: {invoice_id}")
         return {"link": url}
     except HTTPException:
@@ -448,21 +472,32 @@ async def upload_and_process_invoice(
                 detail=f"Failed to convert invoice: {failed_files}"
             )
 
-        # Process extracted data and get result
-        results = await process_extracted_data(converted_files, failed_files)
+        # Process extracted data using restored business logic
+        # Pass the original PDF file path for S3 upload
+        results = await process_extracted_data(converted_files, failed_files, original_pdf_path=file_path)
         if not results or results.get('success_count', 0) == 0:
+            # Check if any files were skipped due to duplicates
+            if results.get('skipped_count', 0) > 0 and results.get('results'):
+                # Find the skipped result
+                for result in results['results']:
+                    if result.get('skipped'):
+                        return {
+                            "status": "skipped",
+                            "message": result.get('message', 'Invoice already exists'),
+                            "filename": result.get('filename', file.filename),
+                            "supplier": supplier,
+                            "ref_no": result.get('ref_no'),
+                            "vendor": result.get('vendor'),
+                            "date": result.get('date')
+                        }
+            
             logger.error(f"POST /invoice/upload - No successful processing for: {file.filename}")
             raise HTTPException(
                 status_code=500, 
                 detail="No successful invoice processing"
             )
 
-        # For single file upload, we need to get the individual file result
-        # Since process_extracted_data returns aggregate results, we need to process the file directly
-        from mpi_backend.database.models.Invoice import Invoice
-        from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
-        
-        created_invoice = None
+        # Get the result for the processed file
         invoice_id = None
         status = "error"
         message = "Processing failed"
@@ -470,21 +505,23 @@ async def upload_and_process_invoice(
         vendor = None
         date = None
         
-        # Process the converted file directly to get detailed results
-        if converted_files:
-            controller = InvoiceItemController(db)
-            file_result = await controller.process_invoice_file(converted_files[0])
-            
-            if file_result.get('success'):
-                invoice_id = file_result.get("invoice_id")
-                status = file_result.get("status", "created")
-                message = file_result.get("message", "Invoice processed successfully")
-                ref_no = file_result.get("ref_no")
-                vendor = file_result.get("vendor")
-                date = file_result.get("date")
-            else:
-                message = file_result.get("error", "Processing failed")
-                status = "error"
+        # Find the successful result
+        for result in results.get('results', []):
+            if result.get('success'):
+                invoice_id = result.get("invoice_id")
+                status = result.get("status", "created")
+                message = result.get("message", "Invoice processed successfully")
+                ref_no = result.get("ref_no")
+                vendor = result.get("vendor")
+                date = result.get("date")
+                break
+            elif result.get('skipped'):
+                status = "skipped"
+                message = result.get("message", "Invoice already exists")
+                ref_no = result.get("ref_no")
+                vendor = result.get("vendor")
+                date = result.get("date")
+                break
 
         if status == "skipped":
             logger.warning(f"POST /invoice/upload - {message}")
@@ -564,200 +601,310 @@ async def process_again(
     token: str = Depends(JWTBearer())
 ):
     """
-    Reprocess an existing invoice to update extracted data.
+    Reprocess an existing invoice following original business logic.
     
-    **Summary:**
-        Downloads an existing invoice from S3 storage and reprocesses it to
-        update the extracted data. This is useful when the original processing
-        failed or when updated processing logic needs to be applied to existing
-        invoices.
+    **Original Business Logic (from documentation):**
+        1. Download PDF file from S3 using invoice-id and supplier
+        2. Delete previous invoice items rows and invoice entry from database
+        3. Run convert and combine workflow again
+        4. Insert new data in the database
+        5. Upload original PDF file back to S3
+        
+    **Process Flow:**
+        1. Get invoice and supplier information
+        2. Download PDF file from S3 storage
+        3. Save PDF to temporary local storage
+        4. Convert PDF to Excel for data extraction
+        5. Delete existing invoice and invoice items from database
+        6. Process extracted data and create new invoice
+        7. Upload original PDF file to S3 (not Excel)
+        8. Clean up temporary files
         
     **Query Parameters:**
-        - **invoice_id** (`str`, required): The ID of the invoice to reprocess
-        
-    **Authentication:**
-        - Requires valid JWT token in Authorization header
+        - **invoice_id** (`str`): UUID of the invoice to reprocess
         
     **Returns:**
-        - **Dict**: Reprocessing results containing:
-            - **status** (`str`): Success message
-            - **invoice_id** (`str`): The reprocessed invoice ID
-            - **filename** (`str`): Original filename
-            
-    **Response Example:**
-    ```json
-    {
-        "status": "Success Invoice 'invoice_001.pdf' reprocessed successfully.",
-        "invoice_id": "123",
-        "filename": "invoice_001.pdf"
-    }
-    ```
-    
-    **Process Flow:**
-        1. Retrieves existing invoice record
-        2. Gets supplier information
-        3. Downloads PDF file from S3
-        4. Saves file to temporary storage
-        5. Converts PDF to Excel format
-        6. Reprocesses extracted data
-        7. Updates existing invoice items
-        8. Cleans up temporary files
+        - **status** (`str`): Success/failure message
+        - **invoice_id** (`str`): New invoice ID (UUID)
+        - **filename** (`str`): Original PDF filename
         
-    **Error Codes:**
-        - **404**: Invoice not found or file not available
-        - **500**: Processing error or file conversion failure
-        
-    **Reprocessing Behavior:**
-        - Updates existing invoice items without deleting invoice record
-        - Enhanced duplicate detection prevents data loss
-        - Preserves original invoice metadata
-        - Updates extracted item data with latest processing logic
-        
-    **Notes:**
-        - Processing is synchronous (blocks until complete)
-        - Original invoice record is preserved
-        - Invoice items are updated with new extracted data
-        - Temporary files are automatically cleaned up
-        - Useful for applying updated extraction logic to existing invoices
+    **Error Handling:**
+        - Automatic deletion if S3 file missing
+        - Proper rollback on processing failures
+        - Comprehensive error logging
+        - PDF corruption handling
     """
     logger.info(f"POST /invoice/process - Reprocessing invoice: {invoice_id}")
+    
+    # Store original filename for response
+    original_filename = None
+    new_invoice_id = None
+    upload_folder = None
+    
     try:
-        # Get invoice and supplier info
-        invoice = await InvoiceController(db).get_invoice_by_invoiceID(
-            invoice_id, db
-        )
+        # STEP 1: Get invoice and supplier information
+        logger.info(f"Step 1: Getting invoice and supplier information for {invoice_id}")
+        
+        invoice_controller = InvoiceController(db)
+        supplier_controller = SupplierController(db)
+        
+        invoice = await invoice_controller.get_invoice_by_invoiceID(invoice_id, db)
         if not invoice:
-            logger.error(f"POST /invoice/process - Invoice not found: {invoice_id}")
+            logger.error(f"Invoice not found: {invoice_id}")
             raise HTTPException(
                 status_code=404, 
                 detail=f"Invoice with ID {invoice_id} not found"
             )
-
-        supplier = await SupplierController(db).get_supplier_by_id(
-            invoice.supplier_id
-        )
+        
+        original_filename = invoice.filename
+        logger.info(f"Found invoice: {original_filename}")
+        
+        supplier = await supplier_controller.get_supplier_by_id(invoice.supplier_id)
         if not supplier:
-            logger.error(f"POST /invoice/process - Supplier for invoice {invoice_id} not found: {invoice.supplier_id}")
+            logger.error(f"Supplier not found for invoice {invoice_id}: supplier_id={invoice.supplier_id}")
             raise HTTPException(
                 status_code=404, 
                 detail=f"Supplier for invoice {invoice_id} not found"
             )
-
-        # Download invoice from S3
-        invoice_url = get_presigned_url(file_key=f'{supplier}/{invoice_id}')
+        
+        logger.info(f"Found supplier: {supplier}")
+        
+        # STEP 2: Download PDF file from S3
+        logger.info(f"Step 2: Downloading PDF from S3")
+        
+        s3_file_key = f'{supplier}/{invoice_id}'
+        invoice_url = get_presigned_url(file_key=s3_file_key)
+        
         if not invoice_url:
-            logger.error(f"POST /invoice/process - Couldn't fetch requested Invoice URL for: {invoice_id}")
-            raise HTTPException(
-                status_code=404, 
-                detail="Couldn't fetch requested Invoice"
-            )
-
-        # Create upload directory (sanitize supplier for filesystem safety)
+            logger.warning(f"S3 key not found: {s3_file_key}, deleting orphaned invoice record")
+            await _delete_orphaned_invoice(db, invoice_id)
+            return {
+                "status": "deleted",
+                "message": f"Invoice {invoice_id} deleted - S3 file not found",
+                "reason": "S3 key not found"
+            }
+        
+        # Create temporary upload directory
         safe_supplier = _sanitize_path_component(supplier)
         upload_folder = os.path.join(INVOICE_DOWNLOAD_FOLDER, safe_supplier)
-        if not os.path.exists(upload_folder):
-            os.makedirs(upload_folder)
-
-        # Download file
-        # Stream download with small timeout to avoid blocking and suppress
-        # verbose third-party logs
-        response = requests.get(invoice_url, timeout=30)
-        if response.status_code == 200:
-            file_path = os.path.join(upload_folder, invoice.filename)
-            with open(file_path, 'wb') as file:
-                file.write(response.content)
-        else:
-            logger.error(f"POST /invoice/process - Failed to download invoice from URL: {invoice_url}, status: {response.status_code}, detail: {response.text}")
+        os.makedirs(upload_folder, exist_ok=True)
+        
+        # Download PDF file
+        file_path = os.path.join(upload_folder, original_filename)
+        logger.info(f"Downloading PDF to: {file_path}")
+        
+        response = requests.get(invoice_url, timeout=60, stream=True)
+        if response.status_code == 404:
+            logger.warning(f"S3 file not found: {s3_file_key}, deleting orphaned invoice record")
+            await _delete_orphaned_invoice(db, invoice_id)
+            return {
+                "status": "deleted",
+                "message": f"Invoice {invoice_id} deleted - S3 file not found",
+                "reason": "S3 file not found"
+            }
+        elif response.status_code != 200:
+            logger.error(f"Failed to download from S3: status={response.status_code}")
             raise HTTPException(
-                status_code=response.status_code, 
-                detail=response.text
+                status_code=500,
+                detail=f"Failed to download invoice from S3: {response.status_code}"
             )
-
-        # Convert and process the invoice
-        converted_files, failed_files = convert_single_invoice(
-            file_path, supplier
-        )
-        if failed_files:
-            logger.error(f"POST /invoice/process - Failed to convert invoice: {failed_files}")
+        
+        # Write PDF file to disk
+        with open(file_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        
+        # Verify PDF file was downloaded correctly
+        if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+            logger.error(f"Downloaded file is empty or missing: {file_path}")
             raise HTTPException(
-                status_code=500, 
-                detail=f"Failed to convert invoice: {failed_files}"
+                status_code=500,
+                detail="Downloaded PDF file is corrupted or empty"
             )
-
-        # According to documentation: Delete previous invoice items and invoice entry, then recreate
-        if converted_files:
-            try:
-                # Step 1: Delete existing invoice items
-                from sqlalchemy import delete
-                from mpi_backend.database.models.InvoiceItems import InvoiceItem
-                from mpi_backend.database.models.Invoice import Invoice as InvoiceModel
+        
+        logger.info(f"Successfully downloaded PDF: {os.path.getsize(file_path)} bytes")
+        
+        # STEP 3: Convert PDF to Excel for data extraction
+        logger.info(f"Step 3: Converting PDF to Excel")
+        
+        try:
+            converted_files, failed_files = convert_single_invoice(file_path, supplier)
+            
+            if failed_files:
+                logger.error(f"PDF conversion failed: {failed_files}")
                 
-                await db.execute(
-                    delete(InvoiceItem).where(InvoiceItem.invoice_id == invoice_id)
-                )
-                logger.info(f"Deleted existing invoice items for invoice ID: {invoice_id}")
+                # Check if it's a PDF corruption issue
+                try:
+                    import PyPDF2
+                    with open(file_path, 'rb') as pdf_file:
+                        PyPDF2.PdfReader(pdf_file)
+                    error_detail = f"PDF conversion failed but file is readable: {failed_files}"
+                except Exception as pdf_error:
+                    error_detail = f"PDF file is corrupted or unreadable: {str(pdf_error)}"
                 
-                # Step 2: Delete existing invoice entry
-                await db.execute(
-                    delete(InvoiceModel).where(InvoiceModel.id == invoice_id)
-                )
-                logger.info(f"Deleted existing invoice entry for invoice ID: {invoice_id}")
-                
-                # Step 3: Process the file as a new invoice (no existing_invoice_id)
-                from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
-                controller = InvoiceItemController(db)
-                file_result = await controller.process_invoice_file(converted_files[0])
-                
-                if file_result.get('success'):
-                    await db.commit()
-                    logger.info(f"Successfully reprocessed invoice: {invoice.filename}")
-                else:
-                    await db.rollback()
-                    logger.error(f"Processing failed for invoice: {invoice.filename}")
-                    raise HTTPException(
-                        status_code=500, 
-                        detail=f"Failed to process invoice: {file_result.get('error', 'Unknown error')}"
-                    )
-                    
-            except Exception as e:
-                await db.rollback()
-                logger.error(f"Error during reprocessing: {str(e)}")
                 raise HTTPException(
-                    status_code=500, 
-                    detail=f"Reprocessing failed: {str(e)}"
+                    status_code=500,
+                    detail=error_detail
                 )
-        else:
-            # No converted files to process
-            invoice.status = "FAILED"
+            
+            if not converted_files:
+                logger.error("No files were converted from PDF")
+                raise HTTPException(
+                    status_code=500,
+                    detail="PDF conversion produced no output files"
+                )
+            
+            logger.info(f"Successfully converted PDF to {len(converted_files)} Excel files")
+            
+        except Exception as conversion_error:
+            logger.error(f"PDF conversion failed: {str(conversion_error)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to convert PDF: {str(conversion_error)}"
+            )
+        
+        # STEP 4: Delete existing invoice and items (original business logic)
+        logger.info(f"Step 4: Deleting existing invoice and items")
+        
+        try:
+            from sqlalchemy import delete
+            from mpi_backend.database.models.InvoiceItems import InvoiceItem
+            from mpi_backend.database.models.Invoice import Invoice as InvoiceModel
+            
+            # Delete invoice items first (foreign key constraint)
+            delete_items_result = await db.execute(
+                delete(InvoiceItem).where(InvoiceItem.invoice_id == invoice_id)
+            )
+            logger.info(f"Deleted {delete_items_result.rowcount} invoice items")
+            
+            # Delete invoice record
+            delete_invoice_result = await db.execute(
+                delete(InvoiceModel).where(InvoiceModel.id == invoice_id)
+            )
+            logger.info(f"Deleted {delete_invoice_result.rowcount} invoice record")
+            
+            # Commit deletions
             await db.commit()
-            logger.warning(f"No converted files for invoice: {invoice.filename}, setting status to FAILED")
-
-        # Clean up files after processing (handle files and directories)
-        for entry in os.listdir(upload_folder):
-            path = os.path.join(upload_folder, entry)
-            try:
-                if os.path.isfile(path) or os.path.islink(path):
-                    os.remove(path)
-                elif os.path.isdir(path):
-                    shutil.rmtree(path, ignore_errors=True)
-            except Exception:
-                pass
-
-        logger.info(f"POST /invoice/process - Successfully reprocessed invoice: {invoice.filename}")
+            logger.info("Successfully deleted existing invoice and items")
+            
+        except Exception as delete_error:
+            await db.rollback()
+            logger.error(f"Failed to delete existing invoice: {str(delete_error)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to delete existing invoice: {str(delete_error)}"
+            )
+        
+        # STEP 5: Process extracted data as NEW invoice (original business logic)
+        logger.info(f"Step 5: Processing extracted data as new invoice")
+        
+        try:
+            # Process as new invoice (existing_invoice_id=None)
+            # Pass original PDF path for S3 upload
+            results = await process_extracted_data(
+                converted_files=converted_files,
+                failed_files=failed_files,
+                existing_invoice_id=None,  # Create new invoice
+                original_pdf_path=file_path  # Use PDF for S3 upload
+            )
+            
+            if not results or results.get('success_count', 0) == 0:
+                error_msg = "No successful processing"
+                if results and results.get('errors'):
+                    error_msg = "; ".join(results['errors'])
+                
+                logger.error(f"Processing failed: {error_msg}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to process extracted data: {error_msg}"
+                )
+            
+            # Get the new invoice ID from results
+            for result in results.get('results', []):
+                if result.get('success') and result.get('invoice_id'):
+                    new_invoice_id = result['invoice_id']
+                    break
+            
+            if not new_invoice_id:
+                logger.error("No invoice ID returned from processing")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Processing succeeded but no invoice ID returned"
+                )
+            
+            logger.info(f"Successfully processed invoice with new ID: {new_invoice_id}")
+            
+        except HTTPException:
+            raise
+        except Exception as processing_error:
+            logger.error(f"Error processing extracted data: {str(processing_error)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to process extracted data: {str(processing_error)}"
+            )
+        
+        logger.info(f"Successfully reprocessed invoice: {original_filename} -> {new_invoice_id}")
         return {
-            "status": f"Success Invoice '{invoice.filename}' reprocessed successfully.",
-            "invoice_id": invoice_id,
-            "filename": invoice.filename
+            "status": f"Success: Invoice '{original_filename}' reprocessed successfully",
+            "invoice_id": new_invoice_id,
+            "filename": original_filename,
+            "original_invoice_id": invoice_id
         }
-
+        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"POST /invoice/process - Error in reprocess endpoint: {str(e)}")
+        logger.error(f"Unexpected error in reprocess endpoint: {str(e)}")
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail=f"Reprocessing failed: {str(e)}"
         )
+    finally:
+        # STEP 6: Clean up temporary files
+        if upload_folder and os.path.exists(upload_folder):
+            try:
+                logger.info(f"Cleaning up temporary files in: {upload_folder}")
+                for entry in os.listdir(upload_folder):
+                    path = os.path.join(upload_folder, entry)
+                    try:
+                        if os.path.isfile(path) or os.path.islink(path):
+                            os.remove(path)
+                        elif os.path.isdir(path):
+                            shutil.rmtree(path, ignore_errors=True)
+                    except Exception as cleanup_error:
+                        logger.warning(f"Failed to remove {path}: {cleanup_error}")
+                logger.info("Temporary file cleanup completed")
+            except Exception as cleanup_error:
+                logger.warning(f"Error during cleanup: {cleanup_error}")
+
+
+async def _delete_orphaned_invoice(db: AsyncSession, invoice_id: str):
+    """
+    Helper function to delete orphaned invoice records when S3 file is missing.
+    """
+    try:
+        from sqlalchemy import delete
+        from mpi_backend.database.models.InvoiceItems import InvoiceItem
+        from mpi_backend.database.models.Invoice import Invoice as InvoiceModel
+        
+        # Delete invoice items first
+        await db.execute(
+            delete(InvoiceItem).where(InvoiceItem.invoice_id == invoice_id)
+        )
+        logger.info(f"Deleted orphaned invoice items for: {invoice_id}")
+        
+        # Delete invoice record
+        await db.execute(
+            delete(InvoiceModel).where(InvoiceModel.id == invoice_id)
+        )
+        logger.info(f"Deleted orphaned invoice record: {invoice_id}")
+        
+        await db.commit()
+        
+    except Exception as delete_error:
+        await db.rollback()
+        logger.error(f"Failed to delete orphaned invoice {invoice_id}: {str(delete_error)}")
+        raise
 
 
 @router.get("/sort", response_model=Page[Invoice])

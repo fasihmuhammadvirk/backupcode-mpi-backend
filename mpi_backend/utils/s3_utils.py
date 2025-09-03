@@ -24,12 +24,8 @@ def upload_file(file_name, file_key, is_invoice=True):
         )
 
         if is_invoice:
-            # Smart handling of PDF extension to prevent double .pdf
-            file_key_str = str(file_key)
-            if not file_key_str.lower().endswith('.pdf'):
-                s3_key = file_key_str + '.pdf'
-            else:
-                s3_key = file_key_str
+            # Use the file_key as-is since we now pass explicit extensions
+            s3_key = str(file_key)
             
             s3_client.upload_file(
                 file_name,
@@ -64,12 +60,8 @@ def get_presigned_url(
         )
 
         if is_invoice:
-            # Smart handling of PDF extension to prevent double .pdf
-            file_key_str = str(file_key)
-            if not file_key_str.lower().endswith('.pdf'):
-                key = file_key_str + '.pdf'
-            else:
-                key = file_key_str
+            # Use the file_key as-is since we now pass explicit extensions
+            key = str(file_key)
             
             # Try multiple key patterns to handle case differences and
             # double extensions
