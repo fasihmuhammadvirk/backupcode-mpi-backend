@@ -9,7 +9,7 @@ and update invoice items with sheet_name assignments as part of the sync process
 import logging
 import pandas as pd
 from typing import Dict, List, Any
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from mpi_backend.utils.google_sheets.enhanced_sheet_data_extractor import EnhancedGoogleSheetDataExtractor
 from mpi_backend.utils.google_sheets.temporary_mapping_extractor import TemporaryMappingExtractor
@@ -22,12 +22,12 @@ logger = logging.getLogger(__name__)
 class TemporaryMappingSync:
     """Handles temporary mapping extraction and sync as part of Google Sheets sync."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: AsyncSession):
         """
         Initialize the TemporaryMappingSync.
 
         Args:
-            db: SQLAlchemy database session
+            db: SQLAlchemy async database session
         """
         self.db = db
         self.temp_extractor = TemporaryMappingExtractor(db)

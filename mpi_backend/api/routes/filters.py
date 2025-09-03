@@ -294,7 +294,7 @@ async def customer_job_filter(db: AsyncSession = Depends(get_async_db),
 
 
 @router.get("/column-mapping")
-def column_mappings(token: str = Depends(JWTBearer())):
+async def column_mappings(token: str = Depends(JWTBearer())):
     """
     Get column mapping definitions for frontend display.
     
@@ -1536,7 +1536,7 @@ async def get_aggregates(
 
 # Add cache management endpoint for debugging
 @router.get("/cache-stats")
-def get_cache_stats(token: str = Depends(JWTBearer())):
+async def get_cache_stats(token: str = Depends(JWTBearer())):
     """
     Get cache statistics for performance monitoring and debugging.
     
@@ -1587,7 +1587,7 @@ def get_cache_stats(token: str = Depends(JWTBearer())):
     })
 
 @router.delete("/cache")
-def clear_cache(token: str = Depends(JWTBearer())):
+async def clear_cache(token: str = Depends(JWTBearer())):
     """
     Clear all cached data for debugging and maintenance.
     
@@ -2095,7 +2095,7 @@ async def export_all_unmapped_items(
         controller = UnmappedItemsController(db)
         
         # Get items with optional filters
-        result = controller.get_unmapped_items(
+        result = await controller.get_unmapped_items(
             item_type=item_type,
             date_from=date_from_obj,  # Pass converted date object
             date_to=date_to_obj,      # Pass converted date object
@@ -2173,7 +2173,7 @@ async def export_all_unmapped_items(
         )
 
 @router.post("/unmapped-items/export-selected")
-def export_selected_unmapped_items(
+async def export_selected_unmapped_items(
     item_ids: List[str] = Body(..., description="List of item IDs to export"),
     order_by: Optional[List[Dict[str, str]]] = Body(None, description="Optional ordering criteria"),
     db: AsyncSession = Depends(get_async_db),
@@ -2251,7 +2251,7 @@ def export_selected_unmapped_items(
         
         # Get all unmapped items first (we'll filter by cleaned item_ids)
         # Use "unmapped" to get all items regardless of sheet_name status
-        all_items_result = controller.get_unmapped_items(
+        all_items_result = await controller.get_unmapped_items(
             item_type="unmapped",  # Get all unmapped items regardless of sheet_name
             date_from=None,
             date_to=None,

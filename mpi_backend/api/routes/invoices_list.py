@@ -450,22 +450,41 @@ async def upload_and_process_invoice(
 
         # Process extracted data and get result
         results = await process_extracted_data(converted_files, failed_files)
-        result = results[0] if results else None
-        if not result:
-            logger.error(f"POST /invoice/upload - No result from processing for: {file.filename}")
+        if not results or results.get('success_count', 0) == 0:
+            logger.error(f"POST /invoice/upload - No successful processing for: {file.filename}")
             raise HTTPException(
                 status_code=500, 
-                detail="No result from invoice processing"
+                detail="No successful invoice processing"
             )
 
+        # For single file upload, we need to get the individual file result
+        # Since process_extracted_data returns aggregate results, we need to process the file directly
         from mpi_backend.database.models.Invoice import Invoice
+        from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
+        
         created_invoice = None
-        invoice_id = result.get("invoice_id")
-        status = result.get("status")
-        message = result.get("message")
-        ref_no = result.get("ref_no")
-        vendor = result.get("vendor")
-        date = result.get("date")
+        invoice_id = None
+        status = "error"
+        message = "Processing failed"
+        ref_no = None
+        vendor = None
+        date = None
+        
+        # Process the converted file directly to get detailed results
+        if converted_files:
+            controller = InvoiceItemController(db)
+            file_result = await controller.process_invoice_file(converted_files[0])
+            
+            if file_result.get('success'):
+                invoice_id = file_result.get("invoice_id")
+                status = file_result.get("status", "created")
+                message = file_result.get("message", "Invoice processed successfully")
+                ref_no = file_result.get("ref_no")
+                vendor = file_result.get("vendor")
+                date = file_result.get("date")
+            else:
+                message = file_result.get("error", "Processing failed")
+                status = "error"
 
         if status == "skipped":
             logger.warning(f"POST /invoice/upload - {message}")
@@ -665,22 +684,53 @@ async def process_again(
                 detail=f"Failed to convert invoice: {failed_files}"
             )
 
-        # Process extracted data
-        # The enhanced duplicate detection logic will handle updating existing invoice items
-        # without deleting the invoice record itself
-        processing_result = await process_extracted_data(
-            converted_files, failed_files
-        )
-
-        # Update invoice status based on processing result
-        if processing_result['success_count'] > 0:
-            # Update invoice status to PROCESSED
-            invoice.status = "PROCESSED"
-            await db.commit()
-            logger.info(f"Updated invoice status to PROCESSED for: {invoice.filename}")
+        # According to documentation: Delete previous invoice items and invoice entry, then recreate
+        if converted_files:
+            try:
+                # Step 1: Delete existing invoice items
+                from sqlalchemy import delete
+                from mpi_backend.database.models.InvoiceItems import InvoiceItem
+                from mpi_backend.database.models.Invoice import Invoice as InvoiceModel
+                
+                await db.execute(
+                    delete(InvoiceItem).where(InvoiceItem.invoice_id == invoice_id)
+                )
+                logger.info(f"Deleted existing invoice items for invoice ID: {invoice_id}")
+                
+                # Step 2: Delete existing invoice entry
+                await db.execute(
+                    delete(InvoiceModel).where(InvoiceModel.id == invoice_id)
+                )
+                logger.info(f"Deleted existing invoice entry for invoice ID: {invoice_id}")
+                
+                # Step 3: Process the file as a new invoice (no existing_invoice_id)
+                from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
+                controller = InvoiceItemController(db)
+                file_result = await controller.process_invoice_file(converted_files[0])
+                
+                if file_result.get('success'):
+                    await db.commit()
+                    logger.info(f"Successfully reprocessed invoice: {invoice.filename}")
+                else:
+                    await db.rollback()
+                    logger.error(f"Processing failed for invoice: {invoice.filename}")
+                    raise HTTPException(
+                        status_code=500, 
+                        detail=f"Failed to process invoice: {file_result.get('error', 'Unknown error')}"
+                    )
+                    
+            except Exception as e:
+                await db.rollback()
+                logger.error(f"Error during reprocessing: {str(e)}")
+                raise HTTPException(
+                    status_code=500, 
+                    detail=f"Reprocessing failed: {str(e)}"
+                )
         else:
-            # Keep status as FAILED if processing failed
-            logger.warning(f"Processing failed for invoice: {invoice.filename}, keeping FAILED status")
+            # No converted files to process
+            invoice.status = "FAILED"
+            await db.commit()
+            logger.warning(f"No converted files for invoice: {invoice.filename}, setting status to FAILED")
 
         # Clean up files after processing (handle files and directories)
         for entry in os.listdir(upload_folder):

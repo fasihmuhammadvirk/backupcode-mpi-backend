@@ -392,7 +392,7 @@ class StatementController:
 
             # Handle special status filters BEFORE executing query
             if status and status.lower() == "unlisted":
-                return self.get_unlisted_invoices(
+                return await self.get_unlisted_invoices(
                     from_date=from_date,
                     to_date=to_date,
                     supplier_names=supplier_names,
@@ -402,7 +402,7 @@ class StatementController:
             if status and (status.lower() == "missing" or
                            status.lower() == "missing system" or
                            status.lower() == "missing statement"):
-                return self.get_missing_invalid_invoices(
+                return await self.get_missing_invalid_invoices(
                     from_date=from_date,
                     to_date=to_date,
                     supplier_names=supplier_names,
@@ -410,7 +410,7 @@ class StatementController:
                     page_size=page_size
                 )
             if status and status.lower() == "all":
-                return self.get_all_invoices_combined(
+                return await self.get_all_invoices_combined(
                     from_date=from_date,
                     to_date=to_date,
                     supplier_names=supplier_names,
@@ -827,10 +827,10 @@ class StatementController:
                         logger.info(
                             f"Deleted statement {statement_id} and {invoice_count} associated invoices")
 
-                self.db.commit()
+                await self.db.commit()
 
             except Exception as e:
-                self.db.rollback()
+                await self.db.rollback()
                 logger.error(f"Failed to delete existing records: {str(e)}")
                 return {
                     'success': False,
@@ -950,13 +950,13 @@ class StatementController:
                         )
                         self.db.add(invoice)
 
-                    self.db.commit()
+                    await self.db.commit()
 
                     new_statement_id = new_statement.id
                     new_invoice_count = result['total_invoices']
 
                 except Exception as db_error:
-                    self.db.rollback()
+                    await self.db.rollback()
                     logger.error(
                         f"Failed to save to database: {str(db_error)}")
                     logger.error(
@@ -1131,7 +1131,7 @@ class StatementController:
 
         except Exception as e:
             logger.error(f"Error deleting existing statement: {str(e)}")
-            self.db.rollback()
+            await self.db.rollback()
             return False
 
     async def reprocess_all_statements(self, supplier_name: Optional[str] = None, max_statements: int = 100) -> Dict[str, Any]:
@@ -1377,7 +1377,7 @@ class StatementController:
             deleted_statement = result.rowcount
 
             # Commit the transaction
-            self.db.commit()
+            await self.db.commit()
 
             logger.info(
                 f"Successfully deleted statement {statement_id}: "
@@ -1398,7 +1398,7 @@ class StatementController:
 
         except Exception as e:
             # Rollback in case of error
-            self.db.rollback()
+            await self.db.rollback()
             logger.error(f"Error deleting statement {statement_id}: {str(e)}")
             return {
                 'success': False,
@@ -1458,7 +1458,7 @@ class StatementController:
             # Handle special status filters separately
             if status and status.lower() == "unlisted":
                 # For unlisted, search system invoices not in statements
-                unlisted_results = self.get_unlisted_invoices(
+                unlisted_results = await self.get_unlisted_invoices(
                     from_date=from_date,
                     to_date=to_date,
                     supplier_names=supplier_names,
@@ -1509,7 +1509,7 @@ class StatementController:
                            status.lower() == "missing system" or
                            status.lower() == "missing statement"):
                 # For missing, search invalid invoices
-                missing_results = self.get_missing_invalid_invoices(
+                missing_results = await self.get_missing_invalid_invoices(
                     from_date=from_date,
                     to_date=to_date,
                     supplier_names=supplier_names,
@@ -1559,7 +1559,7 @@ class StatementController:
 
             if status and status.lower() == "all":
                 # For all status, search across all invoice types
-                all_results = self.get_all_invoices_combined(
+                all_results = await self.get_all_invoices_combined(
                     from_date=from_date,
                     to_date=to_date,
                     supplier_names=supplier_names,

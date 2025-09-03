@@ -14,6 +14,8 @@ class Invoice(Base):
     status = Column(String)
     storage_path = Column(String)
     is_exported = Column(String, default="Pending")
+    ref_no = Column(String)
+    customer_job = Column(String)
 
     items = relationship("InvoiceItem", back_populates="invoice")
     supplier_fk = relationship("Supplier", back_populates="supplier")

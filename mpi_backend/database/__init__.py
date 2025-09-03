@@ -129,68 +129,10 @@ async def async_db_context():
                 logger.error(f"Error closing database session: {e}")
 
 
-# Keep legacy sync functions for backward compatibility during transition
-SessionLocal = sessionmaker(
-    autocommit=False, autoflush=False, bind=engine
-)
-QBSessionLocal = sessionmaker(
-    autocommit=False, autoflush=False, bind=qb_engine
-)
+# Removed legacy sync functions - all operations are now fully async
 
 
-def get_db():
-    """Get database session (legacy sync version)"""
-    db = None
-    try:
-        db = SessionLocal()
-        yield db
-    finally:
-        if db:
-            try:
-                db.close()
-            except (OperationalError, DBAPIError, Psycopg2OperationalError) as e:
-                logger.error(f"Error closing main DB session: {e}")
-            except Exception as e:
-                logger.error(f"Unexpected error closing main DB session: {e}")
-
-
-def get_qb_db():
-    """Get QuickBooks database session (legacy sync version)"""
-    db = None
-    try:
-        db = QBSessionLocal()
-        yield db
-    finally:
-        if db:
-            try:
-                db.close()
-            except (OperationalError, DBAPIError, Psycopg2OperationalError) as e:
-                logger.error(f"Error closing QB DB session: {e}")
-            except Exception as e:
-                logger.error(f"Unexpected error closing QB DB session: {e}")
-
-
-@contextmanager
-def db_context():
-    """Context manager for database sessions (legacy sync version)"""
-    db = None
-    try:
-        db = SessionLocal()
-        yield db
-    except Exception as e:
-        logger.error(f"Database operation failed: {e}")
-        if db:
-            try:
-                db.rollback()
-            except Exception:
-                pass
-        raise
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception as e:
-                logger.error(f"Error closing database session: {e}")
+# All sync database functions have been removed - use async versions only
 
 
 def get_db_health_status():

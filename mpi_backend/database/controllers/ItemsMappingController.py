@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mpi_backend.utils.quickbooks_priority import is_qb_export_active
 from mpi_backend.utils.export_utils import extract_supplier_id
-from mpi_backend.database import SessionLocal
+# Removed SessionLocal import - using AsyncSessionLocal instead
 # Removed clean_supplier_suffix import - no longer needed with suffix standardization
 from mpi_backend.utils.mapping_validators import (
     validate_mapping_for_permanent_storage,
@@ -72,11 +72,11 @@ class ItemsMappingController:
         created_new_session = False
         try:
             if db is None:
-                from mpi_backend.database import SessionLocal
-                db = SessionLocal()
+                from mpi_backend.database import AsyncSessionLocal
+                db = AsyncSessionLocal()
                 created_new_session = True
                 logger.info(
-                    "Created new database session for mapping update task")
+                    "Created new async database session for mapping update task")
 
             controller = cls(db)
             logger.info("Starting update all mappings task execution")

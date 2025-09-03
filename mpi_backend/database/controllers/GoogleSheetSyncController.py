@@ -143,12 +143,8 @@ class GoogleSheetSyncController:
                     cls._reset_progress()
                     cls._total_steps = 1  # Default to 1 step
 
-                # Create a new database session for this thread
-                from mpi_backend.database import SessionLocal
-                thread_db = SessionLocal()
-
                 try:
-                    # Convert sync session to async session for the controller
+                    # Use async database session for the controller
                     from mpi_backend.database import get_async_db
                     import asyncio
                     
@@ -172,17 +168,15 @@ class GoogleSheetSyncController:
                         return result
                     finally:
                         loop.close()
-                finally:
-                    thread_db.close()
 
-            except Exception as e:
-                logger.error(f"Sync task failed: {str(e)}")
-                return {
-                    "success": False,
-                    "message": f"Sync task failed: {str(e)}",
-                    "timestamp": datetime.now(),
-                    "operation": operation
-                }
+                except Exception as e:
+                    logger.error(f"Sync task failed: {str(e)}")
+                    return {
+                        "success": False,
+                        "message": f"Sync task failed: {str(e)}",
+                        "timestamp": datetime.now(),
+                        "operation": operation
+                    }
             finally:
                 cls._sync_task_running = False
                 cls._current_operation = None

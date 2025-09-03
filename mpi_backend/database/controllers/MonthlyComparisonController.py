@@ -242,14 +242,17 @@ class MonthlyComparisonController:
             
             # Apply pagination and ordering directly to the main query
             # For DISTINCT queries, we need to include ORDER BY expressions in the SELECT
+            starts_with_expr = func.upper(InvoiceItem.mpi_item).like(f'{search_term}%')
+            contains_term_expr = func.upper(InvoiceItem.mpi_item).like(f'%{search_term}%')
+            
             query = query.distinct()\
                     .add_columns(
-                        func.upper(InvoiceItem.mpi_item).like(f'{search_term}%').label('starts_with'),
-                        func.upper(InvoiceItem.mpi_item).like(f'%{search_term}%').label('contains_term')
+                        starts_with_expr.label('starts_with'),
+                        contains_term_expr.label('contains_term')
                     )\
                     .order_by(
-                        func.upper(InvoiceItem.mpi_item).like(f'{search_term}%').desc(),  # Starts with first
-                        func.upper(InvoiceItem.mpi_item).like(f'%{search_term}%').desc(),  # Contains the term
+                        starts_with_expr.desc(),  # Starts with first
+                        contains_term_expr.desc(),  # Contains the term
                         InvoiceItem.mpi_item.asc()  # Then sort alphabetically
                     )\
                     .offset((page - 1) * size)\

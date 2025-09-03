@@ -166,7 +166,12 @@ async def process_single_file(file_path: str, db) -> Dict[str, any]:
             }
         
         # Determine file type and process accordingly
-        if 'invoice' in file_path.lower():
+        file_extension = file_path_obj.suffix.lower()
+        
+        # Excel files (.xlsx) are always invoice files from PDF conversion
+        if file_extension == '.xlsx':
+            return await process_invoice_file(file_path, db)
+        elif 'invoice' in file_path.lower():
             return await process_invoice_file(file_path, db)
         elif 'statement' in file_path.lower():
             return await process_statement_file(file_path, db)
@@ -181,7 +186,7 @@ async def process_single_file(file_path: str, db) -> Dict[str, any]:
         }
 
 
-async def process_invoice_file(file_path: str, db) -> Dict[str, any]:
+async def process_invoice_file(file_path: str, db, existing_invoice_id: Optional[str] = None) -> Dict[str, any]:
     """
     Process an invoice file
     
@@ -197,19 +202,27 @@ async def process_invoice_file(file_path: str, db) -> Dict[str, any]:
         controller = InvoiceItemController(db)
         
         # Process the invoice file
-        result = await controller.process_invoice_file(file_path)
+        result = await controller.process_invoice_file(file_path, existing_invoice_id)
         
         if result.get('success'):
             return {
                 'success': True,
                 'skipped': False,
-                'error': None
+                'error': None,
+                'invoice_id': result.get('invoice_id'),
+                'status': result.get('status'),
+                'message': result.get('message'),
+                'ref_no': result.get('ref_no'),
+                'vendor': result.get('vendor'),
+                'date': result.get('date')
             }
         else:
             return {
                 'success': False,
                 'skipped': False,
-                'error': result.get('error', 'Unknown error')
+                'error': result.get('error', 'Unknown error'),
+                'status': result.get('status', 'error'),
+                'message': result.get('message', result.get('error', 'Unknown error'))
             }
             
     except Exception as e:
