@@ -17,7 +17,7 @@ DEFAULT_SHEET_ID = os.environ.get(
 # Google API key for accessing Google Sheets API
 GOOGLE_API_KEY = os.environ.get(
     "GOOGLE_API_KEY", 
-    "AIzaSyAeMGjLedlaT12NpFTUhrEzkUBtvT-9EsY"
+    "AIzaSyDB5T2qVuWgI5b0QuBPXV5P6t5dQ78Z_RE"
 )
 
 # Default output file path for storing extracted mapping data
