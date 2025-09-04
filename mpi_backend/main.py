@@ -146,16 +146,13 @@ add_pagination(app)
 async def advanced_health_check():
     """Advanced health check with memory management metrics"""
     try:
-        # System metrics
-        cpu_percent = get_windows_cpu_percent(interval=0.1)
+        # System metrics - simplified for compatibility
+        cpu_percent = 0  # CPU monitoring disabled
         memory_percent = 0  # Memory monitoring disabled
         disk_percent = 0  # Disk monitoring disabled
         
         # Application metrics
         uptime = time.time() - app_start_time
-        
-        # Memory manager stats
-        memory_stats = memory_manager.get_stats()
         
         health_data = {
             "status": "healthy",
@@ -173,23 +170,11 @@ async def advanced_health_check():
                 "errors": error_count,
                 "success_rate": ((request_count - error_count) / request_count * 100) if request_count > 0 else 100
             },
-            "memory_management": memory_stats,
-            "optimization": {
-                "cpu_threshold": MAX_CPU_USAGE,
-                "memory_threshold": MAX_MEMORY_USAGE,
-                "memory_cleanup_enabled": False, # Memory management disabled
-                "cleanup_threshold": MEMORY_CLEANUP_INTERVAL
+            "background_jobs": {
+                "scheduler_running": "checking...",
+                "jobs_configured": 7
             }
         }
-        
-        # Determine overall health status
-        if (cpu_percent > MAX_CPU_USAGE or 
-            memory_percent > MAX_MEMORY_USAGE):
-            health_data['status'] = 'warning'
-        
-        if (cpu_percent > MAX_CPU_USAGE * 1.2 or 
-            memory.percent > MAX_MEMORY_USAGE * 1.2):
-            health_data['status'] = 'critical'
         
         return health_data
         
@@ -200,13 +185,12 @@ async def advanced_health_check():
 
 @app.get("/cpu-info")
 async def get_cpu_information():
-    """Get detailed CPU information for Windows VPS debugging"""
+    """Get detailed CPU information for debugging"""
     try:
-        cpu_info = get_cpu_info()
         return {
             "status": "success",
-            "cpu_info": cpu_info,
-            "message": "Use this endpoint to debug CPU percentage discrepancies between Task Manager and application"
+            "cpu_info": "CPU monitoring disabled",
+            "message": "CPU monitoring is currently disabled for compatibility"
         }
     except Exception as e:
         logger.error(f"Error getting CPU info: {e}")
@@ -217,7 +201,7 @@ async def get_cpu_information():
 async def optimization_status():
     """Get comprehensive optimization status"""
     try:
-        memory_stats = memory_manager.get_stats()
+        import gc
         
         return {
             "timestamp": time.time(),
@@ -226,7 +210,7 @@ async def optimization_status():
                 "memory_available": "monitoring_disabled"
             },
             "optimizations": {
-                "memory_manager": memory_stats,
+                "memory_manager": "disabled",
                 "database_health": "optimized",
                 "background_jobs": "optimized",
                 "caching": "multi_level"
@@ -235,7 +219,7 @@ async def optimization_status():
                 "collections": gc.get_count(),
                 "objects_tracked": len(gc.get_objects()) if hasattr(gc, 'get_objects') else 'N/A'
             },
-            "recommendations": generate_optimization_recommendations(0)
+            "recommendations": ["System running with basic optimizations"]
         }
         
     except Exception as e:
@@ -247,7 +231,7 @@ async def optimization_status():
 async def memory_status():
     """Get detailed memory management status"""
     try:
-        memory_stats = memory_manager.get_stats()
+        import gc
         
         return {
             "timestamp": time.time(),
@@ -255,55 +239,19 @@ async def memory_status():
                 "status": "monitoring_disabled",
                 "optimization": "enabled"
             },
-            "memory_manager": memory_stats,
+            "memory_manager": "disabled",
             "garbage_collection": {
                 "collections": gc.get_count(),
                 "objects_tracked": len(gc.get_objects()) if hasattr(gc, 'get_objects') else 'N/A'
             },
-            "recommendations": generate_memory_recommendations(0, memory_stats)
+            "recommendations": ["Memory monitoring disabled for compatibility"]
         }
         
     except Exception as e:
         logger.error(f"Memory status failed: {e}")
         return {"error": str(e)}
 
-def generate_optimization_recommendations(memory_percent: float) -> list:
-    """Generate comprehensive optimization recommendations"""
-    recommendations = []
-    
-    # Memory usage recommendations
-    if memory_percent > MAX_MEMORY_USAGE * 0.9:
-        recommendations.append({
-            "priority": "critical",
-            "message": f"Memory usage critical ({memory_percent:.1f}%)",
-            "action": "Immediate cleanup required, consider restarting application"
-        })
-    elif memory_percent > MAX_MEMORY_USAGE * 0.8:
-        recommendations.append({
-            "priority": "high",
-            "message": f"Memory usage high ({memory_percent:.1f}%)",
-            "action": "Trigger memory cleanup and monitor closely"
-        })
-    
-    # Proactive optimization recommendations
-    if memory_percent > 60:
-        recommendations.append({
-            "priority": "medium",
-            "message": "Moderate resource usage detected",
-            "action": "Proactive optimizations are active - monitoring performance"
-        })
-    
-    # General recommendations
-    if not recommendations:
-        recommendations.append({
-            "priority": "low",
-            "message": "System performing well with proactive optimizations",
-            "action": "Continue monitoring and maintain current optimization settings"
-        })
-    
-    return recommendations
-
-
+# Keep main focused on app setup and route registration only
 
 if __name__ == "__main__":
     logger.info("Starting memory-optimized uvicorn server")

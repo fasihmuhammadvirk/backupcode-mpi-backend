@@ -3,7 +3,6 @@ from typing import Optional, List
 from sqlalchemy.orm import Session
 from datetime import datetime
 import logging
-import boto3
 
 from mpi_backend.database import get_db
 from mpi_backend.database.controllers.StatementController import (
@@ -11,14 +10,7 @@ from mpi_backend.database.controllers.StatementController import (
 )
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.s3_utils import get_presigned_url
-from mpi_backend.utils.statement_extractor.extractor import StatementExtractor
-from mpi_backend.config import (
-    INVOICE_DOWNLOAD_FOLDER, 
-    AWS_SERVER_PUBLIC_KEY, 
-    AWS_SERVER_SECRET_KEY, 
-    REGION, 
-    BUCKET_NAME
-)
+# Removed unused imports
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +72,9 @@ def get_statement_invoice_data(
     Returns invoice data from statements including invoice details, 
     statement information, and reconciliation status.
     
-    **Note:** Date filtering is applied to invoice_date, not statement_date.
+    **Note:** Date filtering behavior:
+    - System invoices (no statement): filtered by their own invoice_date
+    - Statement invoices: filtered by statement month/year (statement_date)
     
     **Parameters:**
     - **search**: Search term to look for in invoice numbers (full or partial match)
@@ -234,7 +228,6 @@ def get_statement_invoice_data(
         )
 
 
-
 @router.get("/download")
 def download_statement_pdf(
     statement_id: int = Query(
@@ -348,6 +341,7 @@ def download_statement_pdf(
             detail=f"Internal server error: {str(e)}"
         )
         
+ 
 @router.post("/reprocess")
 def reprocess_statement(
     statement_id: Optional[str] = Query(
