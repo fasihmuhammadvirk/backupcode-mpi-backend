@@ -4,7 +4,45 @@ import os
 # import openpyxl
 
 
+def save_final_data_for_database(final_df, supplier, output_path):
+    """Save data for database processing without invisible prefixes"""
+    # Ensure ref_no is formatted as string to preserve leading zeros
+    if 'Ref NO' in final_df.columns:
+        final_df['Ref NO'] = final_df['Ref NO'].astype(str)
+    
+    writer = pd.ExcelWriter(output_path, engine='xlsxwriter')
+    
+    num_cols = len(final_df.columns)
+    
+    final_df.to_excel(writer, index=False, sheet_name='Table 1')
+    
+    workbook = writer.book
+    worksheet = writer.sheets['Table 1']
+    
+    # Apply basic formatting without invisible prefixes
+    worksheet.set_column('A:A', 20)
+    worksheet.set_column('B:B', 35)
+    worksheet.set_column('C:C', 7)
+    worksheet.set_column('D:D', 10)
+    worksheet.set_column('E:E', 10)
+    worksheet.set_column('F:F', 10)
+    worksheet.set_column('G:G', 15)
+    worksheet.set_column('H:H', 10)
+    worksheet.set_column('I:I', 35)
+    worksheet.set_column('J:J', 10)
+    worksheet.set_column('K:K', 20)
+    worksheet.set_column('L:L', 10)
+    worksheet.set_column('M:M', 20)
+    worksheet.set_column('N:N', 20)
+    
+    writer.close()
+
+
 def save_final_data(final_df, supplier, output_path):
+    # Ensure ref_no is formatted as string to preserve leading zeros
+    if 'Ref NO' in final_df.columns:
+        final_df['Ref NO'] = final_df['Ref NO'].astype(str)
+    
     writer = pd.ExcelWriter(output_path, engine='xlsxwriter')
     
     num_cols = len(final_df.columns)
@@ -13,6 +51,81 @@ def save_final_data(final_df, supplier, output_path):
 
     workbook = writer.book
     worksheet = writer.sheets['Table 1']
+    
+    # Force ref_no column to be treated as text in Excel (no visual changes)
+    if 'Ref NO' in final_df.columns:
+        ref_no_col_idx = final_df.columns.get_loc('Ref NO')
+        
+        # Create text format that prevents Excel from auto-converting
+        text_format = workbook.add_format({
+            'num_format': '@',  # @ = text format
+            'text_wrap': False,
+            'align': 'left'
+        })
+        
+        # Set column format
+        worksheet.set_column(ref_no_col_idx, ref_no_col_idx, 15, text_format)
+        
+        # Write header as text
+        worksheet.write_string(0, ref_no_col_idx, 'Ref NO', text_format)
+        
+        # Write each ref_no value as text with explicit text format (invisible prefix to prevent Excel errors)
+        for row_idx, value in enumerate(final_df['Ref NO'], 1):  # Start from row 1 (skip header)
+            # Add invisible non-breaking space to prevent Excel "Number Stored as Text" error
+            text_value = str(value)
+            if text_value.isdigit():
+                text_value = '\u00A0' + text_value  # Non-breaking space (invisible)
+            worksheet.write_string(row_idx, ref_no_col_idx, text_value, text_format)
+    
+    # Force amount column to be treated as text in Excel (invisible prefix to prevent Excel errors)
+    if 'Amount' in final_df.columns:
+        amount_col_idx = final_df.columns.get_loc('Amount')
+        
+        # Create text format that prevents Excel from auto-converting
+        text_format = workbook.add_format({
+            'num_format': '@',  # @ = text format
+            'text_wrap': False,
+            'align': 'left'
+        })
+        
+        # Set column format
+        worksheet.set_column(amount_col_idx, amount_col_idx, 15, text_format)
+        
+        # Write header as text
+        worksheet.write_string(0, amount_col_idx, 'Amount', text_format)
+        
+        # Write each amount value as text with explicit text format (invisible prefix to prevent Excel errors)
+        for row_idx, value in enumerate(final_df['Amount'], 1):  # Start from row 1 (skip header)
+            # Add invisible non-breaking space to prevent Excel "Number Stored as Text" error
+            text_value = str(value)
+            if text_value.replace('.', '').replace('-', '').isdigit():
+                text_value = '\u00A0' + text_value  # Non-breaking space (invisible)
+            worksheet.write_string(row_idx, amount_col_idx, text_value, text_format)
+    
+    # Force cost column to be treated as text in Excel (invisible prefix to prevent Excel errors)
+    if 'Cost' in final_df.columns:
+        cost_col_idx = final_df.columns.get_loc('Cost')
+        
+        # Create text format that prevents Excel from auto-converting
+        text_format = workbook.add_format({
+            'num_format': '@',  # @ = text format
+            'text_wrap': False,
+            'align': 'left'
+        })
+        
+        # Set column format
+        worksheet.set_column(cost_col_idx, cost_col_idx, 15, text_format)
+        
+        # Write header as text
+        worksheet.write_string(0, cost_col_idx, 'Cost', text_format)
+        
+        # Write each cost value as text with explicit text format (invisible prefix to prevent Excel errors)
+        for row_idx, value in enumerate(final_df['Cost'], 1):  # Start from row 1 (skip header)
+            # Add invisible non-breaking space to prevent Excel "Number Stored as Text" error
+            text_value = str(value)
+            if text_value.replace('.', '').replace('-', '').isdigit():
+                text_value = '\u00A0' + text_value  # Non-breaking space (invisible)
+            worksheet.write_string(row_idx, cost_col_idx, text_value, text_format)
 
     worksheet.set_column('A:A', 20)
     worksheet.set_column('B:B', 35)
@@ -84,14 +197,93 @@ def save_final_data_fast(final_df, output_path):
         output_path: Output file path
     """
     try:
+        # Ensure ref_no is formatted as string to preserve leading zeros
+        if 'Ref NO' in final_df.columns:
+            final_df['Ref NO'] = final_df['Ref NO'].astype(str)
+        
         # Use xlsxwriter for better performance
-        with pd.ExcelWriter(output_path, engine='xlsxwriter', options={'strings_to_numbers': True}) as writer:
+        with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
             # Write data without formatting first
             final_df.to_excel(writer, sheet_name='Exported Data', index=False)
             
             # Get workbook and worksheet
             workbook = writer.book
             worksheet = writer.sheets['Exported Data']
+            
+            # Force ref_no column to be treated as text in Excel (no visual changes)
+            if 'Ref NO' in final_df.columns:
+                ref_no_col_idx = final_df.columns.get_loc('Ref NO')
+                
+                # Create text format that prevents Excel from auto-converting
+                text_format = workbook.add_format({
+                    'num_format': '@',  # @ = text format
+                    'text_wrap': False,
+                    'align': 'left'
+                })
+                
+                # Set column format
+                worksheet.set_column(ref_no_col_idx, ref_no_col_idx, 15, text_format)
+                
+                # Write header as text
+                worksheet.write_string(0, ref_no_col_idx, 'Ref NO', text_format)
+                
+                # Write each ref_no value as text with explicit text format (invisible prefix to prevent Excel errors)
+                for row_idx, value in enumerate(final_df['Ref NO'], 1):  # Start from row 1 (skip header)
+                    # Add invisible non-breaking space to prevent Excel "Number Stored as Text" error
+                    text_value = str(value)
+                    if text_value.isdigit():
+                        text_value = '\u00A0' + text_value  # Non-breaking space (invisible)
+                    worksheet.write_string(row_idx, ref_no_col_idx, text_value, text_format)
+            
+            # Force amount column to be treated as text in Excel (invisible prefix to prevent Excel errors)
+            if 'Amount' in final_df.columns:
+                amount_col_idx = final_df.columns.get_loc('Amount')
+                
+                # Create text format that prevents Excel from auto-converting
+                text_format = workbook.add_format({
+                    'num_format': '@',  # @ = text format
+                    'text_wrap': False,
+                    'align': 'left'
+                })
+                
+                # Set column format
+                worksheet.set_column(amount_col_idx, amount_col_idx, 15, text_format)
+                
+                # Write header as text
+                worksheet.write_string(0, amount_col_idx, 'Amount', text_format)
+                
+                # Write each amount value as text with explicit text format (invisible prefix to prevent Excel errors)
+                for row_idx, value in enumerate(final_df['Amount'], 1):  # Start from row 1 (skip header)
+                    # Add invisible non-breaking space to prevent Excel "Number Stored as Text" error
+                    text_value = str(value)
+                    if text_value.replace('.', '').replace('-', '').isdigit():
+                        text_value = '\u00A0' + text_value  # Non-breaking space (invisible)
+                    worksheet.write_string(row_idx, amount_col_idx, text_value, text_format)
+            
+            # Force cost column to be treated as text in Excel (invisible prefix to prevent Excel errors)
+            if 'Cost' in final_df.columns:
+                cost_col_idx = final_df.columns.get_loc('Cost')
+                
+                # Create text format that prevents Excel from auto-converting
+                text_format = workbook.add_format({
+                    'num_format': '@',  # @ = text format
+                    'text_wrap': False,
+                    'align': 'left'
+                })
+                
+                # Set column format
+                worksheet.set_column(cost_col_idx, cost_col_idx, 15, text_format)
+                
+                # Write header as text
+                worksheet.write_string(0, cost_col_idx, 'Cost', text_format)
+                
+                # Write each cost value as text with explicit text format (invisible prefix to prevent Excel errors)
+                for row_idx, value in enumerate(final_df['Cost'], 1):  # Start from row 1 (skip header)
+                    # Add invisible non-breaking space to prevent Excel "Number Stored as Text" error
+                    text_value = str(value)
+                    if text_value.replace('.', '').replace('-', '').isdigit():
+                        text_value = '\u00A0' + text_value  # Non-breaking space (invisible)
+                    worksheet.write_string(row_idx, cost_col_idx, text_value, text_format)
             
             # Apply minimal formatting for better readability
             # Header format

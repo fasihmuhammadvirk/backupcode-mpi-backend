@@ -6,7 +6,7 @@ import re
 import os
 import logging
 from typing import Tuple
-from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
+from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data, save_final_data_for_database
 from mpi_backend.utils.pdf_to_excel.extraction_util import read_invoice
 from mpi_backend.utils.pdf_to_excel.supremePlumbing_uitl import get_pages
 
@@ -31,7 +31,7 @@ def process_invoice(filename, output_path):
     buyer = extract_buyer(raw_text)
 
     results = process_results(invoice_items, date, ref_no, tax, customer_job, po_no, buyer)
-    save_final_data(results, "Lion Hvac Supplies", output_path)
+    save_final_data_for_database(results, "Lion Hvac Supplies", output_path)
 
 
 def process_results(invoice_items, date, ref_no, tax, job_name="", po_no="", buyer=""):

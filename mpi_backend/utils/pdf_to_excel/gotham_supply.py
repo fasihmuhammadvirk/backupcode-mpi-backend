@@ -4,7 +4,7 @@ import fitz
 import re
 import os
 import numpy as np
-from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
+from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data, save_final_data_for_database
 from PyPDF4 import PdfFileReader, PdfFileWriter
 from PyPDF4.pdf import ContentStream
 from PyPDF4.generic import TextStringObject, NameObject
@@ -35,7 +35,7 @@ def process_invoice(filename, output_path):
     customer_no = extract_customer_no(tables[0])
 
     result = process_results(invoice_items, date, invoice_no, tax, customer_job,customer_no)
-    save_final_data(result, "Gotham Pipe Supply", output_path)
+    save_final_data_for_database(result, "Gotham Pipe Supply", output_path)
     os.remove(processed_file_path)  # deleting intermediary file [one without watermark]
     pass
 

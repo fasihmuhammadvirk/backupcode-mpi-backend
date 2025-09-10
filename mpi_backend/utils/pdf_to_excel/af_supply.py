@@ -2,7 +2,7 @@ import tabula
 import pandas as pd
 import fitz
 import re
-from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
+from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data, save_final_data_for_database
 
 line_items_area = (263, 0, 263+418.40, 591)
 line_items_columns = [62.56,125.63,186.62,421.49,520.33,590.72]
@@ -24,7 +24,7 @@ def process_invoice(filename, output_path):
     tax = float(tax.replace(",", ""))
 
     result = process_results(invoice_items, date, ref_no, tax, customer_job, po_no)
-    save_final_data(result, "AF Supply", output_path)
+    save_final_data_for_database(result, "AF Supply", output_path)
     pass
 
 

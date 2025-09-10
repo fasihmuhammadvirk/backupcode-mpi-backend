@@ -9,7 +9,7 @@ import logging
 logger = logging.getLogger(__name__)
 from mpi_backend.utils.pdf_to_excel.cleaning_util import clean_individual_table,split_multiple_invoices
 from mpi_backend.utils.pdf_to_excel.extraction_util import extract_job_info, extract_invoice_info, extract_tax_etc, extract_po, extract_buyer,check_for_unique_invoices, read_invoice
-from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
+from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data, save_final_data_for_database
 from mpi_backend.utils.pdf_to_excel.supremePlumbing_uitl import extract_supremePlumbing_data,get_pages
 from mpi_backend.utils.pdf_to_excel.gotham_supply import process_invoice
 from mpi_backend.utils.pdf_to_excel import bmw_old
@@ -239,6 +239,6 @@ def extract_data(filename, output_path, supplier):
         final_df = final_df.reindex(columns=["Item", "Description", "Qty", "Cost", "Amount", "Date",
             "Ref NO", "PO #", "Customer Job", "Bill", "Vendor", "Class", "Memo", "Buyer"])
 
-    save_final_data(final_df, supplier, output_path)
+    save_final_data_for_database(final_df, supplier, output_path)
 
     return []
