@@ -9,8 +9,6 @@ class Invoice(BaseModel):
     supplier_id: int
     status: str
     invoice_id: str
-    ref_no: str
-    customer_job: str
     is_exported: str
 
     class Config:
