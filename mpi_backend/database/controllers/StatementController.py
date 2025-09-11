@@ -1,6 +1,7 @@
 import os
 import sys
 from datetime import datetime, date
+from calendar import monthrange
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, select
@@ -414,11 +415,26 @@ class StatementController:
                 )
             )
 
-            # Apply date filters on invoice_date
-            if from_date:
-                query = query.filter(PlumbingInvoice.invoice_date >= from_date)
-            if to_date:
-                query = query.filter(PlumbingInvoice.invoice_date <= to_date)
+            # Apply date filters for statement invoices by statement_date (month/year only)
+            normalized_from = (
+                date(from_date.year, from_date.month, 1) if from_date else None
+            )
+            normalized_to = (
+                date(
+                    to_date.year,
+                    to_date.month,
+                    monthrange(to_date.year, to_date.month)[1]
+                ) if to_date else None
+            )
+
+            if normalized_from:
+                query = query.filter(
+                    PlumbingStatement.statement_date >= normalized_from
+                )
+            if normalized_to:
+                query = query.filter(
+                    PlumbingStatement.statement_date <= normalized_to
+                )
 
             # Apply supplier filter - support ["All"], multiple supplier IDs, or supplier names
             if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
@@ -1575,13 +1591,25 @@ class StatementController:
                 )
             )
 
-            # Apply filters to statement query
-            if from_date:
+            # Apply date filters to statement query by statement_date (month/year only)
+            normalized_from = (
+                date(from_date.year, from_date.month, 1) if from_date else None
+            )
+            normalized_to = (
+                date(
+                    to_date.year,
+                    to_date.month,
+                    monthrange(to_date.year, to_date.month)[1]
+                ) if to_date else None
+            )
+            if normalized_from:
                 statement_query = statement_query.filter(
-                    PlumbingInvoice.invoice_date >= from_date)
-            if to_date:
+                    PlumbingStatement.statement_date >= normalized_from
+                )
+            if normalized_to:
                 statement_query = statement_query.filter(
-                    PlumbingInvoice.invoice_date <= to_date)
+                    PlumbingStatement.statement_date <= normalized_to
+                )
 
             # Apply supplier filter to statement query
             if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
@@ -2043,13 +2071,44 @@ class StatementController:
                 .distinct(PlumbingInvoice.invoice_number, PlumbingSupplier.name, PlumbingInvoice.invoice_date)
             )
 
-            # Apply filters to statement query
-            if from_date:
+            # Apply filters to statement query by statement_date (month/year only)
+            normalized_from = (
+                date(from_date.year, from_date.month, 1) if from_date else None
+            )
+            normalized_to = (
+                date(
+                    to_date.year,
+                    to_date.month,
+                    monthrange(to_date.year, to_date.month)[1]
+                ) if to_date else None
+            )
+            if normalized_from:
                 statement_query = statement_query.filter(
-                    PlumbingInvoice.invoice_date >= from_date)
-            if to_date:
+                    PlumbingStatement.statement_date >= normalized_from
+                )
+            if normalized_to:
                 statement_query = statement_query.filter(
-                    PlumbingInvoice.invoice_date <= to_date)
+                    PlumbingStatement.statement_date <= normalized_to
+                )
+            # Apply filters to statement query by statement_date (month/year only)
+            normalized_from = (
+                date(from_date.year, from_date.month, 1) if from_date else None
+            )
+            normalized_to = (
+                date(
+                    to_date.year,
+                    to_date.month,
+                    monthrange(to_date.year, to_date.month)[1]
+                ) if to_date else None
+            )
+            if normalized_from:
+                statement_query = statement_query.filter(
+                    PlumbingStatement.statement_date >= normalized_from
+                )
+            if normalized_to:
+                statement_query = statement_query.filter(
+                    PlumbingStatement.statement_date <= normalized_to
+                )
             if supplier_conditions_statement:
                 statement_query = statement_query.filter(
                     or_(*supplier_conditions_statement))
@@ -2317,13 +2376,25 @@ class StatementController:
                 .distinct(PlumbingInvoice.invoice_number, PlumbingSupplier.name, PlumbingInvoice.invoice_date)
             )
 
-            # Apply filters to statement query
-            if from_date:
+            # Apply filters to statement query by statement_date (month/year only)
+            normalized_from = (
+                date(from_date.year, from_date.month, 1) if from_date else None
+            )
+            normalized_to = (
+                date(
+                    to_date.year,
+                    to_date.month,
+                    monthrange(to_date.year, to_date.month)[1]
+                ) if to_date else None
+            )
+            if normalized_from:
                 statement_base_query = statement_base_query.filter(
-                    PlumbingInvoice.invoice_date >= from_date)
-            if to_date:
+                    PlumbingStatement.statement_date >= normalized_from
+                )
+            if normalized_to:
                 statement_base_query = statement_base_query.filter(
-                    PlumbingInvoice.invoice_date <= to_date)
+                    PlumbingStatement.statement_date <= normalized_to
+                )
             if supplier_conditions_statement:
                 statement_base_query = statement_base_query.filter(
                     or_(*supplier_conditions_statement))

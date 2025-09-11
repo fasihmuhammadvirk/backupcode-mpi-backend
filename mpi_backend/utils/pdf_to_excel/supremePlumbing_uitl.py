@@ -3,7 +3,7 @@ import pandas as pd
 import PyPDF2 as pyPdf  # alternate approach
 import fitz
 import re
-from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
+from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data, save_final_data_for_database
 import numpy as np
 
 def extract_supremePlumbing_data(filename, output_path):
@@ -70,7 +70,7 @@ def extract_supremePlumbing_data(filename, output_path):
     results["Memo"] = memo
     results["Buyer"] = ""
 
-    save_final_data(results, "Supreme Plumbing Supply", output_path)
+    save_final_data_for_database(results, "Supreme Plumbing Supply", output_path)
 
 
 def merge_rows(table):
@@ -487,5 +487,5 @@ def extract_supremePlumbing_data_multiplepages(filename, output_path):
     results["Memo"] = memo
     results["Buyer"] = ""
 
-    save_final_data(results, "Supreme Plumbing Supply", output_path)
+    save_final_data_for_database(results, "Supreme Plumbing Supply", output_path)
     return

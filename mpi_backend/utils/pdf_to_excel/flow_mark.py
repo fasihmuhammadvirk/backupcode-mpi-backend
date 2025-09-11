@@ -4,7 +4,7 @@ import PyPDF2 as pyPdf  # alternate approach
 import fitz
 import numpy as np
 import re
-from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
+from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data, save_final_data_for_database
 from mpi_backend.utils.pdf_to_excel.supremePlumbing_uitl import get_pages
 
 columns = [46,183,371,429,510,589]
@@ -30,7 +30,7 @@ def process_invoice(filename, output_path):
     buyer = extract_buyer(tables)
 
     result = process_results(invoice_items, date, ref_no, tax, customer_job, po_no, buyer)
-    save_final_data(result, "Flow Mark Plumbing Supply", output_path)
+    save_final_data_for_database(result, "Flow Mark Plumbing Supply", output_path)
 
 
 def process_results(invoice_items, date, invoice_no, tax, job_name="", po_no="", buyer=""):

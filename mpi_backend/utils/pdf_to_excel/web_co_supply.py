@@ -2,7 +2,7 @@ import tabula
 import fitz
 import re
 import pandas as pd
-from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
+from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data, save_final_data_for_database
 
 
 def process_invoice(filename, output_path):
@@ -18,7 +18,7 @@ def process_invoice(filename, output_path):
     tax = extract_tax(filename).replace('$','')
 
     result = process_results(invoice_items, date, ref_no, tax, customer_job, po_no)
-    save_final_data(result, "FW Webb Plumbing Supply", output_path)
+    save_final_data_for_database(result, "FW Webb Plumbing Supply", output_path)
 
 
 def process_results(invoice_items, date, invoice_no, tax, job_name="", customer_no=""):

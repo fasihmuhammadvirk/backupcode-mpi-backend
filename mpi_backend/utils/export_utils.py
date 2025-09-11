@@ -48,6 +48,30 @@ def convert_items_to_dataframe(items, use_suffix=True):
     
     df = pd.DataFrame(items_dict).rename(columns=columns_mapping)
     
+    # Ensure ref_no is formatted as string to preserve leading zeros
+    if 'Ref NO' in df.columns:
+        df['Ref NO'] = df['Ref NO'].astype(str)
+        # Add invisible non-breaking space to pure numeric refs to prevent Excel errors
+        df['Ref NO'] = df['Ref NO'].apply(
+            lambda x: '\u00A0' + str(x) if str(x).isdigit() else str(x)
+        )
+    
+    # Ensure amount is formatted as string to prevent Excel errors
+    if 'Amount' in df.columns:
+        df['Amount'] = df['Amount'].astype(str)
+        # Add invisible non-breaking space to numeric amounts to prevent Excel errors
+        df['Amount'] = df['Amount'].apply(
+            lambda x: '\u00A0' + str(x) if str(x).replace('.', '').replace('-', '').isdigit() else str(x)
+        )
+    
+    # Ensure cost is formatted as string to prevent Excel errors
+    if 'Cost' in df.columns:
+        df['Cost'] = df['Cost'].astype(str)
+        # Add invisible non-breaking space to numeric costs to prevent Excel errors
+        df['Cost'] = df['Cost'].apply(
+            lambda x: '\u00A0' + str(x) if str(x).replace('.', '').replace('-', '').isdigit() else str(x)
+        )
+    
     # Only select columns that exist in the DataFrame
     available_columns = [col for col in columns_mapping.values() if col in df.columns]
     df = df[available_columns]
@@ -147,19 +171,38 @@ def convert_items_to_dataframe_optimized(db_session, ids, columns=None, order_by
                 elif order_filter.order == "desc":
                     query = query.order_by(column.desc())
     
-    # Execute query and convert to DataFrame
-    results = query.all()
+    # Execute query and get full objects first for duplication filtering
+    # We need full objects to apply duplication filtering correctly
+    from mpi_backend.database.models.InvoiceItems import InvoiceItem
+    full_query = db_session.query(InvoiceItem).filter(InvoiceItem.id.in_(ids))
     
-    if not results:
+    # Apply ordering to full query
+    if order_by:
+        for order_filter in order_by:
+            if hasattr(InvoiceItem, order_filter.column):
+                column = getattr(InvoiceItem, order_filter.column)
+                if order_filter.order == "asc":
+                    full_query = full_query.order_by(column.asc())
+                elif order_filter.order == "desc":
+                    full_query = full_query.order_by(column.desc())
+    
+    # Get full objects and apply duplication filtering
+    full_results = full_query.all()
+    
+    # Apply duplication filtering to remove exact duplicates
+    from mpi_backend.utils.duplication_filter import filter_exact_duplicates
+    filtered_results = filter_exact_duplicates(full_results)
+    
+    if not filtered_results:
         return pd.DataFrame()
     
-    # Convert to DataFrame
+    # Convert filtered results to DataFrame
     df_data = []
-    for row in results:
+    for item in filtered_results:
         row_dict = {}
-        for i, col in enumerate(selected_columns):
-            if i < len(row):
-                row_dict[col] = row[i]
+        for col in selected_columns:
+            if hasattr(item, col):
+                row_dict[col] = getattr(item, col)
         df_data.append(row_dict)
     
     df = pd.DataFrame(df_data)
@@ -171,6 +214,30 @@ def convert_items_to_dataframe_optimized(db_session, ids, columns=None, order_by
     # Format dates
     if 'date' in df.columns:
         df['date'] = pd.to_datetime(df['date']).dt.strftime('%m/%d/%Y')
+    
+    # Ensure ref_no is formatted as string to preserve leading zeros
+    if 'ref_no' in df.columns:
+        df['ref_no'] = df['ref_no'].astype(str)
+        # Add invisible non-breaking space to pure numeric refs to prevent Excel errors
+        df['ref_no'] = df['ref_no'].apply(
+            lambda x: '\u00A0' + str(x) if str(x).isdigit() else str(x)
+        )
+    
+    # Ensure amount is formatted as string to prevent Excel errors
+    if 'amount' in df.columns:
+        df['amount'] = df['amount'].astype(str)
+        # Add invisible non-breaking space to numeric amounts to prevent Excel errors
+        df['amount'] = df['amount'].apply(
+            lambda x: '\u00A0' + str(x) if str(x).replace('.', '').replace('-', '').isdigit() else str(x)
+        )
+    
+    # Ensure cost is formatted as string to prevent Excel errors
+    if 'cost' in df.columns:
+        df['cost'] = df['cost'].astype(str)
+        # Add invisible non-breaking space to numeric costs to prevent Excel errors
+        df['cost'] = df['cost'].apply(
+            lambda x: '\u00A0' + str(x) if str(x).replace('.', '').replace('-', '').isdigit() else str(x)
+        )
     if 'date_added' in df.columns:
         df['date_added'] = pd.to_datetime(df['date_added']).dt.strftime('%m/%d/%Y')
     

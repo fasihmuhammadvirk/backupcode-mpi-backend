@@ -24,7 +24,8 @@ def init_scheduler() -> BackgroundScheduler:
     
     # Simple executor configuration - no restrictions
     executors = {
-        'default': APSchedulerThreadPool(100),  # Large pool size, no restrictions
+        'default': APSchedulerThreadPool(10),   # Lightweight for scheduler internals
+        'background': APSchedulerThreadPool(100),  # Dedicated pool for background tasks
     }
     
     # Simple job defaults - no restrictions
@@ -56,7 +57,7 @@ def init_scheduler() -> BackgroundScheduler:
         async_email_download_wrapper,
         "interval",
         minutes=5,
-        executor='default',
+        executor='background',
         id="email_download",
         name="Email Download Task (Every 5 Minutes)",
         replace_existing=True,
@@ -67,20 +68,20 @@ def init_scheduler() -> BackgroundScheduler:
         async_statement_download_wrapper,
         "interval",
         hours=12,
-        executor='default',
+        executor='background',
         id="statement_download",
         name="Statement Download Task (Every 12 Hours)",
         replace_existing=True,
     )
 
-    # Failed invoice recovery - every hour
+    # Failed invoice recovery - every 24 hours
     scheduler.add_job(
         async_failed_invoice_recovery_wrapper,
         "interval",
-        hours=1,
-        executor='default',
+        hours=24,
+        executor='background',
         id="failed_invoice_recovery",
-        name="Failed Invoice Recovery Task (Every 1 Hour)",
+        name="Failed Invoice Recovery Task (Every 24 Hours)",
         replace_existing=True,
     )
 
@@ -89,7 +90,7 @@ def init_scheduler() -> BackgroundScheduler:
         async_missing_invoice_download_wrapper,
         "interval",
         hours=5,
-        executor='default',
+        executor='background',
         id="missing_invoice_download",
         name="Missing Invoice Download Task (Every 5 Hours)",
         replace_existing=True,
@@ -103,7 +104,7 @@ def init_scheduler() -> BackgroundScheduler:
     scheduler.add_job(
         scheduled_uidi_no_match_update,
         CronTrigger(hour=1, minute=0, timezone=pytz.utc),
-        executor='default',
+        executor='background',
         id="daily_uidi_no_match_update",
         name="Daily UIDI/NO Match Update (6 AM PKT)",
         replace_existing=True,
@@ -113,29 +114,20 @@ def init_scheduler() -> BackgroundScheduler:
     scheduler.add_job(
         scheduled_all_mappings_update,
         CronTrigger(hour=3, minute=0, timezone=pytz.utc, day_of_week=5),
-        executor='default',
+        executor='background',
         id="weekly_all_mappings_update",
         name="Weekly All Mappings Update (Saturday 8 AM PKT)",
         replace_existing=True,
     )
 
-    # Google Sheet sync - every 2 hours
-    scheduler.add_job(
-        scheduled_google_sheet_sync,
-        "interval",
-        hours=2,
-        executor='default',
-        id="google_sheet_sync",
-        name="Google Sheet Sync (Every 2 Hours)",
-        replace_existing=True,
-    )
+    # Google Sheet sync - REMOVED as requested
 
     # Memory cleanup - every 6 hours
     scheduler.add_job(
         scheduled_memory_cleanup,
         "interval",
         hours=6,
-        executor='default',
+        executor='background',
         id="memory_cleanup",
         name="Memory Cleanup (Every 6 Hours)",
         replace_existing=True,
@@ -241,16 +233,7 @@ def scheduled_all_mappings_update():
     except Exception as e:
         logger.error("All mappings update task failed: %s", e)
 
-def scheduled_google_sheet_sync():
-    """Simple wrapper for Google Sheet sync - no restrictions."""
-    try:
-        logger.info("Starting Google Sheet sync task")
-        # Import and run the actual task
-        from mpi_backend.background.tasks.google_sync import sync_google_sheets
-        sync_google_sheets()
-        logger.info("Google Sheet sync task completed")
-    except Exception as e:
-        logger.error("Google Sheet sync task failed: %s", e)
+# Google Sheet sync function removed as requested
 
 def scheduled_memory_cleanup():
     """Simple memory cleanup - no restrictions."""

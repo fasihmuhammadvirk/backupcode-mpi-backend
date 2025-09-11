@@ -3,7 +3,7 @@ import pandas as pd
 import fitz
 import re
 from datetime import datetime
-from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
+from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data, save_final_data_for_database
 
 
 invoice_items_area = (218.27,34.83,218.27+502.48,34.83+539.13)
@@ -28,7 +28,7 @@ def process_invoice(filename, output_path):
     tax = float(tax.replace("$", "").replace(",", "").replace("-",""))
 
     result = process_results(invoice_items, date, ref_no, tax, customer_job, po_no)
-    save_final_data(result, "Plumbing Exchange", output_path)
+    save_final_data_for_database(result, "Plumbing Exchange", output_path)
 
 
 def process_results(invoice_items, date, invoice_no, tax, job_name="", po_no=""):

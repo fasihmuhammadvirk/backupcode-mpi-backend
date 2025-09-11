@@ -1023,6 +1023,10 @@ class InvoiceItemController:
         # Execute query and get results
         items = query.all()
 
+        # Apply duplication filtering to remove exact duplicates
+        from mpi_backend.utils.duplication_filter import filter_exact_duplicates
+        items = filter_exact_duplicates(items)
+
         # Opportunistically backfill missing accounts for returned items
         try:
             self._ensure_accounts_assigned(items)
@@ -1052,7 +1056,7 @@ class InvoiceItemController:
                     item_response.amount = format_currency(item_response.amount)
                 invoices_items.append(item_response)
 
-        # Calculate pagination metadata
+        # Calculate pagination metadata (keep original total for proper pagination)
         total_pages = (total + size - 1) // size if size > 0 else 1
         has_next = page < total_pages if size > 0 else False
         has_prev = page > 1 if size > 0 else False
@@ -1788,6 +1792,10 @@ class InvoiceItemController:
                     query = query.order_by(column.desc())
 
         items = query.all()
+
+        # Apply duplication filtering to remove exact duplicates (consistent with filter endpoint)
+        from mpi_backend.utils.duplication_filter import filter_exact_duplicates
+        items = filter_exact_duplicates(items)
 
         invoices_items = []
         for item in items:

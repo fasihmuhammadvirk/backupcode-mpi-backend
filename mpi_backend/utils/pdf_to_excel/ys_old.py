@@ -4,7 +4,7 @@ import os
 import re
 import fitz
 import tabula
-from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data
+from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data, save_final_data_for_database
 
 regular_area = (309,34,292+309, 34+540)
 columns = [287,383,477.6]
@@ -26,7 +26,7 @@ def process_invoice(filename, output_path):
     tax= extract_tax(raw_text)
 
     result = process_results(invoice_items, date, ref_no, tax, customer_job, po_no)
-    save_final_data(result, "Y & S Plumbing Supplies", output_path)
+    save_final_data_for_database(result, "Y & S Plumbing Supplies", output_path)
 
 
 def process_results(invoice_items, date, invoice_no, tax, job_name="", po_no=""):
