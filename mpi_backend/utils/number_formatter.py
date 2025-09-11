@@ -194,3 +194,48 @@ def _manual_format_quantity(value: int) -> str:
         formatted = f"-{formatted}"
     
     return formatted
+
+
+def parse_number(value: Union[float, int, str, None]) -> Union[float, None]:
+    """
+    Parse a numeric value, removing commas and converting to float.
+    Used for database storage where numeric values are expected.
+    
+    Args:
+        value: The value to parse (can be string with commas, number, or None)
+        
+    Returns:
+        Parsed float value or None if parsing fails
+        
+    Examples:
+        >>> parse_number("3,473.75")
+        3473.75
+        >>> parse_number("1,234,567.89")
+        1234567.89
+        >>> parse_number(1234.56)
+        1234.56
+        >>> parse_number(None)
+        None
+    """
+    if value is None:
+        return None
+    
+    try:
+        if isinstance(value, str):
+            # Remove commas, currency symbols, and convert to float
+            clean_value = float(
+                value.replace(',', '').replace('$', '').replace('£', '')
+                .replace('€', '').strip()
+            )
+        else:
+            clean_value = float(value)
+        
+        # Handle infinity and NaN
+        if (not (clean_value == clean_value) or 
+                abs(clean_value) == float('inf')):
+            return None
+        
+        return clean_value
+        
+    except (ValueError, TypeError):
+        return None

@@ -8,7 +8,7 @@ from mpi_backend.database.schemas import InvoiceItems as InvoiceItemsResponse
 from mpi_backend.database.schemas import PriceHistoryResponse
 from mpi_backend.database.schemas.Filters import FilterRequest
 from mpi_backend.utils.export_utils import extract_supplier_id
-from mpi_backend.utils.number_formatter import format_currency
+from mpi_backend.utils.number_formatter import format_currency, parse_number
 import math
 import logging
 import sqlalchemy.orm
@@ -2126,10 +2126,61 @@ class InvoiceItemController:
             # Update the item with all provided fields
             for key, value in item_data.items():
                 if hasattr(item, key):  # Only update fields that exist on the model
-                    setattr(item, key, value)
+                    # Parse numeric fields to handle comma-separated values
+                    if key in ['cost']:  # cost is double precision in database
+                        parsed_value = self._parse_numeric_value(value)
+                        setattr(item, key, parsed_value)
+                    elif key in ['amount']:  # amount is string but parse for consistency
+                        # Parse and format amount consistently (remove commas, currency symbols)
+                        parsed_value = self._parse_amount_value(value)
+                        setattr(item, key, parsed_value)
+                    else:
+                        setattr(item, key, value)
 
             self.db.add(item)
         self.db.commit()
+
+    def _parse_numeric_value(self, value):
+        """
+        Parse a numeric value, removing commas and converting to float.
+        Used for database storage where numeric values are expected.
+        
+        Args:
+            value: The value to parse (can be string with commas, number, or None)
+            
+        Returns:
+            Parsed float value or None if parsing fails
+        """
+        return parse_number(value)
+
+    def _parse_amount_value(self, value):
+        """
+        Parse an amount value, removing commas and currency symbols but keeping as string.
+        Used for amount field which is stored as string in database.
+        
+        Args:
+            value: The value to parse (can be string with commas, currency symbols, or None)
+            
+        Returns:
+            Cleaned string value or None if parsing fails
+        """
+        if value is None:
+            return None
+        
+        try:
+            if isinstance(value, str):
+                # Remove commas, currency symbols, and extra whitespace
+                cleaned_value = value.replace(',', '').replace('$', '').replace('£', '') \
+                                   .replace('€', '').strip()
+                # Try to convert to float to validate it's a number, then back to string
+                float(cleaned_value)
+                return cleaned_value
+            else:
+                # Convert number to string
+                return str(value)
+        except (ValueError, TypeError):
+            # If it's not a valid number, return the original value
+            return str(value) if value is not None else None
 
     def update_mpi_field(self, item_value: str, field_name: str, new_value: str):
         # If updating mpi_description, enforce that we never change it for No Match or UIDI items
