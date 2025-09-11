@@ -347,7 +347,7 @@ def search_replace(row, temp_items, item_mappings, db):
     Uses exact matching only to avoid business logic issues.
     Also handles mappings without sheet names.
     """
-    from mpi_backend.utils.mapping_validators import is_temporary_mapping
+    # Removed unused import - mapping validation is now handled differently
 
     # Clean supplier_item_ids from invoice and strip spaces
     original_item = row['Item'].strip()
@@ -356,19 +356,33 @@ def search_replace(row, temp_items, item_mappings, db):
     # This ensures permanent mappings override temporary ones
     # Also handles mappings without sheet names
     if 'supplier_item_ids' in item_mappings.columns:
-        # Exact match only - no suffix variations to avoid business logic issues
+        # Try exact match first
         mapping_match = item_mappings[
             item_mappings['supplier_item_ids'] == original_item
         ]
+        
+        # If no exact match, try suffix variations for permanent mappings
+        if mapping_match.empty:
+            mapping_match = _find_permanent_mapping_with_suffix_variations(
+                item_mappings, original_item, row['Vendor'])
 
         if not mapping_match.empty:
             mpi_code = mapping_match.iloc[0]['mpi_code']
             description = mapping_match.iloc[0]['description']
 
-            # Validate that this is not a temporary mapping that slipped through
-            if not is_temporary_mapping(mpi_code, description):
+            # Apply the mapping if it exists in the permanent mappings table
+            # Only apply if it's a valid permanent mapping (not UIDI or temporary codes)
+            # UIDI codes should remain as "No Match" until properly mapped
+            if (mpi_code and
+                mpi_code.strip() and
+                not mpi_code.strip().startswith('UIDI') and
+                mpi_code.strip() != "No Match" and
+                mpi_code.strip() != "No Match / UIDI" and
+                not mpi_code.strip().startswith('Temp') and
+                not mpi_code.strip().startswith('TEMP')):
+
                 row['MpiItem'] = mpi_code  # This is the target mpi_code
-                row['MpiDescription'] = description
+                row['MpiDescription'] = description or mpi_code
                 sheet_name = mapping_match.iloc[0]['google_sheet_name']
                 # Handle empty sheet names
                 row['Sheet Name'] = sheet_name or ""
@@ -376,31 +390,41 @@ def search_replace(row, temp_items, item_mappings, db):
                 # Log if this is a mapping without sheet name
                 if not sheet_name or sheet_name.strip() == "":
                     logger.debug(
-                        f"Applied permanent mapping (no sheet): {original_item} -> {mpi_code}")
+                        f"Applied permanent mapping (no sheet): "
+                        f"{original_item} -> {mpi_code}")
                 else:
                     logger.debug(
-                        f"Applied permanent mapping: {original_item} -> {mpi_code}")
+                        f"Applied permanent mapping: "
+                        f"{original_item} -> {mpi_code}")
                 return row
             else:
-                logger.warning(
-                    f"Found temporary mapping in permanent table, skipping: {mpi_code}")
+                logger.debug(
+                    f"Skipping temporary/UIDI mapping in permanent table: "
+                    f"{mpi_code} - will remain as No Match")
 
     # SECOND: If no permanent mapping found, check temporary mappings
-    # Exact match only - no suffix variations to avoid business logic issues
+    # Check for exact match first, then try suffix variations
     temp_match = temp_items[
         temp_items['original_item'] == original_item
     ]
+
+    # If no exact match, try suffix variations for temporary mappings
+    if temp_match.empty:
+        temp_match = _find_temp_mapping_with_suffix_variations(
+            temp_items, original_item, row['Vendor'])
 
     if not temp_match.empty:
         # For temporary mappings, ONLY assign the sheet name. Do NOT change MPI fields.
         row['Sheet Name'] = temp_match.iloc[0]['sheet_name']
         logger.debug(
-            f"Applied temporary mapping: {original_item} -> sheet: {temp_match.iloc[0]['sheet_name']} (MPI fields unchanged)")
+            f"Applied temporary mapping: {original_item} -> sheet: "
+            f"{temp_match.iloc[0]['sheet_name']} (MPI fields unchanged)")
         return row
 
     # THIRD: If no mapping found at all, add to unmapped items
     supplier_id, _ = extract_supplier_id(row['Vendor'])
-    if not UnmappedItemsController(db).is_item_code_present(row['Item'], supplier_id):
+    if not UnmappedItemsController(db).is_item_code_present(
+            row['Item'], supplier_id):
         UnmappedItemsController(db).insert_unmapped_item(
             row['Item'], row['Description'], supplier_id
         )
@@ -408,6 +432,121 @@ def search_replace(row, temp_items, item_mappings, db):
 
     # Return with default "No Match" - this will be set by the calling function
     return row
+
+
+def _find_temp_mapping_with_suffix_variations(temp_items, original_item, vendor):
+    """
+    Find temporary mapping by checking suffix variations.
+    
+    Args:
+        temp_items: DataFrame of temporary mappings
+        original_item: Item from invoice (clean, no suffix)
+        vendor: Vendor name to determine expected suffix
+        
+    Returns:
+        DataFrame with matching temporary mapping or empty DataFrame
+    """
+    if temp_items.empty:
+        return temp_items
+    
+    # Get expected suffix for this vendor
+    supplier_id, _ = extract_supplier_id(vendor)
+    expected_suffix = _get_supplier_suffix(supplier_id)
+    
+    if not expected_suffix:
+        return temp_items  # No suffix expected, return empty
+    
+    # Try to find mapping with suffix
+    item_with_suffix = f"{original_item}-{expected_suffix}"
+    temp_match = temp_items[temp_items['original_item'] == item_with_suffix]
+    
+    if not temp_match.empty:
+        logger.debug(
+            f"Found temporary mapping with suffix variation: "
+            f"{original_item} -> {item_with_suffix}")
+        return temp_match
+    
+    # Try other common suffix variations
+    common_suffixes = ['B', 'W', 'Y', 'S', 'P', 'A', 'G', 'F']
+    for suffix in common_suffixes:
+        if suffix != expected_suffix:  # Skip the expected one, already tried
+            item_with_suffix = f"{original_item}-{suffix}"
+            temp_match = temp_items[temp_items['original_item'] == item_with_suffix]
+            if not temp_match.empty:
+                logger.debug(
+                    f"Found temporary mapping with alternative suffix: "
+                    f"{original_item} -> {item_with_suffix}")
+                return temp_match
+    
+    return temp_items  # Return empty if no variations found
+
+
+def _find_permanent_mapping_with_suffix_variations(item_mappings, original_item, vendor):
+    """
+    Find permanent mapping by checking suffix variations.
+    
+    Args:
+        item_mappings: DataFrame of permanent mappings
+        original_item: Item from invoice (clean, no suffix)
+        vendor: Vendor name to determine expected suffix
+        
+    Returns:
+        DataFrame with matching permanent mapping or empty DataFrame
+    """
+    if item_mappings.empty:
+        return item_mappings
+    
+    # Get expected suffix for this vendor
+    supplier_id, _ = extract_supplier_id(vendor)
+    expected_suffix = _get_supplier_suffix(supplier_id)
+    
+    if not expected_suffix:
+        return item_mappings  # No suffix expected, return empty
+    
+    # Try to find mapping with suffix
+    item_with_suffix = f"{original_item}-{expected_suffix}"
+    mapping_match = item_mappings[item_mappings['supplier_item_ids'] == item_with_suffix]
+    
+    if not mapping_match.empty:
+        logger.debug(
+            f"Found permanent mapping with suffix variation: "
+            f"{original_item} -> {item_with_suffix}")
+        return mapping_match
+    
+    # Try other common suffix variations
+    common_suffixes = ['B', 'W', 'Y', 'S', 'P', 'A', 'G', 'F']
+    for suffix in common_suffixes:
+        if suffix != expected_suffix:  # Skip the expected one, already tried
+            item_with_suffix = f"{original_item}-{suffix}"
+            mapping_match = item_mappings[item_mappings['supplier_item_ids'] == item_with_suffix]
+            if not mapping_match.empty:
+                logger.debug(
+                    f"Found permanent mapping with alternative suffix: "
+                    f"{original_item} -> {item_with_suffix}")
+                return mapping_match
+    
+    return item_mappings  # Return empty if no variations found
+
+
+def _get_supplier_suffix(supplier_id):
+    """Get suffix for a supplier ID."""
+    suffix_map = {
+        1: 'B',   # BMW Plumbing Supplies
+        2: 'W',   # World Wide Plumbing  
+        3: 'Y',   # Y & S Plumbing Supply
+        4: 'S',   # Supreme Plumbing Supply
+        5: 'P',   # Pyramid Plumbing
+        6: 'A',   # ABC Opus Services
+        7: 'P',   # Park Plumbing Supply
+        8: 'G',   # Gotham Plumbing Supply
+        9: 'F',   # FW Webb Plumbing Supply
+        10: 'F',  # Flow Mark Plumbing Supply
+        11: None, # Plumbing Exchange (no suffix)
+        12: 'A',  # AF Supply
+        13: None, # Lion Hvac Supplies (no suffix)
+        14: 'F',  # Bruce Ferguson
+    }
+    return suffix_map.get(supplier_id)
 
 
 def get_updated_customer_job(customer_job, customer_job_mappings):

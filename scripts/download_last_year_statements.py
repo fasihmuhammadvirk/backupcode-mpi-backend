@@ -3,8 +3,8 @@
 Monthly Statement and Invoice Downloader for Historical Data
 ===========================================================
 
-This script downloads and processes monthly statements and invoices from email for historical periods.
-It handles:
+This script downloads and processes monthly statements and invoices from email for
+historical periods. It handles:
 - Email connection and search for statement emails (using BODY.PEEK to avoid marking as read)
 - PDF download and processing for statements and associated invoice data
 - Complete data reprocessing with deletion of existing statements and invoices
@@ -12,18 +12,26 @@ It handles:
 - S3 upload for storage
 - Automatic deletion and re-download of existing statements
 - Support for up to 10 years of historical data
+- Granular control over specific months and date ranges
 
-The script ensures NO emails are marked as read during processing by using BODY.PEEK commands.
-Existing statements and invoices are automatically deleted and fresh data is extracted
-to ensure complete data accuracy and consistency.
+The script ensures NO emails are marked as read during processing by using BODY.PEEK
+commands. Existing statements and invoices are automatically deleted and fresh data is
+extracted to ensure complete data accuracy and consistency.
 
 Usage:
     python scripts/download_last_year_statements.py [options]
 
-Options:
+Date Control Options (choose one):
     --from-months-ago INT    Number of months ago to start from (default: 12)
     --to-months-ago INT      Number of months ago to end at (default: 0)
+    --last-month            Download only the previous month's statements
+    --current-month         Download only the current month's statements
+    --last-months INT       Download last N months (e.g., --last-months 4 for last 4 months)
+    --specific-month YYYY-MM Download statements for a specific month (e.g., 2024-03)
+    --year YYYY             Download all statements for a specific year (e.g., 2024)
     --download-all-historical Download all statements and invoices for past 10 years
+
+Other Options:
     --suppliers TEXT         Comma-separated list of suppliers to process
     --dry-run               Preview what would be processed without downloading
     --force                 Reprocess existing statements
@@ -40,7 +48,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime, timedelta
 from contextlib import contextmanager
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any
 import time
 from dateutil.relativedelta import relativedelta
 from email.utils import parsedate_to_datetime
@@ -192,19 +200,21 @@ class StatementDownloader:
         except Exception as e:
             logger.warning(f"Error closing database connection: {str(e)}")
     
-    def generate_date_ranges(self, from_months_ago: int, 
-                            to_months_ago: int) -> List[tuple]:
-        """Generate date ranges for each month to search"""
+    def generate_date_ranges(self, from_months_ago: int = None,
+                             to_months_ago: int = None,
+                             last_month: bool = False,
+                             current_month: bool = False,
+                             last_months: int = None,
+                             specific_month: str = None,
+                             year: int = None) -> List[tuple]:
+        """Generate date ranges for each month to search with enhanced control"""
         date_ranges = []
         current_date = datetime.now(TIMEZONE)
         
-        for months_back in range(to_months_ago, from_months_ago + 1):
-            # Calculate target month using relativedelta for accurate arithmetic
-            target_date = current_date - relativedelta(months=months_back)
-            
-            # Get first and last day of that month
+        if last_month:
+            # Download only the previous month
+            target_date = current_date - relativedelta(months=1)
             first_day = target_date.replace(day=1)
-            # Get last day of the month
             if target_date.month == 12:
                 last_day = (target_date.replace(year=target_date.year + 1, 
                                                month=1, day=1) - 
@@ -213,8 +223,104 @@ class StatementDownloader:
                 last_day = (target_date.replace(month=target_date.month + 1, 
                                                day=1) - 
                            timedelta(days=1))
-            
             date_ranges.append((first_day, last_day))
+            logger.info(
+                f"Targeting last month: {target_date.strftime('%Y-%m')}")
+            
+        elif current_month:
+            # Download only the current month
+            target_date = current_date
+            first_day = target_date.replace(day=1)
+            # Get last day of the month
+            if target_date.month == 12:
+                last_day = (target_date.replace(
+                    year=target_date.year + 1, month=1, day=1) -
+                    timedelta(days=1))
+            else:
+                last_day = (target_date.replace(
+                    month=target_date.month + 1, day=1) -
+                    timedelta(days=1))
+            date_ranges.append((first_day, last_day))
+            logger.info(
+                f"Targeting current month: {target_date.strftime('%Y-%m')}")
+            
+        elif last_months:
+            # Download last N months
+            for months_back in range(1, last_months + 1):
+                target_date = current_date - relativedelta(months=months_back)
+                first_day = target_date.replace(day=1)
+                # Get last day of the month
+                if target_date.month == 12:
+                    last_day = (target_date.replace(
+                        year=target_date.year + 1, month=1, day=1) -
+                        timedelta(days=1))
+                else:
+                    last_day = (target_date.replace(
+                        month=target_date.month + 1, day=1) -
+                        timedelta(days=1))
+                date_ranges.append((first_day, last_day))
+            logger.info(f"Targeting last {last_months} months")
+            
+        elif specific_month:
+            # Download specific month (format: YYYY-MM)
+            try:
+                year, month = map(int, specific_month.split('-'))
+                target_date = datetime(year, month, 1, tzinfo=TIMEZONE)
+                first_day = target_date.replace(day=1)
+                if target_date.month == 12:
+                    last_day = (target_date.replace(
+                        year=target_date.year + 1, month=1, day=1) -
+                        timedelta(days=1))
+                else:
+                    last_day = (target_date.replace(
+                        month=target_date.month + 1, day=1) -
+                        timedelta(days=1))
+                date_ranges.append((first_day, last_day))
+                logger.info(f"Targeting specific month: {specific_month}")
+            except ValueError:
+                raise ValueError(
+                    f"Invalid month format: {specific_month}. Use YYYY-MM format.")
+                
+        elif year:
+            # Download all months in a specific year
+            for month in range(1, 13):
+                target_date = datetime(year, month, 1, tzinfo=TIMEZONE)
+                first_day = target_date.replace(day=1)
+                if target_date.month == 12:
+                    last_day = (target_date.replace(
+                        year=target_date.year + 1, month=1, day=1) -
+                        timedelta(days=1))
+                else:
+                    last_day = (target_date.replace(
+                        month=target_date.month + 1, day=1) -
+                        timedelta(days=1))
+                date_ranges.append((first_day, last_day))
+            logger.info(f"Targeting entire year: {year}")
+            
+        else:
+            # Default behavior: range of months
+            if from_months_ago is None:
+                from_months_ago = 12
+            if to_months_ago is None:
+                to_months_ago = 0
+                
+            for months_back in range(to_months_ago, from_months_ago + 1):
+                # Calculate target month using relativedelta for accurate arithmetic
+                target_date = current_date - relativedelta(months=months_back)
+                
+                # Get first and last day of that month
+                first_day = target_date.replace(day=1)
+                # Get last day of the month
+                if target_date.month == 12:
+                    last_day = (target_date.replace(
+                        year=target_date.year + 1, month=1, day=1) -
+                        timedelta(days=1))
+                else:
+                    last_day = (target_date.replace(
+                        month=target_date.month + 1, day=1) -
+                        timedelta(days=1))
+                
+                date_ranges.append((first_day, last_day))
         
         return date_ranges
     
@@ -903,8 +1009,13 @@ class StatementDownloader:
             self.db_session.rollback()
             return False
     
-    def download_statements_for_period(self, from_months_ago: int, 
-                                      to_months_ago: int, 
+    def download_statements_for_period(self, from_months_ago: int = None, 
+                                      to_months_ago: int = None,
+                                      last_month: bool = False,
+                                      current_month: bool = False,
+                                      last_months: int = None,
+                                      specific_month: str = None,
+                                      year: int = None,
                                       supplier_filter: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Main method to download statements for a period
@@ -921,7 +1032,13 @@ class StatementDownloader:
             
             # Generate date ranges
             date_ranges = self.generate_date_ranges(
-                from_months_ago, to_months_ago
+                from_months_ago=from_months_ago,
+                to_months_ago=to_months_ago,
+                last_month=last_month,
+                current_month=current_month,
+                last_months=last_months,
+                specific_month=specific_month,
+                year=year
             )
             
             # Setup download directory (like invoice downloader)
@@ -1018,10 +1135,23 @@ class StatementDownloader:
                     )
             
             # Return results
+            if last_month:
+                period_desc = "last month"
+            elif current_month:
+                period_desc = "current month"
+            elif last_months:
+                period_desc = f"last {last_months} months"
+            elif specific_month:
+                period_desc = f"specific month {specific_month}"
+            elif year:
+                period_desc = f"year {year}"
+            else:
+                period_desc = f"{from_months_ago or 12} to {to_months_ago or 0} months ago"
+                
             return {
                 'success': True,
                 'statistics': self.stats,
-                'period': f"{from_months_ago} to {to_months_ago} months ago",
+                'period': period_desc,
                 'files_processed': len(all_downloaded_files)
             }
             
@@ -1066,42 +1196,95 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Download statements and invoices from the last 12 months
+  # Download statements and invoices from the last 12 months (default)
   python scripts/download_last_year_statements.py
   
-  # Download statements and invoices from the last 24 months
+  # Download only the previous month's statements
+  python scripts/download_last_year_statements.py --last-month
+  
+  # Download only the current month's statements
+  python scripts/download_last_year_statements.py --current-month
+  
+  # Download last 4 months' statements
+  python scripts/download_last_year_statements.py --last-months 4
+  
+  # Download last 6 months' statements
+  python scripts/download_last_year_statements.py --last-months 6
+  
+  # Download statements for a specific month
+  python scripts/download_last_year_statements.py --specific-month 2024-03
+  
+  # Download all statements for a specific year
+  python scripts/download_last_year_statements.py --year 2024
+  
+  # Download statements from the last 24 months
   python scripts/download_last_year_statements.py --from-months-ago 24
   
   # Download 10 years of historical statements and invoices for all suppliers
   python scripts/download_last_year_statements.py --download-all-historical
   
   # Download for specific suppliers only
-  python scripts/download_last_year_statements.py --suppliers "World Wide Plumbing,Y & S Plumbing Supply"
+  python scripts/download_last_year_statements.py --last-month --suppliers "World Wide Plumbing,Y & S Plumbing Supply"
+  
+  # Download current month for specific suppliers
+  python scripts/download_last_year_statements.py --current-month --suppliers "BMW Plumbing Supplies"
+  
+  # Download last 3 months for specific suppliers
+  python scripts/download_last_year_statements.py --last-months 3 --suppliers "BMW Plumbing Supplies"
   
   # Preview what would be downloaded without actually processing
-  python scripts/download_last_year_statements.py --download-all-historical --dry-run
+  python scripts/download_last_year_statements.py --specific-month 2024-03 --dry-run
+  
+  # Preview last 5 months without processing
+  python scripts/download_last_year_statements.py --last-months 5 --dry-run
+  
+  # Preview current month without processing
+  python scripts/download_last_year_statements.py --current-month --dry-run
   
   # Force reprocessing (existing statements, invoices, and invoice items are always deleted and fresh data is extracted)
-  python scripts/download_last_year_statements.py --force
+  python scripts/download_last_year_statements.py --last-month --force
         """
     )
     
-    # Time range options
-    parser.add_argument(
+    # Time range options - mutually exclusive group
+    date_group = parser.add_mutually_exclusive_group()
+    
+    date_group.add_argument(
         '--from-months-ago',
         type=int,
-        default=12,
         help='Number of months ago to start from (default: 12)'
     )
-    parser.add_argument(
+    date_group.add_argument(
         '--to-months-ago',
         type=int,
-        default=0,
         help='Number of months ago to end at (default: 0 - current month)'
     )
-    
-    # Historical download option
-    parser.add_argument(
+    date_group.add_argument(
+        '--last-month',
+        action='store_true',
+        help='Download only the previous month\'s statements'
+    )
+    date_group.add_argument(
+        '--current-month',
+        action='store_true',
+        help='Download only the current month\'s statements'
+    )
+    date_group.add_argument(
+        '--last-months',
+        type=int,
+        help='Download last N months (e.g., --last-months 4 for last 4 months)'
+    )
+    date_group.add_argument(
+        '--specific-month',
+        type=str,
+        help='Download statements for a specific month (format: YYYY-MM, e.g., 2024-03)'
+    )
+    date_group.add_argument(
+        '--year',
+        type=int,
+        help='Download all statements for a specific year (e.g., 2024)'
+    )
+    date_group.add_argument(
         '--download-all-historical',
         action='store_true',
         help='Download all historical statements and invoices for the past 10 years (existing statements, invoices, and invoice items will be deleted and fresh data extracted)'
@@ -1133,6 +1316,43 @@ Examples:
     
     args = parser.parse_args()
     
+    # Validate date arguments - ensure only one date option is specified
+    date_options = [args.from_months_ago, args.to_months_ago, args.last_month, 
+                   args.current_month, args.last_months, args.specific_month, 
+                   args.year, args.download_all_historical]
+    specified_options = [opt for opt in date_options if opt is not None and opt is not False]
+    
+    if len(specified_options) > 1:
+        print("ERROR: Only one date option can be specified at a time.")
+        print("Use --help to see available options.")
+        return 1
+    
+    # Validate specific month format
+    if args.specific_month:
+        try:
+            year, month = map(int, args.specific_month.split('-'))
+            if not (1 <= month <= 12):
+                print(f"ERROR: Invalid month in --specific-month: {args.specific_month}. Month must be 01-12.")
+                return 1
+            if year < 2000 or year > datetime.now().year + 1:
+                print(f"ERROR: Invalid year in --specific-month: {args.specific_month}. Year must be between 2000 and {datetime.now().year + 1}.")
+                return 1
+        except ValueError:
+            print(f"ERROR: Invalid format for --specific-month: {args.specific_month}. Use YYYY-MM format (e.g., 2024-03).")
+            return 1
+    
+    # Validate last_months
+    if args.last_months:
+        if args.last_months < 1 or args.last_months > 120:
+            print(f"ERROR: Invalid last_months: {args.last_months}. Must be between 1 and 120.")
+            return 1
+    
+    # Validate year
+    if args.year:
+        if args.year < 2000 or args.year > datetime.now().year + 1:
+            print(f"ERROR: Invalid year: {args.year}. Year must be between 2000 and {datetime.now().year + 1}.")
+            return 1
+    
     # Configure logging level
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -1145,7 +1365,15 @@ Examples:
         supplier_filter = [s.strip() for s in args.suppliers.split(',')]
         logger.info(f"Supplier filter: {supplier_filter}")
     
-    # Set time range
+    # Set time range based on arguments
+    from_months_ago = None
+    to_months_ago = None
+    last_month = False
+    current_month = False
+    last_months = None
+    specific_month = None
+    year = None
+    
     if args.download_all_historical:
         from_months_ago = 120  # 10 years (12 months * 10)
         to_months_ago = 0
@@ -1160,9 +1388,41 @@ Examples:
             if confirmation.lower() != 'y':
                 print("Operation cancelled.")
                 return
+    elif args.last_month:
+        last_month = True
+        logger.info(" DOWNLOADING LAST MONTH'S STATEMENTS")
+        logger.info(" Using BODY.PEEK commands to ensure NO emails are marked as read")
+        logger.info(" Existing statements and invoices will be automatically deleted")
+        logger.info(" Fresh data will be extracted and saved to database")
+    elif args.current_month:
+        current_month = True
+        logger.info(" DOWNLOADING CURRENT MONTH'S STATEMENTS")
+        logger.info(" Using BODY.PEEK commands to ensure NO emails are marked as read")
+        logger.info(" Existing statements and invoices will be automatically deleted")
+        logger.info(" Fresh data will be extracted and saved to database")
+    elif args.last_months:
+        last_months = args.last_months
+        logger.info(f" DOWNLOADING LAST {last_months} MONTHS' STATEMENTS")
+        logger.info(" Using BODY.PEEK commands to ensure NO emails are marked as read")
+        logger.info(" Existing statements and invoices will be automatically deleted")
+        logger.info(" Fresh data will be extracted and saved to database")
+    elif args.specific_month:
+        specific_month = args.specific_month
+        logger.info(f" DOWNLOADING STATEMENTS FOR SPECIFIC MONTH: {specific_month}")
+        logger.info(" Using BODY.PEEK commands to ensure NO emails are marked as read")
+        logger.info(" Existing statements and invoices will be automatically deleted")
+        logger.info(" Fresh data will be extracted and saved to database")
+    elif args.year:
+        year = args.year
+        logger.info(f" DOWNLOADING STATEMENTS FOR YEAR: {year}")
+        logger.info(" Using BODY.PEEK commands to ensure NO emails are marked as read")
+        logger.info(" Existing statements and invoices will be automatically deleted")
+        logger.info(" Fresh data will be extracted and saved to database")
     else:
-        from_months_ago = args.from_months_ago
-        to_months_ago = args.to_months_ago
+        # Default behavior or range specified
+        from_months_ago = args.from_months_ago or 12
+        to_months_ago = args.to_months_ago or 0
+        logger.info(f" DOWNLOADING STATEMENTS FOR RANGE: {from_months_ago} to {to_months_ago} months ago")
         logger.info(" Using BODY.PEEK commands to ensure NO emails are marked as read")
         logger.info(" Existing statements and invoices will be automatically deleted")
         logger.info(" Fresh data will be extracted and saved to database")
@@ -1179,6 +1439,11 @@ Examples:
             result = downloader.download_statements_for_period(
                 from_months_ago=from_months_ago,
                 to_months_ago=to_months_ago,
+                last_month=last_month,
+                current_month=current_month,
+                last_months=last_months,
+                specific_month=specific_month,
+                year=year,
                 supplier_filter=supplier_filter
             )
             
