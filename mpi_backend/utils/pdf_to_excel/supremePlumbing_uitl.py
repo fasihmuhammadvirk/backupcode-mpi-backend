@@ -213,13 +213,33 @@ def extract_refno(filename):
         invoice_data = invoice_data.split("Customer Credit CR-", 1)
         invoice_data = invoice_data[1].split("\n", 1)
         invoice_data = invoice_data[0]
-        return 'CR-' + str(invoice_data)
+        # Preserve the full reference including leading zeros and any letters/dashes
+        return 'CR-' + str(invoice_data).strip()
 
+    # Try to find invoice number with more flexible patterns
+    import re
+    
+    # Look for various invoice patterns first
+    patterns = [
+        r"Invoice\s*#?\s*([A-Za-z0-9\-]+)",  # Invoice # I-000987, Invoice 0081212A
+        r"Invoice\s*No\.?\s*([A-Za-z0-9\-]+)",  # Invoice No. I-000987, Invoice No 0081212A
+        r"INVOICE\s*#?\s*([A-Za-z0-9\-]+)",  # INVOICE # I-000987, INVOICE 0081212A
+        r"INVOICE\s*NO\.?\s*([A-Za-z0-9\-]+)",  # INVOICE NO. I-000987, INVOICE NO 0081212A
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, invoice_data, re.IGNORECASE)
+        if match:
+            return str(match.group(1)).strip()
+    
+    # Fallback to original string splitting method
     invoice_data = invoice_data.split("Invoice", 1)
-    invoice_data = invoice_data[1].split("\n", 1)
-    invoice_data = invoice_data[0]
+    if len(invoice_data) > 1:
+        invoice_data = invoice_data[1].split("\n", 1)
+        invoice_data = invoice_data[0]
+        return str(invoice_data).strip()
 
-    return str(invoice_data)
+    return ""
 
 
 def extract_date_from_shipping_slip(filename):

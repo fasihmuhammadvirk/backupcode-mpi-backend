@@ -93,7 +93,8 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
         excel_file = file
         if base_name.lower().endswith('.pdf'):
             excel_file = file[: -4] + '.xlsx'
-        extracted_data = pd.read_excel(excel_file)
+        # Read Excel file with explicit data types to preserve leading zeros in reference numbers
+        extracted_data = pd.read_excel(excel_file, dtype={'Ref NO': str})
         logger.info(f"Processing file: {file} with {len(extracted_data)} "
                     f"items")
         # Ensure DB session is clean before any queries (in case a previous
@@ -186,6 +187,24 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
                 "vendor": vendor,
                 "date": str(invoice_date),
                 "message": duplicate_status['message']
+            }
+        elif duplicate_status['status'] == 'exact_duplicate_with_ref_update':
+            logger.warning(duplicate_status['message'])
+            # Update the reference number in the existing invoice
+            controller = InvoiceItemController(db)
+            updated_count = controller.update_invoice_reference_number(
+                duplicate_status['existing_invoice_id'], 
+                ref_no
+            )
+            
+            return {
+                "status": "updated_ref_no",
+                "ref_no": ref_no,
+                "vendor": vendor,
+                "date": str(invoice_date),
+                "existing_invoice_id": duplicate_status['existing_invoice_id'],
+                "items_updated": updated_count,
+                "message": f"Updated reference number for existing invoice: {updated_count} items updated to '{ref_no}'"
             }
         elif duplicate_status['status'] == 'updated_invoice':
             logger.info(duplicate_status['message'])

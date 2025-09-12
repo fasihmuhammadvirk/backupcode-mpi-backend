@@ -17,9 +17,6 @@ from pathlib import Path
 import time
 import logging
 import argparse
-import platform
-import threading
-from contextlib import contextmanager
 
 # Setup logging
 logging.basicConfig(
@@ -39,6 +36,7 @@ sys.path.insert(0, str(current_dir))
 # Import the enhanced missing invoice finder
 from missing_invoice_finder import MissingInvoiceFinder
 
+
 class InvoiceSearchAndAdd(MissingInvoiceFinder):
     """
     Enhanced invoice searcher that uses exact matching and adds invoices to system
@@ -56,29 +54,41 @@ class InvoiceSearchAndAdd(MissingInvoiceFinder):
         # Import required modules for invoice processing
         from datetime import datetime, timedelta
         
-        # Create storage directory for attachments (ONLY storage, no local downloads)
-        self.storage_dir = Path("storage/missing_invoice_attachments")
-        self.storage_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Create a temporary processing directory (will be cleaned up)
+        # Create time-based storage directory for this specific script run
         try:
             from mpi_backend.config import TIMEZONE
-            time_window_start = datetime.now(TIMEZONE) - timedelta(minutes=3)
-            base_folder = (f"MISSING_INVOICES_{time_window_start.strftime('%d-%b-%Y_%H-%M-%S')} - "
-                          f"{datetime.now(TIMEZONE).strftime('%d-%b-%Y_%H-%M-%S')}")
-            self.temp_processing_dir = Path("temp_processing") / base_folder
+            current_time = datetime.now(TIMEZONE)
+            # Use microseconds to ensure uniqueness even for rapid successive runs
+            time_folder = current_time.strftime('%Y%m%d_%H%M%S_%f')
+            self.storage_dir = (Path("storage/missing_invoice_attachments") 
+                               / time_folder)
         except ImportError:
             logger.warning("Could not import TIMEZONE, using defaults")
-            time_window_start = datetime.now() - timedelta(minutes=3)
-            base_folder = (f"MISSING_INVOICES_{time_window_start.strftime('%d-%b-%Y_%H-%M-%S')} - "
-                          f"{datetime.now().strftime('%d-%b-%Y_%H-%M-%S')}")
-            self.temp_processing_dir = Path("temp_processing") / base_folder
+            current_time = datetime.now()
+            # Use microseconds to ensure uniqueness even for rapid successive runs
+            time_folder = current_time.strftime('%Y%m%d_%H%M%S_%f')
+            self.storage_dir = (Path("storage/missing_invoice_attachments") 
+                               / time_folder)
         
-        self.temp_processing_dir.mkdir(parents=True, exist_ok=True)
+        self.storage_dir.mkdir(parents=True, exist_ok=True)
         
-        # Override directories - use storage for all attachments (no temp processing)
+        # Override directories - use ONLY time-based storage for all attachments
+        # Override the parent class directories to prevent extra directory creation
         self.download_dir = self.storage_dir
         self.attachments_folder = self.storage_dir
+        
+        # Remove the extra directory created by parent class
+        extra_dir = Path("missing_invoice_attachments")
+        if extra_dir.exists() and extra_dir.is_dir():
+            try:
+                # Only remove if it's empty (safe to remove)
+                if not any(extra_dir.iterdir()):
+                    extra_dir.rmdir()
+                    logger.info(f"🗑️ Removed empty extra directory: {extra_dir}")
+                else:
+                    logger.warning(f"⚠️ Extra directory {extra_dir} exists but is not empty, leaving it")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not remove extra directory {extra_dir}: {e}")
         
         # Override summary file name
         self.summary_file = "missing_invoice_search_summary.xlsx"
@@ -97,9 +107,13 @@ class InvoiceSearchAndAdd(MissingInvoiceFinder):
             logger.info("🔄 Will use basic attachment download only")
         
         logger.info("🎯 Invoice Search and Add initialized with EXACT MATCHING")
-        logger.info(f"📁 Attachments will be saved ONLY to storage: {self.storage_dir}")
-        logger.info(f"📁 Temporary processing directory: {self.temp_processing_dir}")
-        logger.info("🔄 Will use SAME processing pipeline as regular invoice downloader")
+        logger.info(f"📁 Attachments will be saved to time-based storage: "
+                   f"{self.storage_dir}")
+        logger.info("🔄 Will use SAME processing pipeline as regular "
+                   "invoice downloader")
+        logger.info(f"📁 Each script run creates isolated directory: "
+                   f"{self.storage_dir.name}")
+        logger.info("📁 NO temp_processing directories - only storage used")
     
     def select_mailbox_safely(self, mailbox_name):
         """Safely select mailbox without timeout context (Windows compatible)"""
@@ -439,6 +453,8 @@ class InvoiceSearchAndAdd(MissingInvoiceFinder):
         
         finally:
             self.cleanup()
+            # Clean up extra directory after processing
+            self._cleanup_extra_directory()
     
     def process_emails_for_reference_with_invoice_pipeline(self, ref_no, email_ids, email_mailbox_map):
         """
@@ -484,7 +500,8 @@ class InvoiceSearchAndAdd(MissingInvoiceFinder):
                         total_attachments_downloaded += 1
                         if detected_supplier:
                             supplier_name = detected_supplier
-                        logger.info(f"    ✅ Successfully downloaded attachments from email {email_id}")
+                        logger.info(f"    ✅ Successfully downloaded attachments "
+                               f"from email {email_id}")
                     else:
                         logger.warning(f"    ⚠️ No attachments downloaded from email {email_id}")
                         
@@ -508,7 +525,7 @@ class InvoiceSearchAndAdd(MissingInvoiceFinder):
     
     def process_all_downloaded_invoices(self):
         """
-        Process all downloaded invoices using EXACT same pipeline as invoice_downloader
+        Process only the invoices downloaded in this specific script run using EXACT same pipeline as invoice_downloader
         """
         try:
             if not self.invoice_processing_available:
@@ -518,29 +535,30 @@ class InvoiceSearchAndAdd(MissingInvoiceFinder):
                 return True  # Return True since attachments were downloaded successfully
             
             logger.info("🔄 Starting invoice processing using EXACT same pipeline as invoice_downloader...")
-            logger.info(f"📁 Processing storage folder: {self.storage_dir}")
+            logger.info(f"📁 Processing ONLY current run folder: {self.storage_dir}")
             
-            # Count files in storage directory
+            # Count files in ONLY the current time-based storage directory (not all historical files)
             pdf_files = list(self.storage_dir.rglob("*.pdf"))
-            logger.info(f"📄 Found {len(pdf_files)} PDF files in storage directory")
+            logger.info(f"📄 Found {len(pdf_files)} PDF files in current run directory")
             
             if not pdf_files:
-                logger.warning("⚠️ No PDF files found in storage directory")
+                logger.warning("⚠️ No PDF files found in current run directory")
                 return False
             
-            # Use EXACT same conversion logic as invoice_downloader
+            # Use EXACT same conversion logic as invoice_downloader - but only for current run files
             logger.info("🔄 Starting invoice conversion (same as invoice_downloader)...")
             from mpi_backend.utils.invoice_convertor import convert_invoice_for_email
             converted_files, failed_files = convert_invoice_for_email(self.storage_dir)
             logger.info(f"✅ Conversion complete. Success: {len(converted_files)}, Failed: {len(failed_files)}")
             
-            # Use EXACT same data processing logic as invoice_downloader
+            # Use EXACT same data processing logic as invoice_downloader - but only for current run files
             logger.info("🔄 Starting data processing (same as invoice_downloader)...")
             from mpi_backend.utils.extracted_data_processor import process_extracted_data
             processing_results = process_extracted_data(converted_files, failed_files)
             logger.info(f"✅ Data processing complete. Processed {len(processing_results)} files")
             
             logger.info("✅ Invoice processing pipeline completed successfully")
+            logger.info(f"📁 Processed ONLY files from: {self.storage_dir}")
             return True
                 
         except Exception as e:
@@ -556,10 +574,8 @@ class InvoiceSearchAndAdd(MissingInvoiceFinder):
         Format: Ref No | Supplier | Status (Added / Not Found / Failed) | DB Updated (Yes/No) | Notes
         """
         try:
-            import pandas as pd
             from openpyxl import Workbook
             from openpyxl.styles import PatternFill, Font
-            from datetime import datetime
             
             logger.info(f"📊 Creating comprehensive summary Excel file: {self.summary_file}")
             
@@ -661,7 +677,7 @@ class InvoiceSearchAndAdd(MissingInvoiceFinder):
                     try:
                         if len(str(cell.value)) > max_length:
                             max_length = len(str(cell.value))
-                    except:
+                    except Exception:
                         pass
                 adjusted_width = min(max_length + 2, 50)
                 ws.column_dimensions[column_letter].width = adjusted_width
@@ -726,8 +742,10 @@ class InvoiceSearchAndAdd(MissingInvoiceFinder):
                     print(f"  - {error_item['error']}")
         
         print(f"\n📁 FILES CREATED:")
-        print(f"  - Storage: {self.storage_dir}/")
+        print(f"  - Time-based Storage: {self.storage_dir}/")
         print(f"  - Summary: {self.summary_file}")
+        print(f"  - Isolated Run: {self.storage_dir.name}")
+        print(f"  - NO temp_processing directories created")
         
         if results['processed']:
             print("\n💾 DATABASE INTEGRATION:")
@@ -737,6 +755,20 @@ class InvoiceSearchAndAdd(MissingInvoiceFinder):
             print("  🔍 Duplicate detection and handling")
         
         print("="*60)
+    
+    def _cleanup_extra_directory(self):
+        """Clean up the extra missing_invoice_attachments directory created by parent class"""
+        try:
+            extra_dir = Path("missing_invoice_attachments")
+            if extra_dir.exists() and extra_dir.is_dir():
+                # Only remove if it's empty (safe to remove)
+                if not any(extra_dir.iterdir()):
+                    extra_dir.rmdir()
+                    logger.info(f"🗑️ Cleaned up empty extra directory: {extra_dir}")
+                else:
+                    logger.debug(f"📁 Extra directory {extra_dir} not empty, leaving it")
+        except Exception as e:
+            logger.debug(f"Could not clean up extra directory: {e}")
     
     def search_from_file(self, file_path, limit=None):
         """
@@ -823,6 +855,9 @@ def main():
     print("")
     print("📎 PROCESS: Uses invoice_downloader pipeline EXACTLY")
     print("  ✅ Downloads PDFs using same logic")
+    print("  ✅ Creates ONLY time-based storage directories")
+    print("  ✅ Processes ONLY current run files (not historical)")
+    print("  ✅ NO temp_processing directories created")
     print("  ✅ Converts PDFs to Excel") 
     print("  ✅ Adds to system database automatically")
     print("  ✅ Handles duplicates and errors")
@@ -851,14 +886,16 @@ def main():
                 print(f"📎 Successfully processed {processed_count} invoices")
                 
                 if processed_count > 0:
-                    print(f"")
+                    print("")
                     print(f"🎉 SUCCESS! Missing invoices found and added to system!")
                     print(f"📊 Used SAME processing pipeline as regular invoice_downloader:")
                     print(f"  1. 🔍 Found missing invoices using exact search")
-                    print(f"  2. 📎 Downloaded PDF attachments")
-                    print(f"  3. 📄 Converted PDFs to Excel")
+                    print(f"  2. 📎 Downloaded PDF attachments to isolated storage directory")
+                    print(f"  3. 📄 Converted PDFs to Excel (current run only)")
                     print(f"  4. 💾 Added to database with duplicate handling")
                     print(f"  5. ✅ Ready for use in your system!")
+                    print(f"📁 Files saved to: {searcher.storage_dir}")
+                    print(f"📁 NO temp_processing directories created")
                 
                 return True
             else:
