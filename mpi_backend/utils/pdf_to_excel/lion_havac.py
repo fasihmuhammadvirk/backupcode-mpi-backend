@@ -42,7 +42,7 @@ def process_results(invoice_items, date, ref_no, tax, job_name="", po_no="", buy
     results.loc[len(results)] = tax_row
 
     results["Date"] = date
-    results["Ref NO"] = ref_no
+    results["Ref NO"] = str(ref_no)  # Ensure reference number is stored as string to preserve leading zeros
     results["PO #"] = po_no
     results['Customer Job'] = job_name
     results["Bill"] = "Bill"
@@ -122,12 +122,34 @@ def extract_po_no(text):
 
 def extract_ref_no(text):
     ref_no = ''
-    hit = re.search(r"#:(\d+)", text)
-    if hit:
-        ref_no = hit.group(1)
-    else:
-        hit = re.search(r"Credit # (\d+)", text)
-        if hit: ref_no = hit.group(1).strip()
+    # Handle various reference formats: #:0081212A, #:I-000987, Credit # 89779-I, etc.
+    patterns = [
+        r"#:([A-Za-z0-9\-]+)",  # General format: #:I-000987, #:0081212A, #:89779-I
+        r"#:([0-9]+[A-Za-z]?)",  # Numbers with optional letters: #:0081212A
+        r"#:([A-Za-z]?[0-9]+)",  # Letters with numbers: #:I000987
+        r"#:([0-9]+-[A-Za-z]+)",  # Numbers with dash and letters: #:89779-I
+        r"#:([A-Za-z]+-[0-9]+)",  # Letters with dash and numbers: #:I-000987
+    ]
+    
+    for pattern in patterns:
+        hit = re.search(pattern, text)
+        if hit:
+            ref_no = hit.group(1).strip()
+            break
+    
+    if not ref_no:
+        # Try credit patterns
+        credit_patterns = [
+            r"Credit # ([A-Za-z0-9\-]+)",  # General format for credit
+            r"Credit # ([0-9]+[A-Za-z]?)",  # Numbers with optional letters
+            r"Credit # ([A-Za-z]?[0-9]+)",  # Letters with numbers
+        ]
+        for pattern in credit_patterns:
+            hit = re.search(pattern, text)
+            if hit:
+                ref_no = hit.group(1).strip()
+                break
+    
     return ref_no
 
 

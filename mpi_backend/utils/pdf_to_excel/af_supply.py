@@ -33,7 +33,7 @@ def process_results(invoice_items, date, invoice_no, tax, job_name="", po_no="")
     tax_row = ["10 Materials", "Tax", "", "", float(tax)]
     results.loc[len(results)] = tax_row
     results["Date"] = date
-    results["Ref NO"] = invoice_no
+    results["Ref NO"] = str(invoice_no)  # Ensure reference number is stored as string to preserve leading zeros
     results["PO #"] = po_no
     results['Customer Job'] = job_name
     results["Bill"] = "Bill"
@@ -76,8 +76,21 @@ def extract_po_no(text):
 
 def extract_ref_no(text):
     ref_no = ''
-    hit = re.search(r"\nINVOICE NO.\n*(\d+)\n", text)
-    if hit : ref_no = hit.group(1)
+    # Handle various reference formats: 0081212A, I-000987, 89779-I, etc.
+    patterns = [
+        r"\nINVOICE NO.\n*([A-Za-z0-9\-]+)\n",  # General format: I-000987, 0081212A, 89779-I
+        r"\nINVOICE NO.\n*([0-9]+[A-Za-z]?)\n",  # Numbers with optional letters: 0081212A
+        r"\nINVOICE NO.\n*([A-Za-z]?[0-9]+)\n",  # Letters with numbers: I000987
+        r"\nINVOICE NO.\n*([0-9]+-[A-Za-z]+)\n",  # Numbers with dash and letters: 89779-I
+        r"\nINVOICE NO.\n*([A-Za-z]+-[0-9]+)\n",  # Letters with dash and numbers: I-000987
+    ]
+    
+    for pattern in patterns:
+        hit = re.search(pattern, text)
+        if hit:
+            ref_no = hit.group(1).strip()
+            break
+    
     return ref_no
 
 

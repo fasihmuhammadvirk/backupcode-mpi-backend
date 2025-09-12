@@ -38,7 +38,7 @@ def process_results(invoice_items, date, invoice_no, tax, job_name="", po_no="",
     tax_row = ["10 Materials", "Tax", "", "", float(tax)]
     results.loc[len(results)] = tax_row
     results["Date"] = date
-    results["Ref NO"] = invoice_no
+    results["Ref NO"] = str(invoice_no)  # Ensure reference number is stored as string to preserve leading zeros
     results["PO #"] = po_no
     results['Customer Job'] = job_name
     results["Bill"] = "Bill"
@@ -149,27 +149,44 @@ def extract_ref_no(text):
 
     ref_no = ''
     if 'Sale Order' in text:
-        hit = re.search(r"\nSale Order\s*(SO-\d+)\n", text)
-        if hit: ref_no = hit.group(1)
+        # Handle various sale order formats: SO-000987, SO000987, SO-0081212A, etc.
+        patterns = [
+            r"\nSale Order\s*(SO-[A-Za-z0-9\-]+)\n",  # SO-000987, SO-0081212A
+            r"\nSale Order\s*(SO[A-Za-z0-9\-]+)\n",   # SO000987, SO0081212A
+        ]
+        for pattern in patterns:
+            hit = re.search(pattern, text)
+            if hit:
+                ref_no = hit.group(1)
+                break
 
     elif 'Customer Credit' in text:
-        hit = re.search(r"\nCustomer Credit\s*(CR-\d+)\n", text)
-        if hit: ref_no = hit.group(1)
+        # Handle various credit formats: CR-000987, CR000987, CR-0081212A, etc.
+        patterns = [
+            r"\nCustomer Credit\s*(CR-[A-Za-z0-9\-]+)\n",  # CR-000987, CR-0081212A
+            r"\nCustomer Credit\s*(CR[A-Za-z0-9\-]+)\n",   # CR000987, CR0081212A
+        ]
+        for pattern in patterns:
+            hit = re.search(pattern, text)
+            if hit:
+                ref_no = hit.group(1)
+                break
 
     elif 'Invoice' in text:
-
-        # existing pattern for searching invoices
-        pattern = r"\nInvoice\s*(I-\d+)\n"
-        hit = re.search(pattern, text)
-
-        # Run this pattern if not found on previous (Resolved the missing invoice issue)
-        if not hit:
-            # Newly added pattern
-            pattern = r"Invoice\s*(I-\d+-\d+)"
+        # Handle various invoice formats: I-000987, I000987, I-0081212A, 89779-I, etc.
+        patterns = [
+            r"\nInvoice\s*(I-[A-Za-z0-9\-]+)\n",  # I-000987, I-0081212A
+            r"\nInvoice\s*(I[A-Za-z0-9\-]+)\n",   # I000987, I0081212A
+            r"Invoice\s*(I-[A-Za-z0-9\-]+-[A-Za-z0-9\-]+)",  # I-000987-001
+            r"Invoice\s*([A-Za-z0-9\-]+-[A-Za-z0-9\-]+)",    # 89779-I, 0081212A-B
+            r"Invoice\s*([A-Za-z0-9\-]+)",                   # General format
+        ]
+        
+        for pattern in patterns:
             hit = re.search(pattern, text)
-
-        if hit:
-            ref_no = hit.group(1)
+            if hit:
+                ref_no = hit.group(1)
+                break
 
     return ref_no
 

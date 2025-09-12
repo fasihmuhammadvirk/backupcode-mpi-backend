@@ -41,6 +41,109 @@ class InvoiceItemController:
         # ADDED: Resource monitoring
         self._query_start_time = None
         self._memory_before = None
+    
+    def _normalize_ref_no_for_comparison(self, ref_no):
+        """
+        Normalize reference number for duplicate comparison while preserving original format.
+        This handles cases where the same invoice might be stored with different leading zero formats.
+        
+        Examples:
+        - "066617" -> "66617" (for comparison)
+        - "I-000987" -> "I-987" (for comparison)
+        - "0081212A" -> "81212A" (for comparison)
+        - "89779-I" -> "89779-I" (unchanged)
+        
+        Args:
+            ref_no: Reference number string
+            
+        Returns:
+            Normalized reference number for comparison
+        """
+        if not ref_no:
+            return ""
+        
+        ref_no = str(ref_no).strip()
+        
+        # Handle patterns like "066617", "I-000987", "0081212A"
+        # Remove leading zeros from numeric parts while preserving letters and dashes
+        
+        import re
+        
+        # Pattern 1: Pure numbers with leading zeros (e.g., "066617" -> "66617")
+        if ref_no.isdigit():
+            return ref_no.lstrip('0') or '0'  # Handle "0000" -> "0"
+        
+        # Pattern 2: Letter-dash-number with leading zeros (e.g., "I-000987" -> "I-987")
+        match = re.match(r'^([A-Za-z]+)-0+(\d+)$', ref_no)
+        if match:
+            letter_part = match.group(1)
+            number_part = match.group(2).lstrip('0') or '0'
+            return f"{letter_part}-{number_part}"
+        
+        # Pattern 3: Number-letter with leading zeros (e.g., "0081212A" -> "81212A")
+        match = re.match(r'^0+(\d+[A-Za-z]+)$', ref_no)
+        if match:
+            return match.group(1)
+        
+        # Pattern 4: Letter-number with leading zeros (e.g., "I000987" -> "I987")
+        match = re.match(r'^([A-Za-z]+)0+(\d+)$', ref_no)
+        if match:
+            letter_part = match.group(1)
+            number_part = match.group(2).lstrip('0') or '0'
+            return f"{letter_part}{number_part}"
+        
+        # Pattern 5: Complex patterns with multiple leading zeros
+        # Split by common delimiters and normalize each part
+        parts = re.split(r'([-])', ref_no)
+        normalized_parts = []
+        
+        for part in parts:
+            if part in ['-']:
+                normalized_parts.append(part)
+            elif part.isdigit():
+                normalized_parts.append(part.lstrip('0') or '0')
+            elif re.match(r'^[A-Za-z]+0+\d+$', part):
+                # Handle cases like "I000987"
+                match = re.match(r'^([A-Za-z]+)0+(\d+)$', part)
+                if match:
+                    letter_part = match.group(1)
+                    number_part = match.group(2).lstrip('0') or '0'
+                    normalized_parts.append(f"{letter_part}{number_part}")
+                else:
+                    normalized_parts.append(part)
+            else:
+                normalized_parts.append(part)
+        
+        return ''.join(normalized_parts)
+
+    def update_invoice_reference_number(self, invoice_id, new_ref_no):
+        """
+        Update the reference number for all items in an invoice.
+        
+        Args:
+            invoice_id: UUID of the invoice to update
+            new_ref_no: New reference number to set
+            
+        Returns:
+            Number of items updated
+        """
+        try:
+            # Update all items with the given invoice_id
+            updated_count = self.db.query(InvoiceItem).filter(
+                InvoiceItem.invoice_id == invoice_id,
+                InvoiceItem.is_active == True
+            ).update({
+                'ref_no': new_ref_no
+            })
+            
+            self.db.commit()
+            logger.info(f"Updated reference number for invoice {invoice_id}: {updated_count} items updated to '{new_ref_no}'")
+            return updated_count
+            
+        except Exception as e:
+            logger.error(f"Error updating reference number for invoice {invoice_id}: {str(e)}")
+            self.db.rollback()
+            return 0
 
     def _monitor_resource_usage(self, operation: str):
         """Monitor resource usage for operations"""
@@ -1330,10 +1433,24 @@ class InvoiceItemController:
         Check if an invoice exists with the given reference number and vendor.
         This is a simple check that doesn't consider date and amount.
         For comprehensive duplicate detection, use check_invoice_duplicate_status().
+        Uses normalized reference number comparison to handle leading zero differences.
         """
-        matched_invoice = self.db.query(InvoiceItem).filter_by(
-            ref_no=reference_no, vendor=vendor).first()
-        return matched_invoice is not None
+        # Normalize the reference number for comparison
+        normalized_ref_no = self._normalize_ref_no_for_comparison(reference_no)
+        
+        # Query for existing invoices with same vendor
+        all_existing_items = self.db.query(InvoiceItem).filter(
+            InvoiceItem.vendor == vendor,
+            InvoiceItem.is_active == True
+        ).all()
+        
+        # Check if any item has matching normalized reference number
+        for item in all_existing_items:
+            item_normalized_ref = self._normalize_ref_no_for_comparison(item.ref_no)
+            if item_normalized_ref == normalized_ref_no:
+                return True
+        
+        return False
 
     def find_duplicate_invoices(self, reference_no, vendor, date, amount):
         """
@@ -1608,12 +1725,22 @@ class InvoiceItemController:
                     'message': 'Missing reference number or vendor'
                 }
 
-            # Query for existing invoices with same ref_no and vendor
-            existing_items = self.db.query(InvoiceItem).filter(
-                InvoiceItem.ref_no == ref_no,
+            # Normalize the reference number for comparison
+            normalized_ref_no = self._normalize_ref_no_for_comparison(ref_no)
+            
+            # Query for existing invoices with same vendor
+            # We'll filter by normalized ref_no in Python to handle leading zero differences
+            all_existing_items = self.db.query(InvoiceItem).filter(
                 InvoiceItem.vendor == vendor_str,
                 InvoiceItem.is_active == True
             ).all()
+            
+            # Filter by normalized reference number comparison
+            existing_items = []
+            for item in all_existing_items:
+                item_normalized_ref = self._normalize_ref_no_for_comparison(item.ref_no)
+                if item_normalized_ref == normalized_ref_no:
+                    existing_items.append(item)
 
             if not existing_items:
                 return {
@@ -1670,23 +1797,57 @@ class InvoiceItemController:
                         'date_added': invoice_date_added[invoice_id]
                     })
 
-            # If we found exact duplicates, return the most recent one
+            # If we found exact duplicates, check if we need to update reference number
             if exact_duplicates:
                 # Sort by date_added (most recent first), then by invoice_id
                 exact_duplicates.sort(key=lambda x: (
                     x['date_added'] or date.min, x['invoice_id']), reverse=True)
                 most_recent_duplicate = exact_duplicates[0]
 
-                logger.warning(
-                    f"Found {len(exact_duplicates)} exact duplicate(s) for RefNo: {ref_no}, Vendor: {vendor_str}, Date: {date_obj}, Amount: {new_amount_float}. Using most recent: {most_recent_duplicate['invoice_id']}")
+                # Check if the reference number format needs to be updated
+                # Get the existing reference number from the most recent duplicate
+                existing_ref_no = None
+                for item in existing_items:
+                    if item.invoice_id == most_recent_duplicate['invoice_id']:
+                        existing_ref_no = item.ref_no
+                        break
+                
+                # If the new reference number has leading zeros and the existing one doesn't,
+                # or vice versa, we should update the reference number
+                needs_ref_update = False
+                if existing_ref_no and existing_ref_no != ref_no:
+                    # Check if one has leading zeros and the other doesn't
+                    existing_normalized = self._normalize_ref_no_for_comparison(existing_ref_no)
+                    new_normalized = self._normalize_ref_no_for_comparison(ref_no)
+                    
+                    if existing_normalized == new_normalized and existing_ref_no != ref_no:
+                        needs_ref_update = True
+                        logger.info(f"Reference number format update needed: '{existing_ref_no}' -> '{ref_no}'")
 
-                return {
-                    'status': 'exact_duplicate',
-                    'existing_invoice_id': most_recent_duplicate['invoice_id'],
-                    'existing_amount': str(most_recent_duplicate['amount']),
-                    'existing_date': most_recent_duplicate['date'],
-                    'message': f'Found {len(exact_duplicates)} exact duplicate(s) for RefNo: {ref_no}, Vendor: {vendor_str}, Date: {date_obj}, Amount: {new_amount_float}. Using most recent invoice {most_recent_duplicate["invoice_id"]}.'
-                }
+                if needs_ref_update:
+                    logger.warning(
+                        f"Found {len(exact_duplicates)} exact duplicate(s) for RefNo: {ref_no}, Vendor: {vendor_str}, Date: {date_obj}, Amount: {new_amount_float}. Updating reference number format: '{existing_ref_no}' -> '{ref_no}'")
+                    
+                    return {
+                        'status': 'exact_duplicate_with_ref_update',
+                        'existing_invoice_id': most_recent_duplicate['invoice_id'],
+                        'existing_amount': str(most_recent_duplicate['amount']),
+                        'existing_date': most_recent_duplicate['date'],
+                        'existing_ref_no': existing_ref_no,
+                        'new_ref_no': ref_no,
+                        'message': f'Found {len(exact_duplicates)} exact duplicate(s) for RefNo: {ref_no}, Vendor: {vendor_str}, Date: {date_obj}, Amount: {new_amount_float}. Updating reference number format: "{existing_ref_no}" -> "{ref_no}".'
+                    }
+                else:
+                    logger.warning(
+                        f"Found {len(exact_duplicates)} exact duplicate(s) for RefNo: {ref_no}, Vendor: {vendor_str}, Date: {date_obj}, Amount: {new_amount_float}. Using most recent: {most_recent_duplicate['invoice_id']}")
+
+                    return {
+                        'status': 'exact_duplicate',
+                        'existing_invoice_id': most_recent_duplicate['invoice_id'],
+                        'existing_amount': str(most_recent_duplicate['amount']),
+                        'existing_date': most_recent_duplicate['date'],
+                        'message': f'Found {len(exact_duplicates)} exact duplicate(s) for RefNo: {ref_no}, Vendor: {vendor_str}, Date: {date_obj}, Amount: {new_amount_float}. Using most recent invoice {most_recent_duplicate["invoice_id"]}.'
+                    }
 
             # Check for updated invoice (same ref_no, vendor, and date, different total amount)
             updated_invoices = []

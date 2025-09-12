@@ -36,7 +36,7 @@ def process_results(invoice_items, date, invoice_no, tax, job_name="", po_no="")
     tax_row = ["10 Materials", "Tax", "", "", float(tax)]
     results.loc[len(results)] = tax_row
     results["Date"] = date
-    results["Ref NO"] = invoice_no
+    results["Ref NO"] = str(invoice_no)  # Ensure reference number is stored as string to preserve leading zeros
     results["PO #"] = po_no
     results['Customer Job'] = job_name
     results["Bill"] = "Bill"
