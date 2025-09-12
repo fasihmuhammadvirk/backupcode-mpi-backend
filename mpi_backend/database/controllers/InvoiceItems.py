@@ -687,7 +687,7 @@ class InvoiceItemController:
                             where_conditions.append(f"{col} = :{param_name}")
                             query_params[param_name] = values
             
-            # Apply search filter with ultra-fast pattern matching
+            # Apply intelligent search filter with normalization and ranking
             if search:
                 search = search.strip()
                 if search.startswith('"') and search.endswith('"') and len(search) > 2:
@@ -696,36 +696,86 @@ class InvoiceItemController:
                     where_conditions.append(f"{column_name} = :exact_search")
                     query_params['exact_search'] = exact_term
                 else:
-                    # Prefix match (fastest possible)
-                    where_conditions.append(f"{column_name} ILIKE :prefix_search")
-                    query_params['prefix_search'] = f"{search}%"
+                    # Normalize search term: remove special characters and convert to lowercase
+                    normalized_search = ''.join(c.lower() for c in search if c.isalnum() or c.isspace()).strip()
+                    normalized_search = ' '.join(normalized_search.split())  # Remove extra spaces
+                    
+                    if normalized_search:
+                        # Use PostgreSQL's regex to normalize both search term and column data
+                        # This will match "no hub" with "no-hub", "(no-hub)", "no_hub", etc.
+                        regex_pattern = normalized_search.replace(' ', '[-_\\s\\(\\)]*')
+                        where_conditions.append(f"REGEXP_REPLACE(LOWER({column_name}), '[-_\\s\\(\\)]+', ' ', 'g') ILIKE :intelligent_search")
+                        query_params['intelligent_search'] = f"%{normalized_search}%"
             
             # Build the complete SQL query
             where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
             
-            # Ultra-fast query using window functions for pagination
-            sql_query = f"""
-                WITH filtered_data AS (
-                    SELECT DISTINCT {column_name}
-                    FROM invoice_items 
-                    WHERE {where_clause}
-                    AND {column_name} IS NOT NULL 
-                    AND {column_name} != ''
-                ),
-                paginated_data AS (
+            # Ultra-fast query using window functions for pagination with intelligent ranking
+            if search and not (search.startswith('"') and search.endswith('"') and len(search) > 2):
+                # Add intelligent ranking for search results
+                normalized_search = ''.join(c.lower() for c in search if c.isalnum() or c.isspace()).strip()
+                normalized_search = ' '.join(normalized_search.split())
+                
+                sql_query = f"""
+                    WITH filtered_data AS (
+                        SELECT DISTINCT {column_name},
+                        CASE 
+                            WHEN LOWER({column_name}) LIKE :starts_with THEN 1
+                            WHEN REGEXP_REPLACE(LOWER({column_name}), '[-_\\s\\(\\)]+', ' ', 'g') LIKE :normalized_starts THEN 2
+                            WHEN LOWER({column_name}) LIKE :contains THEN 3
+                            WHEN REGEXP_REPLACE(LOWER({column_name}), '[-_\\s\\(\\)]+', ' ', 'g') LIKE :normalized_contains THEN 4
+                            ELSE 5
+                        END as relevance_rank
+                        FROM invoice_items 
+                        WHERE {where_clause}
+                        AND {column_name} IS NOT NULL 
+                        AND {column_name} != ''
+                    ),
+                    paginated_data AS (
+                        SELECT 
+                            {column_name},
+                            relevance_rank,
+                            ROW_NUMBER() OVER (ORDER BY relevance_rank ASC, {column_name} ASC) as row_num,
+                            COUNT(*) OVER () as total_count
+                        FROM filtered_data
+                    )
                     SELECT 
                         {column_name},
-                        ROW_NUMBER() OVER (ORDER BY {column_name} ASC) as row_num,
-                        COUNT(*) OVER () as total_count
-                    FROM filtered_data
-                )
-                SELECT 
-                    {column_name},
-                    total_count
-                FROM paginated_data
-                WHERE row_num BETWEEN :start_row AND :end_row
-                ORDER BY {column_name} ASC
-            """
+                        total_count
+                    FROM paginated_data
+                    WHERE row_num BETWEEN :start_row AND :end_row
+                    ORDER BY relevance_rank ASC, {column_name} ASC
+                """
+                
+                # Add ranking parameters
+                query_params['starts_with'] = f"{normalized_search}%"
+                query_params['normalized_starts'] = f"{normalized_search}%"
+                query_params['contains'] = f"%{normalized_search}%"
+                query_params['normalized_contains'] = f"%{normalized_search}%"
+            else:
+                # Standard query without ranking
+                sql_query = f"""
+                    WITH filtered_data AS (
+                        SELECT DISTINCT {column_name}
+                        FROM invoice_items 
+                        WHERE {where_clause}
+                        AND {column_name} IS NOT NULL 
+                        AND {column_name} != ''
+                    ),
+                    paginated_data AS (
+                        SELECT 
+                            {column_name},
+                            ROW_NUMBER() OVER (ORDER BY {column_name} ASC) as row_num,
+                            COUNT(*) OVER () as total_count
+                        FROM filtered_data
+                    )
+                    SELECT 
+                        {column_name},
+                        total_count
+                    FROM paginated_data
+                    WHERE row_num BETWEEN :start_row AND :end_row
+                    ORDER BY {column_name} ASC
+                """
             
             # Calculate pagination parameters
             start_row = (page - 1) * limit + 1
@@ -807,7 +857,7 @@ class InvoiceItemController:
         if comparison_filters:
             base_query = self._apply_comparison_filters_optimized(base_query, comparison_filters)
         
-        # Apply search filters
+        # Apply intelligent search filters
         search_query = base_query
         if search:
             # Handle exact match (quoted search)
@@ -815,12 +865,25 @@ class InvoiceItemController:
                 exact_term = search[1:-1]
                 search_query = search_query.filter(column_attr == exact_term)
             else:
-                # Fast path: case-insensitive prefix match
-                try:
-                    search_query = search_query.filter(column_attr.ilike(f"{search}%"))
-                except Exception:
-                    # Fallback to case-sensitive prefix on error
-                    search_query = search_query.filter(column_attr.like(f"{search}%"))
+                # Normalize search term: remove special characters and convert to lowercase
+                normalized_search = ''.join(c.lower() for c in search if c.isalnum() or c.isspace()).strip()
+                normalized_search = ' '.join(normalized_search.split())  # Remove extra spaces
+                
+                if normalized_search:
+                    # Use PostgreSQL's regex to normalize both search term and column data
+                    # This will match "no hub" with "no-hub", "(no-hub)", "no_hub", etc.
+                    try:
+                        search_query = search_query.filter(
+                            func.regexp_replace(
+                                func.lower(column_attr), 
+                                '[-_\\s\\(\\)]+', 
+                                ' ', 
+                                'g'
+                            ).ilike(f"%{normalized_search}%")
+                        )
+                    except Exception:
+                        # Fallback to simple contains search on error
+                        search_query = search_query.filter(column_attr.ilike(f"%{search}%"))
         
         # Filter out null values
         search_query = search_query.filter(column_attr.isnot(None))

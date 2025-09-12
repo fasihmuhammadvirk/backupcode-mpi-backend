@@ -56,21 +56,7 @@ def convert_items_to_dataframe(items, use_suffix=True):
             lambda x: '\u00A0' + str(x) if str(x).isdigit() else str(x)
         )
     
-    # Ensure amount is formatted as string to prevent Excel errors
-    if 'Amount' in df.columns:
-        df['Amount'] = df['Amount'].astype(str)
-        # Add invisible non-breaking space to numeric amounts to prevent Excel errors
-        df['Amount'] = df['Amount'].apply(
-            lambda x: '\u00A0' + str(x) if str(x).replace('.', '').replace('-', '').isdigit() else str(x)
-        )
     
-    # Ensure cost is formatted as string to prevent Excel errors
-    if 'Cost' in df.columns:
-        df['Cost'] = df['Cost'].astype(str)
-        # Add invisible non-breaking space to numeric costs to prevent Excel errors
-        df['Cost'] = df['Cost'].apply(
-            lambda x: '\u00A0' + str(x) if str(x).replace('.', '').replace('-', '').isdigit() else str(x)
-        )
     
     # Only select columns that exist in the DataFrame
     available_columns = [col for col in columns_mapping.values() if col in df.columns]
@@ -223,21 +209,7 @@ def convert_items_to_dataframe_optimized(db_session, ids, columns=None, order_by
             lambda x: '\u00A0' + str(x) if str(x).isdigit() else str(x)
         )
     
-    # Ensure amount is formatted as string to prevent Excel errors
-    if 'amount' in df.columns:
-        df['amount'] = df['amount'].astype(str)
-        # Add invisible non-breaking space to numeric amounts to prevent Excel errors
-        df['amount'] = df['amount'].apply(
-            lambda x: '\u00A0' + str(x) if str(x).replace('.', '').replace('-', '').isdigit() else str(x)
-        )
     
-    # Ensure cost is formatted as string to prevent Excel errors
-    if 'cost' in df.columns:
-        df['cost'] = df['cost'].astype(str)
-        # Add invisible non-breaking space to numeric costs to prevent Excel errors
-        df['cost'] = df['cost'].apply(
-            lambda x: '\u00A0' + str(x) if str(x).replace('.', '').replace('-', '').isdigit() else str(x)
-        )
     if 'date_added' in df.columns:
         df['date_added'] = pd.to_datetime(df['date_added']).dt.strftime('%m/%d/%Y')
     

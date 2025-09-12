@@ -77,55 +77,43 @@ def save_final_data(final_df, supplier, output_path):
                 text_value = '\u00A0' + text_value  # Non-breaking space (invisible)
             worksheet.write_string(row_idx, ref_no_col_idx, text_value, text_format)
     
-    # Force amount column to be treated as text in Excel (invisible prefix to prevent Excel errors)
+    # Write amount column as numbers
     if 'Amount' in final_df.columns:
         amount_col_idx = final_df.columns.get_loc('Amount')
         
-        # Create text format that prevents Excel from auto-converting
-        text_format = workbook.add_format({
-            'num_format': '@',  # @ = text format
-            'text_wrap': False,
-            'align': 'left'
-        })
+        # Write header
+        worksheet.write_string(0, amount_col_idx, 'Amount')
         
-        # Set column format
-        worksheet.set_column(amount_col_idx, amount_col_idx, 15, text_format)
-        
-        # Write header as text
-        worksheet.write_string(0, amount_col_idx, 'Amount', text_format)
-        
-        # Write each amount value as text with explicit text format (invisible prefix to prevent Excel errors)
+        # Write each amount value as number
         for row_idx, value in enumerate(final_df['Amount'], 1):  # Start from row 1 (skip header)
-            # Add invisible non-breaking space to prevent Excel "Number Stored as Text" error
-            text_value = str(value)
-            if text_value.replace('.', '').replace('-', '').isdigit():
-                text_value = '\u00A0' + text_value  # Non-breaking space (invisible)
-            worksheet.write_string(row_idx, amount_col_idx, text_value, text_format)
+            if pd.notna(value):
+                # Remove commas and convert to float
+                clean_value = str(value).replace(',', '')
+                try:
+                    worksheet.write_number(row_idx, amount_col_idx, float(clean_value))
+                except (ValueError, TypeError):
+                    worksheet.write_number(row_idx, amount_col_idx, 0)
+            else:
+                worksheet.write_number(row_idx, amount_col_idx, 0)
     
-    # Force cost column to be treated as text in Excel (invisible prefix to prevent Excel errors)
+    # Write cost column as numbers
     if 'Cost' in final_df.columns:
         cost_col_idx = final_df.columns.get_loc('Cost')
         
-        # Create text format that prevents Excel from auto-converting
-        text_format = workbook.add_format({
-            'num_format': '@',  # @ = text format
-            'text_wrap': False,
-            'align': 'left'
-        })
+        # Write header
+        worksheet.write_string(0, cost_col_idx, 'Cost')
         
-        # Set column format
-        worksheet.set_column(cost_col_idx, cost_col_idx, 15, text_format)
-        
-        # Write header as text
-        worksheet.write_string(0, cost_col_idx, 'Cost', text_format)
-        
-        # Write each cost value as text with explicit text format (invisible prefix to prevent Excel errors)
+        # Write each cost value as number
         for row_idx, value in enumerate(final_df['Cost'], 1):  # Start from row 1 (skip header)
-            # Add invisible non-breaking space to prevent Excel "Number Stored as Text" error
-            text_value = str(value)
-            if text_value.replace('.', '').replace('-', '').isdigit():
-                text_value = '\u00A0' + text_value  # Non-breaking space (invisible)
-            worksheet.write_string(row_idx, cost_col_idx, text_value, text_format)
+            if pd.notna(value):
+                # Remove commas and convert to float
+                clean_value = str(value).replace(',', '')
+                try:
+                    worksheet.write_number(row_idx, cost_col_idx, float(clean_value))
+                except (ValueError, TypeError):
+                    worksheet.write_number(row_idx, cost_col_idx, 0)
+            else:
+                worksheet.write_number(row_idx, cost_col_idx, 0)
 
     worksheet.set_column('A:A', 20)
     worksheet.set_column('B:B', 35)
@@ -235,55 +223,43 @@ def save_final_data_fast(final_df, output_path):
                         text_value = '\u00A0' + text_value  # Non-breaking space (invisible)
                     worksheet.write_string(row_idx, ref_no_col_idx, text_value, text_format)
             
-            # Force amount column to be treated as text in Excel (invisible prefix to prevent Excel errors)
+            # Write amount column as numbers
             if 'Amount' in final_df.columns:
                 amount_col_idx = final_df.columns.get_loc('Amount')
                 
-                # Create text format that prevents Excel from auto-converting
-                text_format = workbook.add_format({
-                    'num_format': '@',  # @ = text format
-                    'text_wrap': False,
-                    'align': 'left'
-                })
+                # Write header
+                worksheet.write_string(0, amount_col_idx, 'Amount')
                 
-                # Set column format
-                worksheet.set_column(amount_col_idx, amount_col_idx, 15, text_format)
-                
-                # Write header as text
-                worksheet.write_string(0, amount_col_idx, 'Amount', text_format)
-                
-                # Write each amount value as text with explicit text format (invisible prefix to prevent Excel errors)
+                # Write each amount value as number
                 for row_idx, value in enumerate(final_df['Amount'], 1):  # Start from row 1 (skip header)
-                    # Add invisible non-breaking space to prevent Excel "Number Stored as Text" error
-                    text_value = str(value)
-                    if text_value.replace('.', '').replace('-', '').isdigit():
-                        text_value = '\u00A0' + text_value  # Non-breaking space (invisible)
-                    worksheet.write_string(row_idx, amount_col_idx, text_value, text_format)
+                    if pd.notna(value):
+                        # Remove commas and convert to float
+                        clean_value = str(value).replace(',', '')
+                        try:
+                            worksheet.write_number(row_idx, amount_col_idx, float(clean_value))
+                        except (ValueError, TypeError):
+                            worksheet.write_number(row_idx, amount_col_idx, 0)
+                    else:
+                        worksheet.write_number(row_idx, amount_col_idx, 0)
             
-            # Force cost column to be treated as text in Excel (invisible prefix to prevent Excel errors)
+            # Write cost column as numbers
             if 'Cost' in final_df.columns:
                 cost_col_idx = final_df.columns.get_loc('Cost')
                 
-                # Create text format that prevents Excel from auto-converting
-                text_format = workbook.add_format({
-                    'num_format': '@',  # @ = text format
-                    'text_wrap': False,
-                    'align': 'left'
-                })
+                # Write header
+                worksheet.write_string(0, cost_col_idx, 'Cost')
                 
-                # Set column format
-                worksheet.set_column(cost_col_idx, cost_col_idx, 15, text_format)
-                
-                # Write header as text
-                worksheet.write_string(0, cost_col_idx, 'Cost', text_format)
-                
-                # Write each cost value as text with explicit text format (invisible prefix to prevent Excel errors)
+                # Write each cost value as number
                 for row_idx, value in enumerate(final_df['Cost'], 1):  # Start from row 1 (skip header)
-                    # Add invisible non-breaking space to prevent Excel "Number Stored as Text" error
-                    text_value = str(value)
-                    if text_value.replace('.', '').replace('-', '').isdigit():
-                        text_value = '\u00A0' + text_value  # Non-breaking space (invisible)
-                    worksheet.write_string(row_idx, cost_col_idx, text_value, text_format)
+                    if pd.notna(value):
+                        # Remove commas and convert to float
+                        clean_value = str(value).replace(',', '')
+                        try:
+                            worksheet.write_number(row_idx, cost_col_idx, float(clean_value))
+                        except (ValueError, TypeError):
+                            worksheet.write_number(row_idx, cost_col_idx, 0)
+                    else:
+                        worksheet.write_number(row_idx, cost_col_idx, 0)
             
             # Apply minimal formatting for better readability
             # Header format

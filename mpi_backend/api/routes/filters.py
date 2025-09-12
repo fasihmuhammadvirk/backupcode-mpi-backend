@@ -477,10 +477,13 @@ def get_column_data_paginated(
     **Request Body:**
         - **page** (`int`, optional, default=1): Page number for pagination (1-based)
         - **limit** (`int`, optional, default=20): Number of items per page (max 100)
-        - **search** (`str`, optional): Search query with the following features:
+        - **search** (`str`, optional): Intelligent search query with the following features:
             - Trims leading/trailing spaces automatically
-            - Supports "starts with" matching (e.g., "1" matches all items starting with "1")
-            - Supports exact match when query is surrounded with quotes (e.g., "12345" matches exactly "12345")
+            - **Ignores special characters**: "no hub" matches "no-hub", "(no-hub)", "no_hub", "no hub", etc.
+            - **Smart ranking**: Results are prioritized by relevance (starts with → contains → ends with)
+            - **Case-insensitive**: Works regardless of case
+            - **Normalizes text**: Removes dashes, parentheses, underscores for better matching
+            - **Exact match**: Use quotes for exact matching (e.g., "12345" matches exactly "12345")
         - **comparison_filters** (`List`, required): Date range filters using comparison operators
         
     **URL Example:**
@@ -504,9 +507,10 @@ def get_column_data_paginated(
     **Search Examples:**
     ```json
     {
-        "search": "1",           // Returns all items starting with "1"
+        "search": "no hub",      // Matches: "no hub", "no-hub", "(no-hub)", "no_hub", "NO HUB", etc.
+        "search": "1",           // Matches: "1", "item-1", "(1)", "1st", etc. - ranked by relevance
         "search": "\"12345\"",   // Returns only exact match "12345"
-        "search": "  BMW  "      // Automatically trimmed to "BMW"
+        "search": "  BMW  "      // Matches: "BMW", "bmw", "bmw-item", "(BMW)", etc.
     }
     ```
         
