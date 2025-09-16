@@ -2,9 +2,38 @@ import camelot
 import os
 import numpy as np
 import re
+import platform
 
-dll_dir = 'C:\Program Files\gs\gs10.04.0'
-os.environ['PATH'] += ';' + dll_dir
+# Cross-platform Ghostscript path setup
+if platform.system() == "Windows":
+    # Windows paths for Ghostscript
+    possible_gs_paths = [
+        r'C:\Program Files\gs\gs10.04.0\bin',
+        r'C:\Program Files\gs\gs10.03.0\bin',
+        r'C:\Program Files\gs\gs10.02.0\bin',
+        r'C:\Program Files\gs\gs10.01.0\bin',
+        r'C:\Program Files\gs\gs9.56.1\bin',
+        r'C:\Program Files\gs\gs9.55.0\bin',
+    ]
+    
+    for gs_path in possible_gs_paths:
+        if os.path.exists(gs_path):
+            os.environ['PATH'] += ';' + gs_path
+            break
+else:
+    # Linux/macOS - Ghostscript should be in PATH
+    # Try to find ghostscript
+    import shutil
+    if shutil.which('gs'):
+        # Ghostscript is already in PATH
+        pass
+    else:
+        # Try common locations
+        common_paths = ['/usr/bin', '/usr/local/bin', '/opt/homebrew/bin']
+        for path in common_paths:
+            if os.path.exists(os.path.join(path, 'gs')):
+                os.environ['PATH'] += ':' + path
+                break
 table_area = ['19,506,589,85']
 columns = ['21,36,67,97,128,228,409,434,511']
 
@@ -41,10 +70,10 @@ def extract_customer_job_double_spaced_invoice(filepath):
         split_text=True
     )
     try:
-        customer_job = tables[0].df[0][1]
+        customer_job = tables[0].df.iloc[0, 1]
     except:
         if tables[0].df[0].shape == (1,):  # if there is one row and one col
-            customer_job = tables[0].df[0][0]
+            customer_job = tables[0].df.iloc[0, 0]
             split_parts = re.split(r'\s{2,}', customer_job, maxsplit=1)
             customer_job = split_parts[-1] if len(split_parts) > 1 else ''
         else:

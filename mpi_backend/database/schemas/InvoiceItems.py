@@ -32,9 +32,7 @@ class InvoiceItems(BaseModel):
     is_active: Optional[bool]
     
     class Config:
-        # Support both Pydantic v1 and v2 environments
-        orm_mode = True  # v1
-        from_attributes = True  # v2
+        from_attributes = True
 
     @validator('date', 'date_added', pre=True)
     def format_date(cls, value):

@@ -53,7 +53,7 @@ def clean_individual_table(table, page,check_row_count = False):
         bo_line_mapping = {k: v for k, v in bo_line_mapping.items() if not pd.isna(k)}
 
     # Join rows where there is nothing in LN column but value in Description
-    table['Line'] = table['Line'].fillna(method="ffill")
+    table['Line'] = table['Line'].ffill()
 
     table['Description'] = ' ' + table['Description'].astype(str)
 

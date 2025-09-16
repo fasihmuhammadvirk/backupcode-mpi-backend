@@ -5,7 +5,7 @@ import mpi_backend.api.routes.get_mappings as gm
 def test_update_item_mappings_happy_path(client):
     # Provide minimal valid body per schema: supplier_id and mapping list
     request_body = {
-        "supplier_id": 1,
+        "supplier_id": "1",
         "mapping": [
             {
                 "supplier_item_ids": "ABC-1",
@@ -28,7 +28,7 @@ def test_update_item_mappings_happy_path(client):
 
 def test_update_item_mappings_skips_empty_supplier_item_ids(client):
     request_body = {
-        "supplier_id": 1,
+        "supplier_id": "1",
         "mapping": [
             {
                 "supplier_item_ids": " ",
@@ -51,7 +51,7 @@ def test_update_item_mappings_skips_empty_supplier_item_ids(client):
 
 def test_update_item_mappings_internal_error(client):
     request_body = {
-        "supplier_id": 1,
+        "supplier_id": "1",
         "mapping": [
             {
                 "supplier_item_ids": "ABC-1",

@@ -1,12 +1,12 @@
 from pydantic import BaseModel, Field, validator
 from datetime import date, datetime
 from typing import Optional, List, Dict, Any, Union
-from pydantic.generics import GenericModel
+from pydantic import BaseModel
 from typing import TypeVar, Generic
 
 T = TypeVar('T')
 
-class PaginatedResponse(GenericModel, Generic[T]):
+class PaginatedResponse(BaseModel, Generic[T]):
     items: List[T]
     total: int
     page: int
@@ -75,7 +75,7 @@ class EnrichedItemPriceResponse(ItemInfo):
 class PaginatedEnrichedItemResponse(PaginatedResponse[EnrichedItemPriceResponse]):
     """Paginated response for EnrichedItemPriceResponse."""
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "items": [
                     {
@@ -127,7 +127,7 @@ class ItemSearchRequest(BaseModel):
 class PaginatedItemInfoResponse(PaginatedResponse[ItemInfo]):
     """Paginated response for ItemInfo."""
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "items": [
                     {

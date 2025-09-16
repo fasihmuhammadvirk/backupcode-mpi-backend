@@ -100,7 +100,7 @@ def extract_invoice_items(tables):
         qty_col = table['Shp'].dropna().astype(int).reset_index(drop=True)
         table[['Exten', 'Ln']] = table['Exten Ln#'].str.split(expand=True)
         table.drop(columns=['Exten Ln#'], inplace=True)
-        table['Ln'].fillna(method='ffill', inplace=True)
+        table['Ln'] = table['Ln'].ffill()
         table['Ln'] = table['Ln'].astype(int)
         table = table.groupby('Ln', as_index=False).agg(lambda x: ' '.join(x.dropna()))
         table.rename(columns={'Location': 'Item', 'B/O Description': 'Description', 'Net Price': 'Cost',
