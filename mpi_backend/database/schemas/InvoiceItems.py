@@ -34,6 +34,15 @@ class InvoiceItems(BaseModel):
     class Config:
         from_attributes = True
 
+    @validator('cost', pre=True)
+    def convert_cost_to_string(cls, value):
+        """Convert cost from float to string for display formatting."""
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return str(value)
+        return value
+
     @validator('date', 'date_added', pre=True)
     def format_date(cls, value):
         if value is None:
@@ -180,6 +189,15 @@ class UnmappedItemResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+    @validator('cost', 'amount', pre=True)
+    def convert_numeric_to_string(cls, value):
+        """Convert numeric values to string for display formatting."""
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return str(value)
+        return value
 
 
 class UnmappedItemsFilterRequest(BaseModel):

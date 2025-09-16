@@ -3,6 +3,14 @@ UNLIMITED PERFORMANCE MPI Backend
 All restrictions removed for maximum speed and scalability.
 """
 
+import warnings
+import os
+
+# Suppress common deprecation warnings
+warnings.filterwarnings("ignore", message=".*GenericModel.*", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*ARC4.*", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message=".*has been moved.*", category=UserWarning)
+
 from fastapi import FastAPI, Request
 from fastapi.responses import ORJSONResponse as JSONResponse
 from contextlib import asynccontextmanager

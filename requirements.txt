@@ -196,3 +196,4 @@ google-api-python-client==2.181.0
 rapidfuzz==3.14.1
 fuzzywuzzy==0.18.0
 python-Levenshtein==0.25.0
+moto==5.1.12
