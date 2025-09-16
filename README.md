@@ -320,6 +320,7 @@ conda activate mpi64bit
 
 # 3. Start the application
 uvicorn mpi_backend.main:app --host 0.0.0.0 --port 8000
+```
 
 ### 4. Verify Application is Running
 
