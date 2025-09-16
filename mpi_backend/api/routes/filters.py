@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from fastapi.responses import ORJSONResponse as JSONResponse
 from typing import List, Dict, Optional, Any
 from sqlalchemy.orm import Session
+import time
 from mpi_backend.database import get_db
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
 from mpi_backend.database.controllers.UnmappedItems import (
@@ -1568,6 +1569,20 @@ def get_cache_stats(token: str = Depends(JWTBearer())):
         - Invalid entries are automatically cleaned up
         - Cache size is limited to 50 entries for optimal performance
     """
+    def _is_cache_valid(key):
+        """Check if a cache key is valid (not expired)."""
+        try:
+            cache_entry = cache_store.get(key)
+            if cache_entry is None:
+                return False
+            # Check if cache entry has expiration time
+            if hasattr(cache_entry, 'expires_at'):
+                return cache_entry.expires_at > time.time()
+            # If no expiration, consider it valid
+            return True
+        except Exception:
+            return False
+    
     valid_entries = sum(1 for key in cache_store.keys() if _is_cache_valid(key))
     
     return create_optimized_response({

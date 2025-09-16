@@ -136,13 +136,30 @@ class TestExportUtils:
 
     def test_convert_items_to_dataframe_optimized_basic(self):
         """Test optimized DataFrame conversion."""
-        # Mock SQLAlchemy ORM query behavior
+        # Create mock InvoiceItem objects
+        mock_item1 = Mock()
+        mock_item1.item = 'ITEM001'
+        mock_item1.description = 'Test Item 1'
+        mock_item1.qty = 5
+        mock_item1.cost = 10.50
+        mock_item1.amount = '52.50'
+        mock_item1.vendor = 'Test Vendor'
+        mock_item1.date = '2024-01-01'
+        mock_item1.date_added = '2024-01-01'
+        
+        mock_item2 = Mock()
+        mock_item2.item = 'ITEM002'
+        mock_item2.description = 'Test Item 2'
+        mock_item2.qty = 3
+        mock_item2.cost = 15.00
+        mock_item2.amount = '45.00'
+        mock_item2.vendor = 'Test Vendor'
+        mock_item2.date = '2024-01-01'
+        mock_item2.date_added = '2024-01-01'
+        
+        mock_results = [mock_item1, mock_item2]
+        
         mock_query = Mock()
-        # Mock results as tuples (like SQLAlchemy ORM returns)
-        mock_results = [
-            ('ITEM001', 'Test Item 1', 5, 10.50, '52.50'),
-            ('ITEM002', 'Test Item 2', 3, 15.00, '45.00')
-        ]
         mock_query.all.return_value = mock_results
         
         mock_db_session = Mock()
@@ -170,11 +187,20 @@ class TestExportUtils:
 
     def test_convert_items_to_dataframe_optimized_no_columns(self):
         """Test optimized conversion without specifying columns."""
-        # Mock SQLAlchemy ORM query behavior
+        # Create mock InvoiceItem object
+        mock_item = Mock()
+        mock_item.item = 'ITEM001'
+        mock_item.description = 'Test Item 1'
+        mock_item.qty = 5
+        mock_item.cost = 10.50
+        mock_item.amount = '52.50'
+        mock_item.vendor = 'Test Vendor'
+        mock_item.date = '2024-01-01'
+        mock_item.date_added = '2024-01-01'
+        
+        mock_results = [mock_item]
+        
         mock_query = Mock()
-        mock_results = [
-            ('ITEM001', 'Test Item 1', 5, 10.50, '52.50')
-        ]
         mock_query.all.return_value = mock_results
         
         mock_db_session = Mock()
@@ -252,11 +278,17 @@ class TestExportUtils:
 
     def test_convert_items_to_dataframe_optimized_with_order_by(self):
         """Test optimized conversion with order_by parameter."""
-        # Mock SQLAlchemy ORM query behavior
+        # Create mock InvoiceItem object
+        mock_item = Mock()
+        mock_item.item = 'ITEM001'
+        mock_item.description = 'Test Item'
+        mock_item.vendor = 'Test Vendor'
+        mock_item.date = '2024-01-01'
+        mock_item.date_added = '2024-01-01'
+        
+        mock_results = [mock_item]
+        
         mock_query = Mock()
-        mock_results = [
-            ('ITEM001', 'Test Item')
-        ]
         mock_query.all.return_value = mock_results
         
         mock_db_session = Mock()

@@ -10,7 +10,7 @@ import os
 from unittest.mock import Mock, patch
 from botocore.exceptions import ClientError, NoCredentialsError
 import boto3
-from moto import mock_s3
+from moto import mock_aws
 
 from mpi_backend.utils.s3_utils import (
     upload_file,
@@ -60,7 +60,7 @@ class TestS3Utils:
         if os.path.exists(temp_file_path):
             os.unlink(temp_file_path)
 
-    @mock_s3
+    @mock_aws
     def test_upload_file_invoice_success(self, mock_config, temp_pdf_file):
         """Test successful invoice file upload to S3."""
         # Create mock S3 bucket
@@ -76,7 +76,7 @@ class TestS3Utils:
         assert 'Contents' in objects
         assert objects['Contents'][0]['Key'] == 'test/invoice.pdf'
 
-    @mock_s3
+    @mock_aws
     def test_upload_file_with_pdf_extension_handling(self, mock_config, temp_pdf_file):
         """Test upload with proper PDF extension handling."""
         s3_client = boto3.client('s3', region_name='us-east-1')
@@ -96,7 +96,7 @@ class TestS3Utils:
             uploaded_keys = [obj['Key'] for obj in objects.get('Contents', [])]
             assert expected_key in uploaded_keys
 
-    @mock_s3
+    @mock_aws
     def test_upload_file_non_invoice(self, mock_config, temp_excel_file):
         """Test non-invoice file upload (no special PDF handling)."""
         s3_client = boto3.client('s3', region_name='us-east-1')
@@ -134,7 +134,7 @@ class TestS3Utils:
         
         mock_client.upload_file.assert_called_once()
 
-    @mock_s3
+    @mock_aws
     def test_get_presigned_url_success(self, mock_config):
         """Test successful presigned URL generation."""
         s3_client = boto3.client('s3', region_name='us-east-1')
@@ -154,7 +154,7 @@ class TestS3Utils:
         assert 'test-mpi-bucket' in url
         assert 'test/invoice.pdf' in url
 
-    @mock_s3
+    @mock_aws
     def test_get_presigned_url_multiple_key_attempts(self, mock_config):
         """Test presigned URL generation with multiple key pattern attempts."""
         s3_client = boto3.client('s3', region_name='us-east-1')
@@ -173,7 +173,7 @@ class TestS3Utils:
         
         assert url is not None
 
-    @mock_s3
+    @mock_aws
     def test_get_presigned_url_double_extension_handling(self, mock_config):
         """Test presigned URL generation with double extension files."""
         s3_client = boto3.client('s3', region_name='us-east-1')
@@ -225,7 +225,7 @@ class TestS3Utils:
         
         assert url is None
 
-    @mock_s3
+    @mock_aws
     def test_delete_file_from_s3_success(self, mock_config):
         """Test successful file deletion from S3."""
         s3_client = boto3.client('s3', region_name='us-east-1')
@@ -247,7 +247,7 @@ class TestS3Utils:
         with pytest.raises(ClientError):
             s3_client.get_object(Bucket='test-mpi-bucket', Key='test/invoice.pdf')
 
-    @mock_s3
+    @mock_aws
     def test_delete_file_multiple_variants(self, mock_config):
         """Test deletion of multiple file variants (PDF extensions)."""
         s3_client = boto3.client('s3', region_name='us-east-1')
