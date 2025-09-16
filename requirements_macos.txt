@@ -195,3 +195,14 @@ google-api-python-client==2.181.0
 rapidfuzz==3.14.1
 fuzzywuzzy==0.18.0
 python-Levenshtein==0.25.0
+
+# =============================================================================
+# CHATBOT/QA SYSTEM DEPENDENCIES
+# =============================================================================
+langchain==0.3.7
+langchain-google-genai==2.0.4
+langchain-openai==0.2.8
+langchain-community==0.3.7
+langchain-core==0.3.21
+google-generativeai==0.8.3
+openai==1.58.1
