@@ -304,8 +304,8 @@ def extract_tax(filename, page):
 
 def get_pages(filename):
 
-    reader = pyPdf.PdfFileReader(filename)
-    numPages = reader.getNumPages()
+    reader = pyPdf.PdfReader(filename)
+    numPages = len(reader.pages)
     return numPages
 
 

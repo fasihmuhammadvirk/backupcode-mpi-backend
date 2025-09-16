@@ -5,7 +5,7 @@ import re
 from os import listdir
 import fitz
 from os.path import isfile, join
-from PyPDF2 import PdfFileWriter, PdfFileReader
+from PyPDF2 import PdfWriter, PdfReader
 from mpi_backend.utils.pdf_to_excel.extraction_util import extract_invoice_info
 
 def clean_spaces(text):
@@ -102,7 +102,7 @@ def clean_individual_table(table, page,check_row_count = False):
         except ValueError:
             table['Qty'] = table['Qty'].astype(float)
 
-        table['Qty BO'].replace([''],0, inplace=True)
+        table['Qty BO'] = table['Qty BO'].replace([''], 0)
         table['Qty BO'] = table['Qty BO'].astype(float)
         table['Cost'] = table['Cost'].apply(lambda cost: float(re.sub(r"[^0-9.]", "",str(cost))))
 
@@ -174,20 +174,20 @@ def split_multiple_invoices(filename, supplier):
     if len(set(unique_invoices)) == 1:
         return  # dont do anything if there is only one unique invoice id
 
-    input_pdf = PdfFileReader(open(filename, "rb"))
-    output = PdfFileWriter()
-    for index in range(input_pdf.numPages):
+    input_pdf = PdfReader(open(filename, "rb"))
+    output = PdfWriter()
+    for index in range(len(input_pdf.pages)):
 
         if index == 0:  # its first page, so always add it
-            output.addPage(input_pdf.getPage(index))
+            output.add_page(input_pdf.pages[index])
         elif unique_invoices[index] == unique_invoices[index-1]:  # multiple pages of same invoice
-            output.addPage(input_pdf.getPage(index))
+            output.add_page(input_pdf.pages[index])
         elif unique_invoices[index] != unique_invoices[index-1]:  # new invoice is found
             # generate pdf for previous invoice
             splited_file_paths.append(save_splited_invoice(output, index-1,filename))
             # start preparing new invoice
-            output = PdfFileWriter()
-            output.addPage(input_pdf.getPage(index))
+            output = PdfWriter()
+            output.add_page(input_pdf.pages[index])
         if index == (len(unique_invoices)-1):  # if its the last page add it to pdf anyways
             splited_file_paths.append(save_splited_invoice(output, index,filename))
     return splited_file_paths

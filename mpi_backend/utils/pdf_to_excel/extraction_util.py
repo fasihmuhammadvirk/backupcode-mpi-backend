@@ -74,10 +74,10 @@ def extract_tax_etc(filename):
     financial_data = {}
 
     for i in range(len(financial_details_table[0])):
-        fin_key = financial_details_table[0].iloc[i][0].lower()
+        fin_key = financial_details_table[0].iloc[i].iloc[0].lower()
         if not "taxable" in fin_key and not "total" in fin_key:
             try:
-                value = float(financial_details_table[0].iloc[i][1].replace("$", "").replace(",", ""))
+                value = float(financial_details_table[0].iloc[i].iloc[1].replace("$", "").replace(",", ""))
             except:
                 value = 0
             # if "sub total" in fin_key:
