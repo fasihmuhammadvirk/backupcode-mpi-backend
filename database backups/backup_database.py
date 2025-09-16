@@ -277,12 +277,6 @@ class PythonDatabaseBackup:
             logger.info(f"Backup file: {backup_path}")
             logger.info(f"File size: {file_size_mb:.2f} MB")
             
-            # Create a copy to the project root with the standard name
-            latest_backup = self.project_root / "mpi_backend_db_copy.sql"
-            import shutil
-            shutil.copy2(backup_path, latest_backup)
-            logger.info(f"Created latest backup copy: {latest_backup}")
-            
             return True
             
         except Exception as e:
@@ -325,7 +319,6 @@ def main():
         if success:
             print("\n✅ Database backup completed successfully!")
             print("📁 Backup file: database backups/mpi_backend_db_backup.sql")
-            print("📄 Latest backup copy: mpi_backend_db_copy.sql")
             print("🐍 This backup was created using Python libraries (no pg_dump required)")
             print("🔄 Previous backup was overwritten")
             sys.exit(0)

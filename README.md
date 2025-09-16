@@ -1,8 +1,17 @@
-# mpi-backend
-Contains Code for MPI Backend
+# MPI Backend
 
-## Overview
-MPI Backend is a comprehensive FastAPI-based application designed for managing invoice processing, supplier data, and QuickBooks integration. The system handles automated invoice downloads, statement processing, item mapping, and price comparison functionality.
+A comprehensive FastAPI-based application for managing invoice processing, supplier data, and QuickBooks integration. The system handles automated invoice downloads, statement processing, item mapping, and price comparison functionality.
+
+## 🚀 **Latest Updates (Python 3.11 Upgrade)**
+
+- ✅ **Upgraded to Python 3.11.9** - Full compatibility with modern Python features
+- ✅ **Fixed PyPDF2 deprecation issues** - Updated to use modern PDF processing libraries
+- ✅ **Resolved pandas deprecation warnings** - All data processing now uses current pandas syntax
+- ✅ **Cross-platform compatibility** - Works seamlessly on macOS, Linux, and Windows
+- ✅ **Enhanced PDF to Excel conversion** - All 12 supplier processing modules tested and verified
+- ✅ **Improved dependency management** - Clean, organized requirements with platform-specific support
+- ✅ **Fixed jpype integration** - Faster PDF processing with Java-Python bridge
+- ✅ **Updated backup system** - Streamlined database backup process
 
 ## Features
 - **Invoice Management**: Automated download, processing, and storage of invoices from multiple suppliers
@@ -17,15 +26,17 @@ MPI Backend is a comprehensive FastAPI-based application designed for managing i
 - **S3 Integration**: Cloud storage for processed files and exports
 
 ## Technology Stack
+- **Python**: 3.11.9 (Latest stable version)
 - **Framework**: FastAPI 0.104.0
 - **Database**: PostgreSQL with SQLAlchemy 2.0.4
 - **Authentication**: JWT with PyJWT
 - **Background Tasks**: APScheduler 3.10.4
-- **File Processing**: PyPDF2, tabula-py, openpyxl
+- **File Processing**: PyPDF2, PyPDF4, tabula-py, camelot-py, openpyxl, PyMuPDF
 - **Data Processing**: Pandas, NumPy
 - **Cloud Storage**: AWS S3 (boto3)
 - **Monitoring**: Middleware APM
 - **Containerization**: Docker & Docker Compose
+- **Environment Management**: Conda (mpi64bit environment)
 
 ## Performance Optimizations
 - **Proactive Resource Management**: Advanced optimizations that prevent high CPU usage before it occurs
@@ -190,28 +201,178 @@ To create a new migration of revision use following command and commit the resul
 alembic revision --autogenerate -m "change details"
 ```
 
-## Environment Setup
+## 🐍 **Environment Setup (Conda)**
 
-For this to run you need to have env variable set. We have included a sample .envrc file with this repo
-rename it to `.envrc` and set the values correctly
+### Prerequisites
+- **Conda** (Anaconda or Miniconda)
+- **PostgreSQL** 14+ 
+- **Java Runtime Environment** (for PDF processing)
+- **macOS**: Homebrew for PostgreSQL installation
 
-For ease of use, using `direnv` is recommended.
-You can follow instructions to install and use it here 
-https://direnv.net
-
-## Running the Application
-
-### Production Mode
-To start the uvicorn server in PRODUCTION (with monitoring enabled) run below command:
+### 1. Create and Activate Conda Environment
 
 ```bash
-middleware-apm run uvicorn mpi_backend.main:app --host 0.0.0.0 --port 8000
+# Create conda environment with Python 3.11
+conda create -n mpi64bit python=3.11.9
+
+# Activate the environment
+conda activate mpi64bit
+
+# Verify Python version
+python --version  # Should show Python 3.11.9
 ```
 
-### Development Mode
-For execution in LOCAL environment (or without monitoring) run below command:
+### 2. Install Dependencies
+
 ```bash
-uvicorn mpi_backend.main:app --port 8080
+# Install dependencies (macOS - excludes Windows-specific packages)
+pip install -r requirements_macos.txt
+
+# OR for other platforms
+pip install -r requirements.txt
+```
+
+### 3. Database Setup
+
+```bash
+# Install PostgreSQL (macOS with Homebrew)
+brew install postgresql@14
+
+# Start PostgreSQL service
+brew services start postgresql@14
+
+# Set environment variable for library path (macOS)
+export DYLD_LIBRARY_PATH="/opt/homebrew/opt/postgresql@14/lib:$DYLD_LIBRARY_PATH"
+```
+
+### 4. Environment Variables
+
+Create a `.env` file in the project root with the following variables:
+
+```bash
+# Database Configuration
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=mpi_db
+POSTGRES_USERNAME=postgres
+POSTGRES_PASSWORD=your_password
+
+# JWT Secret
+SECRET_KEY=your_secret_key
+
+# Email Configuration
+LOGIN_EMAIL=your_email@example.com
+LOGIN_PWD=your_email_password
+SMTP_SERVER=smtp.gmail.com
+
+# AWS S3 Configuration
+AWS_SERVER_PUBLIC_KEY=your_aws_key
+AWS_SERVER_SECRET_KEY=your_aws_secret
+REGION=us-east-1
+BUCKET_NAME=your_bucket_name
+
+# Local Storage
+INVOICE_DOWNLOAD_FOLDER=mpi_backend/storage
+
+# Logging
+LOG_LEVEL=INFO
+```
+
+## 🚀 **Running the Application**
+
+### 1. Activate Conda Environment
+
+```bash
+# Always activate the conda environment first
+conda activate mpi64bit
+
+# Verify you're in the correct environment
+which python  # Should point to conda environment
+```
+
+### 2. Database Migration
+
+```bash
+# Run database migrations
+cd mpi_backend
+export PYTHONPATH=../
+alembic upgrade head
+```
+
+### 3. Start the Application
+
+#### Development Mode
+```bash
+# Set PostgreSQL library path (macOS)
+export DYLD_LIBRARY_PATH="/opt/homebrew/opt/postgresql@14/lib:$DYLD_LIBRARY_PATH"
+
+# Start the application with auto-reload
+uvicorn mpi_backend.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+#### Production Mode
+```bash
+# 1. Open terminal and navigate to project directory
+cd Desktop/mpi-backend
+
+# 2. Activate conda environment
+conda activate mpi64bit
+
+# 3. Start the application
+uvicorn mpi_backend.main:app --host 0.0.0.0 --port 8000
+
+### 4. Verify Application is Running
+
+```bash
+# Check health endpoint
+curl http://localhost:8000/health
+
+# Expected response:
+# {"status":"healthy","message":"MPI Backend is running"}
+```
+
+### Server Prerequisites
+
+Before running on server, ensure:
+
+1. **Conda environment is created and activated**
+2. **Dependencies are installed** (`pip install -r requirements_macos.txt`)
+3. **Database is set up and migrated** (`alembic upgrade head`)
+4. **Environment variables are configured** (`.env` file)
+5. **PostgreSQL is running** and accessible
+6. **Port 8000 is available** and not blocked by firewall
+
+### Server Environment Variables
+
+Make sure your server has the correct environment variables in `.env`:
+
+```bash
+# Database Configuration
+POSTGRES_HOST=localhost  # or your database server IP
+POSTGRES_PORT=5432
+POSTGRES_DB=mpi_db
+POSTGRES_USERNAME=postgres
+POSTGRES_PASSWORD=your_secure_password
+
+# JWT Secret (use a strong, unique secret)
+SECRET_KEY=your_very_secure_secret_key_here
+
+# Other required variables...
+```
+
+### Running as Background Service
+
+For production, consider running as a background service:
+
+```bash
+# Using nohup to run in background
+nohup uvicorn mpi_backend.main:app --host 0.0.0.0 --port 8000 > app.log 2>&1 &
+
+# Or using screen/tmux for session management
+screen -S mpi-backend
+conda activate mpi64bit
+uvicorn mpi_backend.main:app --host 0.0.0.0 --port 8000
+# Press Ctrl+A, D to detach from screen
 ```
 
 ### Docker Deployment
@@ -228,23 +389,67 @@ docker-compose up -d
 docker-compose logs -f mpi-backend
 ```
 
-## Development
+## 🧪 **Development & Testing**
 
 ### Prerequisites
-- Python 3.9+
-- PostgreSQL
-- Java Runtime Environment (for PDF processing)
-- Docker & Docker Compose (optional)
+- **Python 3.11.9** (via conda environment)
+- **PostgreSQL 14+**
+- **Java Runtime Environment** (for PDF processing)
+- **Conda** (for environment management)
+- **Docker & Docker Compose** (optional)
 
-### Installation
-1. Clone the repository
-2. Install dependencies: `pip install -r requirements.txt`
-3. Set up environment variables
-4. Run database migrations: `alembic upgrade head`
-5. Start the application
+### Quick Start
+```bash
+# 1. Clone the repository
+git clone <repository-url>
+cd mpi-backend
+
+# 2. Create and activate conda environment
+conda create -n mpi64bit python=3.11.9
+conda activate mpi64bit
+
+# 3. Install dependencies
+pip install -r requirements_macos.txt  # macOS
+# OR
+pip install -r requirements.txt       # Other platforms
+
+# 4. Set up environment variables
+cp .env.example .env  # Edit with your values
+
+# 5. Run database migrations
+cd mpi_backend
+export PYTHONPATH=../
+alembic upgrade head
+
+# 6. Start the application
+export DYLD_LIBRARY_PATH="/opt/homebrew/opt/postgresql@14/lib:$DYLD_LIBRARY_PATH"  # macOS
+uvicorn mpi_backend.main:app --host 0.0.0.0 --port 8000 --reload
+```
 
 ### Testing
-Run tests using the test files in the `tests/` directory.
+```bash
+# Activate conda environment
+conda activate mpi64bit
+
+# Run all tests
+pytest
+
+# Run specific test file
+pytest tests/test_invoices.py
+
+# Run with verbose output
+pytest -v
+```
+
+### PDF Processing Testing
+```bash
+# Test PDF to Excel conversion
+python -c "
+from mpi_backend.utils.pdf_to_excel.main_extractor import extract_data
+result = extract_data('path/to/test.pdf', 'output.xlsx', 'Supplier Name')
+print('PDF processing test:', result)
+"
+```
 
 ### Scripts
 The `scripts/` directory contains utility scripts for:
@@ -252,6 +457,30 @@ The `scripts/` directory contains utility scripts for:
 - Historical data processing
 - Data cleanup and maintenance
 - Performance optimization
+
+## 🔧 **Recent Fixes & Improvements**
+
+### Python 3.11 Compatibility
+- ✅ **PyPDF2 Deprecation**: Updated `PdfFileReader`/`PdfFileWriter` to `PdfReader`/`PdfWriter`
+- ✅ **Pandas Warnings**: Fixed `fillna(method="ffill")` to `.ffill()` syntax
+- ✅ **Series Indexing**: Updated deprecated `df[0][1]` to `df.iloc[0, 1]`
+- ✅ **Cross-Platform Paths**: Fixed hardcoded Windows paths for macOS/Linux compatibility
+
+### PDF Processing Enhancements
+- ✅ **All 12 Suppliers Tested**: World Wide Plumbing, BMW, Y&S, Supreme, Gotham, etc.
+- ✅ **jpype Integration**: Faster PDF processing with Java-Python bridge
+- ✅ **Error Handling**: Improved error handling and logging for PDF conversion
+- ✅ **Memory Optimization**: Better memory management for large PDF files
+
+### Database & Backup
+- ✅ **Backup Script**: Python-based backup (no pg_dump required)
+- ✅ **Clean Storage**: Backups only stored in `database backups/` directory
+- ✅ **Dependency Order**: Proper table creation order respecting foreign keys
+
+### Environment Management
+- ✅ **Conda Environment**: `mpi64bit` environment with Python 3.11.9
+- ✅ **Platform-Specific Requirements**: `requirements_macos.txt` for macOS
+- ✅ **Dependency Resolution**: Fixed version conflicts and duplicates
 
 ## Monitoring & Logging
 

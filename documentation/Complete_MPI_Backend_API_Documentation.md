@@ -1,5 +1,16 @@
 # MPI Backend API Documentation
 
+## 🚀 **Latest Updates (Python 3.11 Upgrade)**
+
+- ✅ **Upgraded to Python 3.11.9** - Full compatibility with modern Python features
+- ✅ **Fixed PyPDF2 deprecation issues** - Updated to use modern PDF processing libraries
+- ✅ **Resolved pandas deprecation warnings** - All data processing now uses current pandas syntax
+- ✅ **Cross-platform compatibility** - Works seamlessly on macOS, Linux, and Windows
+- ✅ **Enhanced PDF to Excel conversion** - All 12 supplier processing modules tested and verified
+- ✅ **Improved dependency management** - Clean, organized requirements with platform-specific support
+- ✅ **Fixed jpype integration** - Faster PDF processing with Java-Python bridge
+- ✅ **Updated backup system** - Streamlined database backup process
+
 ## Table of Contents
 1. [Authentication](#authentication)
 2. [Health Check](#health-check)
@@ -13,6 +24,8 @@
 10. [Statements](#statements)
 11. [Supplier Management](#supplier-management)
 12. [Customer Job Mapping](#customer-job-mapping)
+13. [Environment Setup](#environment-setup)
+14. [PDF Processing](#pdf-processing)
 
 ---
 
@@ -959,6 +972,117 @@ Currently, no explicit rate limiting is implemented, but it's recommended to imp
 
 - **PDF Files**: Maximum size depends on server configuration
 - **Excel Files**: Maximum size depends on server configuration
+
+---
+
+## Environment Setup
+
+### Prerequisites
+- **Conda** (Anaconda or Miniconda)
+- **PostgreSQL** 14+ 
+- **Java Runtime Environment** (for PDF processing)
+- **macOS**: Homebrew for PostgreSQL installation
+
+### 1. Create and Activate Conda Environment
+
+```bash
+# Create conda environment with Python 3.11
+conda create -n mpi64bit python=3.11.9
+
+# Activate the environment
+conda activate mpi64bit
+
+# Verify Python version
+python --version  # Should show Python 3.11.9
+```
+
+### 2. Install Dependencies
+
+```bash
+# Install dependencies (macOS - excludes Windows-specific packages)
+pip install -r requirements_macos.txt
+
+# OR for other platforms
+pip install -r requirements.txt
+```
+
+### 3. Database Setup
+
+```bash
+# Install PostgreSQL (macOS with Homebrew)
+brew install postgresql@14
+
+# Start PostgreSQL service
+brew services start postgresql@14
+
+# Set environment variable for library path (macOS)
+export DYLD_LIBRARY_PATH="/opt/homebrew/opt/postgresql@14/lib:$DYLD_LIBRARY_PATH"
+```
+
+### 4. Running the Application
+
+```bash
+# Activate conda environment
+conda activate mpi64bit
+
+# Set PostgreSQL library path (macOS)
+export DYLD_LIBRARY_PATH="/opt/homebrew/opt/postgresql@14/lib:$DYLD_LIBRARY_PATH"
+
+# Start the application
+uvicorn mpi_backend.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+---
+
+## PDF Processing
+
+### Supported Suppliers
+
+The system supports PDF to Excel conversion for the following suppliers:
+
+1. **World Wide Plumbing** - Standard tabula processing
+2. **BMW Plumbing Supplies** - Enhanced processing with camelot fallback
+3. **Y & S Plumbing Supply** - Credit memo processing support
+4. **Park Plumbing Supply** - Standard BMW processing
+5. **Pyramid Plumbing** - Custom column configuration
+6. **Supreme Plumbing Supply** - Multi-page invoice support
+7. **Gotham Plumbing Supply** - Watermark removal processing
+8. **FW Webb Plumbing Supply** - Web Co Supply processing
+9. **Flow Mark Plumbing Supply** - Flow Mark specific processing
+10. **Plumbing Exchange** - Exchange-specific processing
+11. **AF Supply** - AF Supply processing
+12. **Lion Hvac Supplies** - HVAC-specific processing
+
+### PDF Processing Features
+
+- **Multi-format Support**: Handles various PDF layouts and formats
+- **Table Extraction**: Uses tabula-py and camelot-py for table extraction
+- **Data Cleaning**: Automatic data cleaning and formatting
+- **Error Handling**: Comprehensive error handling and logging
+- **Memory Optimization**: Efficient memory usage for large PDFs
+- **Cross-platform**: Works on macOS, Linux, and Windows
+
+### Testing PDF Processing
+
+```bash
+# Test PDF processing
+python -c "
+from mpi_backend.utils.pdf_to_excel.main_extractor import extract_data
+result = extract_data('path/to/invoice.pdf', 'output.xlsx', 'Supplier Name')
+print('Processing result:', result)
+"
+```
+
+### Dependencies
+
+- **PyPDF2**: PDF reading and manipulation
+- **PyPDF4**: Additional PDF processing capabilities
+- **tabula-py**: Table extraction from PDFs
+- **camelot-py**: Advanced table extraction
+- **PyMuPDF (fitz)**: PDF text extraction
+- **pandas**: Data manipulation and cleaning
+- **openpyxl**: Excel file creation
+- **jpype1**: Java-Python bridge for faster processing
 - **Supported Formats**: PDF for invoices, Excel (.xlsx, .xls, .xlsm) for mappings
 
 ## Notes
