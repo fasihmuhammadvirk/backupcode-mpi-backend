@@ -33,4 +33,4 @@ ENV PYTHONPATH=../
 ENV PATH="/usr/lib/jvm/java-11-openjdk-amd64/bin:$PATH"
 
 # First do Alembic Migrations and then proceed towards Running Fast API
-CMD ["bash", "-c", "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1 --timeout-keep-alive 65 --timeout-graceful-shutdown 30 --limit-concurrency 1000 --access-log --log-level info"]
+CMD ["bash", "-c", "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"]

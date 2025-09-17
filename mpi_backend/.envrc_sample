@@ -1,7 +1,27 @@
+# Database Configuration
 export POSTGRES_HOST=localhost
 export POSTGRES_DB=mpi_db
-export POSTGRES_USERNAME=dummy
-export POSTGRES_PASSWORD=dummy
+export POSTGRES_USERNAME=dummy_user
+export POSTGRES_PASSWORD=dummy_password
 export POSTGRES_PORT=5432
+
+# Application Configuration
 export ENVIRONMENT=dev
 export PYTHONBUFFERED=1
+export SECRET_KEY=your_secret_key
+# Email Configuration
+export LOGIN_EMAIL=your_email@example.com
+export LOGIN_PWD=your_email_password
+export SMTP_SERVER=imap.gmail.com
+
+# AWS S3 Configuration
+export PUBLIC_ACCESS_KEY=your_aws_key
+export SECRET_ACCESS_KEY=your_aws_secret
+export BUCKET_NAME=nl-mpi-storage
+export REGION=us-east-1
+
+# Local Storage
+export INVOICE_DOWNLOAD_FOLDER=mpi_backend/storage
+
+# AI/ML Configuration
+export GOOGLE_CHATBOT_API_KEY=your_google_chatbot_api_key
