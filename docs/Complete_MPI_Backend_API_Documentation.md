@@ -1,6 +1,6 @@
 # MPI Backend API Documentation
 
-## 🚀 **Latest Updates (Python 3.11 Upgrade)**
+## 🚀 **Latest Updates (Python 3.11 Upgrade & Enhanced Mapping System)**
 
 - ✅ **Upgraded to Python 3.11.9** - Full compatibility with modern Python features
 - ✅ **Fixed PyPDF2 deprecation issues** - Updated to use modern PDF processing libraries
@@ -10,6 +10,9 @@
 - ✅ **Improved dependency management** - Clean, organized requirements with platform-specific support
 - ✅ **Fixed jpype integration** - Faster PDF processing with Java-Python bridge
 - ✅ **Updated backup system** - Streamlined database backup process
+- ✅ **Enhanced Mapping System** - Improved file naming and organization for better maintainability
+- ✅ **Google Sheets Integration** - Renamed and reorganized Google Sheets extractors for clarity
+- ✅ **Temporary Mapping Management** - Better handling of temporary vs permanent mappings
 
 ## Table of Contents
 1. [Authentication](#authentication)
@@ -18,14 +21,15 @@
 4. [Invoice Items](#invoice-items)
 5. [Filters](#filters)
 6. [QuickBooks Integration](#quickbooks-integration)
-7. [Item Mappings](#item-mappings)
-8. [Sync Mappings](#sync-mappings)
+7. [Mapping Updates](#mapping-updates)
+8. [Google Sheets Sync](#google-sheets-sync)
 9. [Monthly Comparison](#monthly-comparison)
 10. [Statements](#statements)
 11. [Supplier Management](#supplier-management)
 12. [Customer Job Mapping](#customer-job-mapping)
 13. [Environment Setup](#environment-setup)
 14. [PDF Processing](#pdf-processing)
+15. [Updated File Structure](#updated-file-structure)
 
 ---
 
@@ -405,16 +409,43 @@ Supports multiple formats:
 
 ---
 
-## Item Mappings
+## Mapping Updates
 
 ### Update Item Mappings
 **POST** `/mapping`
 
-Updates the description, sheet name and MPI codes for an item number. If mapping for item-number does not exist before, a new record is inserted. Basically the endpoint updates or creates mappings for supplier-specific item IDs to MPI codes and descriptions.
+Updates the description, sheet name and MPI codes for an item number with enhanced validation and temporary mapping handling. This endpoint processes batch updates and provides detailed feedback on the results, preventing temporary mappings from being saved permanently.
+
+**Request Body:**
+```json
+{
+  "supplier_id": 1,
+  "mapping": [
+    {
+      "supplier_item_ids": "ABC-1",
+      "mpi_item": "MPI001",
+      "mpi_description": "Description"
+    }
+  ]
+}
+```
 
 **Responses:**
-- **200**: Mapping updated/created successfully
+- **200**: Returns detailed update results with permanent/temporary mapping counts
 - **500**: Failed to update item mapping
+
+**Response Example:**
+```json
+{
+  "success": true,
+  "message": "Processing completed: 15 permanent mappings, 3 redirected to temporary storage",
+  "details": {
+    "permanent_mappings": 15,
+    "temporary_redirected": 3,
+    "results": [...]
+  }
+}
+```
 
 ### Get Mappings by MPI Type
 **GET** `/mapping/mpi_types`
@@ -439,12 +470,12 @@ Retrieves all MPI items and MPI descriptions for a specific supplier.
 
 ---
 
-## Sync Mappings
+## Google Sheets Sync
 
 ### Sync Mapping
 **POST** `/sync/mapping`
 
-Manually trigger enhanced synchronization of mappings from Google Sheets. This endpoint provides enhanced synchronization with better handling of temporary and permanent mappings. If a sync task is already running, it returns a detailed status message.
+Manually trigger complete synchronization of mappings from Google Sheets. This endpoint orchestrates the entire mapping sync process including both permanent and temporary mappings. If a sync task is already running, it returns a detailed status message.
 
 **Background Tasks:**
 - **background_tasks** (`BackgroundTasks`): FastAPI background tasks for async processing
@@ -479,9 +510,9 @@ Manually trigger enhanced synchronization of mappings from Google Sheets. This e
 4. Returns immediate response with task status
 
 **Sync Operations:**
-- **Google Sheets Sync**: Basic synchronization from Google Sheets
-- **UIDI Update**: Updates No Match / UIDI mappings (3-step process)
-- **Full Update**: Updates all mappings (3-step process)
+- **Data Extraction**: Extracts data from Google Sheets using enhanced extractors
+- **Mapping Processing**: Processes and categorizes mappings as permanent or temporary
+- **Temporary Mapping Sync**: Updates invoice items with temporary sheet assignments
 
 **Blocking Job Detection:**
 - Detects currently running sync operations
@@ -490,10 +521,11 @@ Manually trigger enhanced synchronization of mappings from Google Sheets. This e
 - Returns specific blocking job descriptions
 
 **Background Processing:**
-- Uses GoogleSheetSyncController for enhanced sync
+- Uses GoogleSheetSyncController for complete sync orchestration
 - Runs in background to prevent API blocking
 - Provides detailed operation tracking
-- Handles temporary and permanent mapping updates
+- Handles both permanent and temporary mapping updates
+- Utilizes enhanced Google Sheets extractors for data processing
 
 ### Get Sync Status
 **GET** `/sync/status`
@@ -1084,6 +1116,65 @@ print('Processing result:', result)
 - **openpyxl**: Excel file creation
 - **jpype1**: Java-Python bridge for faster processing
 - **Supported Formats**: PDF for invoices, Excel (.xlsx, .xls, .xlsm) for mappings
+
+## Updated File Structure
+
+### Recent File Renaming and Reorganization
+
+The codebase has been reorganized for better maintainability and clarity. Here are the key changes:
+
+#### **Route Files Renamed:**
+- `temporary_mapping_sync.py` → `google_sheets_sync.py`
+  - **Purpose**: Triggers complete Google Sheets synchronization (both permanent and temporary mappings)
+  - **Endpoint**: `POST /sync/mapping`
+
+- `item_mappings.py` → `mapping_updates.py`
+  - **Purpose**: Handles individual mapping updates with validation
+  - **Endpoint**: `POST /mapping`
+
+#### **Utils Directory Reorganization:**
+- `temporary_mapping_management/` → `mapping_sync_utils/`
+  - **Purpose**: Contains utilities for the complete mapping sync process
+
+- `google_sheets/` → `google_sheets_extractors/`
+  - **Purpose**: Contains Google Sheets data extraction utilities
+  - **Files**:
+    - `google_sheets_mapping_extractor.py` (EnhancedGoogleSheetDataExtractor)
+    - `temporary_mapping_detector.py` (TemporaryMappingExtractor)
+
+#### **File Naming Improvements:**
+- `temporary_mapping_synchronizer.py` → `temporary_mapping_sync_handler.py`
+- `temporary_mapping_processor.py` → `temporary_mapping_applier.py`
+- `invoice_downaloder.py` → `invoice_downloader.py` (fixed typo)
+- `missing_invoice_downaloder.py` → `missing_invoice_downloader.py` (fixed typo)
+- `invoice_convertor.py` → `invoice_converter.py` (American spelling)
+- `qa_agent.py` → `database_qa_agent.py` (more specific)
+- `item_utils.py` → `item_processing_utils.py` (more descriptive)
+
+#### **PDF Processing Files Renamed:**
+All PDF processing files in `utils/pdf_to_excel/` have been renamed to follow the pattern `{supplier}_processor.py`:
+- `supremePlumbing_uitl.py` → `supreme_plumbing_util.py`
+- `abc_opus_services_utils.py` → `abc_opus_services_processor.py`
+- `af_supply.py` → `af_supply_processor.py`
+- `bmw_old.py` → `bmw_plumbing_processor.py`
+- `ys_old.py` → `ys_plumbing_processor.py`
+- `web_co_supply.py` → `fw_webb_plumbing_processor.py`
+- `plumbing_exchange.py` → `plumbing_exchange_processor.py`
+- `gotham_supply.py` → `gotham_plumbing_processor.py`
+- `lion_havac.py` → `lion_hvac_processor.py` (fixed typo)
+- `flow_mark.py` → `flow_mark_plumbing_processor.py`
+
+#### **Directory Structure Improvements:**
+- `customer_job_mapping/` → `customer_job_management/`
+- `statement_extractor/` → `statement_processing/`
+- `sync_mapping/` → `mapping_sync_utils/`
+
+### Benefits of the Reorganization:
+1. **Clearer Purpose**: File names now clearly indicate their functionality
+2. **Better Organization**: Related files are grouped logically
+3. **PEP 8 Compliance**: All file names follow Python naming conventions
+4. **Maintainability**: Easier to find and understand code components
+5. **Consistency**: Uniform naming patterns across the codebase
 
 ## Notes
 

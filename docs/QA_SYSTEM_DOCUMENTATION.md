@@ -17,7 +17,7 @@ The MPI Backend now includes a powerful Natural Language Q/A system that allows 
 
 ### Components
 
-1. **QA Agent** (`utils/qa_agent.py`)
+1. **QA Agent** (`utils/database_qa_agent.py`)
    - Core AI logic using Google Gemini LLM
    - SQL query generation and safety validation
    - Result processing and natural language response generation
@@ -127,7 +127,8 @@ The system works with your existing database models:
 - `invoices` - Invoice records
 - `invoice_items` - Individual line items
 - `suppliers` - Supplier information
-- `supplier_item_mappings` - Item mappings
+- `supplier_item_mappings` - Permanent item mappings
+- `temporary_item_mappings` - Temporary item mappings
 - `customer_job_mappings` - Customer job mappings
 - `item_classifications` - Item classifications
 - `unmapped_items` - Unmapped items
