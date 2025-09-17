@@ -556,7 +556,10 @@ the information they need to make decisions.
             if not self._is_safe_query(sql_query):
                 return {
                     "answer": ("⚠️ Warning: Only SELECT queries are allowed. "
-                               "Write operations are blocked for safety.")
+                               "Write operations are blocked for safety."),
+                    "sql_query": sql_query,
+                    "raw_results": [],
+                    "error": "Unsafe query detected"
                 }
 
             # Execute query and get raw results
@@ -697,9 +700,12 @@ the information they need to make decisions.
                 )
                 logger.info("Response generated using fallback due to Gemini rate limits")
             
-            # Return only the answer
+            # Return structured response
             return {
-                "answer": answer
+                "answer": answer,
+                "sql_query": sql_query,
+                "raw_results": f"Found {len(raw_results) if isinstance(raw_results, list) else 1} results",
+                "error": None
             }
 
         except Exception as e:
@@ -709,13 +715,124 @@ the information they need to make decisions.
             if self._is_rate_limit_error(e):
                 return {
                     "answer": ("⚠️ Rate limit exceeded! I'm currently experiencing high demand. "
-                               "Please try again in a few minutes. If this persists, contact support.")
+                               "Please try again in a few minutes. If this persists, contact support."),
+                    "sql_query": None,
+                    "raw_results": None,
+                    "error": str(e)
                 }
             else:
                 return {
                     "answer": (f"I encountered an error while processing "
-                               f"your question: {str(e)}")
+                               f"your question: {str(e)}"),
+                    "sql_query": None,
+                    "raw_results": None,
+                    "error": str(e)
                 }
+
+    async def debug_query(self, question: str) -> Dict[str, Any]:
+        """
+        Process a natural language question and return debug information
+        
+        Args:
+            question (str): Natural language question about the database
+            
+        Returns:
+            Dict containing answer, sql_query, raw_results, debug_info, and any errors
+        """
+        try:
+            logger.info(f"Processing debug question: {question}")
+            
+            # Generate SQL query with fallback
+            async def generate_sql(llm):
+                sql_chain = create_sql_query_chain(
+                    llm=llm,
+                    db=self.sql_database
+                )
+                return await sql_chain.ainvoke({"question": question})
+            
+            sql_result, gemini_rate_limited = await self._execute_with_fallback(generate_sql)
+            sql_query = sql_result
+            logger.info(f"Generated SQL: {sql_query}")
+            
+            # Safety check
+            safety_check = "PASSED" if self._is_safe_query(sql_query) else "FAILED"
+            
+            # Get table info for debugging
+            table_info = self._get_enhanced_table_info()
+            
+            # Execute query and get raw results (only if safe)
+            if safety_check == "PASSED":
+                raw_results = self._execute_sql_query(sql_query)
+                sanitized_results = self._sanitize_results(str(raw_results))
+                
+                # Generate natural language answer with fallback
+                async def generate_answer(llm):
+                    answer_prompt = PromptTemplate.from_template(
+                        """You are an expert data analyst for MPI Backend.
+                        
+                        Based on the following SQL query and its results, provide a clear answer.
+                        
+                        **User Question:** {question}
+                        **SQL Query:** {query}
+                        **Query Results:** {result}
+                        
+                        Provide a comprehensive response.
+                        """
+                    )
+                    
+                    answer_chain = (
+                        RunnablePassthrough.assign(query=lambda x: sql_query)
+                        | RunnablePassthrough.assign(result=lambda x: raw_results)
+                        | answer_prompt
+                        | llm
+                        | StrOutputParser()
+                    )
+                    
+                    return await answer_chain.ainvoke({"question": question})
+                
+                answer_result, gemini_rate_limited_answer = await self._execute_with_fallback(generate_answer)
+                answer = answer_result
+                
+                if gemini_rate_limited or gemini_rate_limited_answer:
+                    answer = "⚠️ Note: Gemini 2.5 Flash rate limit exceeded, using fallback model.\n\n" + answer
+                
+                return {
+                    "answer": answer,
+                    "sql_query": sql_query,
+                    "raw_results": f"Found {len(raw_results) if isinstance(raw_results, list) else 1} results",
+                    "debug_info": {
+                        "table_info": table_info,
+                        "safety_check": safety_check,
+                        "gemini_rate_limited": gemini_rate_limited or gemini_rate_limited_answer
+                    },
+                    "error": None
+                }
+            else:
+                return {
+                    "answer": "⚠️ Warning: Only SELECT queries are allowed. Write operations are blocked for safety.",
+                    "sql_query": sql_query,
+                    "raw_results": [],
+                    "debug_info": {
+                        "table_info": table_info,
+                        "safety_check": safety_check,
+                        "gemini_rate_limited": False
+                    },
+                    "error": "Unsafe query detected"
+                }
+                
+        except Exception as e:
+            logger.error(f"Error processing debug question: {e}")
+            return {
+                "answer": f"I encountered an error while processing your question: {str(e)}",
+                "sql_query": None,
+                "raw_results": None,
+                "debug_info": {
+                    "table_info": {},
+                    "safety_check": "ERROR",
+                    "gemini_rate_limited": False
+                },
+                "error": str(e)
+            }
 
 
 # Global instance

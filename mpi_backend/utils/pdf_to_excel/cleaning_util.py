@@ -5,7 +5,11 @@ import re
 from os import listdir
 import fitz
 from os.path import isfile, join
-from PyPDF2 import PdfWriter, PdfReader
+try:
+    from PyPDF2 import PdfWriter, PdfReader
+except ImportError:
+    # PyPDF2 has been deprecated, use pypdf instead
+    from pypdf import PdfWriter, PdfReader
 from mpi_backend.utils.pdf_to_excel.extraction_util import extract_invoice_info
 
 def clean_spaces(text):

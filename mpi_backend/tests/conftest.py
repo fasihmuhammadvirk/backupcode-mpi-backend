@@ -27,6 +27,7 @@ def _enable_pytest_auth_bypass():
 @pytest.fixture(scope="session")
 def client():
     # Create a real FastAPI TestClient to test actual app startup and functionality
+    # Use the older TestClient constructor for compatibility
     return TestClient(app)
 
 

@@ -84,6 +84,96 @@ class QAController:
                 detail=f"Failed to process query: {str(e)}"
             )
 
+    async def process_debug_query(self, question: str) -> Dict[str, Any]:
+        """
+        Process a natural language question and return debug information
+
+        Args:
+            question (str): Natural language question about the database
+
+        Returns:
+            Dict containing answer, sql_query, raw_results, debug_info, and any errors
+
+        Raises:
+            HTTPException: If question is invalid or processing fails
+        """
+        try:
+            # Validate input
+            if not question or not isinstance(question, str):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Question must be a non-empty string"
+                )
+            
+            question = question.strip()
+            if len(question) < 3:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Question must be at least 3 characters long"
+                )
+            
+            if len(question) > 1000:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Question must be less than 1000 characters"
+                )
+            
+            logger.info("Processing debug query: %s...", question[:100])
+
+            # Get QA agent and process question with debug info
+            qa_agent = self._get_qa_agent()
+            result = await qa_agent.debug_query(question)
+
+            logger.info("Debug query processed successfully")
+            return result
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error processing debug query: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to process debug query: {str(e)}"
+            )
+
+    def get_system_info(self) -> Dict[str, Any]:
+        """
+        Get system information for debugging and monitoring
+
+        Returns:
+            Dict containing system information including available tables
+        """
+        try:
+            qa_agent = self._get_qa_agent()
+            
+            # Get table information
+            table_names = qa_agent._get_table_names()
+            table_info = qa_agent._get_enhanced_table_info()
+            
+            return {
+                "status": "active",
+                "available_tables": table_names,
+                "table_info": table_info,
+                "llm_model": "gemini-pro",
+                "llm_status": {
+                    "primary_llm": "available" if qa_agent.primary_llm else "unavailable",
+                    "fallback_llm": "available" if qa_agent.fallback_llm else "unavailable"
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting system info: {e}")
+            return {
+                "status": "error",
+                "error": str(e),
+                "available_tables": [],
+                "table_info": {},
+                "llm_status": {
+                    "primary_llm": "unavailable",
+                    "fallback_llm": "unavailable"
+                }
+            }
+
 
 # Global controller instance
 _qa_controller = None

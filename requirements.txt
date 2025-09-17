@@ -1,6 +1,13 @@
-# MPI Backend - Python 3.11+ (64-bit) Production Requirements
-# Complete dependency list for production deployment
-
+# =============================================================================
+# MPI Backend - Windows Requirements (Python 3.11+)
+# =============================================================================
+# 
+# ⚠️  IMPORTANT WARNINGS:
+# - This file is specifically for Windows systems
+# - Includes pywin32 for Windows-specific functionality
+# - Some packages may have different versions for different platforms
+# - Always use a virtual environment: python -m venv venv && venv\Scripts\activate
+#
 # =============================================================================
 # CORE FRAMEWORK
 # =============================================================================
@@ -9,7 +16,6 @@ uvicorn[standard]==0.35.0
 pydantic==2.11.9
 starlette==0.47.3
 fastapi-pagination==0.9.0
-orjson>=3.8.0,<4.0.0
 
 # =============================================================================
 # DATABASE & ORM
@@ -17,7 +23,7 @@ orjson>=3.8.0,<4.0.0
 SQLAlchemy==2.0.43
 alembic==1.16.5
 psycopg2-binary==2.9.10
-pyodbc==5.2.0
+pyodbc==5.2.0  # Windows-specific for SQL Server connections
 
 # =============================================================================
 # DATA PROCESSING & ANALYSIS
@@ -30,13 +36,15 @@ xlsxwriter==3.2.8
 # =============================================================================
 # PDF PROCESSING & DOCUMENT HANDLING
 # =============================================================================
-tabula-py==2.10.0
+# ⚠️  PDF Processing Dependencies - Order matters for compatibility
 PyMuPDF==1.26.4
-camelot-py==1.0.9
+tabula-py==2.10.0
 pdfminer.six==20250506
 PyPDF2==3.0.1
 PyPDF4==1.27.0
-pypdf==3.17.4
+# pypdf and camelot-py - using working versions
+pypdf==5.9.0  # Working version with camelot-py 1.0.9
+camelot-py==1.0.9
 pypdfium2==4.30.0
 
 # =============================================================================
@@ -74,7 +82,7 @@ pillow==11.3.0
 # =============================================================================
 # WINDOWS SUPPORT
 # =============================================================================
-pywin32==311
+pywin32==311  # Windows-specific package
 
 # =============================================================================
 # EMAIL PROCESSING
@@ -84,8 +92,9 @@ email-validator==2.1.1
 # =============================================================================
 # TESTING FRAMEWORK
 # =============================================================================
-pytest==8.0.0
-pytest-asyncio==0.23.2
+# ⚠️  Testing Dependencies - Critical for pytest functionality
+pytest==8.3.4
+pytest-asyncio==0.25.0  # Updated for compatibility with pytest 8.x
 pytest-mock==3.12.0
 moto==5.1.12
 
@@ -95,42 +104,40 @@ moto==5.1.12
 python-dateutil==2.9.0.post0
 pytz==2025.2
 tzdata==2025.2
-charset-normalizer==3.4.3
+charset-normalizer==3.3.2
 chardet==5.2.0
 tabulate==0.9.0
 distro==1.9.0
-# hashlib-compat==1.0.1  # Package not available
 
 # =============================================================================
 # SECURITY & CRYPTOGRAPHY
 # =============================================================================
-cryptography==45.0.7
-cffi==2.0.0
-pycparser==2.23
+cryptography==44.0.0
+cffi==1.17.1
+pycparser==2.22
 
 # =============================================================================
 # ASYNC & CONCURRENCY
 # =============================================================================
-anyio==4.10.0
-asyncio-mqtt==0.16.1
+anyio==4.3.0
 
 # =============================================================================
 # WEB FRAMEWORK EXTRAS
 # =============================================================================
-click==8.2.1
+click==8.1.7
 colorama==0.4.6
 et_xmlfile==2.0.0
 greenlet==3.2.4
 h11==0.16.0
-idna==3.10
+idna==3.7
 Mako==1.3.10
 MarkupSafe==3.0.2
 pydantic_core==2.33.2
-six==1.17.0
+six==1.16.0
 sniffio==1.3.1
 typing-inspection==0.4.1
-typing_extensions==4.15.0
-annotated-types==0.7.0
+typing_extensions==4.12.2
+annotated-types==0.6.0
 
 # =============================================================================
 # PERFORMANCE & MONITORING
@@ -146,12 +153,12 @@ loguru==0.7.2
 # =============================================================================
 # FILE HANDLING & I/O
 # =============================================================================
-pathlib2==2.3.7
 watchdog==4.0.0
 
 # =============================================================================
 # JSON & SERIALIZATION
 # =============================================================================
+orjson>=3.8.0,<4.0.0
 ujson==5.8.0
 
 # =============================================================================
@@ -167,23 +174,11 @@ redis==5.0.1
 diskcache==5.6.3
 
 # =============================================================================
-# FILE MONITORING
+# DEVELOPMENT & DEBUGGING (Optional)
 # =============================================================================
-
-# =============================================================================
-# HASHING & COMPATIBILITY
-# =============================================================================
-# hashlib-compat==1.0.1  # Package not available
-
-# =============================================================================
-# MQTT & MESSAGING
-# =============================================================================
-
-# =============================================================================
-# DEVELOPMENT & DEBUGGING
-# =============================================================================
-ipython==8.22.0
-jupyter==1.0.0
+# Uncomment if needed for development
+# ipython==8.22.0
+# jupyter==1.0.0
 
 # =============================================================================
 # ADDITIONAL DEPENDENCIES FOUND DURING RUNTIME
@@ -192,11 +187,14 @@ google-api-python-client==2.181.0
 rapidfuzz==3.14.1
 fuzzywuzzy==0.18.0
 python-Levenshtein==0.25.0
-jpype1==1.6.0
+# jpype1==1.6.0  # Optional, for Java-based PDF processing
 
 # =============================================================================
 # CHATBOT/QA SYSTEM DEPENDENCIES
 # =============================================================================
+# ⚠️  AI/ML Dependencies - May have version conflicts
+# Note: langchain-google-genai may have metaclass conflicts in some environments
+# If you encounter issues, try: pip install --upgrade langchain-google-genai
 langchain==0.1.20
 langchain-google-genai==0.0.8
 langchain-openai==0.0.8
@@ -204,3 +202,18 @@ langchain-community==0.0.38
 langchain-core==0.1.52
 google-generativeai==0.3.2
 openai==1.12.0
+
+# =============================================================================
+# DEPENDENCY CONFLICT RESOLUTION
+# =============================================================================
+# If you encounter conflicts, try installing in this order:
+# 1. Core framework packages first
+# 2. Database packages
+# 3. PDF processing packages (order matters)
+# 4. AI/ML packages last (most likely to have conflicts)
+#
+# Common conflicts:
+# - pypdf vs camelot-py: Use pypdf==5.9.0 (working with camelot-py 1.0.9)
+# - openai version conflicts: Stick to 1.12.0 for compatibility
+# - pytest-asyncio: Use 0.24.0+ for pytest 8.x compatibility
+# - pywin32: Only install on Windows systems
