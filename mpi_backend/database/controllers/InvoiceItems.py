@@ -790,7 +790,7 @@ class InvoiceItemController:
                             where_conditions.append(f"{col} = :{param_name}")
                             query_params[param_name] = values
             
-            # Apply intelligent search filter with normalization and ranking
+            # Apply intelligent search filter with flexible matching
             if search:
                 search = search.strip()
                 if search.startswith('"') and search.endswith('"') and len(search) > 2:
@@ -799,16 +799,30 @@ class InvoiceItemController:
                     where_conditions.append(f"{column_name} = :exact_search")
                     query_params['exact_search'] = exact_term
                 else:
-                    # Normalize search term: remove special characters and convert to lowercase
-                    normalized_search = ''.join(c.lower() for c in search if c.isalnum() or c.isspace()).strip()
-                    normalized_search = ' '.join(normalized_search.split())  # Remove extra spaces
+                    # Create multiple search patterns for flexible matching
+                    search_patterns = []
                     
-                    if normalized_search:
-                        # Use PostgreSQL's regex to normalize both search term and column data
-                        # This will match "no hub" with "no-hub", "(no-hub)", "no_hub", etc.
-                        regex_pattern = normalized_search.replace(' ', '[-_\\s\\(\\)]*')
-                        where_conditions.append(f"REGEXP_REPLACE(LOWER({column_name}), '[-_\\s\\(\\)]+', ' ', 'g') ILIKE :intelligent_search")
-                        query_params['intelligent_search'] = f"%{normalized_search}%"
+                    # 1. Direct case-insensitive search
+                    search_patterns.append(f"{column_name} ILIKE :search_direct")
+                    query_params['search_direct'] = f"%{search}%"
+                    
+                    # 2. Normalized search (remove special characters)
+                    normalized_search = ''.join(c.lower() for c in search if c.isalnum() or c.isspace()).strip()
+                    normalized_search = ' '.join(normalized_search.split())
+                    if normalized_search and normalized_search != search.lower():
+                        search_patterns.append(f"REGEXP_REPLACE(LOWER({column_name}), '[-_\\s\\(\\)]+', ' ', 'g') ILIKE :search_normalized")
+                        query_params['search_normalized'] = f"%{normalized_search}%"
+                    
+                    # 3. Flexible pattern matching (handles missing characters)
+                    if len(search) > 2:
+                        # Create a pattern that allows for missing characters
+                        flexible_pattern = search.lower().replace('-', '[-_\\s]*').replace(' ', '[-_\\s]*')
+                        search_patterns.append(f"LOWER({column_name}) ~ :search_flexible")
+                        query_params['search_flexible'] = f".*{flexible_pattern}.*"
+                    
+                    # Combine all patterns with OR
+                    if search_patterns:
+                        where_conditions.append(f"({' OR '.join(search_patterns)})")
             
             # Build the complete SQL query
             where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
@@ -823,11 +837,13 @@ class InvoiceItemController:
                     WITH filtered_data AS (
                         SELECT DISTINCT {column_name},
                         CASE 
-                            WHEN LOWER({column_name}) LIKE :starts_with THEN 1
-                            WHEN REGEXP_REPLACE(LOWER({column_name}), '[-_\\s\\(\\)]+', ' ', 'g') LIKE :normalized_starts THEN 2
-                            WHEN LOWER({column_name}) LIKE :contains THEN 3
-                            WHEN REGEXP_REPLACE(LOWER({column_name}), '[-_\\s\\(\\)]+', ' ', 'g') LIKE :normalized_contains THEN 4
-                            ELSE 5
+                            WHEN LOWER({column_name}) = :exact_match THEN 1
+                            WHEN LOWER({column_name}) LIKE :starts_with THEN 2
+                            WHEN REGEXP_REPLACE(LOWER({column_name}), '[-_\\s\\(\\)]+', ' ', 'g') LIKE :normalized_starts THEN 3
+                            WHEN LOWER({column_name}) LIKE :contains THEN 4
+                            WHEN REGEXP_REPLACE(LOWER({column_name}), '[-_\\s\\(\\)]+', ' ', 'g') LIKE :normalized_contains THEN 5
+                            WHEN LOWER({column_name}) ~ :flexible_pattern THEN 6
+                            ELSE 7
                         END as relevance_rank
                         FROM invoice_items 
                         WHERE {where_clause}
@@ -851,10 +867,13 @@ class InvoiceItemController:
                 """
                 
                 # Add ranking parameters
-                query_params['starts_with'] = f"{normalized_search}%"
+                flexible_pattern = search.lower().replace('-', '[-_\\s]*').replace(' ', '[-_\\s]*')
+                query_params['exact_match'] = search.lower()
+                query_params['starts_with'] = f"{search.lower()}%"
                 query_params['normalized_starts'] = f"{normalized_search}%"
-                query_params['contains'] = f"%{normalized_search}%"
+                query_params['contains'] = f"%{search.lower()}%"
                 query_params['normalized_contains'] = f"%{normalized_search}%"
+                query_params['flexible_pattern'] = f".*{flexible_pattern}.*"
             else:
                 # Standard query without ranking
                 sql_query = f"""
