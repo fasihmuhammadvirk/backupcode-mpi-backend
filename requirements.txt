@@ -42,8 +42,8 @@ tabula-py==2.10.0
 pdfminer.six==20250506
 PyPDF2==3.0.1
 PyPDF4==1.27.0
-# pypdf and camelot-py - using working versions
-pypdf==5.9.0  # Working version with camelot-py 1.0.9
+# pypdf and camelot-py - using compatible versions
+pypdf>=3.17,<4.0  # Compatible with camelot-py 1.0.9 for Python < 3.12
 camelot-py==1.0.9
 pypdfium2==4.30.0
 
