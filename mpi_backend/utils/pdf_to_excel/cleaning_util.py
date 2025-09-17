@@ -5,17 +5,34 @@ import re
 from os import listdir
 import fitz
 from os.path import isfile, join
-from PyPDF2 import PdfFileWriter, PdfFileReader
+try:
+    from PyPDF2 import PdfWriter, PdfReader
+except ImportError:
+    # PyPDF2 has been deprecated, use pypdf instead
+    from pypdf import PdfWriter, PdfReader
 from mpi_backend.utils.pdf_to_excel.extraction_util import extract_invoice_info
 
-def clean_individual_table(table, page):
-    if len(table) < 2:
+def clean_spaces(text):
+    if isinstance(text, str):
+        return ''.join(text.split())
+    return text
+
+
+def clean_individual_table(table, page,check_row_count = False):
+    if len(table) < 2 and check_row_count: # don't check row count if file is processed by camelot
         return None
 
     try:
         table = table[['LN', 'QNTY.1', 'QNTY.2', 'PRODUCT', 'Unnamed: 1', 'NET', 'EXTENSION']]
     except KeyError:
-        if {'NET', 'EXT'}.issubset(table.columns):
+        if {'Unnamed: 0','L N','Q N T Y','Q N T Y.1','Q N T Y.2','P R O D U C T', 'Unnamed: 1','U O M','N E T','EXTENSION'}.issubset(table.columns):
+            table = table[['L N', 'Q N T Y.1', 'Q N T Y.2', 'P R O D U C T', 'Unnamed: 1', 'N E T', 'EXTENSION']]
+            table = table.rename(columns={'L N': 'LN','Q N T Y.1':'QNTY.1', 'Q N T Y.2': 'QNTY.2','P R O D U C T':'PRODUCT',
+                                         'N E T': 'NET'})
+            table = table.applymap(clean_spaces)
+
+
+        elif {'NET', 'EXT'}.issubset(table.columns):
             table = table[['LN', 'QNTY.1', 'QNTY.2', 'PRODUCT', 'Unnamed: 1', 'EXT', 'ENSION']]
             table = table.rename(columns={'EXT':'NET', 'ENSION': 'EXTENSION'})
         else:
@@ -34,10 +51,13 @@ def clean_individual_table(table, page):
     table['Qty BO'] = table['Qty BO'].fillna(0)
 
     bo_line_mapping = pd.Series(table['Qty BO'].values, index=table['Line']).to_dict()
-    bo_line_mapping = {k: bo_line_mapping[k] for k in bo_line_mapping if not np.isnan(k)}
+    try:
+        bo_line_mapping = {k: bo_line_mapping[k] for k in bo_line_mapping if not np.isnan(k)}
+    except TypeError:
+        bo_line_mapping = {k: v for k, v in bo_line_mapping.items() if not pd.isna(k)}
 
     # Join rows where there is nothing in LN column but value in Description
-    table['Line'] = table['Line'].fillna(method="ffill")
+    table['Line'] = table['Line'].ffill()
 
     table['Description'] = ' ' + table['Description'].astype(str)
 
@@ -85,6 +105,8 @@ def clean_individual_table(table, page):
             table['Qty'] = table['Qty'].astype(np.int64)
         except ValueError:
             table['Qty'] = table['Qty'].astype(float)
+
+        table['Qty BO'] = table['Qty BO'].replace([''], 0)
         table['Qty BO'] = table['Qty BO'].astype(float)
         table['Cost'] = table['Cost'].apply(lambda cost: float(re.sub(r"[^0-9.]", "",str(cost))))
 
@@ -93,6 +115,12 @@ def clean_individual_table(table, page):
 
             table['Amount'] = [value.split("..",1)[0] if ".." in value else value for value in table['Amount'].values] # fix for values like $45.2..$65
             table['Amount'] = table['Amount'].astype(str).str.replace(',', '').str.replace('$', '').astype(float)
+
+        try:
+            table['Amount'] = table['Amount'].astype(str).str.replace(',', '').str.replace('$', '').astype(float)
+            table['Cost'] = table['Cost'].astype(str).str.replace(',', '').str.replace('$', '').astype(float)
+        except:
+            pass # cleaning up dollar sign from amount
 
         table['Description'] = table['Description'].str.strip()
 
@@ -112,6 +140,37 @@ def split_multiple_invoices(filename, supplier):
                 invoice_data = invoice_data[1].split("\n", 1)
                 invoice_data = invoice_data[0]
                 if 8 < len(invoice_data) < 14: unique_invoices.append(invoice_data)
+
+    elif supplier == 'AF Supply':
+        with fitz.open(filename) as doc:
+            for page in doc:
+                text = page.get_text()
+                invoice_data = text.split("INVOICE NO.", 1)
+                invoice_data = invoice_data[1].split("\n", 2)
+                invoice_data = invoice_data[1]
+                if 8 < len(invoice_data) < 14: unique_invoices.append(invoice_data)
+
+    elif supplier == 'Plumbing Exchange':
+        with fitz.open(filename) as doc:
+            for page in doc:
+                try:
+                    text = page.get_text()
+                    invoice_num = text.split('mpip01', 1)[-1].split('\n \n', 2)[1].strip()
+                except: continue
+                if len(invoice_num) >=5: unique_invoices.append(invoice_num)
+
+    elif supplier == 'Lion Hvac Supplies':
+        with fitz.open(filename) as doc:
+            for page in doc:
+                try:
+                    text = page.get_text()
+                    invoice_num = text.split('Invoice #:', 1)[-1].split('\n', 2)[0].strip()
+                except:
+                    continue
+                if len(invoice_num) >= 5: unique_invoices.append(invoice_num)
+
+    elif supplier == "Ferguson":
+        unique_invoices = extract_invoice_info(filename, 'all', True, "Ferguson")
     else:
         unique_invoices = extract_invoice_info(filename, 'all', True)
 
@@ -119,26 +178,27 @@ def split_multiple_invoices(filename, supplier):
     if len(set(unique_invoices)) == 1:
         return  # dont do anything if there is only one unique invoice id
 
-    input_pdf = PdfFileReader(open(filename, "rb"))
-    output = PdfFileWriter()
-    for index in range(input_pdf.numPages):
+    input_pdf = PdfReader(open(filename, "rb"))
+    output = PdfWriter()
+    for index in range(len(input_pdf.pages)):
 
         if index == 0:  # its first page, so always add it
-            output.addPage(input_pdf.getPage(index))
+            output.add_page(input_pdf.pages[index])
         elif unique_invoices[index] == unique_invoices[index-1]:  # multiple pages of same invoice
-            output.addPage(input_pdf.getPage(index))
+            output.add_page(input_pdf.pages[index])
         elif unique_invoices[index] != unique_invoices[index-1]:  # new invoice is found
             # generate pdf for previous invoice
             splited_file_paths.append(save_splited_invoice(output, index-1,filename))
             # start preparing new invoice
-            output = PdfFileWriter()
-            output.addPage(input_pdf.getPage(index))
+            output = PdfWriter()
+            output.add_page(input_pdf.pages[index])
         if index == (len(unique_invoices)-1):  # if its the last page add it to pdf anyways
             splited_file_paths.append(save_splited_invoice(output, index,filename))
     return splited_file_paths
 
 
 def save_splited_invoice(output, index, filename):
+
     # output will contain the page/s of same invoice
     if '.pdf' in filename:
         filename = filename.split('.pdf', 1)

@@ -1,6 +1,5 @@
 from pydantic import BaseModel
-from typing import List,Dict
-from mpi_backend.database.models import ItemsMapping
+from typing import List
 
 
 class ItemMappingsResponse(BaseModel):
@@ -16,10 +15,6 @@ class ItemMappingsByMpiType(BaseModel):
     type: str
 
 
-class ItemMappingsByMpiTypeResponse(BaseModel):
-    __root__: Dict[str, ItemMappingsByMpiType]
-
-
 class UpdateMappingRequest(BaseModel):
     supplier_id: str
-    mapping: list[dict]
+    mapping: List[dict]

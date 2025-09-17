@@ -1,0 +1,76 @@
+[Unit]
+Description=MPI Backend Production Service - UNLIMITED PERFORMANCE
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=exec
+User=mpi-user
+Group=mpi-user
+WorkingDirectory=/opt/mpi-backend
+Environment=PATH=/opt/mpi-backend/venv/bin
+Environment=ENVIRONMENT=production
+Environment=PYTHONPATH=/opt/mpi-backend
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+# Uvicorn optimization - UNLIMITED PERFORMANCE
+Environment=UVICORN_WORKERS=4
+Environment=UVICORN_LIMIT_CONCURRENCY=0
+Environment=UVICORN_MAX_REQUESTS=0
+Environment=UVICORN_BACKLOG=0
+Environment=UVICORN_TIMEOUT_KEEP_ALIVE=0
+
+# Database optimization - UNLIMITED PERFORMANCE
+Environment=DB_POOL_SIZE=50
+Environment=DB_MAX_OVERFLOW=100
+Environment=DB_POOL_RECYCLE=0
+
+# Background job optimization - UNLIMITED PERFORMANCE
+Environment=BG_CPU_THRESHOLD=100
+Environment=BG_MEMORY_THRESHOLD=0
+Environment=BG_IO_POOL_SIZE=50
+
+# Memory management - UNLIMITED PERFORMANCE
+Environment=MEMORY_CLEANUP_THRESHOLD=100
+Environment=MEMORY_CLEANUP_INTERVAL=0
+Environment=MAX_OBJECT_CACHE_SIZE=0
+
+ExecStart=/opt/mpi-backend/venv/bin/uvicorn mpi_backend.main:app \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --workers 4 \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --backlog 0 \
+    --max-requests 0 \
+    --max-requests-jitter 0 \
+    --timeout-keep-alive 0 \
+    --limit-concurrency 0 \
+    --limit-max-requests 0 \
+    --log-level error \
+    --no-access-log \
+    --use-colors false \
+    --forwarded-allow-ips "*" \
+    --proxy-headers
+
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=1
+
+# NO RESOURCE LIMITS - UNLIMITED PERFORMANCE
+# All limits removed for maximum performance
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/mpi-backend/logs /opt/mpi-backend/data
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mpi-backend
+
+[Install]
+WantedBy=multi-user.target
