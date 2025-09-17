@@ -11,7 +11,7 @@ from PyPDF4.generic import TextStringObject, NameObject
 from PyPDF4.utils import b_
 from datetime import datetime
 
-gotham_supply_columns = [32, 54, 154.5, 384, 419, 460.5, 527.8, 592, 683]
+gotham_plumbing_columns = [32, 54, 154.5, 384, 419, 460.5, 527.8, 592, 683]
 regular_area = (247, 32, 247 + 275, 32 + 651)
 customer_job_area = (148, 362, 148 + 26, 362 + 140)
 # tax_area = (535.88, 516.76, 535.88 + 162, 516.76 + 23.11)
@@ -107,7 +107,7 @@ def merge_invoice_items(invoice_items):
 
 def extract_and_clean_invoice_items(filename):
     invoice_items = tabula.read_pdf(filename, pages='all', area=regular_area, stream=True,
-                                    columns=gotham_supply_columns)
+                                    columns=gotham_plumbing_columns)
 
     invoice_items = [invoice_items[index] for index in range(0, len(invoice_items)) if index % 2 == 0]
 

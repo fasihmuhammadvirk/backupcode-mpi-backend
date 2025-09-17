@@ -8,7 +8,7 @@ from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data, save
 
 regular_area = (300, 44, 300+341, 44+531)
 credit_memo_area = (268,35.5, 268 + 342, 35.5 +540)
-bmw_old_columns = [44, 84.2, 165.5, 445.5, 508]
+bmw_plumbing_columns = [44, 84.2, 165.5, 445.5, 508]
 credit_memo_columns = [35.5, 80.5, 138.6, 412.5, 494.8]
 
 
@@ -31,11 +31,11 @@ def process_invoice(filename, output_path):
         if 'Project' in raw_text:
             # Use old processing method for Project invoices
             tables = tabula.read_pdf(filename, pages='all', area=regular_area, guess=False, stream=True, 
-                                   columns=bmw_old_columns)
+                                   columns=bmw_plumbing_columns)
         else:
             # Use enhanced processing for all other BMW invoices
             tables = tabula.read_pdf(filename, pages='all', area=regular_area, guess=False, stream=True, 
-                                   columns=bmw_old_columns)
+                                   columns=bmw_plumbing_columns)
     
     invoice_items = extract_invoice_items(tables)
 

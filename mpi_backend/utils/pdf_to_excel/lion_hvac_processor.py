@@ -8,7 +8,7 @@ import logging
 from typing import Tuple
 from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data, save_final_data_for_database
 from mpi_backend.utils.pdf_to_excel.extraction_util import read_invoice
-from mpi_backend.utils.pdf_to_excel.supremePlumbing_uitl import get_pages
+from mpi_backend.utils.pdf_to_excel.supreme_plumbing_util import get_pages
 
 # Original area definitions (preserved for backward compatibility)
 area1 = [205.5, 16.67, 205.5 + 390, 16.67 + 573]

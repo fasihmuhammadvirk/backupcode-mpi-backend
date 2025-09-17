@@ -6,7 +6,7 @@ particularly for extracting and processing data.
 """
 
 # Export the EnhancedGoogleSheetDataExtractor class
-from mpi_backend.utils.google_sheets.enhanced_sheet_data_extractor import (
+from mpi_backend.utils.google_sheets_extractors.google_sheets_mapping_extractor import (
     EnhancedGoogleSheetDataExtractor
 )
 

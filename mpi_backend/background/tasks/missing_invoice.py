@@ -10,7 +10,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
-from mpi_backend.utils.missing_invoice_downaloder import (
+from mpi_backend.utils.missing_invoice_downloader import (
     missing_email_download_background_task
 )
 

@@ -16,13 +16,13 @@ import asyncio
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-from mpi_backend.utils.google_sheets.enhanced_sheet_data_extractor import (
+from mpi_backend.utils.google_sheets_extractors.google_sheets_mapping_extractor import (
     EnhancedGoogleSheetDataExtractor
 )
-from mpi_backend.utils.google_sheets.temporary_mapping_extractor import (
+from mpi_backend.utils.google_sheets_extractors.temporary_mapping_detector import (
     TemporaryMappingExtractor
 )
-from mpi_backend.utils.sync_mapping.temporary_mapping_sync import (
+from mpi_backend.utils.mapping_sync_utils.temporary_mapping_sync_handler import (
     TemporaryMappingSync
 )
 from mpi_backend.database.controllers.ItemsMappingController import (

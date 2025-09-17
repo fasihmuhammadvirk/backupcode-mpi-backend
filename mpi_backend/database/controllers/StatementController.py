@@ -821,7 +821,7 @@ class StatementController:
             # Re-extract and process the statement
             logger.info(f"Re-extracting data from {pdf_path}")
             try:
-                from mpi_backend.utils.statement_extractor.extractor import StatementExtractor
+                from mpi_backend.utils.statement_processing.extractor import StatementExtractor
 
                 # FRESH SUPPLIER DETECTION: Don't use old (potentially wrong) supplier
                 # Instead, let the system re-detect supplier from filename and PDF

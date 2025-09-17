@@ -9,7 +9,7 @@ This script tests:
 """
 
 import json
-from mpi_backend.utils.google_sheets.enhanced_sheet_data_extractor import EnhancedGoogleSheetDataExtractor
+from mpi_backend.utils.google_sheets_extractors.google_sheets_mapping_extractor import EnhancedGoogleSheetDataExtractor
 import sys
 from pathlib import Path
 

@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Optional, Dict, Any
 import logging
 
-from mpi_backend.utils.statement_extractor.statement_utils import (
+from mpi_backend.utils.statement_processing.statement_utils import (
     extract_text_from_pdf,
     identify_supplier,
     extract_statement_metadata,

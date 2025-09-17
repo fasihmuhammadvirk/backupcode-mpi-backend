@@ -1,5 +1,5 @@
 from unittest.mock import patch
-import mpi_backend.api.routes.get_mappings as gm
+import mpi_backend.api.routes.mapping_updates as gm
 
 
 def test_update_item_mappings_happy_path(client):

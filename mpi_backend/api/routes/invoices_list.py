@@ -14,7 +14,7 @@ from mpi_backend.database.controllers.Invoice import InvoiceController
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
-from mpi_backend.utils.invoice_convertor import convert_single_invoice
+from mpi_backend.utils.invoice_converter import convert_single_invoice
 from mpi_backend.database.schemas import Invoice, PaginatedInvoiceResponse
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
 from mpi_backend.utils.s3_utils import get_presigned_url, upload_file

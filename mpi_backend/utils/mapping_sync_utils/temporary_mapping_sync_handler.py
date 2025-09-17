@@ -11,9 +11,9 @@ import pandas as pd
 from typing import Dict, List, Any
 from sqlalchemy.orm import Session
 
-from mpi_backend.utils.google_sheets.enhanced_sheet_data_extractor import EnhancedGoogleSheetDataExtractor
-from mpi_backend.utils.google_sheets.temporary_mapping_extractor import TemporaryMappingExtractor
-from mpi_backend.utils.sync_mapping.temporary_mapping_updater import TemporaryMappingUpdater
+from mpi_backend.utils.google_sheets_extractors.google_sheets_mapping_extractor import EnhancedGoogleSheetDataExtractor
+from mpi_backend.utils.google_sheets_extractors.temporary_mapping_detector import TemporaryMappingExtractor
+from mpi_backend.utils.mapping_sync_utils.temporary_mapping_applier import TemporaryMappingUpdater
 
 # Set up logging
 logger = logging.getLogger(__name__)

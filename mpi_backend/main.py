@@ -24,8 +24,8 @@ import uvicorn
 
 # Import routes
 from mpi_backend.api.routes import (
-    health, supplier, invoices_list, get_mappings, invoice_items,
-    quickbooks, signin, filters, sync_mappings, monthly_comparison, statements, qa
+    health, supplier, invoices_list, mapping_updates, invoice_items,
+    quickbooks, signin, filters, google_sheets_sync, monthly_comparison, statements, qa
 )
 
 # Import scheduler
@@ -129,12 +129,12 @@ def register_routes(app):
         ("Health", health.router),
         ("Supplier", supplier.router),
         ("Invoices List", invoices_list.router),
-        ("Get Mappings", get_mappings.router),
+        ("Mapping Updates", mapping_updates.router),
         ("Sign In", signin.router),
         ("Invoice Items", invoice_items.router),
         ("QuickBooks", quickbooks.router),
         ("Filters", filters.router),
-        ("Sync Mappings", sync_mappings.router),
+        ("Google Sheets Sync", google_sheets_sync.router),
         ("Monthly Comparison", monthly_comparison.router),
         ("Statements", statements.router),
         ("Q/A System", qa.router),

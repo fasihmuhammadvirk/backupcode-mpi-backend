@@ -10,7 +10,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.executors.pool import ThreadPoolExecutor as APSchedulerThreadPool
 
 # Import business logic tasks
-from mpi_backend.utils.quickbooks_priority import set_scheduler_instance
+from mpi_backend.utils.quickbooks_priority_controller import set_scheduler_instance
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +160,7 @@ def stop_scheduler():
 def get_scheduler_instance():
     """Get the global scheduler instance."""
     try:
-        from mpi_backend.utils.quickbooks_priority import get_scheduler_instance
+        from mpi_backend.utils.quickbooks_priority_controller import get_scheduler_instance
         return get_scheduler_instance()
     except ImportError:
         logger.warning("Could not import get_scheduler_instance")

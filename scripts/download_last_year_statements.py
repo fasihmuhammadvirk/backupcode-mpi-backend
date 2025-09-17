@@ -64,7 +64,7 @@ from mpi_backend.database import get_db
 from mpi_backend.database.models.MonthlyStatement import (
     PlumbingSupplier, PlumbingStatement
 )
-from mpi_backend.utils.statement_extractor.extractor import StatementExtractor
+from mpi_backend.utils.statement_processing.extractor import StatementExtractor
 from mpi_backend.utils.s3_utils import upload_file
 from mpi_backend.database.controllers.StatementController import (
     StatementController

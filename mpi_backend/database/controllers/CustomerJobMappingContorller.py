@@ -1,9 +1,9 @@
 from mpi_backend.database.models import CustomerJobMapping
 import pandas as pd
 import json
-from mpi_backend.utils.customer_job_mapping.update_customer_job_mapping_file import update_customer_job_mappings_json
-from mpi_backend.utils.customer_job_mapping.insert_customer_job import insert_customer_job_in_db
-from mpi_backend.utils.customer_job_mapping.update_existing_customer_job import update_existing_invoice_items
+from mpi_backend.utils.customer_job_management.update_customer_job_mapping_file import update_customer_job_mappings_json
+from mpi_backend.utils.customer_job_management.insert_customer_job import insert_customer_job_in_db
+from mpi_backend.utils.customer_job_management.update_existing_customer_job import update_existing_invoice_items
 
 
 class CustomerJobMappingController:

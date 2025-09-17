@@ -28,7 +28,7 @@ def extract_tax_etc(filename):
         raw_text = read_invoice(filename)
         if "BMW Plumbing Supplies" in raw_text:
             # Use enhanced BMW tax extraction for BMW invoices
-            from mpi_backend.utils.pdf_to_excel.bmw_old import extract_tax
+            from mpi_backend.utils.pdf_to_excel.bmw_plumbing_processor import extract_tax
             bmw_tax = extract_tax(filename)
             try:
                 bmw_tax_float = float(bmw_tax)

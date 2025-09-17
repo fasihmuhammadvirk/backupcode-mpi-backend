@@ -5,8 +5,8 @@ This module provides tools to extract data from supplier statement PDFs.
 It is designed to handle statements from various suppliers with a common interface.
 """
 
-from mpi_backend.utils.statement_extractor.extractor import StatementExtractor, process_statement
-from mpi_backend.utils.statement_extractor.statement_utils import (
+from mpi_backend.utils.statement_processing.extractor import StatementExtractor, process_statement
+from mpi_backend.utils.statement_processing.statement_utils import (
     extract_text_from_pdf,
     identify_supplier,
     extract_statement_metadata,

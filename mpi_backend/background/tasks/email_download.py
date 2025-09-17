@@ -13,7 +13,7 @@ def download_emails():
         logger.info("Starting email download task")
         
         # Import the actual invoice downloader logic
-        from mpi_backend.utils.invoice_downaloder import (
+        from mpi_backend.utils.invoice_downloader import (
             email_download_background_task
         )
         

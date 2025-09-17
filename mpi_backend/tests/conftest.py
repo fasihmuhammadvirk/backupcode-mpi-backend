@@ -207,7 +207,7 @@ def mock_invoice_upload_pipeline(monkeypatch, tmp_path, mock_s3):
         }]
 
     monkeypatch.setattr(
-        "mpi_backend.utils.invoice_convertor.convert_single_invoice",
+        "mpi_backend.utils.invoice_converter.convert_single_invoice",
         _dummy_convert_single_invoice,
     )
     monkeypatch.setattr(

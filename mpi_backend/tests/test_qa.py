@@ -8,7 +8,7 @@ import os
 from unittest.mock import Mock, patch, AsyncMock
 from fastapi.testclient import TestClient
 from mpi_backend.main import app
-from mpi_backend.utils.qa_agent import QAAgent, get_qa_agent
+from mpi_backend.utils.database_qa_agent import QAAgent, get_qa_agent
 from mpi_backend.database.controllers.QAController import QAController, get_qa_controller
 
 
@@ -24,7 +24,7 @@ class TestQAAgent:
     @pytest.fixture
     def mock_llm(self):
         """Mock LLM for testing"""
-        with patch('mpi_backend.utils.qa_agent.ChatGoogleGenerativeAI') as mock:
+        with patch('mpi_backend.utils.database_qa_agent.ChatGoogleGenerativeAI') as mock:
             mock_instance = Mock()
             mock.return_value = mock_instance
             yield mock_instance
@@ -32,7 +32,7 @@ class TestQAAgent:
     @pytest.fixture
     def mock_sql_database(self):
         """Mock SQL Database for testing"""
-        with patch('mpi_backend.utils.qa_agent.SQLDatabase') as mock:
+        with patch('mpi_backend.utils.database_qa_agent.SQLDatabase') as mock:
             mock_instance = Mock()
             mock_instance.get_table_info.return_value = "Test table info"
             mock.return_value = mock_instance
@@ -41,7 +41,7 @@ class TestQAAgent:
     @pytest.fixture
     def mock_engine(self):
         """Mock database engine"""
-        with patch('mpi_backend.utils.qa_agent.engine') as mock:
+        with patch('mpi_backend.utils.database_qa_agent.engine') as mock:
             mock_connection = Mock()
             mock_result = Mock()
             mock_result.fetchall.return_value = [{'id': 1, 'name': 'test'}]
@@ -86,7 +86,7 @@ class TestQAAgent:
         mock_answer_chain = AsyncMock()
         mock_answer_chain.ainvoke.return_value = "Found 1 invoice in the database."
         
-        with patch('mpi_backend.utils.qa_agent.create_sql_query_chain', return_value=mock_sql_chain):
+        with patch('mpi_backend.utils.database_qa_agent.create_sql_query_chain', return_value=mock_sql_chain):
             agent = QAAgent()
             agent.answer_chain = mock_answer_chain
             
@@ -104,7 +104,7 @@ class TestQAAgent:
         mock_sql_chain = AsyncMock()
         mock_sql_chain.ainvoke.return_value = "DELETE FROM invoices"
         
-        with patch('mpi_backend.utils.qa_agent.create_sql_query_chain', return_value=mock_sql_chain):
+        with patch('mpi_backend.utils.database_qa_agent.create_sql_query_chain', return_value=mock_sql_chain):
             agent = QAAgent()
             
             result = await agent.query("Delete all invoices")
@@ -124,7 +124,7 @@ class TestQAAgent:
         mock_answer_chain = AsyncMock()
         mock_answer_chain.ainvoke.return_value = "Found 1 invoice in the database."
         
-        with patch('mpi_backend.utils.qa_agent.create_sql_query_chain', return_value=mock_sql_chain):
+        with patch('mpi_backend.utils.database_qa_agent.create_sql_query_chain', return_value=mock_sql_chain):
             agent = QAAgent()
             agent.answer_chain = mock_answer_chain
             

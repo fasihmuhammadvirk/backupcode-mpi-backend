@@ -6,7 +6,7 @@ Production-ready version with essential functionality only
 import logging
 from typing import Dict, Any
 from fastapi import HTTPException
-from mpi_backend.utils.qa_agent import get_qa_agent
+from mpi_backend.utils.database_qa_agent import get_qa_agent
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,6 @@
 import pandas as pd
 from sqlalchemy import func
-from mpi_backend.utils.item_utils import is_empty_or_invalid_item
+from mpi_backend.utils.item_processing_utils import is_empty_or_invalid_item
 
 
 def convert_items_to_dataframe(items, use_suffix=True):

@@ -48,7 +48,7 @@ from mpi_backend.config import (
     SUPPLIERS, TIMEZONE
 )
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
-from mpi_backend.utils.invoice_convertor import convert_invoice_for_email
+from mpi_backend.utils.invoice_converter import convert_invoice_for_email
 from mpi_backend.database.controllers.StatementController import StatementController
 from mpi_backend.database import SessionLocal
 from mpi_backend.database import get_db

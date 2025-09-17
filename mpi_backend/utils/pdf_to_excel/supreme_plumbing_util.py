@@ -6,9 +6,9 @@ import re
 from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data, save_final_data_for_database
 import numpy as np
 
-def extract_supremePlumbing_data(filename, output_path):
+def extract_supreme_plumbing_data(filename, output_path):
     if get_pages(filename) > 1:  # have different flow if we have >1 pages in invoice
-        extract_supremePlumbing_data_multiplepages(filename, output_path)
+        extract_supreme_plumbing_data_multiple_pages(filename, output_path)
         return
 
     tables = tabula.read_pdf(filename, pages='1', stream=True)
@@ -454,7 +454,7 @@ def merge_and_clean_invoice_items(tables):
 
 # the idea behind this function is to use bars/ seperators in invoice file
 # to get all required information i.e use existing natural dividers in file
-def extract_supremePlumbing_data_multiplepages(filename, output_path):
+def extract_supreme_plumbing_data_multiple_pages(filename, output_path):
 
     tables = tabula.read_pdf(filename, pages='all', stream=False, guess=True)
 

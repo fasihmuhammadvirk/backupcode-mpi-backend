@@ -15,7 +15,7 @@ from mpi_backend.database.controllers.ItemClassification import (
 )
 from mpi_backend.database.schemas import SendtoQBFilterRequest
 from mpi_backend.utils.s3_utils import upload_file, get_presigned_url
-from mpi_backend.utils.quickbooks_priority import (
+from mpi_backend.utils.quickbooks_priority_controller import (
     pause_background_jobs,
     resume_background_jobs,
     pause_all_background_jobs_for_migrate_all,

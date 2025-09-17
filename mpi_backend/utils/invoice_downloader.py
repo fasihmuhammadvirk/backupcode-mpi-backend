@@ -15,7 +15,7 @@ from mpi_backend.config import (
     SUPPLIERS, TIMEZONE
 )
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
-from mpi_backend.utils.invoice_convertor import convert_invoice_for_email
+from mpi_backend.utils.invoice_converter import convert_invoice_for_email
 from mpi_backend.config.logging_config import get_missing_logger
 
 # Create logs directory

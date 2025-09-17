@@ -5,7 +5,7 @@ import fitz
 import numpy as np
 import re
 from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data, save_final_data_for_database
-from mpi_backend.utils.pdf_to_excel.supremePlumbing_uitl import get_pages
+from mpi_backend.utils.pdf_to_excel.supreme_plumbing_util import get_pages
 
 columns = [46,183,371,429,510,589]
 items_area = [360,22,360+410, 568+22]

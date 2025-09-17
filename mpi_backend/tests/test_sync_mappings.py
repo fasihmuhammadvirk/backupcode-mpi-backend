@@ -1,5 +1,5 @@
 from unittest.mock import patch
-import mpi_backend.api.routes.sync_mappings as sm
+import mpi_backend.api.routes.google_sheets_sync as sm
 
 
 def test_sync_mapping_already_running(client):
@@ -41,7 +41,7 @@ def test_sync_mapping_start_success(client):
 
 def test_sync_status_ok(client):
     with patch(
-        "mpi_backend.api.routes.sync_mappings.GoogleSheetSyncController"
+        "mpi_backend.api.routes.google_sheets_sync.GoogleSheetSyncController"
         ".get_sync_status",
         return_value={
             "is_running": False,

@@ -10,16 +10,16 @@ logger = logging.getLogger(__name__)
 from mpi_backend.utils.pdf_to_excel.cleaning_util import clean_individual_table,split_multiple_invoices
 from mpi_backend.utils.pdf_to_excel.extraction_util import extract_job_info, extract_invoice_info, extract_tax_etc, extract_po, extract_buyer,check_for_unique_invoices, read_invoice
 from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data, save_final_data_for_database
-from mpi_backend.utils.pdf_to_excel.supremePlumbing_uitl import extract_supremePlumbing_data,get_pages
-from mpi_backend.utils.pdf_to_excel.gotham_supply import process_invoice
-from mpi_backend.utils.pdf_to_excel import bmw_old
-from mpi_backend.utils.pdf_to_excel import ys_old
-from mpi_backend.utils.pdf_to_excel import web_co_supply
-from mpi_backend.utils.pdf_to_excel import flow_mark
-from mpi_backend.utils.pdf_to_excel import plumbing_exchange
+from mpi_backend.utils.pdf_to_excel.supreme_plumbing_util import extract_supreme_plumbing_data,get_pages
+from mpi_backend.utils.pdf_to_excel.gotham_plumbing_processor import process_invoice
+from mpi_backend.utils.pdf_to_excel import bmw_plumbing_processor
+from mpi_backend.utils.pdf_to_excel import ys_plumbing_processor
+from mpi_backend.utils.pdf_to_excel import fw_webb_plumbing_processor
+from mpi_backend.utils.pdf_to_excel import flow_mark_plumbing_processor
+from mpi_backend.utils.pdf_to_excel import plumbing_exchange_processor
 from mpi_backend.utils.pdf_to_excel import file_preprocess
-from mpi_backend.utils.pdf_to_excel import af_supply
-from mpi_backend.utils.pdf_to_excel import lion_havac
+from mpi_backend.utils.pdf_to_excel import af_supply_processor
+from mpi_backend.utils.pdf_to_excel import lion_hvac_processor
 
 regular_area = (290, 20, 290+415, 20+570)
 last_page_area = (290, 20, 290+375, 20+570)
@@ -39,11 +39,11 @@ def extract_data(filename, output_path, supplier):
         tables = tabula.read_pdf(filename, pages='all', area=regular_area, guess=False, stream=True,
                                  columns=wwps_columns)
     elif supplier == "BMW Plumbing Supplies" and 'Project' in read_invoice(filename):
-        bmw_old.process_invoice(filename, output_path)
+        bmw_plumbing_processor.process_invoice(filename, output_path)
         return
 
     elif supplier == "Y & S Plumbing Supply" and "Y&S Plumbing & Heating Supply Inc." in read_invoice(filename):
-        ys_old.process_invoice(filename, output_path) # credit memo flow for Y&S
+        ys_plumbing_processor.process_invoice(filename, output_path) # credit memo flow for Y&S
         return
 
     elif supplier == "BMW Plumbing Supplies" or supplier == "Y & S Plumbing Supply" or supplier == "Park Plumbing Supply":
@@ -53,25 +53,25 @@ def extract_data(filename, output_path, supplier):
         tables = tabula.read_pdf(filename, pages='all', area=regular_area, guess=False, stream=True,
                                  columns=pyramid_columns)
     elif supplier == "Supreme Plumbing Supply":
-        extract_supremePlumbing_data(filename, output_path)
+        extract_supreme_plumbing_data(filename, output_path)
         return # stop normal flow execution here
     elif supplier == "Gotham Plumbing Supply":
         process_invoice(filename, output_path)
         return
     elif supplier == "FW Webb Plumbing Supply":
-        web_co_supply.process_invoice(filename, output_path)
+        fw_webb_plumbing_processor.process_invoice(filename, output_path)
         return
     elif supplier == "Flow Mark Plumbing Supply":
-        flow_mark.process_invoice(filename, output_path)
+        flow_mark_plumbing_processor.process_invoice(filename, output_path)
         return
     elif supplier == "Plumbing Exchange":
-        plumbing_exchange.process_invoice(filename, output_path)
+        plumbing_exchange_processor.process_invoice(filename, output_path)
         return
     elif supplier == 'AF Supply':
-        af_supply.process_invoice(filename, output_path)
+        af_supply_processor.process_invoice(filename, output_path)
         return
     elif supplier == 'Lion Hvac Supplies':
-        lion_havac.process_invoice(filename, output_path)
+        lion_hvac_processor.process_invoice(filename, output_path)
         return
     else:
         logger.info(f'Invalid Supplier -> {supplier} for file -> {filename}.Skipping Invoice.')

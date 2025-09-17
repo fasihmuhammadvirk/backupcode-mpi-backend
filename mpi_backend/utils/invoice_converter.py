@@ -6,7 +6,7 @@ import logging
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.utils.pdf_to_excel.main_extractor import extract_data
 from mpi_backend.utils.pdf_to_excel.cleaning_util import get_files_from_folder
-from mpi_backend.utils.pdf_to_excel.abc_opus_services_utils import process_invoice
+from mpi_backend.utils.pdf_to_excel.abc_opus_services_processor import process_invoice
 
 logger = logging.getLogger(__name__)
 
