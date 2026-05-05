@@ -1,0 +1,8 @@
+I can help you with supplier information! What would you like to know?
+
+- **Specific supplier name?** (e.g., "Ferguson", "ABC Supply")
+- **Invoices from a supplier?**
+- **Items from a supplier?**
+- **Supplier spending totals?**
+
+Which supplier information do you need?

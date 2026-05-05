@@ -1,0 +1,28 @@
+version: 2
+
+macros:
+  - name: map_from_lists
+    description: |
+      Map "bad" values to "good" values. Where the "bad" values is a list of examples and the "good" values
+      are the keys in the map.
+
+      It takes a column name and a map (a dictionary where keys are desired "good" values and values are
+      lists of "bad" or inconsistent values). The macro generates a SQL CASE statement that transforms
+      values in the specified column: if a value in the column matches any of the "bad" values
+      (case-insensitive), it is replaced with the corresponding "good" value from the map; otherwise,
+      the original column value is retained.
+
+    arguments:
+      - name: column_name
+        type: string
+        description: The name of the column to get values from
+
+      - name: canonical_map
+        type: dictionary
+        description: |
+          The map of "good" values to "bad" values. For example:
+            {
+              "New York": ["Nyy", "News York", "Newyorkk"],
+              "Hillside Ave.": ["Hilside Ave."]
+            }
+

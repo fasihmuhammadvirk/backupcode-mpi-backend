@@ -1,0 +1,66 @@
+version: 2
+
+models:
+  - name: mart__quickbooks_preview
+    description: |
+      Pre-computed QuickBooks export preview rows.
+      Refactored to store results as a single row per invoice, with aggregated JSON
+      data for 'all' and 'unprocessed' filter modes.
+
+    config:
+      materialized: table
+      tags: ['quickbooks', 'export', 'reporting']
+
+    columns:
+      - name: id
+        description: |
+          Surrogate unique key.
+        tests:
+          - not_null
+          - unique
+
+      - name: invoice_id
+        description: UUID of the invoice this row belongs to.
+        tests:
+          - not_null
+
+      - name: ref_no
+        description: Invoice reference number (from mart__invoice_items).
+
+      - name: filename
+        description: Invoice filename (from mart__invoice_items).
+
+      - name: vendor
+        description: Vendor / supplier name.
+
+      - name: date
+        description: Invoice date. Used by the API date-range filter.
+        tests:
+          - not_null
+
+      - name: customer_job
+        description: Customer job address / project name.
+
+      - name: date_added
+        description: |
+          MAX(date_added) of the underlying invoice items.
+
+      - name: all_data_json
+        description: |
+          JSONB array containing all split rows and the total row for the invoice.
+          Each object in the array represents a QuickBooks preview item.
+          Includes both exported and un-exported items.
+        tests:
+          - not_null
+
+      - name: unprocessed_data_json
+        description: |
+          JSONB array containing only un-exported items (and their corresponding totals).
+          Filters out items that already exist in public.quickbooks_items.
+        tests:
+          - not_null
+
+      - name: computed_at
+        description: Timestamp when this row was materialized by dbt.
+        tests:
+          - not_null

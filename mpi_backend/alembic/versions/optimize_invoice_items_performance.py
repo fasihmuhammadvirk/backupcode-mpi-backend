@@ -6,6 +6,7 @@ Create Date: 2024-12-19 10:00:00.000000
 
 """
 from alembic import op
+import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
@@ -17,19 +18,27 @@ depends_on = None
 
 def upgrade():
     """Add performance indexes for invoice_items table"""
-    
+
     # Add indexes for commonly filtered columns
     op.create_index('ix_invoice_items_vendor', 'invoice_items', ['vendor'])
-    op.create_index('ix_invoice_items_customer_job', 'invoice_items', 
+    op.create_index('ix_invoice_items_customer_job', 'invoice_items',
                     ['customer_job'])
     op.create_index('ix_invoice_items_date', 'invoice_items', ['date'])
     op.create_index('ix_invoice_items_item', 'invoice_items', ['item'])
-    op.create_index('ix_invoice_items_export_status', 'invoice_items', 
+    op.create_index('ix_invoice_items_export_status', 'invoice_items',
                     ['export_status'])
     op.create_index('ix_invoice_items_class', 'invoice_items', ['class_'])
-    op.create_index('ix_invoice_items_is_active', 'invoice_items', 
+    op.create_index('ix_invoice_items_is_active', 'invoice_items',
                     ['is_active'])
-    op.create_index('ix_invoice_items_account', 'invoice_items', ['account'])
+
+    # Only create account index if account column exists
+    connection = op.get_bind()
+    inspector = sa.inspect(connection)
+    columns = [col['name'] for col in inspector.get_columns('invoice_items')]
+    if 'account' in columns:
+        op.create_index('ix_invoice_items_account', 'invoice_items',
+                        ['account'])
+
     op.create_index('ix_invoice_items_ref_no', 'invoice_items', ['ref_no'])
     
     # Add composite indexes for common filter combinations
@@ -53,18 +62,32 @@ def upgrade():
         WHERE is_active = true OR is_active IS NULL
     """)
 
-    # Functional indexes to support lower(trim(...)) comparisons used in filters
-    op.execute("CREATE INDEX IF NOT EXISTS ix_invoice_items_vendor_norm ON invoice_items (lower(trim(vendor)))")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_invoice_items_item_norm ON invoice_items (lower(trim(item)))")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_invoice_items_ref_no_norm ON invoice_items (lower(trim(ref_no)))")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_invoice_items_customer_job_norm ON invoice_items (lower(trim(customer_job)))")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_invoice_items_class_norm ON invoice_items (lower(trim(class_)))")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_invoice_items_account_norm ON invoice_items (lower(trim(account)))")
+    # Functional indexes to support lower(trim(...)) comparisons
+    op.execute("""CREATE INDEX IF NOT EXISTS ix_invoice_items_vendor_norm
+                   ON invoice_items (lower(trim(vendor)))""")
+    op.execute("""CREATE INDEX IF NOT EXISTS ix_invoice_items_item_norm
+                   ON invoice_items (lower(trim(item)))""")
+    op.execute("""CREATE INDEX IF NOT EXISTS ix_invoice_items_ref_no_norm
+                   ON invoice_items (lower(trim(ref_no)))""")
+    op.execute("""CREATE INDEX IF NOT EXISTS ix_invoice_items_customer_job_norm
+                   ON invoice_items (lower(trim(customer_job)))""")
+    op.execute("""CREATE INDEX IF NOT EXISTS ix_invoice_items_class_norm
+                   ON invoice_items (lower(trim(class_)))""")
+
+    # Only create account functional index if account column exists
+    if 'account' in columns:
+        op.execute("""CREATE INDEX IF NOT EXISTS ix_invoice_items_account_norm
+                       ON invoice_items (lower(trim(account)))""")
 
 
 def downgrade():
     """Remove performance indexes"""
-    
+
+    # Check if account column exists before trying to drop its index
+    connection = op.get_bind()
+    inspector = sa.inspect(connection)
+    columns = [col['name'] for col in inspector.get_columns('invoice_items')]
+
     # Drop all the indexes we created
     op.drop_index('ix_invoice_items_vendor', table_name='invoice_items')
     op.drop_index('ix_invoice_items_customer_job', table_name='invoice_items')
@@ -73,28 +96,35 @@ def downgrade():
     op.drop_index('ix_invoice_items_export_status', table_name='invoice_items')
     op.drop_index('ix_invoice_items_class', table_name='invoice_items')
     op.drop_index('ix_invoice_items_is_active', table_name='invoice_items')
-    op.drop_index('ix_invoice_items_account', table_name='invoice_items')
+
+    # Only drop account index if account column exists
+    if 'account' in columns:
+        op.drop_index('ix_invoice_items_account', table_name='invoice_items')
+
     op.drop_index('ix_invoice_items_ref_no', table_name='invoice_items')
-    
+
     # Drop composite indexes
-    op.drop_index('ix_invoice_items_vendor_date', 
+    op.drop_index('ix_invoice_items_vendor_date',
                   table_name='invoice_items')
-    op.drop_index('ix_invoice_items_customer_job_date', 
+    op.drop_index('ix_invoice_items_customer_job_date',
                   table_name='invoice_items')
-    op.drop_index('ix_invoice_items_is_active_vendor', 
+    op.drop_index('ix_invoice_items_is_active_vendor',
                   table_name='invoice_items')
-    op.drop_index('ix_invoice_items_is_active_date', 
+    op.drop_index('ix_invoice_items_is_active_date',
                   table_name='invoice_items')
-    
+
     # Drop numeric indexes
     op.drop_index('ix_invoice_items_cost', table_name='invoice_items')
     op.drop_index('ix_invoice_items_qty', table_name='invoice_items')
-    
+
     # Drop partial index
-    op.execute("DROP INDEX IF EXISTS ix_invoice_items_active_vendor_date") 
+    op.execute("DROP INDEX IF EXISTS ix_invoice_items_active_vendor_date")
     op.execute("DROP INDEX IF EXISTS ix_invoice_items_vendor_norm")
     op.execute("DROP INDEX IF EXISTS ix_invoice_items_item_norm")
     op.execute("DROP INDEX IF EXISTS ix_invoice_items_ref_no_norm")
     op.execute("DROP INDEX IF EXISTS ix_invoice_items_customer_job_norm")
     op.execute("DROP INDEX IF EXISTS ix_invoice_items_class_norm")
-    op.execute("DROP INDEX IF EXISTS ix_invoice_items_account_norm")
+
+    # Only drop account functional index if account column exists
+    if 'account' in columns:
+        op.execute("DROP INDEX IF EXISTS ix_invoice_items_account_norm")

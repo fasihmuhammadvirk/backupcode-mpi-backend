@@ -1,0 +1,18 @@
+# Local smoke-test overrides.
+#
+# Caddy + Let's Encrypt cannot issue a real cert for `localhost`, so for local
+# testing we skip the proxy and expose Metabase directly on the host.
+#
+# Usage:
+#     cp docker-compose.override.yml.example docker-compose.override.yml
+#     docker compose --env-file .env.example up -d metabase_db metabase
+#     curl -fsS http://localhost:3000/api/health   # expect {"status":"ok"}
+#     docker compose down              # stop (preserves volumes)
+#     docker compose down -v           # full reset
+#
+# Do NOT commit the resulting `docker-compose.override.yml`; it is local-only.
+
+services:
+  metabase:
+    ports:
+      - "3000:3000"

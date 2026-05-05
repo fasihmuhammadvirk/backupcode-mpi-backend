@@ -1,0 +1,42 @@
+version: 2
+
+macros:
+  - name: normalize_buyer
+    description: |
+      Normalizes buyer names to a consistent format by:
+      1. Removing all non-alphanumeric characters (including spaces)
+      2. Separating alphabetic and numeric segments
+      3. Formatting as Title Case "Alphabetic Numeric" (first letter uppercase, rest lowercase)
+      4. Adding space separator between alphabetic and numeric parts if both exist
+      
+      This macro creates a PostgreSQL function normalize_buyer_fn that performs the normalization.
+      The function is marked as IMMUTABLE for query optimization.
+      
+      Examples:
+        - "AR LE M 9 29 44 2 -9 55 8" becomes "Arlem 9294429558"
+        - "ARLEM 929 442-9558" becomes "Arlem 9294429558"
+        - "Arlem(929) 442-955" becomes "Arlem 929442955"
+        - "Modachi Dutech" becomes "Modachidutech" (spaces removed)
+        - "ANTHONY" becomes "Anthony"
+        - "DAVIDW 3478048772" becomes "Davidw 3478048772"
+        - "( 8 62 ) 3 18 - 00 7 4" becomes "8623180074"
+        
+      Usage: normalize_buyer_fn(buyer_column)
+        
+      Returns:
+        - Normalized buyer name string in Title Case format
+        - NULL if input is NULL
+        - Empty string if input is empty or contains no alphanumeric characters
+        
+    arguments:
+      - name: buyer_column
+        type: column_name
+        description: The column containing the buyer name to normalize
+
+  - name: create_normalize_buyer_function
+    description: |
+      Creates the PostgreSQL function normalize_buyer_fn that performs buyer name normalization.
+      This function should be called during dbt initialization to ensure the function exists in the database.
+      
+      The function is IMMUTABLE, meaning it always returns the same result for the same input,
+      which allows PostgreSQL to optimize queries that use it.

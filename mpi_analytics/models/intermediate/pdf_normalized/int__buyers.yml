@@ -1,0 +1,85 @@
+version: 2
+
+models:
+  - name: int__buyers
+    description: |
+      Intermediate model for buyer normalization and explicit mapping.
+      
+      This model processes all distinct buyer names from invoice items and applies:
+      1. Normalization (title case, remove spaces and non-alphanumeric characters)
+      2. Explicit mapping via buyer_typo_map.sql macro
+      
+      **Key Transformations:**
+        - Removes all non-alphanumeric characters (including spaces)
+        - Separates alphabetic and numeric segments
+        - Formats as Title Case "Alphabetic Numeric" (first letter uppercase, rest lowercase)
+        - Applies explicit mappings from buyer_typo_map.sql for deterministic results
+      
+      **Business Logic:**
+        The mapped buyer name is determined using explicit mappings first, then a safe auto-rollup:
+        
+        1. Normalize buyer name (title case, remove spaces, etc.) → `buyer_normalized_base`
+        2. Look up in `buyer_typo_map.sql` for explicit mapping
+        3. If found, use mapped canonical
+        4. Otherwise, auto-canonicalize truncated numeric suffixes when safe:
+           - Same alphabetic portion (e.g., "Christian")
+           - Digits are a prefix of another buyer's digits (e.g., "347772" → "34777254")
+           - Prefers the most common longer value in the data
+        5. If still no match, use normalized name as-is → `buyer_normalized_canonical`
+        
+        No fuzzy matching is performed; mappings are explicit + deterministic prefix-based rollups only.
+        
+        This consolidates variations like:
+        - "ARLEM", "ARLEM 929", "ARLEM 929442955", "ARLEM 9294429558" → all map to "Arlem 9294429558" (via explicit map)
+        - "ANTHONY" and "ANTNY" → map to "Anthony" (via explicit map)
+        - "BATTY 9298667415" and "BETTY 9298667415" → map to "Betty 9298667415" (via explicit map)
+      
+      **Examples:**
+        - "AR LE M 9 29 44 2 -9 55 8" → normalized: "Arlem 9294429558"
+        - "ARLEM 929 442-9558" → normalized: "Arlem 9294429558"
+        - "Arlem(929) 442-955" → normalized: "Arlem 929442955"
+        - "Modachi Dutech" → normalized: "Modachidutech" (spaces removed)
+        - "ANTHONY" → normalized: "Anthony" → mapped: "Anthony"
+        - "ANTNY" → normalized: "Antny" → mapped: "Anthony" (via explicit map)
+        - "DAVIDW 3478048772" → normalized: "Davidw 3478048772"
+        - "( 8 62 ) 3 18 - 00 7 4" → normalized: "8623180074"
+      
+    columns:
+      - name: buyer
+        description: |
+          Original buyer name as it appears in the source data.
+          This is the raw, unmodified buyer value from invoice items.
+        tests:
+          - not_null
+          - unique
+      
+      - name: buyer_normalized_base
+        description: |
+          Normalized buyer name with consistent formatting.
+          
+          Normalization process:
+          1. Remove all non-alphanumeric characters (including spaces)
+          2. Separate alphabetic and numeric segments
+          3. Format as Title Case "Alphabetic Numeric" (first letter uppercase, rest lowercase)
+          4. Add space separator between alphabetic and numeric parts if both exist
+          
+          This provides a consistent representation for matching and grouping.
+      
+      - name: buyer_normalized_canonical
+        description: |
+          Mapped (standardized) buyer name determined by explicit mapping from buyer_typo_map.sql.
+          
+          For each normalized buyer, this field contains:
+          - The mapped canonical name if found in buyer_typo_map.sql
+          - Otherwise, an auto-canonicalized "best" value when the numeric suffix is clearly truncated
+          - Otherwise, the normalized buyer name itself (buyer_normalized_base)
+          
+          All mappings are explicit and deterministic - no fuzzy matching is performed.
+          
+          This helps consolidate variations of the same buyer under one canonical name.
+          For example:
+          - "Arlem", "Arlem 929", "Arlem 929442955", "Arlem 9294429558" → all map to "Arlem 9294429558" (via explicit map)
+          - "Anthony" and "Antny" → map to "Anthony" (via explicit map)
+          
+          If no mapping is found, this equals buyer_normalized_base.
+

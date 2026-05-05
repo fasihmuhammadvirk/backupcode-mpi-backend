@@ -1,0 +1,44 @@
+version: 2
+
+models:
+  - name: int__extracted_data_items_cleaned
+    description: |
+      Intermediate Model: Item Cleaning Layer
+
+      Centralizes all item-level transformations and patchfixes.
+      Each cleaning rule is documented and applied in sequence.
+
+      **Cleaning Rules:**
+        1. Strip leading single digit prefix (ALL vendors)
+           - Pattern: `^\d\s+(.+)$` --> capture group 1
+           - Examples: "1 2402302" --> "2402302", "1 28L" --> "28L"
+        2. For Flow Mark Plumbing Supply and Supreme Plumbing Supply, keep only the first word
+           - Pattern: `^([^[:space:]]+)` --> capture group 1
+           - Examples: "GA300WTG 29136" --> "GA300WTG", "LPLE102M3 LE102M3" --> "LPLE102M3"
+        3. Exclude non-product items (ALL vendors)
+           - Filters out: "CUSTOMER DISCOUNT", "Header"
+           - These are line items that should never be mapped (discounts, headers, etc.)
+      
+      **Edge Case:**
+        We don't want to apply rule 1 for Plumbing Exchange (PE) because PE doesn't provide
+        item codes so instead we use the description as the item code. Some descriptions could have
+        leading digits. For example: `2 x 10 NO HUB PIPE`
+
+      **Output:**
+        - All columns from int__extracted_data_combined passed through
+        - `item`: Original item value (preserved for audit)
+        - `item_cleaned`: Item after all cleaning rules applied
+
+      Data lineage:
+        int__extracted_data_combined --> THIS MODEL --> int__extracted_data_combined_compat
+
+    columns:
+      - name: invoice_items_id
+        description: Primary key from int__extracted_data_combined
+        tests:
+          - unique
+          - not_null
+      - name: item
+        description: Original item value (preserved for audit)
+      - name: item_cleaned
+        description: Item after all cleaning rules applied

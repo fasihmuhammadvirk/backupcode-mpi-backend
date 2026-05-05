@@ -11,6 +11,8 @@ from sqlalchemy import or_, asc, desc
 from mpi_backend.database.models import Invoice, InvoiceItem
 from mpi_backend.database.schemas import Invoice as InvoiceResponse
 from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
+from mpi_backend.database.controllers.Suppliers import SupplierController
+from mpi_backend.utils.s3_utils import get_presigned_url
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,7 @@ class InvoiceController:
         db.refresh(invoice)
         return invoice
 
-    def insert_invoice(self, date, filename, supplier_id, status, storage_path, 
+    def insert_invoice(self, date, filename, supplier_id, status, storage_path,
                        existing_invoice_id=None):
         """
         Insert a new invoice record (maintains compatibility with old code).
@@ -45,7 +47,7 @@ class InvoiceController:
             status: Invoice status
             storage_path: File storage path
             existing_invoice_id: Optional existing invoice ID for reprocessing
-            
+
         Returns:
             Invoice object
         """
@@ -96,8 +98,13 @@ class InvoiceController:
             InvoiceItemAlias.customer_job
         ).outerjoin(InvoiceItemAlias, Invoice.id == InvoiceItemAlias.invoice_id).distinct()
 
-        if supplier_ids is not None and supplier_ids and 0 not in supplier_ids:
-            query = query.filter(Invoice.supplier_id.in_(supplier_ids))
+        # Filter by supplier_ids if provided and not empty
+        # Empty list or list with empty string/None means "all suppliers"
+        # Note: 0 is valid (Unknown Supplier)
+        if supplier_ids:
+            # Filter out only None and empty strings, keep 0 as valid
+            if valid_ids := [sid for sid in supplier_ids if sid is not None and sid != '']:
+                query = query.filter(Invoice.supplier_id.in_(valid_ids))
 
         if from_date:
             query = query.filter(Invoice.date >= from_date)
@@ -105,7 +112,7 @@ class InvoiceController:
             query = query.filter(Invoice.date <= to_date)
 
         if job_location:
-            query = query.filter(InvoiceItemAlias.customer_job == job_location)
+            query = query.filter(InvoiceItemAlias.customer_job.ilike(f'%{job_location.strip()}%'))
 
         if status == 'processed':
             query = query.filter(Invoice.status == 'PROCESSED')
@@ -124,6 +131,23 @@ class InvoiceController:
 
         invoices_list = []
         for invoice, ref_no, customer_job in invoices:
+            # Generate signed URL using supplier_name/invoice_id pattern
+            signed_url = None
+            try:
+                supplier_name = SupplierController(db).get_supplier_by_id(
+                    invoice.supplier_id
+                )
+                if supplier_name:
+                    signed_url = get_presigned_url(
+                        file_key=f'{supplier_name}/{invoice.id}',
+                        expiration_time=180,
+                        is_invoice=True
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to generate signed URL for invoice {invoice.id}: {e}"
+                )
+            
             invoice_item = InvoiceResponse(
                 date=invoice.date,
                 filename=invoice.filename,
@@ -132,7 +156,8 @@ class InvoiceController:
                 invoice_id=str(invoice.id),
                 ref_no=ref_no if ref_no is not None else '',
                 customer_job=customer_job if customer_job is not None else '',
-                is_exported=invoice.is_exported
+                is_exported=invoice.is_exported,
+                signed_url=signed_url
             )
             invoices_list.append(invoice_item)
         return {
@@ -161,6 +186,23 @@ class InvoiceController:
 
         invoices_list = []
         for invoice, ref_no, customer_job in invoices:
+            # Generate signed URL using supplier_name/invoice_id pattern
+            signed_url = None
+            try:
+                supplier_name = SupplierController(db).get_supplier_by_id(
+                    invoice.supplier_id
+                )
+                if supplier_name:
+                    signed_url = get_presigned_url(
+                        file_key=f'{supplier_name}/{invoice.id}',
+                        expiration_time=180,
+                        is_invoice=True
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to generate signed URL for invoice {invoice.id}: {e}"
+                )
+            
             invoice_item = InvoiceResponse(
                 date=invoice.date,
                 filename=invoice.filename,
@@ -169,7 +211,8 @@ class InvoiceController:
                 invoice_id=str(invoice.id),
                 ref_no=ref_no if ref_no is not None else '',
                 customer_job=customer_job if customer_job is not None else '',
-                is_exported=invoice.is_exported
+                is_exported=invoice.is_exported,
+                signed_url=signed_url
             )
             invoices_list.append(invoice_item)
 
@@ -319,6 +362,23 @@ class InvoiceController:
 
         invoices_list = []
         for invoice, ref_no, customer_job in invoices:
+            # Generate signed URL using supplier_name/invoice_id pattern
+            signed_url = None
+            try:
+                supplier_name = SupplierController(db).get_supplier_by_id(
+                    invoice.supplier_id
+                )
+                if supplier_name:
+                    signed_url = get_presigned_url(
+                        file_key=f'{supplier_name}/{invoice.id}',
+                        expiration_time=180,
+                        is_invoice=True
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to generate signed URL for invoice {invoice.id}: {e}"
+                )
+            
             invoice_item = InvoiceResponse(
                 date=invoice.date,
                 filename=invoice.filename,
@@ -327,7 +387,8 @@ class InvoiceController:
                 invoice_id=str(invoice.id),
                 ref_no=ref_no if ref_no is not None else '',
                 customer_job=customer_job if customer_job is not None else '',
-                is_exported=invoice.is_exported
+                is_exported=invoice.is_exported,
+                signed_url=signed_url
             )
             invoices_list.append(invoice_item)
         return invoices_list

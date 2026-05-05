@@ -8,6 +8,9 @@ from sqlalchemy.orm import Query
 
 
 class InvoiceItem(Base):
+    """
+    DEPRECATED use `InvoiceItemMart` instead
+    """
     __tablename__ = 'invoice_items'
 
     id = Column(Integer, primary_key=True, index=True)
@@ -35,6 +38,9 @@ class InvoiceItem(Base):
     invoice_id = Column(UUID, ForeignKey('invoices.id'))
     invoice = relationship("Invoice", back_populates="items")
     is_active = Column(Boolean, default=True)
+    # TODO: Add company_id for multi-tenancy
+    # company_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
+    # Note: Will be denormalized for query performance
 
 
 @event.listens_for(Query, "before_compile", retval=True)

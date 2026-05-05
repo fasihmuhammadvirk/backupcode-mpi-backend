@@ -13,6 +13,8 @@ from sqlalchemy import or_
 
 from mpi_backend.database.models.InvoiceItems import InvoiceItem
 from mpi_backend.database.models.TemporaryItemMapping import TempItemMapping
+from mpi_backend.utils.supplier_suffix_manager import extract_supplier_info, get_unknown_supplier
+from mpi_backend.utils.mapping_validators import is_empty_or_unassigned_sheet_name
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -45,11 +47,12 @@ class TemporaryMappingUpdater:
         """
         try:
             # Query for items that need sheet_name assignment
+            # Check for empty sheet_name: None, "", or "NO SHEET NAME"
             query = self.db.query(InvoiceItem).filter(
-                # No sheet_name or empty sheet_name
                 or_(
                     InvoiceItem.sheet_name.is_(None),
-                    InvoiceItem.sheet_name == ""
+                    InvoiceItem.sheet_name == "",
+                    InvoiceItem.sheet_name.ilike("NO SHEET NAME")
                 ),
                 # AND one of the following conditions:
                 or_(
@@ -126,29 +129,15 @@ class TemporaryMappingUpdater:
             raise
 
     def _extract_supplier_id(self, vendor_name: str) -> tuple:
-        """Extract supplier ID and name from vendor name."""
-        supplier_mapping = {
-            "BMW Plumbing Supplies": 1,
-            "World Wide Plumbing": 2,
-            "Y & S Plumbing Supply": 3,
-            "Supreme Plumbing Supply": 4,
-            "Pyramid Plumbing": 5,
-            "ABC Opus Services": 6,
-            "Park Plumbing Supply": 7,
-            "Gotham Plumbing Supply": 8,
-            "FW Webb Plumbing Supply": 9,
-            "Flow Mark Plumbing Supply": 10,
-            "Plumbing Exchange": 11,
-            "AF Supply": 12,
-            "Lion Hvac Supplies": 13,
-            "Bruce Ferguson": 14
-        }
-        
-        for supplier, supplier_id in supplier_mapping.items():
-            if supplier in vendor_name:
-                return supplier_id, supplier
-        
-        return 1, "BMW Plumbing Supplies"  # Default fallback
+        """
+        Extract supplier ID and name from vendor name.
+        Uses centralized supplier_suffix_manager.
+        """
+        supplier_id, supplier_name, _ = extract_supplier_info(vendor_name)
+        if supplier_id is not None and supplier_name:
+            return supplier_id, supplier_name
+
+        return get_unknown_supplier()  # Default fallback for unidentified suppliers
 
     def _is_safe_to_update(self, item: InvoiceItem) -> bool:
         """
@@ -179,7 +168,7 @@ class TemporaryMappingUpdater:
             mpi_description.startswith("UIDI")
         )
         
-        has_no_sheet_name = not item.sheet_name or item.sheet_name.strip() == ""
+        has_no_sheet_name = is_empty_or_unassigned_sheet_name(item.sheet_name)
         
         return is_no_match or is_uidi or has_no_sheet_name
 
@@ -224,8 +213,9 @@ class TemporaryMappingUpdater:
             updated_count = 0
             warnings_count = 0
             skipped_count = 0
+            batch_size = 100  # Commit every 100 items instead of at the end
             
-            for item in unmapped_items:
+            for idx, item in enumerate(unmapped_items, 1):
                 try:
                     # Safety check: only update if it's safe to do so
                     if not self._is_safe_to_update(item):
@@ -265,9 +255,19 @@ class TemporaryMappingUpdater:
                 except Exception as e:
                     self.logger.error(f"Error updating invoice item {item.id}: {str(e)}")
                     continue
+                
+                # Batch commits: commit every batch_size items instead of at the end
+                if idx % batch_size == 0:
+                    self.db.commit()
+                    self.logger.debug(f"Committed batch at item {idx}/{len(unmapped_items)}")
             
-            # Commit changes
-            self.db.commit()
+            # Final commit for remaining items
+            try:
+                self.db.commit()
+                self.logger.info("Final commit completed for temporary mapping updates")
+            except Exception as e:
+                self.logger.error(f"Error in final commit: {str(e)}")
+                self.db.rollback()
             
             result = {
                 "success": True,

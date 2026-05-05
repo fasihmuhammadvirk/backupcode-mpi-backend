@@ -24,8 +24,20 @@ from mpi_backend.database.controllers.UnmappedItems import (
 )
 from mpi_backend.utils.s3_utils import upload_file
 from mpi_backend.database.models.InvoiceItems import InvoiceItem
+from mpi_backend.utils.supplier_suffix_manager import (
+    get_supplier_suffix,
+    get_unknown_supplier,
+    get_supplier_id_from_name,
+    get_supplier_name_from_id,
+    get_all_supplier_names
+)
+from mpi_backend.utils.mapping_validators import is_empty_or_unassigned_sheet_name
+# Freight extraction is already handled in PDF to Excel conversion
 
 logger = logging.getLogger(__name__)
+
+# Constants
+TAX_SHEET_NAME = '(TAX)'
 
 # Database context manager
 db = contextmanager(get_db)
@@ -93,8 +105,8 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
         excel_file = file
         if base_name.lower().endswith('.pdf'):
             excel_file = file[: -4] + '.xlsx'
-        # Read Excel file with explicit data types to preserve leading zeros in reference numbers
-        extracted_data = pd.read_excel(excel_file, dtype={'Ref NO': str})
+        # Read Excel file with explicit data types to preserve leading zeros in reference numbers and customer jobs
+        extracted_data = pd.read_excel(excel_file, dtype={'Ref NO': str, 'Customer Job': str})
         logger.info(f"Processing file: {file} with {len(extracted_data)} "
                     f"items")
         # Ensure DB session is clean before any queries (in case a previous
@@ -133,6 +145,13 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
             # Convert Amount column to numeric, handling any non-numeric values
             amounts = pd.to_numeric(
                 extracted_data['Amount'], errors='coerce').fillna(0)
+            
+            # Check if this is a credit memo (CR- prefixed reference number)
+            if ref_no.startswith('CR-'):
+                # For credit memos, make all amounts negative
+                amounts = -abs(amounts)
+                logger.info(f"Credit memo detected (ref_no: {ref_no}), converting amounts to negative")
+            
             total_invoice_amount = amounts.sum()
             invoice_amount = str(total_invoice_amount)
             logger.info(
@@ -143,19 +162,66 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
             invoice_amount = str(extracted_data['Amount'][0]) if len(
                 extracted_data) > 0 else "0"
 
-        # For reprocessing, skip duplicate detection and directly update existing invoice
+        # For reprocessing, check for duplicates first, then handle accordingly
         if existing_invoice_id:
             logger.info(
-                f"Reprocessing mode: Updating existing invoice {existing_invoice_id}")
-            duplicate_status = {
-                'status': 'updated_invoice',
-                'existing_invoice_id': existing_invoice_id,
-                'message': f'Reprocessing existing invoice {existing_invoice_id}'
-            }
+                f"Reprocessing mode: Checking duplicates for existing invoice {existing_invoice_id}")
+            
+            # Extract customer job for comparison
+            extracted_customer_job = extracted_data['Customer Job'][0] if len(extracted_data) > 0 else ""
+            
+            # Check for duplicates even during reprocessing to handle edge cases
+            duplicate_status = InvoiceItemController(db).check_invoice_duplicate_status(
+                ref_no, vendor, invoice_date, invoice_amount, extracted_customer_job
+            )
+            
+            # For reprocessing, always check if content has changed even if basic fields match
+            if duplicate_status['status'] == 'exact_duplicate':
+                # Check if content has actually changed by comparing line counts
+                existing_item_count = InvoiceItemController(db).count_items_for_invoice(existing_invoice_id)
+                new_item_count = len(extracted_data)
+                
+                logger.info(f"Reprocessing: Found exact duplicate with existing {existing_item_count} items, new {new_item_count} items")
+                
+                if existing_item_count != new_item_count:
+                    # Content has changed (different number of items), force refresh
+                    logger.info(f"Reprocessing: Content changed (item count: {existing_item_count} -> {new_item_count}), forcing refresh")
+                    controller = InvoiceItemController(db)
+                    deleted_count = controller.delete_previous_invoice_for_update(existing_invoice_id)
+                    duplicate_status = {
+                        'status': 'updated_invoice',
+                        'existing_invoice_id': existing_invoice_id,
+                        'deleted_previous_items': deleted_count,
+                        'message': f'Reprocessing: Content changed (item count: {existing_item_count} -> {new_item_count}). Deleted {deleted_count} previous items, will add new ones.'
+                    }
+                else:
+                    # Content appears unchanged, clean up inactive items and skip
+                    logger.info("Reprocessing: Content unchanged, cleaning up inactive items")
+                    controller = InvoiceItemController(db)
+                    cleaned_count = controller.cleanup_exact_duplicate_inactive_items(existing_invoice_id)
+                    duplicate_status['cleaned_inactive_items'] = cleaned_count
+                    duplicate_status['message'] = f'Reprocessing: Content unchanged for {existing_invoice_id}. Cleaned up {cleaned_count} inactive items.'
+            elif duplicate_status['status'] == 'updated_invoice':
+                # For updated invoice, delete previous items and add new ones
+                logger.info(f"Reprocessing: Found updated invoice, replacing items for {existing_invoice_id}")
+                controller = InvoiceItemController(db)
+                deleted_count = controller.delete_previous_invoice_for_update(existing_invoice_id)
+                duplicate_status['deleted_previous_items'] = deleted_count
+                duplicate_status['message'] = f'Reprocessing: Found updated invoice for {existing_invoice_id}. Deleted {deleted_count} previous items, will add new ones.'
+            else:
+                # For new invoice or not found, proceed with reprocessing
+                duplicate_status = {
+                    'status': 'updated_invoice',
+                    'existing_invoice_id': existing_invoice_id,
+                    'message': f'Reprocessing existing invoice {existing_invoice_id}'
+                }
         else:
             # Normal processing - check for duplicates
+            # Extract customer job for comparison
+            extracted_customer_job = extracted_data['Customer Job'][0] if len(extracted_data) > 0 else ""
+            
             duplicate_status = InvoiceItemController(db).check_invoice_duplicate_status(
-                ref_no, vendor, invoice_date, invoice_amount
+                ref_no, vendor, invoice_date, invoice_amount, extracted_customer_job
             )
 
             # Additional check: Look for any existing invoice with same ref_no and vendor
@@ -169,7 +235,7 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
                 existing_items = db.query(InvoiceItem).filter(
                     InvoiceItem.ref_no == ref_no,
                     InvoiceItem.vendor == vendor,
-                    InvoiceItem.is_active == True
+                    InvoiceItem.is_active.isnot(False)  # Include True and NULL values
                 ).all()
                 if existing_items:
                     logger.warning(
@@ -181,11 +247,13 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
         # Handle different duplicate scenarios
         if duplicate_status['status'] == 'exact_duplicate':
             logger.warning(duplicate_status['message'])
+            cleaned_count = duplicate_status.get('cleaned_inactive_items', 0)
             return {
                 "status": "skipped",
                 "ref_no": ref_no,
                 "vendor": vendor,
                 "date": str(invoice_date),
+                "cleaned_inactive_items": cleaned_count,
                 "message": duplicate_status['message']
             }
         elif duplicate_status['status'] == 'exact_duplicate_with_ref_update':
@@ -208,7 +276,7 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
             }
         elif duplicate_status['status'] == 'updated_invoice':
             logger.info(duplicate_status['message'])
-            # Continue processing to update the existing invoice
+            # Continue processing to add new items to the existing invoice (previous items already deleted)
             existing_invoice_id = duplicate_status['existing_invoice_id']
         elif duplicate_status['status'] == 'new_invoice':
             logger.info(duplicate_status['message'])
@@ -257,23 +325,58 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
 
         # Handle different processing scenarios
         if duplicate_status['status'] == 'updated_invoice':
-            # Update existing invoice with new data
+            # Check if freight already exists in extracted data and update format if needed
+            freight_rows = extracted_data[
+                (extracted_data['MpiItem'] == '10 Materials') & 
+                (extracted_data['MpiDescription'] == 'Freight')
+            ]
+            
+            if len(freight_rows) > 0:
+                logger.info(f"Found {len(freight_rows)} existing freight rows in updated invoice")
+                
+                # Update existing freight rows to use correct format
+                for idx in freight_rows.index:
+                    extracted_data.loc[idx, 'MpiItem'] = '10 Material'  # Update to correct format
+                    extracted_data.loc[idx, 'Item'] = '10 Material'  # Update to correct format
+                    extracted_data.loc[idx, 'Qty'] = ''  # Remove qty (like tax)
+                    extracted_data.loc[idx, 'Memo'] = ''  # Remove memo (like tax)
+                    
+                    # Handle CR- reference numbers for freight (make negative)
+                    if ref_no.startswith('CR-'):
+                        current_amount = extracted_data.loc[idx, 'Amount']
+                        current_cost = extracted_data.loc[idx, 'Cost']
+                        
+                        # Make amounts negative
+                        extracted_data.loc[idx, 'Amount'] = str(-abs(float(current_amount)))
+                        extracted_data.loc[idx, 'Cost'] = -abs(float(current_cost))
+                        logger.info(f"Credit memo detected, making freight amount negative: {extracted_data.loc[idx, 'Amount']}")
+                
+                logger.info(f"Updated {len(freight_rows)} freight rows to correct format")
+            else:
+                logger.info("No existing freight rows found in updated invoice")
+            
+            # Update existing invoice with new data (previous items already deleted if needed)
             success = InvoiceItemController(db).update_existing_invoice_items(
                 existing_invoice_id, extracted_data, os.path.basename(file)
             )
             if success:
+                deleted_count = duplicate_status.get('deleted_previous_items', 0)
+                cleaned_count = duplicate_status.get('cleaned_inactive_items', 0)
                 logger.info(
-                    f'Successfully updated invoice {existing_invoice_id} with {len(extracted_data)} items')
+                    f'Successfully added {len(extracted_data)} new items to invoice {existing_invoice_id} (deleted {deleted_count} previous items, cleaned {cleaned_count} inactive items)')
                 return {
                     "status": "updated",
                     "invoice_id": existing_invoice_id,
                     "ref_no": ref_no,
                     "vendor": vendor,
                     "date": str(invoice_date),
+                    "deleted_previous_items": deleted_count,
+                    "cleaned_inactive_items": cleaned_count,
+                    "added_new_items": len(extracted_data),
                     "message": duplicate_status['message']
                 }
             else:
-                logger.error(f'Failed to update invoice {existing_invoice_id}')
+                logger.error(f'Failed to add new items to invoice {existing_invoice_id}')
                 return {
                     "status": "error",
                     "invoice_id": existing_invoice_id,
@@ -305,6 +408,36 @@ def process_single_file(file, temp_items, item_mappings, customer_job_mappings,
             # Upload to S3
             upload_file(file_name=file,
                         file_key=f'{extracted_data["Vendor"][0]}/{invoice_record.id}')
+
+            # Check if freight already exists in extracted data and update format if needed
+            freight_rows = extracted_data[
+                (extracted_data['MpiItem'] == '10 Materials') & 
+                (extracted_data['MpiDescription'] == 'Freight')
+            ]
+            
+            if len(freight_rows) > 0:
+                logger.info(f"Found {len(freight_rows)} existing freight rows in new invoice")
+                
+                # Update existing freight rows to use correct format
+                for idx in freight_rows.index:
+                    extracted_data.loc[idx, 'MpiItem'] = '10 Material'  # Update to correct format
+                    extracted_data.loc[idx, 'Item'] = '10 Material'  # Update to correct format
+                    extracted_data.loc[idx, 'Qty'] = ''  # Remove qty (like tax)
+                    extracted_data.loc[idx, 'Memo'] = ''  # Remove memo (like tax)
+                    
+                    # Handle CR- reference numbers for freight (make negative)
+                    if ref_no.startswith('CR-'):
+                        current_amount = extracted_data.loc[idx, 'Amount']
+                        current_cost = extracted_data.loc[idx, 'Cost']
+                        
+                        # Make amounts negative
+                        extracted_data.loc[idx, 'Amount'] = str(-abs(float(current_amount)))
+                        extracted_data.loc[idx, 'Cost'] = -abs(float(current_cost))
+                        logger.info(f"Credit memo detected, making freight amount negative: {extracted_data.loc[idx, 'Amount']}")
+                
+                logger.info(f"Updated {len(freight_rows)} freight rows to correct format")
+            else:
+                logger.info("No existing freight rows found in new invoice")
 
             # Store invoice items
             for index, row in extracted_data.iterrows():
@@ -351,9 +484,33 @@ def process_failed_file(file, db):
                     file_key=f'{supplier_name}/{invoice_record.id}')
         logger.info(f'Processed failed file: {file}')
 
-    except Exception as e:
-        logger.error(f'Error processing failed file {file}: {str(e)}')
+    except Exception as _:
+        logger.exception(f'Error processing failed file {file}')
         raise
+
+
+def _has_original_item_and_description(row):
+    """
+    Check if an invoice item has both Original Item Number and Original Description
+    AND the description is NOT "Tax" (which indicates an actual tax item from PDF processor).
+    
+    Args:
+        row: pandas Series representing an invoice item row
+        
+    Returns:
+        bool: True if both 'Item' and 'Description' are present, non-empty,
+              AND description is NOT "Tax"
+    """
+    item = row.get('Item', '')
+    description = row.get('Description', '')
+
+    has_item = item and str(item).strip()
+    has_description = description and str(description).strip()
+
+    description_str = str(description).strip() if description else ''
+    is_actual_tax = description_str.upper().strip() == 'TAX'
+
+    return has_item and has_description and not is_actual_tax
 
 
 def search_replace(row, temp_items, item_mappings, db):
@@ -365,8 +522,14 @@ def search_replace(row, temp_items, item_mappings, db):
     mappings override UIDI.
     Uses exact matching only to avoid business logic issues.
     Also handles mappings without sheet names.
+    
+    Items with both Original Item Number and Original Description should
+    never be classified as Tax. If no mapping is found, they should
+    display "No Match" instead of Tax.
     """
     # Removed unused import - mapping validation is now handled differently
+
+    has_original_fields = _has_original_item_and_description(row)
 
     # Clean supplier_item_ids from invoice and strip spaces
     original_item = row['Item'].strip()
@@ -388,11 +551,19 @@ def search_replace(row, temp_items, item_mappings, db):
         if not mapping_match.empty:
             mpi_code = mapping_match.iloc[0]['mpi_code']
             description = mapping_match.iloc[0]['description']
+            sheet_name = mapping_match.iloc[0]['google_sheet_name']
 
+            # CRITICAL: Items with both Original Item Number and Original Description
+            # should NEVER be classified as Tax, even if a mapping exists
+            if has_original_fields and sheet_name and str(sheet_name).strip().upper() == TAX_SHEET_NAME:
+                logger.debug(
+                    f"Rejecting Tax mapping for item with Original Item Number and Description: "
+                    f"{original_item} -> {mpi_code} (sheet: {sheet_name})")
+                # Skip this mapping and continue to look for other mappings or return as "No Match"
             # Apply the mapping if it exists in the permanent mappings table
             # Only apply if it's a valid permanent mapping (not UIDI or temporary codes)
             # UIDI codes should remain as "No Match" until properly mapped
-            if (mpi_code and
+            elif (mpi_code and
                 mpi_code.strip() and
                 not mpi_code.strip().startswith('UIDI') and
                 mpi_code.strip() != "No Match" and
@@ -402,12 +573,11 @@ def search_replace(row, temp_items, item_mappings, db):
 
                 row['MpiItem'] = mpi_code  # This is the target mpi_code
                 row['MpiDescription'] = description or mpi_code
-                sheet_name = mapping_match.iloc[0]['google_sheet_name']
                 # Handle empty sheet names
                 row['Sheet Name'] = sheet_name or ""
 
                 # Log if this is a mapping without sheet name
-                if not sheet_name or sheet_name.strip() == "":
+                if is_empty_or_unassigned_sheet_name(sheet_name):
                     logger.debug(
                         f"Applied permanent mapping (no sheet): "
                         f"{original_item} -> {mpi_code}")
@@ -433,12 +603,22 @@ def search_replace(row, temp_items, item_mappings, db):
             temp_items, original_item, row['Vendor'])
 
     if not temp_match.empty:
-        # For temporary mappings, ONLY assign the sheet name. Do NOT change MPI fields.
-        row['Sheet Name'] = temp_match.iloc[0]['sheet_name']
-        logger.debug(
-            f"Applied temporary mapping: {original_item} -> sheet: "
-            f"{temp_match.iloc[0]['sheet_name']} (MPI fields unchanged)")
-        return row
+        temp_sheet_name = temp_match.iloc[0]['sheet_name']
+        
+        # CRITICAL: Items with both Original Item Number and Original Description
+        # should NEVER be classified as Tax, even if a temporary mapping exists
+        if has_original_fields and temp_sheet_name and str(temp_sheet_name).strip().upper() == TAX_SHEET_NAME:
+            logger.debug(
+                f"Rejecting Tax temporary mapping for item with Original Item Number and Description: "
+                f"{original_item} -> sheet: {temp_sheet_name}")
+            # Skip this mapping and continue to return as "No Match"
+        else:
+            # For temporary mappings, ONLY assign the sheet name. Do NOT change MPI fields.
+            row['Sheet Name'] = temp_sheet_name
+            logger.debug(
+                f"Applied temporary mapping: {original_item} -> sheet: "
+                f"{temp_sheet_name} (MPI fields unchanged)")
+            return row
 
     # THIRD: If no mapping found at all, add to unmapped items
     supplier_id, _ = extract_supplier_id(row['Vendor'])
@@ -473,7 +653,8 @@ def _find_temp_mapping_with_suffix_variations(temp_items, original_item, vendor)
     expected_suffix = _get_supplier_suffix(supplier_id)
     
     if not expected_suffix:
-        return temp_items  # No suffix expected, return empty
+        # No suffix expected for this supplier; signal "no match"
+        return temp_items.iloc[0:0]
     
     # Try to find mapping with suffix
     item_with_suffix = f"{original_item}-{expected_suffix}"
@@ -497,7 +678,8 @@ def _find_temp_mapping_with_suffix_variations(temp_items, original_item, vendor)
                     f"{original_item} -> {item_with_suffix}")
                 return temp_match
     
-    return temp_items  # Return empty if no variations found
+    # No suffix-based variations found; return empty
+    return temp_items.iloc[0:0]
 
 
 def _find_permanent_mapping_with_suffix_variations(item_mappings, original_item, vendor):
@@ -520,7 +702,8 @@ def _find_permanent_mapping_with_suffix_variations(item_mappings, original_item,
     expected_suffix = _get_supplier_suffix(supplier_id)
     
     if not expected_suffix:
-        return item_mappings  # No suffix expected, return empty
+        # No suffix expected for this supplier; signal "no match"
+        return item_mappings.iloc[0:0]
     
     # Try to find mapping with suffix
     item_with_suffix = f"{original_item}-{expected_suffix}"
@@ -544,28 +727,21 @@ def _find_permanent_mapping_with_suffix_variations(item_mappings, original_item,
                     f"{original_item} -> {item_with_suffix}")
                 return mapping_match
     
-    return item_mappings  # Return empty if no variations found
+    # No suffix-based variations found; return empty
+    return item_mappings.iloc[0:0]
 
 
 def _get_supplier_suffix(supplier_id):
-    """Get suffix for a supplier ID."""
-    suffix_map = {
-        1: 'B',   # BMW Plumbing Supplies
-        2: 'W',   # World Wide Plumbing  
-        3: 'Y',   # Y & S Plumbing Supply
-        4: 'S',   # Supreme Plumbing Supply
-        5: 'P',   # Pyramid Plumbing
-        6: 'A',   # ABC Opus Services
-        7: 'P',   # Park Plumbing Supply
-        8: 'G',   # Gotham Plumbing Supply
-        9: 'F',   # FW Webb Plumbing Supply
-        10: 'F',  # Flow Mark Plumbing Supply
-        11: None, # Plumbing Exchange (no suffix)
-        12: 'A',  # AF Supply
-        13: None, # Lion Hvac Supplies (no suffix)
-        14: 'F',  # Bruce Ferguson
-    }
-    return suffix_map.get(supplier_id)
+    """
+    Get suffix for a supplier ID.
+    Uses centralized supplier_suffix_manager.
+    
+    Note: This function is called from DataFrame processing utilities that don't
+    have database access. It uses the in-memory fallback mapping, which is
+    acceptable since suffix mappings are static and rarely change. For database-
+    backed lookups, use get_supplier_suffix(supplier_id, db=session) directly.
+    """
+    return get_supplier_suffix(supplier_id=supplier_id)
 
 
 def get_updated_customer_job(customer_job, customer_job_mappings):
@@ -582,27 +758,17 @@ def get_updated_customer_job(customer_job, customer_job_mappings):
 
 
 def extract_supplier_id(file_path):
-    """Extract supplier ID and name from file path"""
-    company_codes = {
-        "BMW Plumbing Supplies": 1,
-        "World Wide Plumbing": 2,
-        "Y & S Plumbing Supply": 3,
-        "Supreme Plumbing Supply": 4,
-        "Pyramid Plumbing": 5,
-        "ABC Opus Services": 6,
-        "Park Plumbing Supply": 7,
-        "Gotham Plumbing Supply": 8,
-        "FW Webb Plumbing Supply": 9,
-        "Flow Mark Plumbing Supply": 10,
-        "Plumbing Exchange": 11,
-        "AF Supply": 12,
-        "Lion Hvac Supplies": 13
-    }
-    for company, code in company_codes.items():
-        if company in file_path:
-            return code, company
-    # Return a safe default tuple to avoid unpack errors in callers
-    return 1, "BMW Plumbing Supplies"
+    """Extract supplier ID and name from file path.
+
+    Uses centralized supplier_suffix_manager for name-to-ID lookups.
+    """
+    for supplier_name in get_all_supplier_names():
+        if supplier_name in file_path:
+            supplier_id = get_supplier_id_from_name(supplier_name)
+            return supplier_id, supplier_name
+
+    # Return Unknown Supplier if no match found
+    return get_unknown_supplier()
 
 
 def extract_email_date(path):

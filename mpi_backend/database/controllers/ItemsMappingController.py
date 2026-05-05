@@ -7,8 +7,8 @@ from sqlalchemy import or_, and_
 from sqlalchemy.orm import Session
 
 from mpi_backend.utils.quickbooks_priority_controller import is_qb_export_active
-from mpi_backend.utils.export_utils import extract_supplier_id
 from mpi_backend.database import SessionLocal
+from mpi_backend.utils.supplier_suffix_manager import extract_supplier_info
 # Removed clean_supplier_suffix import - no longer needed with suffix standardization
 from mpi_backend.utils.mapping_validators import (
     validate_mapping_for_permanent_storage,
@@ -16,7 +16,6 @@ from mpi_backend.utils.mapping_validators import (
     is_temporary_mapping,
     clean_mapping_data
 )
-from mpi_backend.utils.mapping_stats_manager import MappingStatsManager
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -240,8 +239,9 @@ class ItemsMappingController:
         try:
             from mpi_backend.database.models import Supplier
             db = self._get_db_session()
-            supplier = db.query(Supplier).filter_by(id=supplier_id).first()
-            return supplier.supplier_name if supplier else f"Unknown Supplier (ID: {supplier_id})"
+            # Query only supplier_name column to avoid suffix column error
+            result = db.query(Supplier.supplier_name).filter(Supplier.id == supplier_id).first()
+            return result[0] if result else f"Unknown Supplier (ID: {supplier_id})"
         except Exception as e:
             logger.warning(
                 f"Could not fetch supplier name for ID {supplier_id}: {str(e)}")
@@ -517,13 +517,32 @@ class ItemsMappingController:
             ).first()
 
             if existing_mapping:
-                # Mapping already exists with same data - no need to update
+                # Mapping already exists with same data - but we should still
+                # propagate to ensure invoice items are up to date (in case items
+                # were created after the mapping or previous propagation failed)
                 logger.debug(
                     f"Mapping already exists (no change): {cleaned_data['supplier_item_ids']} -> {cleaned_data['mpi_code']}")
+                
+                # Propagate to invoice items to ensure "No Match" items get updated
+                try:
+                    self._propagate_mapping_changes(
+                        db,
+                        supplier_id,
+                        cleaned_data["supplier_item_ids"],
+                        cleaned_data.get("mpi_code", ""),
+                        cleaned_data.get("description", ""),
+                        cleaned_data.get("google_sheet_name", "")
+                    )
+                    logger.info(
+                        f"Propagated existing mapping to invoice items: {cleaned_data['supplier_item_ids']} -> {cleaned_data['mpi_code']}")
+                except Exception as e:
+                    logger.error(
+                        f"Failed to propagate existing mapping changes: {str(e)}")
+                
                 return {
                     "status": "success",
-                    "message": "Mapping already exists with same data",
-                    "action": "no_change",
+                    "message": "Mapping already exists with same data - propagated to invoice items",
+                    "action": "propagate",
                     "mapping_id": existing_mapping.id
                 }
 
@@ -596,24 +615,23 @@ class ItemsMappingController:
                     # Re-raise other commit errors
                     raise commit_error
 
-            # If this was an update and the mpi_code or description changed,
-            # propagate the changes to related InvoiceItems
-            if is_update and (
-                old_mpi_code != cleaned_data.get("mpi_code") or
-                old_description != cleaned_data.get("description")
-            ):
-                try:
-                    self._propagate_mapping_changes(
-                        db,
-                        supplier_id,
-                        cleaned_data["supplier_item_ids"],
-                        cleaned_data.get("mpi_code", ""),
-                        cleaned_data.get("description", ""),
-                        cleaned_data.get("google_sheet_name", "")
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to propagate mapping changes: {str(e)}")
+            # Propagate the changes to related InvoiceItems
+            # This should happen for BOTH new mappings and updates to ensure
+            # that items previously marked as "No Match" get updated
+            try:
+                self._propagate_mapping_changes(
+                    db,
+                    supplier_id,
+                    cleaned_data["supplier_item_ids"],
+                    cleaned_data.get("mpi_code", ""),
+                    cleaned_data.get("description", ""),
+                    cleaned_data.get("google_sheet_name", "")
+                )
+                logger.info(
+                    f"Propagated mapping to invoice items: {cleaned_data['supplier_item_ids']} -> {cleaned_data['mpi_code']}")
+            except Exception as e:
+                logger.error(
+                    f"Failed to propagate mapping changes: {str(e)}")
 
             return {
                 "status": "success",
@@ -742,6 +760,7 @@ class ItemsMappingController:
                 f"Found {len(temp_mappings)} temporary mappings for additional matching")
 
             # Create lookup dictionary for faster matching - PERMANENT MAPPINGS FIRST
+            # Use dict for O(1) lookup instead of iterating through all mappings
             mappings_lookup = {}
             mappings_without_sheet = {}  # Track mappings without sheet names
 
@@ -783,6 +802,7 @@ class ItemsMappingController:
             updated_from_permanent = 0
             updated_from_temp = 0
             updated_from_no_sheet = 0
+            batch_size = 100  # Commit every 100 items instead of at the end
 
             total_items = len(no_match_items)
             logger.info(f"Processing {total_items} items for UIDI update")
@@ -885,7 +905,18 @@ class ItemsMappingController:
                     logger.debug(
                         f"No mapping found for item: '{clean_invoice_item}'")
 
-            db.commit()
+                # Batch commits: commit every batch_size items instead of at the end
+                if idx % batch_size == 0:
+                    db.commit()
+                    logger.debug(f"Committed batch at item {idx}/{total_items}")
+
+            # Final commit for remaining items
+            try:
+                db.commit()
+                logger.info("Final commit completed for UIDI update")
+            except Exception as e:
+                logger.error(f"Error in final commit: {str(e)}")
+                db.rollback()
 
             logger.info(
                 f"UIDI update completed: {updated_count} items updated, {no_match_found_count} items remain unmatched")
@@ -950,6 +981,7 @@ class ItemsMappingController:
         """Helper method to perform comprehensive unmapped items update"""
         try:
             # Get ALL items that are unmapped - comprehensive query
+            # In production, empty sheet names have been converted to "NO SHEET NAME"
             unmapped_items = db.query(InvoiceItem).filter(
                 or_(
                     # Items with no MPI item assigned
@@ -960,10 +992,12 @@ class ItemsMappingController:
                     # Items with no sheet name (even if they have MPI item)
                     InvoiceItem.sheet_name.is_(None),
                     InvoiceItem.sheet_name == "",
+                    InvoiceItem.sheet_name.ilike("NO SHEET NAME"),
                     # Items that might have sheet name but no proper MPI mapping
                     and_(
                         InvoiceItem.sheet_name.isnot(None),
                         InvoiceItem.sheet_name != "",
+                        ~InvoiceItem.sheet_name.ilike("NO SHEET NAME"),
                         or_(
                             InvoiceItem.mpi_item.is_(None),
                             InvoiceItem.mpi_item == "",
@@ -1052,6 +1086,7 @@ class ItemsMappingController:
             updated_from_no_sheet = 0
             no_match_found_count = 0
             items_with_sheet_but_no_mpi = 0
+            batch_size = 100  # Commit every 100 items instead of at the end
 
             total_items = len(unmapped_items)
             logger.info(f"Processing {total_items} unmapped items for comprehensive update")
@@ -1141,9 +1176,15 @@ class ItemsMappingController:
                         logger.debug(
                             f"No mapping found for item with sheet but no MPI: {clean_invoice_item} (sheet: {original_sheet})")
 
-            # Commit all changes
+                # Batch commits: commit every batch_size items instead of at the end
+                if idx % batch_size == 0:
+                    db.commit()
+                    logger.debug(f"Committed batch at item {idx}/{total_items}")
+
+            # Final commit for remaining items
             try:
                 db.commit()
+                logger.info("Final commit completed for comprehensive update")
                 logger.info(
                     f"Comprehensive update completed: {updated_count} items updated, {no_match_found_count} items remain unmatched")
                 logger.info(
@@ -1175,26 +1216,16 @@ class ItemsMappingController:
             raise
 
     def _extract_supplier_id(self, vendor_name):
-        """Helper method to extract supplier ID from vendor name"""
-        company_codes = {
-            "BMW Plumbing Supplies": 1,
-            "World Wide Plumbing": 2,
-            "Y & S Plumbing Supply": 3,
-            "Supreme Plumbing Supply": 4,
-            "Pyramid Plumbing": 5,
-            "ABC Opus Services": 6,
-            "Park Plumbing Supply": 7,
-            "Gotham Plumbing Supply": 8,
-            "FW Webb Plumbing Supply": 9,
-            "Flow Mark Plumbing Supply": 10,
-            "Plumbing Exchange": 11,
-            "AF Supply": 12,
-            "Lion Hvac Supplies": 13
-        }
-        for company, code in company_codes.items():
-            if company in vendor_name:
-                return code, company
-        return 1, "BMW Plumbing Supplies"  # Default
+        """
+        Helper method to extract supplier ID from vendor name.
+        Uses centralized supplier_suffix_manager.
+        """
+        supplier_id, supplier_name, _ = extract_supplier_info(vendor_name)
+        if supplier_id is not None and supplier_name:
+            return supplier_id, supplier_name
+
+        from mpi_backend.utils.supplier_suffix_manager import get_unknown_supplier
+        return get_unknown_supplier()  # Default for unidentified suppliers
 
     def update_all_mappings(self) -> Dict[str, Any]:
         """
@@ -1269,14 +1300,31 @@ class ItemsMappingController:
                     "message": "No valid mappings found to apply after filtering"
                 }
 
-            # Get all invoice items for efficient processing
+            # Get all invoice items ONCE and create a lookup dictionary for O(1) access
+            # This is the key optimization - we load all items once instead of for each mapping
             all_invoice_items = db.query(InvoiceItem).all()
             logger.info(
                 f"Processing {len(valid_mappings)} mappings against {len(all_invoice_items)} invoice items")
 
+            # Create a lookup dictionary: item_code -> list of invoice items
+            # This allows O(1) lookup instead of O(n) for each mapping
+            item_lookup = {}
+            for invoice_item in all_invoice_items:
+                if not invoice_item.item:
+                    continue
+                clean_item = invoice_item.item.strip()
+                if not clean_item:
+                    continue
+                if clean_item not in item_lookup:
+                    item_lookup[clean_item] = []
+                item_lookup[clean_item].append(invoice_item)
+
+            logger.info(f"Created lookup dictionary with {len(item_lookup)} unique item codes")
+
             # Process each mapping to update related invoice items
             total_updated_count = 0
             total_mappings_processed = 0
+            batch_size = 100  # Commit every 100 mappings instead of every mapping
 
             total_mappings = len(valid_mappings)
             logger.info(f"Processing {total_mappings} mappings for all mappings update")
@@ -1297,7 +1345,12 @@ class ItemsMappingController:
                     logger.info(f"All mappings update progress: {progress_percent}% ({idx}/{total_mappings})")
                 
                 try:
-                    # Strip whitespace from mapping item
+                    # Strip whitespace from mapping item - handle None values
+                    if not mapping.supplier_item_ids:
+                        logger.warning(
+                            f"Skipping mapping with None/empty supplier_item_ids: {mapping.mpi_code}")
+                        continue
+                    
                     clean_mapping_item = mapping.supplier_item_ids.strip()
 
                     if not clean_mapping_item:
@@ -1305,19 +1358,8 @@ class ItemsMappingController:
                             f"Skipping mapping with empty supplier_item_ids: {mapping.mpi_code}")
                         continue
 
-                    # Find matches using exact comparison
-                    matching_items = []
-
-                    for invoice_item in all_invoice_items:
-                        # Clean the invoice item by stripping whitespace
-                        clean_invoice_item = invoice_item.item.strip()
-
-                        if not clean_invoice_item:
-                            continue
-
-                        # Exact match only - no suffix variations to avoid business logic issues
-                        if clean_invoice_item == clean_mapping_item:
-                            matching_items.append(invoice_item)
+                    # Use O(1) lookup instead of O(n) iteration
+                    matching_items = item_lookup.get(clean_mapping_item, [])
 
                     if not matching_items:
                         logger.debug(
@@ -1357,8 +1399,10 @@ class ItemsMappingController:
                         f"{mapping.supplier_item_ids} -> {mapping.mpi_code}"
                     )
 
-                    # Commit after each mapping batch to avoid large transactions
-                    db.commit()
+                    # Batch commits: commit every batch_size mappings instead of after each one
+                    if idx % batch_size == 0:
+                        db.commit()
+                        logger.debug(f"Committed batch at mapping {idx}/{total_mappings}")
 
                 except Exception as e:
                     logger.error(
@@ -1366,6 +1410,14 @@ class ItemsMappingController:
                         f"{mapping.supplier_item_ids}: {str(e)}"
                     )
                     db.rollback()
+
+            # Final commit for remaining items
+            try:
+                db.commit()
+                logger.info("Final commit completed")
+            except Exception as e:
+                logger.error(f"Error in final commit: {str(e)}")
+                db.rollback()
 
             logger.info(
                 f"Update complete: {total_updated_count} items updated from "
@@ -1398,9 +1450,19 @@ class ItemsMappingController:
             db: Database session
             supplier_id (str): Supplier ID
             item_number (str): Item identifier/number (supplier_item_ids)
+                              Can be None for special line items (credits, freight, tax)
             new_mpi_code (str): New MPI code to set
             new_description (str): New description to set
             sheet_name (str): Sheet name to set
+            
+        Note on None item_number:
+            Some invoice line items legitimately don't have item codes:
+            - Credit memos (CR- prefix invoices)
+            - Freight charges (often just "FREIGHT" or "10 Material")
+            - Tax line items
+            - Administrative charges
+            - Incomplete data from Google Sheets
+            The None check prevents crashes when processing these items.
         """
         try:
             # Validate that we're not propagating temporary mappings
@@ -1409,10 +1471,14 @@ class ItemsMappingController:
                     f"Skipping propagation of temporary mapping: {new_mpi_code}")
                 return
 
-            # Get all invoice items for matching
-            all_invoice_items = db.query(InvoiceItem).all()
-
-            # Clean the mapping item
+            # Validate item_number is not None
+            # This can happen for credits, freight, tax, or incomplete mappings
+            if item_number is None:
+                logger.debug(
+                    f"Cannot propagate mapping changes: item_number is None "
+                    f"(likely credit/freight/tax line item)")
+                return
+            
             clean_mapping_item = item_number.strip()
 
             if not clean_mapping_item:
@@ -1420,19 +1486,11 @@ class ItemsMappingController:
                     f"Cannot propagate mapping changes: empty item_number")
                 return
 
-            # Find matching items using exact comparison
-            matching_items = []
-
-            for invoice_item in all_invoice_items:
-                # Clean the invoice item by stripping whitespace
-                clean_invoice_item = invoice_item.item.strip()
-
-                if not clean_invoice_item:
-                    continue
-
-                # Exact match only - no suffix variations to avoid business logic issues
-                if clean_invoice_item == clean_mapping_item:
-                    matching_items.append(invoice_item)
+            # Use a direct database query with filter instead of loading all items
+            # This is much more efficient than loading all items into memory
+            matching_items = db.query(InvoiceItem).filter(
+                InvoiceItem.item == clean_mapping_item
+            ).all()
 
             if not matching_items:
                 logger.info(
@@ -1585,12 +1643,18 @@ class ItemsMappingController:
         """
         try:
             from mpi_backend.database.models.Suppliers import Supplier
-            supplier = db.query(Supplier).filter_by(
-                id=int(supplier_id)).first()
+            # Query only id and supplier_name columns to avoid suffix column error
+            supplier = db.query(Supplier.id, Supplier.supplier_name).filter(
+                Supplier.id == int(supplier_id)).first()
             return supplier is not None
         except Exception as e:
             logger.error(
                 f"Error validating supplier ID {supplier_id}: {str(e)}")
+            # Rollback transaction if it was aborted due to database error
+            try:
+                db.rollback()
+            except Exception:
+                pass  # Ignore rollback errors
             return False
 
     def _get_available_supplier_ids(self, db: Session) -> List[int]:
@@ -1605,10 +1669,16 @@ class ItemsMappingController:
         """
         try:
             from mpi_backend.database.models.Suppliers import Supplier
-            suppliers = db.query(Supplier).all()
-            return [supplier.id for supplier in suppliers]
+            # Query only id column to avoid suffix column error
+            suppliers = db.query(Supplier.id).all()
+            return [supplier_id for (supplier_id,) in suppliers]
         except Exception as e:
             logger.error(f"Error getting available supplier IDs: {str(e)}")
+            # Rollback transaction if it was aborted due to database error
+            try:
+                db.rollback()
+            except Exception:
+                pass  # Ignore rollback errors
             return []
 
     def get_mapping_stats(self) -> Dict[str, Any]:
@@ -1657,9 +1727,5 @@ class ItemsMappingController:
             "temporary_mappings": temporary_mappings,
             "invalid_mappings": invalid_mappings
         }
-
-        # Update stats in the JSON file
-        stats_manager = MappingStatsManager()
-        stats_manager.update_item_mapping_stats(stats)
 
         return stats

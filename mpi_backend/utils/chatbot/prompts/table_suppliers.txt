@@ -1,0 +1,8 @@
+Table: suppliers
+Columns: id (INTEGER), supplier_name (VARCHAR)
+
+Key Business Info:
+- Contains supplier company information
+- Links to invoices via suppliers.id = invoices.supplier_id
+- Use supplier_name for user-readable output, never show IDs
+

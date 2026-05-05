@@ -1,0 +1,14 @@
+version: 2
+
+sources:
+  - name: public
+    tables:
+      - name: invoice_items
+        description: "Raw invoice items from the PDF ingestion pipeline."
+      - name: user_overrides
+        description: "User corrections to mart-derived data. App-managed; dbt reads, never writes."
+      - name: invoice_voided
+        description: >
+          Tracks voided invoices by (ref_no, date, vendor). Only voided invoices
+          have rows; the backend inserts on void and deletes on restore.
+          dbt reads this table to populate invoice_voided_at in the mart layer.

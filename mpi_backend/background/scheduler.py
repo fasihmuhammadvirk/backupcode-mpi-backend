@@ -3,14 +3,19 @@ Simple, Unrestricted APScheduler Configuration for MPI Backend
 No restrictions, no memory management, no performance monitoring.
 """
 
+import gc
 import logging
 import pytz
+from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
 from apscheduler.executors.pool import ThreadPoolExecutor as APSchedulerThreadPool
 
-# Import business logic tasks
-from mpi_backend.utils.quickbooks_priority_controller import set_scheduler_instance
+from mpi_backend.background.tasks.email_download import download_emails
+from mpi_backend.utils.quickbooks_priority_controller import (
+    set_scheduler_instance,
+    get_scheduler_instance as get_global_scheduler_instance
+)
+from mpi_backend.utils.dbt_scheduler import get_dbt_runner, DBTConfig, RefreshStatus
 
 logger = logging.getLogger(__name__)
 
@@ -54,74 +59,20 @@ def init_scheduler() -> BackgroundScheduler:
     
     # Email downloads - every 5 minutes
     scheduler.add_job(
-        async_email_download_wrapper,
+        download_emails,
         "interval",
         minutes=5,
         executor='background',
         id="email_download",
         name="Email Download Task (Every 5 Minutes)",
         replace_existing=True,
-    )
-
-    # Statement downloads - every 12 hours
-    scheduler.add_job(
-        async_statement_download_wrapper,
-        "interval",
-        hours=12,
-        executor='background',
-        id="statement_download",
-        name="Statement Download Task (Every 12 Hours)",
-        replace_existing=True,
-    )
-
-    # Failed invoice recovery - every 24 hours
-    scheduler.add_job(
-        async_failed_invoice_recovery_wrapper,
-        "interval",
-        hours=24,
-        executor='background',
-        id="failed_invoice_recovery",
-        name="Failed Invoice Recovery Task (Every 24 Hours)",
-        replace_existing=True,
-    )
-
-    # Missing invoice downloads - every 5 hours
-    scheduler.add_job(
-        async_missing_invoice_download_wrapper,
-        "interval",
-        hours=5,
-        executor='background',
-        id="missing_invoice_download",
-        name="Missing Invoice Download Task (Every 5 Hours)",
-        replace_existing=True,
+        max_instances=1,
     )
 
     # =============================================================================
     # CRON JOBS - No restrictions
     # =============================================================================
     
-    # UIDI/NO Match updates - Daily at 6 AM PKT (1 AM UTC)
-    scheduler.add_job(
-        scheduled_uidi_no_match_update,
-        CronTrigger(hour=1, minute=0, timezone=pytz.utc),
-        executor='background',
-        id="daily_uidi_no_match_update",
-        name="Daily UIDI/NO Match Update (6 AM PKT)",
-        replace_existing=True,
-    )
-
-    # All Mappings update - Saturday at 8 AM PKT (3 AM UTC)
-    scheduler.add_job(
-        scheduled_all_mappings_update,
-        CronTrigger(hour=3, minute=0, timezone=pytz.utc, day_of_week=5),
-        executor='background',
-        id="weekly_all_mappings_update",
-        name="Weekly All Mappings Update (Saturday 8 AM PKT)",
-        replace_existing=True,
-    )
-
-    # Google Sheet sync - REMOVED as requested
-
     # Memory cleanup - every 6 hours
     scheduler.add_job(
         scheduled_memory_cleanup,
@@ -133,7 +84,33 @@ def init_scheduler() -> BackgroundScheduler:
         replace_existing=True,
     )
 
-    logger.info("Scheduler initialized successfully with no restrictions")
+    # =============================================================================
+    # DBT REFRESH JOB - Conditionally enabled
+    # =============================================================================
+
+    dbt_config = DBTConfig.from_env()
+
+    # Check if dbt is enabled and return early if it is
+    if not dbt_config.enabled:
+        logger.info("DBT refresh job disabled via DBT_SCHEDULER_ENABLED=false")
+        return scheduler
+
+    # Calculate next run time with initial delay
+    next_run_time = datetime.now(pytz.utc) + timedelta(seconds=dbt_config.initial_delay_seconds)
+
+    scheduler.add_job(
+        dbt_refresh_wrapper,
+        "interval",
+        minutes=dbt_config.refresh_interval_minutes,
+        executor='background',
+        id="dbt_refresh",
+        name=f"DBT Materialized Views Refresh (Every {dbt_config.refresh_interval_minutes} Minutes)",
+        replace_existing=True,
+        max_instances=1,  # Prevent concurrent refreshes
+        next_run_time=next_run_time
+    )
+    logger.info(f"DBT refresh job scheduled: every {dbt_config.refresh_interval_minutes} minutes")
+
     return scheduler
 
 def start_scheduler():
@@ -142,9 +119,30 @@ def start_scheduler():
         scheduler = init_scheduler()
         scheduler.start()
         logger.info("Scheduler started successfully - no restrictions applied")
+
+        # Log all registered jobs with their next run times
+        jobs = scheduler.get_jobs()
+        logger.info(f"Total registered jobs: {len(jobs)}")
+        
+        for job in jobs:
+            next_run = job.next_run_time
+            logger.info(
+                f"Registered job: {job.id} ({job.name}). "
+                f"Next run: {next_run}"
+            )
+
+        # Specifically check and log key scheduled jobs
+        # Check DBT refresh job
+        dbt_job = scheduler.get_job("dbt_refresh")
+        if dbt_job:
+            next_run = dbt_job.next_run_time
+            logger.info("✓ Registered dbt_refresh job successfully. " f"Next run: {next_run}")
+        else:
+            logger.info("DBT refresh job not registered (disabled or error)")
+
         return scheduler
     except Exception as e:
-        logger.error("Failed to start scheduler: %s", e)
+        logger.error("Failed to start scheduler: %s", e, exc_info=True)
         return None
 
 def stop_scheduler():
@@ -160,89 +158,33 @@ def stop_scheduler():
 def get_scheduler_instance():
     """Get the global scheduler instance."""
     try:
-        from mpi_backend.utils.quickbooks_priority_controller import get_scheduler_instance
-        return get_scheduler_instance()
+        return get_global_scheduler_instance()
     except ImportError:
         logger.warning("Could not import get_scheduler_instance")
         return None
-
-# Simple wrapper functions for background tasks
-def async_email_download_wrapper():
-    """Simple wrapper for email download - no restrictions."""
-    try:
-        logger.info("Starting email download task")
-        # Import and run the actual task
-        from mpi_backend.background.tasks.email_download import download_emails
-        download_emails()
-        logger.info("Email download task completed")
-    except Exception as e:
-        logger.error("Email download task failed: %s", e)
-
-def async_statement_download_wrapper():
-    """Simple wrapper for statement download - no restrictions."""
-    try:
-        logger.info("Starting statement download task")
-        # Import and run the actual task
-        from mpi_backend.background.tasks.statement_download import download_statements
-        download_statements()
-        logger.info("Statement download task completed")
-    except Exception as e:
-        logger.error("Statement download task failed: %s", e)
-
-def async_failed_invoice_recovery_wrapper():
-    """Simple wrapper for failed invoice recovery - no restrictions."""
-    try:
-        logger.info("Starting failed invoice recovery task")
-        # Import and run the actual task
-        from mpi_backend.background.tasks.invoice_recovery import recover_failed_invoices
-        recover_failed_invoices()
-        logger.info("Failed invoice recovery task completed")
-    except Exception as e:
-        logger.error("Failed invoice recovery task failed: %s", e)
-
-def async_missing_invoice_download_wrapper():
-    """Simple wrapper for missing invoice download - no restrictions."""
-    try:
-        logger.info("Starting missing invoice download task")
-        # Import and run the actual task
-        from mpi_backend.background.tasks.missing_invoice import download_missing_invoices
-        download_missing_invoices()
-        logger.info("Missing invoice download task completed")
-    except Exception as e:
-        logger.error("Missing invoice download task failed: %s", e)
-
-def scheduled_uidi_no_match_update():
-    """Simple wrapper for UIDI/NO Match update - no restrictions."""
-    try:
-        logger.info("Starting UIDI/NO Match update task")
-        # Import and run the actual task
-        from mpi_backend.background.tasks.mapping_updates import update_uidi_no_match
-        update_uidi_no_match()
-        logger.info("UIDI/NO Match update task completed")
-    except Exception as e:
-        logger.error("UIDI/NO Match update task failed: %s", e)
-
-def scheduled_all_mappings_update():
-    """Simple wrapper for all mappings update - no restrictions."""
-    try:
-        logger.info("Starting all mappings update task")
-        # Import and run the actual task
-        from mpi_backend.background.tasks.mapping_updates import update_all_mappings
-        update_all_mappings()
-        logger.info("All mappings update task completed")
-    except Exception as e:
-        logger.error("All mappings update task failed: %s", e)
-
-# Google Sheet sync function removed as requested
 
 def scheduled_memory_cleanup():
     """Simple memory cleanup - no restrictions."""
     try:
         logger.info("Starting memory cleanup task")
-        # Simple cleanup without restrictions
-        import gc
         collected = gc.collect()
         logger.info("Memory cleanup completed - collected %s objects", collected)
     except Exception as e:
         logger.error("Memory cleanup failed: %s", e)
+
+def dbt_refresh_wrapper():
+    """Simple wrapper for DBT refresh - no restrictions."""
+    try:
+        logger.info("Starting DBT refresh task")
+        runner = get_dbt_runner()
+        result = runner.try_refresh_materialized_views()
+
+        if result.status == RefreshStatus.SUCCESS:
+            logger.info("DBT refresh task completed successfully")
+        elif result.status == RefreshStatus.ALREADY_RUNNING:
+            logger.info("DBT refresh task skipped - already running")
+        else:
+            logger.warning("DBT refresh task completed with status: %s", result.status)
+    except Exception:
+        logger.exception("DBT refresh task failed")
 

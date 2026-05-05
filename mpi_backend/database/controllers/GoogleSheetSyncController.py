@@ -38,7 +38,6 @@ from mpi_backend.config.spreadsheet_config import (
     SKIP_SHEETS,
     MAPPING_CONFIG
 )
-from mpi_backend.utils.mapping_stats_manager import MappingStatsManager
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -206,14 +205,6 @@ class GoogleSheetSyncController:
         Returns:
             Dictionary with sync status information
         """
-        # Load persisted timestamps from stats file as fallback so values survive restarts
-        try:
-            stats_manager = MappingStatsManager()
-            item_stats = stats_manager.get_item_mapping_stats()  # contains last_sync_time
-            overall_stats = stats_manager.get_overall_stats()    # contains last_uidi_update, last_all_update
-        except Exception:
-            item_stats, overall_stats = {}, {}
-
         def _normalize_time(value):
             # Return ISO string or None
             if not value:
@@ -227,9 +218,20 @@ class GoogleSheetSyncController:
             except Exception:
                 return str(value)
 
-        last_sync_time = cls._last_sync_time or item_stats.get("last_sync_time")
-        last_uidi_time = cls._last_update_no_match_uidi_time or overall_stats.get("last_uidi_update")
-        last_all_time = cls._last_update_all_time or overall_stats.get("last_all_update")
+        last_sync_time = cls._last_sync_time
+        last_uidi_time = cls._last_update_no_match_uidi_time
+        last_all_time = cls._last_update_all_time
+
+        # Ensure percentage is valid (0-100) and reset to 0 if task is not running
+        raw_percentage = cls._current_percentage or 0
+        if not isinstance(raw_percentage, (int, float)):
+            raw_percentage = 0
+        # Clamp percentage to valid range [0, 100]
+        validated_percentage = max(0, min(100, int(raw_percentage)))
+        
+        # If task is not running, percentage should be 0
+        if not cls._sync_task_running:
+            validated_percentage = 0
 
         return {
             "is_running": cls._sync_task_running,
@@ -239,12 +241,12 @@ class GoogleSheetSyncController:
             "last_update_no_match_uidi_time": _normalize_time(last_uidi_time),
             "last_update_all_time": _normalize_time(last_all_time),
             "last_update_invalid_time": _normalize_time(cls._last_update_invalid_time),
-            "percentage": cls._current_percentage,
-            "total_steps": cls._total_steps,
-            "current_step": cls._current_step,
-            "step_progress": cls._step_progress,
-            "total_items_to_process": cls._total_items_to_process,
-            "items_processed": cls._items_processed,
+            "percentage": validated_percentage,
+            "total_steps": cls._total_steps or 0,
+            "current_step": cls._current_step or 0,
+            "step_progress": cls._step_progress or 0,
+            "total_items_to_process": cls._total_items_to_process or 0,
+            "items_processed": cls._items_processed or 0,
         }
 
     @classmethod
@@ -270,7 +272,16 @@ class GoogleSheetSyncController:
             # Calculate progress: completed steps + current step progress
             completed_steps_progress = (current_step - 1) * step_weight
             current_step_progress = (step_progress / 100) * step_weight
-            cls._current_percentage = int(completed_steps_progress + current_step_progress)
+            new_percentage = int(completed_steps_progress + current_step_progress)
+            
+            # Prevent percentage from going backwards
+            if new_percentage >= cls._current_percentage:
+                cls._current_percentage = new_percentage
+            else:
+                logger.warning(
+                    f"Progress tracking: Attempted to set overall percentage ({new_percentage}%) "
+                    f"less than current ({cls._current_percentage}%). Keeping current value."
+                )
         else:
             cls._current_percentage = 0
         
@@ -288,19 +299,43 @@ class GoogleSheetSyncController:
             step_progress: Progress within current step (0-100)
             sub_operation: Optional sub-operation description
         """
-        cls._step_progress = max(0, min(100, step_progress))  # Clamp to 0-100
+        # Clamp to 0-100 and prevent going backwards
+        new_step_progress = max(0, min(100, step_progress))
+        
+        # Prevent step progress from going backwards
+        if new_step_progress < cls._step_progress:
+            logger.warning(
+                f"Progress tracking: Attempted to set step_progress ({new_step_progress}%) "
+                f"less than current ({cls._step_progress}%). Keeping current value."
+            )
+            return
+        
+        cls._step_progress = new_step_progress
         
         # Recalculate overall percentage
         if cls._total_steps > 0:
             step_weight = 100 / cls._total_steps
             completed_steps_progress = (cls._current_step - 1) * step_weight
             current_step_progress = (cls._step_progress / 100) * step_weight
-            cls._current_percentage = int(completed_steps_progress + current_step_progress)
+            new_percentage = int(completed_steps_progress + current_step_progress)
+            
+            # Prevent overall percentage from going backwards
+            if new_percentage >= cls._current_percentage:
+                cls._current_percentage = min(100, new_percentage)
+            else:
+                logger.warning(
+                    f"Progress tracking: Attempted to set overall percentage ({new_percentage}%) "
+                    f"less than current ({cls._current_percentage}%). Keeping current value."
+                )
         
         if sub_operation:
             cls._current_sub_operation = sub_operation
             
-        logger.info(f"Step Progress: {cls._current_percentage}% (Step {cls._current_step}/{cls._total_steps}, Step Progress: {cls._step_progress}%) - {sub_operation or 'Unknown operation'}")
+        logger.info(
+            f"Step Progress: {cls._current_percentage}% "
+            f"(Step {cls._current_step}/{cls._total_steps}, Step Progress: {cls._step_progress}%) "
+            f"- {sub_operation or 'Unknown operation'}"
+        )
 
     @classmethod
     def _reset_progress(cls):
@@ -323,10 +358,16 @@ class GoogleSheetSyncController:
             total_items: Total number of items to process in current step
             step_name: Name of the current step for logging
         """
-        cls._total_items_to_process = total_items
-        cls._items_processed = 0
-        cls._last_progress_update = None
-        logger.info(f"Starting {step_name} with {total_items} items to process")
+        # Only reset items_processed if we're starting fresh or total_items changed significantly
+        # This prevents progress from going backwards if called multiple times
+        if cls._total_items_to_process != total_items:
+            cls._total_items_to_process = total_items
+            cls._items_processed = 0
+            cls._last_progress_update = None
+            logger.info(f"Starting {step_name} with {total_items} items to process")
+        else:
+            # Same total, don't reset progress (might be updating existing operation)
+            logger.debug(f"Total items unchanged ({total_items}), keeping current progress")
 
     @classmethod
     def _update_item_progress(cls, items_processed: int = None, step_name: str = None):
@@ -337,14 +378,27 @@ class GoogleSheetSyncController:
             items_processed: Number of items processed so far (increments by 1 if None)
             step_name: Optional step name for logging
         """
+        # Prevent progress from going backwards - only update if it's increasing
         if items_processed is not None:
-            cls._items_processed = items_processed
+            # Only update if the new value is greater than current (prevents backwards progress)
+            if items_processed > cls._items_processed:
+                cls._items_processed = items_processed
+            elif items_processed < cls._items_processed:
+                logger.warning(
+                    f"Progress tracking: Attempted to set items_processed ({items_processed}) "
+                    f"less than current ({cls._items_processed}). Keeping current value."
+                )
         else:
             cls._items_processed += 1
         
         if cls._total_items_to_process > 0:
             # Calculate step progress based on items processed
-            step_progress = int((cls._items_processed / cls._total_items_to_process) * 100)
+            step_progress_raw = (cls._items_processed / cls._total_items_to_process) * 100
+            
+            # Cap at 99% during processing to prevent stuck at 100% issue
+            # Only allow 100% when explicitly marked as complete
+            is_complete = (cls._items_processed >= cls._total_items_to_process)
+            step_progress = min(99, int(step_progress_raw)) if not is_complete else 100
             cls._step_progress = step_progress
             
             # Recalculate overall percentage
@@ -352,18 +406,30 @@ class GoogleSheetSyncController:
                 step_weight = 100 / cls._total_steps
                 completed_steps_progress = (cls._current_step - 1) * step_weight
                 current_step_progress = (step_progress / 100) * step_weight
-                cls._current_percentage = int(completed_steps_progress + current_step_progress)
+                overall_progress = completed_steps_progress + current_step_progress
+                
+                # Cap overall progress at 99% until step is explicitly marked as complete
+                new_percentage = min(99, int(overall_progress)) if not is_complete else min(100, int(overall_progress))
+                
+                # Prevent overall percentage from going backwards
+                if new_percentage >= cls._current_percentage:
+                    cls._current_percentage = new_percentage
             
-            # Log progress every 10 items or at major milestones to avoid spam
-            if (cls._items_processed % 10 == 0 or 
-                cls._items_processed in [cls._total_items_to_process // 4, 
-                                       cls._total_items_to_process // 2, 
-                                       3 * cls._total_items_to_process // 4] or
+            # Log progress every 100 items or at major milestones to avoid spam
+            if (cls._items_processed % 100 == 0 or 
+                cls._items_processed in [
+                    max(1, cls._total_items_to_process // 4), 
+                    max(1, cls._total_items_to_process // 2), 
+                    max(1, 3 * cls._total_items_to_process // 4)
+                ] or
                 cls._items_processed == cls._total_items_to_process):
                 
-                logger.info(f"Live Progress: {cls._current_percentage}% (Step {cls._current_step}/{cls._total_steps}, "
-                           f"Items: {cls._items_processed}/{cls._total_items_to_process} - {step_progress}%) "
-                           f"- {step_name or 'Processing'}")
+                logger.info(
+                    f"Live Progress: {cls._current_percentage}% "
+                    f"(Step {cls._current_step}/{cls._total_steps}, "
+                    f"Items: {cls._items_processed}/{cls._total_items_to_process} - {step_progress}%) "
+                    f"- {step_name or 'Processing'}"
+                )
         
         # Update sub-operation if provided
         if step_name:
@@ -450,15 +516,10 @@ class GoogleSheetSyncController:
             "operation": "sync"
         }
 
-        # Update last sync time on success and persist to stats file
+        # Update last sync time on success
         if final_result["success"]:
             now_ts = datetime.now()
             self.__class__._last_sync_time = now_ts
-            try:
-                stats_manager = MappingStatsManager()
-                stats_manager.update_sync_times("item_sync", timestamp=now_ts)
-            except Exception as e:
-                logger.error(f"Error persisting item sync time: {str(e)}")
 
         # Log comprehensive summary at the end
         self._log_comprehensive_summary(
@@ -497,18 +558,12 @@ class GoogleSheetSyncController:
         self.__class__._update_progress(3, 3, "updating_uidi_items", 0)
         update_result = self.mapping_controller.update_no_match_uidi_mappings()
         
-        # Update step progress to 100% when UIDI update completes
-        self.__class__._update_step_progress(100, "updating_uidi_items")
+        # Step progress will be set to 100% by the update_no_match_uidi_mappings method
+        # when it completes, so we don't need to set it here
 
         # Update last UIDI update time
         if update_result.get("status") == "success":
             self.__class__._last_update_no_match_uidi_time = datetime.now()
-            # Update stats file
-            try:
-                stats_manager = MappingStatsManager()
-                stats_manager.update_sync_times("uidi_update")
-            except Exception as e:
-                logger.error(f"Error updating stats file: {str(e)}")
 
         # Log comprehensive summary for UIDI update operation
         self._log_uidi_update_summary(sync_result, update_result, temp_result)
@@ -563,12 +618,6 @@ class GoogleSheetSyncController:
         # Update last full update time
         if update_result.get("status") == "success":
             self.__class__._last_update_all_time = datetime.now()
-            # Update stats file
-            try:
-                stats_manager = MappingStatsManager()
-                stats_manager.update_sync_times("all_update")
-            except Exception as e:
-                logger.error(f"Error updating stats file: {str(e)}")
 
         # Log comprehensive summary for full update operation
         self._log_full_update_summary(sync_result, update_result, temp_result)
@@ -601,7 +650,7 @@ class GoogleSheetSyncController:
             extractor = EnhancedGoogleSheetDataExtractor(
                 sheet_id=DEFAULT_SHEET_ID,
                 api_key=GOOGLE_API_KEY,
-                output_file=DEFAULT_OUTPUT_FILE,
+                output_file=None,
                 skip_sheets=SKIP_SHEETS,
                 batch_size=MAPPING_CONFIG["batch_size"],
                 fuzzy_threshold=MAPPING_CONFIG["fuzzy_threshold"]
@@ -715,6 +764,11 @@ class GoogleSheetSyncController:
                     permanent_errors += 1
                     self.logger.error(
                         f"Error saving permanent mapping: {str(e)}")
+                    # Rollback transaction if it was aborted due to database error
+                    try:
+                        self.db.rollback()
+                    except Exception:
+                        pass  # Ignore rollback errors
                     # Continue processing other mappings instead of stopping
                     continue
 
@@ -745,6 +799,11 @@ class GoogleSheetSyncController:
                     temp_errors += 1
                     self.logger.error(
                         f"Error saving temporary mapping: {str(e)}")
+                    # Rollback transaction if it was aborted due to database error
+                    try:
+                        self.db.rollback()
+                    except Exception:
+                        pass  # Ignore rollback errors
 
             # Log invalid mappings
             if invalid_mappings:
@@ -862,7 +921,9 @@ class GoogleSheetSyncController:
             # Extraction Summary
             self.logger.info("📊 EXTRACTION SUMMARY:")
             self.logger.info(
-                f"   • Total Sheets Processed: {sheets_processed}")
+                f"   • Google Sheets Tabs Processed: {sheets_processed} (active tabs from spreadsheet)")
+            self.logger.info(
+                f"   • Note: Database may contain {self.mapping_controller.get_mapping_stats().get('unique_sheets', 'N/A')} unique sheet names (includes historical/renamed sheets)")
             self.logger.info(f"   • Total Items Extracted: {total_extracted}")
             self.logger.info(f"   • Permanent Mappings: {total_permanent}")
             self.logger.info(f"   • Temporary Mappings: {total_temporary}")
@@ -959,7 +1020,7 @@ class GoogleSheetSyncController:
 
             # Phase 1: Google Sheets Sync
             self.logger.info("📊 PHASE 1 - GOOGLE SHEETS SYNC:")
-            self.logger.info(f"   • Sheets Processed: {sheets_processed}")
+            self.logger.info(f"   • Google Sheets Tabs Processed: {sheets_processed} (tabs from spreadsheet)")
             self.logger.info(f"   • Total Items Extracted: {total_extracted}")
             self.logger.info(f"   • Permanent Mappings: {total_permanent}")
             self.logger.info(f"   • Temporary Mappings: {total_temporary}")
@@ -1043,7 +1104,7 @@ class GoogleSheetSyncController:
 
             # Phase 1: Google Sheets Sync
             self.logger.info("📊 PHASE 1 - GOOGLE SHEETS SYNC:")
-            self.logger.info(f"   • Sheets Processed: {sheets_processed}")
+            self.logger.info(f"   • Google Sheets Tabs Processed: {sheets_processed} (tabs from spreadsheet)")
             self.logger.info(f"   • Total Items Extracted: {total_extracted}")
             self.logger.info(f"   • Permanent Mappings: {total_permanent}")
             self.logger.info(f"   • Temporary Mappings: {total_temporary}")
@@ -1097,9 +1158,9 @@ class GoogleSheetSyncController:
             True if valid, False otherwise
         """
         try:
-            # Check if this is a temporary mapping (supplier_id = 0)
-            if mapping.get("supplier_id") == 0:
-                # This is a temporary mapping, skip validation
+            # Check if this is a temporary mapping (supplier_id is None)
+            if mapping.get("supplier_id") is None:
+                # This is a temporary mapping (no supplier assigned), skip validation
                 return True
 
             required_fields = [
@@ -1121,9 +1182,10 @@ class GoogleSheetSyncController:
             # Validate supplier_id is a valid integer (for permanent mappings)
             try:
                 supplier_id = int(mapping["supplier_id"])
-                if supplier_id <= 0:
+                if supplier_id is None or supplier_id < 0:
                     self.logger.warning(f"Invalid supplier_id: {supplier_id}")
                     return False
+                # Note: supplier_id == 0 is now valid (Unknown Supplier)
             except (ValueError, TypeError):
                 self.logger.warning(
                     f"Invalid supplier_id format: {mapping['supplier_id']}")

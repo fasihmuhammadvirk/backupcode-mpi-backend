@@ -1,0 +1,109 @@
+# yaml
+version: 2
+
+models:
+  - name: mart__item_price_comparison
+    description: >
+      Mart of invoice line-items built from `int__invoice_items_with_rerated_pricing`.
+
+      Produces one row per invoice line (filtered to non-empty item and non-null cost)
+      and computes ranking metrics to identify the lowest cost (and most recent) rows
+      per supplier and per item mapping.
+
+      `item_cost` and `item_quantity` reflect Y & S BOX→EACH rerating (issue #899)
+      so the cheapest-by-cost rankings aren't skewed by UOM mismatches.
+
+      Source: `int__invoice_items_with_rerated_pricing`
+
+      (filtered: `item IS NOT NULL AND TRIM(item) <> '' AND cost IS NOT NULL AND matched_supplier_id IS NOT NULL`).
+    tags: [mart, purchase_order]
+    columns:
+      - name: invoice_items_id
+        description: >
+          Primary key from source `int__invoice_items_with_rerated_pricing.invoice_items_id`.
+          Represents the original invoice item identifier. Row is included only when
+          this id exists in the source. Used to trace back to the raw invoice item row.
+        tests:
+          - not_null
+          - unique
+          - relationships:
+              to: ref('int__invoice_items_with_rerated_pricing')
+              field: invoice_items_id
+      - name: filename
+        description: >
+          Filename from `int__invoice_items_with_rerated_pricing.filename`.
+          Useful for tracing back to the original invoice file.
+      - name: item_code
+        description: >
+          Raw item code from `int__invoice_items_with_rerated_pricing.item`.
+          Rows are filtered to exclude NULL or empty values (`TRIM(item) <> ''`).
+        tests:
+          - not_null
+      - name: item_description
+        description: "Raw item description from `int__invoice_items_with_rerated_pricing.description`."
+      - name: item_cost
+        description: >
+          Item cost from `int__invoice_items_with_rerated_pricing.rerated_cost`
+          (Y & S BOX→EACH-corrected per-unit cost).          
+          Used for price comparison and ordering when computing rank fields.
+        tests:
+          - not_null
+      - name: item_quantity
+        description: >
+          Quantity from `int__invoice_items_with_rerated_pricing.rerated_qty`
+          (Y & S BOX→EACH-corrected quantity).
+      - name: is_price_rerated
+        description: >
+          TRUE when `item_cost` and `item_quantity` were corrected by the Y & S
+          UOM rerating rule.
+      - name: original_current_price
+        description: "Raw per-unit cost before rerating. Equals `item_cost` when not rerated."
+      - name: original_current_qty
+        description: "Raw quantity before rerating. Equals `item_quantity` when not rerated."
+      - name: purchase_date
+        description: >
+          Invoice date from `int__invoice_items_with_rerated_pricing.date`.
+          Used as a tie-breaker (most recent) when ordering ranks.
+      - name: supplier_name
+        description: "Matched supplier name from `int__invoice_items_with_rerated_pricing.matched_supplier`."
+      - name: supplier_id
+        description: >
+          Matched supplier identifier from `int__invoice_items_with_rerated_pricing.matched_supplier_id`.
+          Rows are filtered to exclude NULL supplier ids.
+        tests:
+          - not_null
+      - name: item_mpi_code
+        description: "Resolved MPI item code from `int__invoice_items_with_rerated_pricing.resolved_mpi_item`."
+      - name: item_mpi_description
+        description: "Resolved MPI item description from `int__invoice_items_with_rerated_pricing.resolved_mpi_description`."
+      - name: ref_no
+        description: "Reference number from `int__invoice_items_with_rerated_pricing.ref_no`."
+      - name: rank_by_item_code
+        description: >
+          ROW_NUMBER() OVER (PARTITION BY item, matched_supplier ORDER BY cost ASC, date DESC).
+          Rank of the row for the raw item code per supplier; lower = cheaper (prefers most recent on ties).
+      - name: rank_by_item_mpi_code
+        description: >
+          ROW_NUMBER() OVER (PARTITION BY resolved_mpi_item, matched_supplier ORDER BY cost ASC, date DESC).
+          Rank of the row for the resolved MPI item per supplier; lower = cheaper (prefers most recent on ties).
+      - name: rank_by_item_and_item_mpi_code
+        description: >
+          ROW_NUMBER() OVER (PARTITION BY item, resolved_mpi_item, matched_supplier ORDER BY cost ASC, date DESC).
+          Rank when grouping by both raw item and MPI item within each supplier; useful to identify
+          best price for a given combination of raw and resolved item mappings.
+      - name: cheapest_rank_by_item_and_mpi_code
+        description: >
+          ROW_NUMBER() OVER (PARTITION BY item, resolved_mpi_item, matched_supplier ORDER BY cost ASC, date DESC).
+          Rank of the row for the raw item and MPI item per supplier; lower = cheaper (prefers most recent on ties).
+      - name: latest_rank_by_item_code
+        description: >
+          ROW_NUMBER() OVER (PARTITION BY item, matched_supplier ORDER BY date DESC, cost ASC).
+          Rank of the row for the raw item per supplier; latest = recent (prefers lower cost on ties).
+      - name: latest_rank_by_mpi_item_code
+        description: >
+          ROW_NUMBER() OVER (PARTITION BY resolved_mpi_item, matched_supplier ORDER BY date DESC, cost ASC).
+          Rank of the row for the MPI item per supplier; latest = recent (prefers lower cost on ties)
+      - name: latest_rank_by_item_and_mpi_code
+        description: >
+          ROW_NUMBER() OVER (PARTITION BY item, resolved_mpi_item, matched_supplier ORDER BY date DESC, cost ASC).
+          Rank of the row for the raw item and MPI item per supplier; latest = recent (prefers lower cost on ties).

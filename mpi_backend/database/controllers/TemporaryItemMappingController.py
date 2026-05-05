@@ -3,7 +3,6 @@ import pandas as pd
 from typing import Dict, List, Any
 from sqlalchemy.orm import Session
 import logging
-from mpi_backend.utils.mapping_stats_manager import MappingStatsManager
 
 logger = logging.getLogger(__name__)
 
@@ -174,16 +173,9 @@ class TemporaryItemMappingController:
                 TempItemMapping.sheet_name == sheet_name
             ).count()
             sheet_counts[sheet_name] = count
-
-        stats = {
+        return {
             "total_mappings": total_mappings,
             "unique_sheets": len(unique_sheets),
             "sheet_names": unique_sheets,
             "mappings_per_sheet": sheet_counts
         }
-
-        # Update stats in the JSON file
-        stats_manager = MappingStatsManager()
-        stats_manager.update_temp_mapping_stats(stats)
-
-        return stats

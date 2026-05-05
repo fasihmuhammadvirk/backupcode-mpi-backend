@@ -1,0 +1,36 @@
+version: 2
+
+sources:
+  - name: public
+    schema: public
+    tables:
+      - name: suppliers
+        description: "Master supplier/vendor lookup table with canonical supplier names and suffixes"
+        columns:
+          - name: id
+            description: "Primary key - supplier identifier"
+          - name: supplier_name
+            description: "Canonical supplier name (e.g., 'BMW Plumbing Supplies', 'World Wide Plumbing')"
+          - name: suffix
+            description: "Single-letter suffix for item code mapping (e.g., 'B', 'W', 'F')"
+
+models:
+  - name: stg__suppliers
+    description: |
+      Staged suppliers for vendor normalization.
+
+      Contains the master list of known suppliers used for fuzzy matching
+      vendor names from invoice data.
+    columns:
+      - name: supplier_id
+        description: "Unique supplier identifier"
+        tests:
+          - unique
+          - not_null
+      - name: supplier_name
+        description: "Canonical supplier name"
+        tests:
+          - unique
+          - not_null
+      - name: suffix
+        description: "Vendor suffix for item code mapping"

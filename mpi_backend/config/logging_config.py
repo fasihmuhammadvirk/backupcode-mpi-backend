@@ -23,12 +23,12 @@ LOGGING_CONFIG = {
     "formatters": {
         "default": {
             "()": "mpi_backend.config.logging_config.AsciiSafeFormatter",
-            "format": "%(asctime)s - %(levelname)s - %(message)s",
+            "format": "[%(asctime)s - %(name)s->%(funcName)s():%(lineno)s]%(levelname)s: %(message)s",
             "datefmt": "%Y-%m-%d %H:%M:%S",
         },
         "detailed": {
             "()": "mpi_backend.config.logging_config.AsciiSafeFormatter",
-            "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            "format": "[%(asctime)s - %(name)s->%(funcName)s():%(lineno)s]%(levelname)s: %(message)s",
             "datefmt": "%Y-%m-%d %H:%M:%S",
         },
     },

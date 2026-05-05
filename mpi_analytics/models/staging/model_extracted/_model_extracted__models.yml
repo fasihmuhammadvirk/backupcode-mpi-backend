@@ -1,0 +1,159 @@
+version: 2
+
+models:
+  - name: stg__extracted_global_fields
+    description: |
+      Staging model for invoice global/header fields parsed from raw_data JSONB.
+      One row per extraction attempt.
+
+      This model is part of the new normalized extraction pipeline that reads from
+      raw.model_extracted_data instead of public.model_extracted_data.
+
+      Data lineage:
+        raw.model_extracted_data → THIS MODEL → int__extracted_data_combined
+
+      Key features:
+      - Incremental processing based on extracted_at timestamp
+      - Multi-format date parsing (YYYY-MM-DD, MM/DD/YYYY, MM/DD/YY)
+      - Line item count for validation
+      - Validation metadata from raw_data
+
+    columns:
+      - name: extraction_invoice_id
+        description: Primary key - deterministic hash of (extraction_id, invoice_index)
+        tests:
+          - unique
+          - not_null
+      - name: extraction_id
+        description: Foreign key to raw.model_extracted_data.id
+        tests:
+          - not_null
+      - name: invoice_index
+        description: Position of this invoice within the PDF (1-indexed). Always 1 for single-invoice PDFs.
+        tests:
+          - not_null
+      - name: s3_file_key
+        description: S3 path to the source PDF file
+        tests:
+          - not_null
+      - name: filename
+        description: Alias for s3_file_key (compatibility with existing models)
+      - name: pdf_extraction_queue_id
+        description: Foreign key to pdf_extraction_queue table
+      - name: email_queue_id
+        description: Foreign key to email_download_queue table
+      - name: model_name
+        description: AI model used for extraction (e.g., gemini-2.0-flash)
+        tests:
+          - not_null
+      - name: prompt_hash
+        description: Hash of the extraction prompt used
+      - name: status
+        description: Extraction status (human_review_required, model_approved, etc.)
+      - name: validation_score
+        description: Quality score from validation (0-100)
+      - name: confidence_score
+        description: Model confidence score (0-1)
+      - name: extracted_at
+        description: Timestamp when extraction occurred
+        tests:
+          - not_null
+      - name: date_added
+        description: Alias for extracted_at (compatibility with existing models)
+      - name: ref_no
+        description: Invoice reference number
+      - name: date
+        description: Invoice date (parsed from various formats)
+      - name: vendor
+        description: Vendor name from invoice (OCR-extracted, may be unreliable)
+      - name: buyer
+        description: Buyer name from invoice
+      - name: po_number
+        description: Purchase order number
+      - name: customer_job
+        description: Customer job reference
+      - name: bill
+        description: Bill information
+      - name: tax
+        description: Tax amount (as text, will be cast in downstream models)
+      - name: sub_total
+        description: Sub-total amount (as text)
+      - name: freight
+        description: Freight/shipping amount (as text)
+      - name: line_item_count
+        description: Number of line items in this extraction
+        tests:
+          - not_null
+      - name: validation_passed
+        description: Whether validation passed (from _validation_passed in raw_data)
+      - name: header_validation_details
+        description: Header validation details as JSONB
+      - name: line_items_validation_details
+        description: Line items validation details as JSONB
+
+  - name: stg__extracted_line_items
+    description: |
+      Staging model for invoice line items exploded from raw_data JSONB.
+      One row per line item.
+
+      This model is part of the new normalized extraction pipeline that reads from
+      raw.model_extracted_data instead of public.model_extracted_data.
+
+      Data lineage:
+        raw.model_extracted_data → THIS MODEL → int__extracted_data_combined
+
+      Key features:
+      - Uses jsonb_array_elements WITH ORDINALITY to get line_order
+      - Generates deterministic surrogate key from (extraction_id, line_order)
+      - Splits item code for Flow Mark compatibility (first part only)
+      - Incremental processing based on extracted_at timestamp
+
+    columns:
+      - name: line_item_id
+        description: Surrogate key generated from (extraction_id, invoice_index, line_order)
+        tests:
+          - unique
+          - not_null
+      - name: extraction_invoice_id
+        description: Foreign key to stg__extracted_global_fields (hash of extraction_id + invoice_index)
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg__extracted_global_fields')
+              field: extraction_invoice_id
+      - name: extraction_id
+        description: Foreign key to raw.model_extracted_data.id
+        tests:
+          - not_null
+      - name: invoice_index
+        description: Position of this invoice within the PDF (1-indexed). Always 1 for single-invoice PDFs.
+        tests:
+          - not_null
+      - name: s3_file_key
+        description: S3 path to the source PDF file
+        tests:
+          - not_null
+      - name: filename
+        description: Alias for s3_file_key (compatibility with existing models)
+      - name: model_name
+        description: AI model used for extraction
+      - name: extracted_at
+        description: Timestamp when extraction occurred
+      - name: line_order
+        description: Position of item in extraction (1-indexed from ORDINALITY)
+        tests:
+          - not_null
+      - name: item
+        description: Original item code from invoice (may have multiple parts)
+      - name: item_code
+        description: First part of item code (Flow Mark compatibility - split on space)
+      - name: description
+        description: Item description from invoice
+      - name: qty
+        description: Quantity (as text, will be cast in downstream models)
+      - name: cost
+        description: Unit cost (as text, will be cast in downstream models)
+      - name: amount
+        description: Line total amount (as text, will be cast in downstream models)
+      - name: raw_line_item
+        description: Original JSONB line item object (for debugging)

@@ -1,11 +1,13 @@
+from datetime import datetime, date
 from mpi_backend.database.models import UnmappedItems
 from mpi_backend.database.models.InvoiceItems import InvoiceItem
+from mpi_backend.database.models.InvoiceItemsMapMart import InvoiceItemsMapMart
 import pandas as pd
 # Note: extract_supplier_id is not used in this controller
 # from mpi_backend.utils.item_utils import (
 #     extract_supplier_id
 # )
-from sqlalchemy import and_, or_, exists, text
+from sqlalchemy import and_, or_, exists, text, inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from typing import Dict, Any, Optional, List
@@ -13,6 +15,12 @@ from datetime import date
 import logging
 from sqlalchemy.orm import Session
 from mpi_backend.utils.number_formatter import format_currency, format_quantity
+from mpi_backend.database.dao import get_unmapped_items as dao_get_unmapped_items
+from mpi_backend.database.dao import get_unmapped_items_graph_stats as dao_get_unmapped_items_graph_stats
+from mpi_backend.database.dao.invoice_items_map import get_mapping_types
+from mpi_backend.database.dao.invoice_items_map.get_unmapped_items import EXPECTED_MAPPING_TYPES
+from mpi_backend.database.dao.invoice_items_map.constants import ALLOWED_GROUP_BY
+
 
 logger = logging.getLogger(__name__)
 
@@ -95,11 +103,11 @@ class UnmappedItemsController:
     def is_item_code_present(self, item_code, supplier_id=None):
         """
         Check if an item code is present in unmapped items.
-        
+
         Args:
             item_code (str): Item code to check
             supplier_id (int, optional): Supplier ID (not used for suffix cleaning)
-            
+
         Returns:
             bool: True if item is present, False otherwise
         """
@@ -107,58 +115,148 @@ class UnmappedItemsController:
             db = self._get_db_session()
             # Get all unmapped items
             all_unmapped = db.query(UnmappedItems).all()
-            
+
             # Check for exact match only
             for unmapped_item in all_unmapped:
                 if unmapped_item.supplier_item_ids == item_code:
                     return True
-                    
+
             return False
-            
+
         except Exception as e:
             print(f'Unmapped item-{item_code} could not be looked up in db ->{e}')
             return False
 
+    def validate_request_params(
+        self,
+        db: Session,
+        item_type: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        date_history: Optional[str] = None,
+        order_by: Optional[list[Dict[str, str]]] = None,
+        group_by: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Validate request parameters for unmapped items queries.
+
+        Args:
+            db: Database session
+            item_type: The item type to validate (if provided)
+
+        Raises:
+            ValueError: If any parameter is invalid
+        """
+        mapping_types_result = get_mapping_types(db)
+        valid_mapping_types = mapping_types_result.mapping_types
+
+        valid_request = {}
+        if item_type and item_type not in valid_mapping_types and item_type != 'all':
+            raise ValueError(f"Invalid item_type: '{item_type}'. Must be one of: {valid_mapping_types}")
+        valid_request['item_type'] = item_type
+
+        try:
+            if date_from:
+                date_from_obj = datetime.strptime(date_from, "%Y-%m-%d").date()
+                valid_request['date_from'] = date_from_obj
+            if date_to:
+                date_to_obj = datetime.strptime(date_to, "%Y-%m-%d").date()
+                valid_request['date_to'] = date_to_obj
+            if date_history:
+                date_history_obj = datetime.strptime(date_history, "%Y-%m-%d").date()
+                valid_request['date_history'] = date_history_obj
+        except ValueError:
+            raise
+
+        # Provide default ordering if order_by is None or empty
+        if not order_by:
+            # Default ordering: descending by amount (highest amounts first)
+            valid_request['order_by'] = [{"column": "amount", "order": "desc"}]
+        else:
+            # Validate order_by columns against the actual model
+            mapper = inspect(InvoiceItemsMapMart)
+            valid_columns = {col.key for col in mapper.columns}
+
+            # Also include computed/aliased columns used in DAO queries
+            # From get_unmapped_items.py DAO: original_description -> description
+            column_mapping = {'original_item_id', 'original_description', 'quantity', 'times_bought', 'status'}
+            valid_order_columns = valid_columns | column_mapping
+
+            valid_orders = {"asc", "desc"}
+
+            validated_order_by = []
+            for ob in order_by:
+                col = ob.get("column", "amount")
+                order = ob.get("order", "desc").lower()
+
+                if col not in valid_order_columns:
+                    raise ValueError(f"Invalid order_by column: '{col}'. Valid columns: {sorted(valid_order_columns)}")
+                if order not in valid_orders:
+                    raise ValueError(f"Invalid order direction: '{order}'. Must be 'asc' or 'desc'")
+
+                # We might need to map from the column that the frontend sent to the table column name
+                validated_order_by.append({"column": col, "order": order})
+
+            valid_request['order_by'] = validated_order_by
+
+        # group_by has already been normalized and validated by the Pydantic schema.
+        valid_request['group_by'] = group_by if group_by else None
+
+        return valid_request
+
     def get_unmapped_items(
         self,
         item_type: str,
+        db: Optional[Session] = None,
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,
+        date_history: Optional[str] = None,
         supplier_names: Optional[List[str]] = None,
         search: Optional[str] = None,
         order_by: Optional[List[dict]] = None,
         page: int = 1,
-        size: int = 10
+        size: int = 10,
+        group_by: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Get unmapped items with pagination and filtering.
-        
+
         Args:
-            item_type (str): 'temporary' or 'unmapped'
+            item_type (str): Must be one of the valid mapping types from the database
             date_from (date, optional): Start date filter
             date_to (date, optional): End date filter
+            date_history (date, optional): Specific date for filtering
             supplier_names (List[str], optional): Supplier names to filter by
             page (int): Page number (1-based)
             size (int): Number of items per page
-            
+
         Returns:
             Dict with items, pagination metadata
         """
-        try:
+        # Backwards compatibility for existing code
+        if not db:
             db = self._get_db_session()
-            return self._get_unmapped_items_query(
+
+        # Validate request parameters
+        valid_request = self.validate_request_params(db, item_type, date_from, date_to, date_history, order_by, group_by)
+
+        try:
+            logger.info("GETTING FROM ANALYTICS")
+            return self._get_unmapped_items_from_analytics(
                 db,
-                item_type,
-                date_from,
-                date_to,
+                valid_request['item_type'],
+                valid_request.get('date_from'),
+                valid_request.get('date_to'),
+                valid_request.get('date_history'),
                 supplier_names,
                 search,
-                order_by,
+                valid_request.get('order_by'),
                 page,
                 size,
+                valid_request.get('group_by')
             )
         except Exception as e:
-            logger.error(f"Error retrieving unmapped items: {e}")
+            logger.exception(f"Error retrieving unmapped items from analytics: {e}")
             return {
                 "items": [],
                 "total_count": 0,
@@ -166,6 +264,102 @@ class UnmappedItemsController:
                 "size": size,
                 "pages": 0
             }
+
+
+    def _get_unmapped_items_from_analytics(
+        self,
+        db,
+        item_type: str,
+        date_from: Optional[date],
+        date_to: Optional[date],
+        date_history: Optional[date],
+        supplier_names: Optional[List[str]],
+        search: Optional[str],
+        order_by: Optional[List[dict]],
+        page: int,
+        size: int,
+        group_by: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get unmapped items from analytics.mart__invoice_items_map using DAO.
+
+        Args:
+            db: Database session
+            item_type: Type of items - 'temporary', 'unmapped', or 'no_temporary'
+            date_from: Start date filter
+            date_to: End date filter
+            date_history: Specific date for filtering
+            supplier_names: List of supplier names to filter
+            search: Search term for item/description
+            order_by: List of order_by dicts
+            page: Page number
+            size: Items per page
+
+        Returns:
+            Dict with formatted items and pagination metadata
+        """
+        # Call DAO function
+        dao_result = dao_get_unmapped_items(
+            db=db,
+            item_type=item_type,
+            date_from=date_from,
+            date_to=date_to,
+            date_history=date_history,
+            supplier_names=supplier_names,
+            search=search,
+            order_by=order_by,
+            page=page,
+            size=size,
+            group_by=group_by
+        )
+
+        logger.info(f"DAO returned {len(dao_result.items)}")
+
+        # Format items for controller response
+        formatted_items = []
+        for item in dao_result.items:
+            # Format date if present
+            item_date = item.get("date")
+            if item_date:
+                # Handle both datetime objects and strings
+                if hasattr(item_date, 'strftime'):
+                    item_date = item_date.strftime("%Y-%m-%d")
+                else:
+                    item_date = str(item_date)
+            else:
+                item_date = ""
+            
+            formatted_items.append({
+                "original_item_id": item.get("original_item_id", ""),
+                "original_description": item.get("original_description", ""),
+                "cost": format_currency(item.get("cost") or 0.0),
+                "amount": format_currency(item.get("amount") or 0.0),
+                "quantity": int(item.get("quantity") or 0),
+                "times_bought": int(item.get("times_bought") or 0),
+                "sheet_name": item.get("sheet_name", ""),
+                "supplier": item.get("supplier", ""),
+                "mapping_type": item.get("mapping_type", ""),
+                "is_isolated": bool(item.get("is_isolated", False)),
+                "is_price_rerated": bool(item.get("is_price_rerated", False)),
+                "original_quantity": int(item.get("original_quantity") or 0),
+                "date": item_date
+            })
+
+        return {
+            "items": formatted_items,
+            "total_count": dao_result.total_count,
+            "page": dao_result.page,
+            "size": dao_result.size,
+            "pages": dao_result.pages,
+            "aggregates": dao_result.aggregates or {
+                "total_cost": 0.0,
+                "total_amount": 0.0,
+                "total_qty": 0,
+                "total_times_bought": 0,
+            },
+            # Exposed for mappings UI when group_by is set (per-group row counts for charts/labels)
+            "group_counts": dao_result.group_counts,
+        }
 
     def _get_unmapped_items_query(
         self,
@@ -325,10 +519,12 @@ class UnmappedItemsController:
         ItemAlias = aliased(InvoiceItem)
 
         # Now restrict to rows with NO sheet_name for the current rows
+        # In production, empty sheet names have been converted to "NO SHEET NAME"
         query = base_unmapped.filter(
             or_(
                 InvoiceItem.sheet_name.is_(None),
-                InvoiceItem.sheet_name == ''
+                InvoiceItem.sheet_name == '',
+                InvoiceItem.sheet_name.ilike('NO SHEET NAME')
             )
         )
 
@@ -347,8 +543,12 @@ class UnmappedItemsController:
                 ItemAlias.mpi_description == 'No Match',
                 ItemAlias.mpi_description.like('UIDI%'),
             ),
-            # With a non-empty sheet_name
-            and_(ItemAlias.sheet_name.isnot(None), ItemAlias.sheet_name != ''),
+            # With a non-empty sheet_name (excluding "NO SHEET NAME" which is treated as empty)
+            and_(
+                ItemAlias.sheet_name.isnot(None), 
+                ItemAlias.sheet_name != '',
+                ~ItemAlias.sheet_name.ilike('NO SHEET NAME')
+            ),
         ]
 
         # Apply date range to the correlated EXISTS so partitioning respects filters
@@ -376,10 +576,12 @@ class UnmappedItemsController:
         """Get items that have a sheet_name but are 'No Match' or start with 'UIDI'"""
         
         # Base query for temporary items
+        # Items must have a sheet_name (not NULL, not empty, and not "NO SHEET NAME")
         query = db.query(InvoiceItem).filter(
             and_(
                 InvoiceItem.sheet_name.isnot(None),
                 InvoiceItem.sheet_name != '',
+                ~InvoiceItem.sheet_name.ilike('NO SHEET NAME'),
                 or_(
                     InvoiceItem.mpi_item == 'No Match',
                     InvoiceItem.mpi_item.like('UIDI%'),
@@ -531,5 +733,83 @@ class UnmappedItemsController:
             "size": size,
             "pages": total_pages
         }
+
+    def get_unmapped_items_graph_stats(
+        self,
+        item_type: str,
+        db: Optional[Session] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        date_history: Optional[date] = None,
+        supplier_names: Optional[List[str]] = None,
+        search: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get date-based statistics for unmapped items graph (no pagination).
+        Returns dynamic mapping type counts.
+
+        Args:
+            item_type (str): Must be one of the valid mapping types or 'all'
+            date_from (date, optional): Start date filter (reserved for future use)
+            date_to (date, optional): End date filter (reserved for future use)
+            supplier_names (List[str], optional): Supplier names to filter by
+            search (str, optional): Search term for filtering
+
+        Returns:
+            Dict with date_stats array and dynamic totals
+            Example: {
+                "date_stats": [{"date": "2024-01-01", "permanent": 10, "no_match": 5}],
+                "totals": {"permanent": 10, "no_match": 5, "total": 15}
+            }
+        """
+        # Backwards compatibility for existing code
+        if not db:
+            db = self._get_db_session()
+
+        # Validate request parameters (skip order_by validation since we don't need it)
+        valid_request = self.validate_request_params(db, item_type, date_from, date_to, date_history, order_by=None)
+
+        try:
+            logger.info("Getting graph stats from analytics")
+            
+            # Call DAO function - returns dynamic mapping type keys
+            date_stats = dao_get_unmapped_items_graph_stats(
+                db=db,
+                item_type=valid_request['item_type'],
+                date_from=valid_request.get('date_from'),
+                date_to=valid_request.get('date_to'),
+                date_history=valid_request.get('date_history'),
+                supplier_names=supplier_names,
+                search=search,
+            )
+
+            # Calculate totals dynamically based on whatever mapping types are present
+            # Initialize with all expected mapping types set to 0
+            totals: Dict[str, int] = {mt: 0 for mt in EXPECTED_MAPPING_TYPES}
+            total_count = 0
+
+            for stat in date_stats:
+                for key, value in stat.items():
+                    if key == "date":
+                        continue  # Skip the date field
+                    if isinstance(value, (int, float)):
+                        if key not in totals:
+                            totals[key] = 0
+                        totals[key] += int(value)
+                        total_count += int(value)
+
+            totals["total"] = total_count
+
+            return {
+                "date_stats": date_stats,
+                "totals": totals
+            }
+
+        except Exception as e:
+            logger.exception(f"Error retrieving graph stats: {e}")
+            return {
+                "date_stats": [],
+                "totals": {"total": 0}
+            }
 
 

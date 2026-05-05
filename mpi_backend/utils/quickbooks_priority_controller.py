@@ -31,8 +31,8 @@ QB_EXPORT_BATCH_SIZE = int(os.getenv("EXPORT_BATCH_SIZE", "1000"))
 # NEW: Scheduler jobs that will be paused during migrate-all
 BACKGROUND_JOB_IDS = [
     "email_download",
-    "statement_download", 
-    "daily_mapping_tasks"  # Combined mapping tasks with Google Sheets sync
+    "daily_mapping_tasks",  # Combined mapping tasks with Google Sheets sync
+    "dbt_refresh"
 ]
 
 

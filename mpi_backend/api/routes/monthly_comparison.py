@@ -1,35 +1,28 @@
-from datetime import date
-from fastapi import APIRouter, Depends, HTTPException, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List, Optional, Union
-from sqlalchemy import or_
+from typing import List, Optional
+import logging
 
 from mpi_backend.database import get_db
 from mpi_backend.database.schemas.MonthlyComparison import (
-    ItemInfo, 
-    ItemPriceResponse, 
+    ItemInfo,
     PaginatedItemInfoResponse,
-    SupplierPriceInfo,
     MonthlyComparisonDateRange,
-    ItemSearchRequest,
-    SupplierCheapestItemsResponse,
-    EnrichedItemPriceResponse,
     PaginatedEnrichedItemResponse,
     DateRangeWithExclusions
 )
 from mpi_backend.database.controllers.MonthlyComparisonController import (
     MonthlyComparisonController
 )
-from mpi_backend.utils.auth.auth_bearer import JWTBearer
-
+from mpi_backend.database.models.User import User
+from mpi_backend.utils.auth.dependencies import get_current_user
 
 router = APIRouter(
     prefix="/price-comparison",
     tags=["Monthly Comparison"]
 )
 
-
-# Removed search-items endpoint
+logger = logging.getLogger(__name__)
 
 
 @router.post("/dropdown-items", response_model=PaginatedItemInfoResponse)
@@ -39,7 +32,7 @@ async def get_dropdown_items(
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     size: int = Query(10, ge=1, le=100, description="Number of items per page"),
     db: Session = Depends(get_db),
-    token: str = Depends(JWTBearer())
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get paginated distinct items for dropdown population within a date range.
@@ -142,7 +135,7 @@ async def get_selected_items_prices(
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     size: int = Query(10, ge=1, le=100, description="Number of items per page"),
     db: Session = Depends(get_db),
-    token: str = Depends(JWTBearer())
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get price comparison data for selected items with supplier information.
@@ -250,7 +243,7 @@ async def get_items_by_date_range(
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     size: int = Query(10, ge=1, le=100, description="Number of items per page"),
     db: Session = Depends(get_db),
-    token: str = Depends(JWTBearer())
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get items within a date range with supplier information and optional exclusions.

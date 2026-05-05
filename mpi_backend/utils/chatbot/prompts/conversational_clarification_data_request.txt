@@ -1,0 +1,21 @@
+I can help you get that data! To provide exactly what you need, could you clarify:
+
+1. **What type of data are you looking for?**
+   - Invoices
+   - Invoice items
+   - Suppliers
+   - Customer jobs
+   - Unmapped items
+
+2. **Any filters to narrow down the results?**
+   - Date range
+   - Specific supplier/vendor
+   - Customer job name
+   - Processing status
+
+For example:
+- "Show me invoices from July 2024"
+- "List all items from Ferguson Supply"
+- "Get pending invoices for customer job ABC Construction"
+
+What specifically would you like to see?

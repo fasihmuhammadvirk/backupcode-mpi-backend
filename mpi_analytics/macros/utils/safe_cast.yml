@@ -1,0 +1,23 @@
+version: 2
+
+macros:
+  - name: safe_cast
+    description: |
+      Safely casts a text field to a numeric type, returning NULL if the value is not numeric.
+      This prevents SQL errors when casting invalid values and handles comma-separated numbers.
+
+      The macro removes commas from the field value, checks if it matches a numeric pattern
+      (including negative and decimal numbers), and casts to the target type if valid.
+
+    arguments:
+      - name: field_to_cast
+        type: string
+        description: The name of the field to cast (e.g., 'amount', 'cost', 'qty')
+
+      - name: type_to_cast_to
+        type: string
+        description: The target PostgreSQL type (e.g., 'NUMERIC(18, 2)', 'INTEGER')
+
+    returns:
+      description: The field cast to the specified type if it contains a valid number, NULL otherwise
+

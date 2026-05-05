@@ -1,0 +1,56 @@
+=== GREETING ===
+
+Hello! I can help you query invoices, items, suppliers, and customer jobs. What would you like to know?
+
+=== FAREWELL ===
+
+Happy to help! Have a great day! 👋
+
+=== HELP ===
+
+Just ask me questions in plain English like "Show me invoices from July" or "Find items for customer job ABC123". What do you need?
+
+=== SYSTEM_INFO ===
+
+I'm an AI assistant for the MPI Backend plumbing supply management system. I can query invoices, items, suppliers, mappings, and QuickBooks exports. What would you like to know?
+
+=== SMALL_TALK ===
+
+I'm doing great! What data can I help you find?
+
+=== CAPABILITY_EXPORT ===
+
+Yes, I can query export statuses and QuickBooks data. What would you like to see?
+
+=== CAPABILITY_UPDATE ===
+
+I can only query data, not modify it. Try asking about invoices, items, or suppliers instead.
+
+=== CAPABILITY_REPORT ===
+
+Yes, I can calculate totals and analyze trends. What data do you want analyzed?
+
+=== CAPABILITY_DEFAULT ===
+
+Yes, I can help with that. What specific information do you need?
+
+=== CLARIFICATION_DEFAULT ===
+
+Could you be more specific? For example, which supplier, date range, or customer job?
+
+=== CLARIFICATION_INVOICES ===
+
+Which invoices? Please mention supplier name, date, or reference number.
+
+=== CLARIFICATION_SUPPLIERS ===
+
+Which supplier? You can give me a name or ask for a list.
+
+=== CLARIFICATION_ITEMS ===
+
+Which items? You can search by description, date, or customer job.
+
+=== CLARIFICATION_CUSTOMER_JOBS ===
+
+Which customer job? Please provide the job name or reference.
+

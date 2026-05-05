@@ -1,0 +1,114 @@
+version: 2
+
+models:
+  - name: int__extracted_data_switched
+    description: |
+      Intermediate Model: Extracted Data Switch Point
+
+      This model acts as a switch point between the old and new extraction pipelines,
+      allowing downstream models to work with either pipeline without modification.
+
+      **Usage:**
+        - Default (new pipeline): `dbt run --select int__invoice_items_mapped+`
+        - Old pipeline: `dbt run --select int__invoice_items_mapped+ --vars '{"data_source": "public.model_extracted_data"}'`
+
+      **Data Lineage (default - new pipeline):**
+        raw.model_extracted_data (JSONB)
+          → stg__extracted_global_fields + stg__extracted_line_items
+          → int__extracted_data_combined
+          → int__extracted_data_combined_compat
+          → THIS MODEL
+          → int__invoice_items_mapped
+          → downstream...
+
+      **Data Lineage (old pipeline with data_source='public.model_extracted_data'):**
+        stg__model_extracted_data
+          → int__model_extracted_data
+          → THIS MODEL
+          → int__invoice_items_mapped
+          → downstream...
+
+      **Configuration:**
+        data_source (dbt variable):
+          - 'default' (default): Use new normalized pipeline (int__extracted_data_combined_compat)
+          - 'public.model_extracted_data': Use old pipeline (int__model_extracted_data)
+
+      **Note:** The new pipeline is now the default after validation.
+      Use the old pipeline flag only for backwards compatibility or debugging.
+
+    columns:
+      - name: invoice_items_id
+        description: Primary key - unique identifier for each invoice line item or tax record
+        tests:
+          - unique
+          - not_null
+      - name: filename
+        description: S3 file key or filename of the source PDF
+        tests:
+          - not_null
+      - name: item
+        description: Item code with vendor suffix applied (e.g., "ABC123-B" for Best Plumbing)
+      - name: description
+        description: Item description from invoice, or "Tax" for tax records
+      - name: vendor
+        description: Email-derived vendor name (reliable source)
+      - name: date
+        description: Invoice date
+      - name: ref_no
+        description: Invoice reference number
+      - name: po_number
+        description: Purchase order number
+      - name: customer_job
+        description: Customer job reference
+      - name: buyer
+        description: Buyer name from invoice
+      - name: date_added
+        description: Timestamp when extraction/record was added
+      - name: invoice_id
+        description: Invoice ID (from old pipeline) or extraction ID (from new pipeline)
+      - name: is_active
+        description: Whether the record is active (true for new pipeline)
+      - name: mpi_item
+        description: MPI item code from PDF extraction (untrustworthy - use mappings instead)
+      - name: mpi_description
+        description: MPI description from PDF extraction (untrustworthy - use mappings instead)
+      - name: sheet_name
+        description: Sheet name from PDF extraction (untrustworthy - use mappings instead)
+      - name: class_
+        description: QuickBooks class
+      - name: account
+        description: QuickBooks account
+      - name: export_status
+        description: Export status for QuickBooks integration
+      - name: bill
+        description: Bill information
+      - name: memo
+        description: Memo field
+      - name: model_name
+        description: AI model used for extraction (e.g., gemini-2.0-flash)
+      - name: status
+        description: Extraction status (human_review_required, model_approved, etc.)
+      - name: validation_score
+        description: Quality score from validation (0-100)
+      - name: confidence_score
+        description: Model confidence score (0-1)
+      - name: amount
+        description: Line total amount (numeric, NULL cleaned)
+      - name: cost
+        description: Unit cost (numeric, 0 for tax records)
+      - name: qty
+        description: Quantity (numeric, NULL for tax records)
+      - name: amount_raw
+        description: Original amount value as text (for audit)
+      - name: cost_raw
+        description: Original cost value as text (for audit)
+      - name: qty_raw
+        description: Original qty value as text (for audit)
+      - name: is_amount_consistent
+        description: Whether qty * cost = amount (within 1 cent tolerance)
+      - name: amount_cents
+        description: Amount in cents (integer)
+      - name: cost_cents
+        description: Cost in cents (integer)
+      - name: line_order
+        description: Position of item in invoice (1-indexed, tax records appear last). NULL for old pipeline.

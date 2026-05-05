@@ -1,0 +1,8 @@
+I can help you with invoices! To get you the right ones, could you tell me:
+
+- **Which supplier?** (e.g., "Ferguson", "ABC Supply")
+- **Date range?** (e.g., "from July 2024", "last month")
+- **Reference number?** (if you have a specific invoice in mind)
+- **Status?** (processed, pending, exported)
+
+What specific invoices are you looking for?

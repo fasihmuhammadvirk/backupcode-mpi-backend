@@ -1,0 +1,123 @@
+version: 2
+
+sources:
+  - name: public
+    tables:
+      - name: parsed_customer_job_addresses
+        description: |
+          Customer job addresses parsed using the usaddress Python library.
+          Populated by scripts/parse_customer_job_addresses.py
+
+models:
+  - name: stg__parsed_customer_job_addresses
+    description: |
+      Staging model for Python-parsed customer job addresses.
+
+      This model reads from the parsed_customer_job_addresses table which is populated
+      by a Python script using the usaddress library. This provides more accurate
+      address parsing than pure SQL regex patterns.
+
+      **How to refresh data:**
+      ```bash
+      cd mpi-backend
+      python scripts/parse_customer_job_addresses.py
+      ```
+
+      Use `--force` flag to re-parse existing addresses.
+
+    columns:
+      - name: customer_job
+        description: "Original customer_job value (unique key)"
+        tests:
+          - unique
+          - not_null
+
+      - name: address_number
+        description: |
+          Street number extracted by usaddress.
+          Examples: "172-02", "69", "1584"
+
+      - name: street_name_pre_directional
+        description: |
+          Directional prefix before street name.
+          Examples: "N", "S", "E", "W", "NE"
+
+      - name: street_name
+        description: |
+          Street name without type suffix.
+          Examples: "Hope", "Hillside", "Fulton"
+
+      - name: street_name_post_type
+        description: |
+          Street type suffix.
+          Examples: "St", "Ave", "Blvd", "Pl"
+
+      - name: street_name_post_directional
+        description: |
+          Directional suffix after street name.
+          Examples: "N", "S"
+
+      - name: occupancy_type
+        description: |
+          Unit/apartment type.
+          Examples: "Apt", "Unit", "Suite", "Fl"
+
+      - name: occupancy_identifier
+        description: |
+          Unit/apartment number.
+          Examples: "1A", "200", "3rd Floor"
+
+      - name: place_name
+        description: |
+          City/place name extracted by usaddress.
+          Examples: "Brooklyn", "Jamaica", "Queens"
+
+      - name: state_name
+        description: |
+          State abbreviation (normalized to standard format).
+          Examples: "NY", "NJ", "CT"
+
+      - name: zip_code
+        description: |
+          ZIP code (5 digits, optionally with +4).
+          Examples: "11211", "11432-1234"
+
+      - name: extracted_address
+        description: |
+          The address portion after removing prefixes and deduplicating.
+          This is the cleaned input that was sent to usaddress.
+
+      - name: clean_street_address
+        description: |
+          Reconstructed street address from parsed components.
+          Format: "{number} {pre_dir} {name} {type} {post_dir}"
+
+      - name: parse_type
+        description: |
+          usaddress parse result type:
+          - "Street Address": Normal street address
+          - "Ambiguous": Could be parsed multiple ways
+          - "RepeatedLabelError": Same component appeared multiple times
+          - "Error": Failed to parse
+
+      - name: confidence
+        description: |
+          Parsing confidence level:
+          - high: Street number AND state found
+          - medium: Street number found, no state
+          - low: Could not identify standard pattern
+        tests:
+          - accepted_values:
+              values: ['high', 'medium', 'low']
+
+      - name: needs_manual_review
+        description: |
+          Boolean flag for addresses that need manual review.
+          TRUE when parsing failed or was ambiguous.
+        tests:
+          - not_null
+
+      - name: prefix_removed
+        description: |
+          Text that was removed from the beginning of customer_job.
+          Examples: "Mpi Plumbing", "Thursday 8:00", "+1 (646) 708-4476"

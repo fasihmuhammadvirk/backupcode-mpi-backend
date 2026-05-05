@@ -1,0 +1,108 @@
+# Metabase deployment stack for the standalone DigitalOcean droplet.
+#
+# Stack:
+#   - metabase     : Metabase server (open source image)
+#   - metabase_db  : Postgres for Metabase's own application DB (settings,
+#                    saved questions, dashboards, users). NOT the analytics DB.
+#   - caddy        : Reverse proxy that terminates TLS via Let's Encrypt and
+#                    forwards traffic to Metabase.
+#
+# Connection to the production analytics Postgres (`mpi_db`) is configured
+# from inside the Metabase UI on first login, using a read-only DB user.
+# It is NOT defined in this compose file, so credentials never live on disk
+# in plain text on the droplet.
+#
+# Future services (Airflow, Dagster, ...) can be added to this same stack
+# by appending new services and joining them to the `internal_ntw` network.
+
+name: mpi-analytics-stack
+
+services:
+  metabase_db:
+    image: postgres:16
+    container_name: metabase_db
+    restart: unless-stopped
+    shm_size: '256m'
+    environment:
+      POSTGRES_USER: ${METABASE_DB_USER}
+      POSTGRES_PASSWORD: ${METABASE_DB_PASSWORD}
+      POSTGRES_DB: ${METABASE_DB_NAME}
+    volumes:
+      - metabase_pgdata:/var/lib/postgresql/data
+    networks:
+      - internal_ntw
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${METABASE_DB_USER} -d ${METABASE_DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  metabase:
+    image: metabase/metabase:v0.50.20
+    container_name: metabase
+    restart: unless-stopped
+    environment:
+      # Metabase application DB (stores Metabase's own metadata)
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: metabase_db
+      MB_DB_PORT: 5432
+      MB_DB_DBNAME: ${METABASE_DB_NAME}
+      MB_DB_USER: ${METABASE_DB_USER}
+      MB_DB_PASS: ${METABASE_DB_PASSWORD}
+
+      # Public URL & embedding
+      MB_SITE_URL: ${METABASE_SITE_URL}
+      MB_EMBEDDING_SECRET_KEY: ${MB_EMBEDDING_SECRET_KEY}
+      MB_ENABLE_EMBEDDING: "true"
+
+      # Allow the frontend origin(s) to embed Metabase iframes.
+      # Comma-separated list, e.g. "https://app.example.com,https://*.example.com"
+      MB_EMBEDDING_APP_ORIGIN: ${MB_EMBEDDING_APP_ORIGIN}
+
+      # JVM tuning. Metabase recommends ~2-4GB heap for small/medium teams.
+      JAVA_OPTS: "-Xmx2g -Xms1g"
+
+      # Behind a TLS-terminating reverse proxy
+      MB_JETTY_HOST: 0.0.0.0
+      MB_JETTY_PORT: 3000
+    expose:
+      - "3000"
+    networks:
+      - internal_ntw
+    depends_on:
+      metabase_db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      METABASE_DOMAIN: ${METABASE_DOMAIN}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - metabase
+    networks:
+      - internal_ntw
+
+volumes:
+  metabase_pgdata: {}
+  caddy_data: {}
+  caddy_config: {}
+
+networks:
+  internal_ntw:
+    driver: bridge

@@ -1,0 +1,60 @@
+// Suppress Alloy's own info-level noise
+logging {
+  level  = "warn"
+  format = "logfmt"
+}
+
+// ===== LOGGING: Tail app log files --> Grafana Cloud Loki =====
+
+local.file_match "app_logs" {
+  path_targets = [
+    {__path__ = "/app/logs/app.log",     job = "mpi-backend", log_type = "app"},
+    {__path__ = "/app/logs/error.log",   job = "mpi-backend", log_type = "error"},
+    {__path__ = "/app/logs/missing.log", job = "mpi-backend", log_type = "missing"},
+    {__path__ = "/app/logs/backup.log",  job = "mpi-backend", log_type = "backup"},
+  ]
+}
+
+loki.source.file "log_files" {
+  targets       = local.file_match.app_logs.targets
+  forward_to    = [loki.write.grafana_cloud.receiver]
+  tail_from_end = true
+}
+
+loki.write "grafana_cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_LOKI_URL")
+    basic_auth {
+      username = sys.env("GRAFANA_LOKI_USER")
+      password = sys.env("GRAFANA_LOKI_API_KEY")
+    }
+  }
+  external_labels = {
+    app         = "mpi-backend",
+    environment = sys.env("ENVIRONMENT"),
+  }
+}
+
+// ===== POSTGRES METRICS: Scrape DO Managed DB =====
+
+prometheus.exporter.postgres "managed_db" {
+  data_source_names  = [sys.env("ALLOY_PG_DSN")]
+}
+
+prometheus.scrape "postgres" {
+  targets         = prometheus.exporter.postgres.managed_db.targets
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+  scrape_interval = "60s"
+}
+
+// ===== REMOTE WRITE: Push metrics to Grafana Cloud =====
+
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_METRICS_URL")
+    basic_auth {
+      username = sys.env("GRAFANA_METRICS_USER")
+      password = sys.env("GRAFANA_METRICS_API_KEY")
+    }
+  }
+}

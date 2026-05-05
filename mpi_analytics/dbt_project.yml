@@ -1,0 +1,73 @@
+
+# Name your project! Project names should contain only lowercase characters
+# and underscores. A good package name should reflect your organization's
+# name or the intended use of these models
+name: 'mpi_analytics'
+version: '1.0.0'
+
+# This setting configures which "profile" dbt uses for this project.
+profile: 'mpi_analytics'
+
+# These configurations specify where dbt should look for different types of files.
+# The `model-paths` config, for example, states that models in this project can be
+# found in the "models/" directory. You probably won't need to change these!
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:         # directories to be removed by `dbt clean`
+  - "target"
+  - "dbt_packages"
+
+# Project variables
+vars:
+  # Minimum validation score for data to pass through the pipeline
+  # Records with status='model_approved' OR validation_score > this value are included
+  min_validation_score: 95
+
+  # Sheets to exclude from all analytics and history (Master Source: .env)
+  # Default list aligns with Python's SKIP_SHEETS fallback.
+  skip_sheets: "{{ env_var('SKIP_SHEETS', 'ALL SYSTEMS, ITEMS WITHOUT TEMPORARY GROUP NAME, DUPLICATE ITEMS, Organize') }}"
+  
+  # Tax variables for QuickBooks export calculations
+  quickbooks_tax_rate: 0.08875
+  quickbooks_tax_multiplier: 1.08875
+
+  price_increase_threshold: "{{ env_var('DBT_PRICE_INCREASE_THRESHOLD', '250') }}"
+
+# Hooks to run SQL before/after dbt runs
+on-run-start:
+  - "{{ create_normalize_address_function() }}"
+  - "{{ create_pg_trgm_extension() }}"
+  - "SET work_mem = '64MB'"
+
+
+# Configuring models
+# Full documentation: https://docs.getdbt.com/docs/configuring-models
+
+# In this example config, we tell dbt to build all models in the example/
+# directory as views. These settings can be overridden in the individual model
+# files using the `{{ config(...) }}` macro.
+models:
+  mpi_analytics:
+    +pre_hook:
+      - "SET LOCAL jit = off"
+      - "SET LOCAL statement_timeout = '900s'"
+    # Config indicated by + and applies to all files under models/example/
+    staging:
+      +materialized: view
+    intermediate:
+      +materialized: view 
+    marts:
+      +materialized: table
+  elementary:
+    +schema: elementary
+
+# Configure tests to store failures for data quality monitoring
+tests:
+  mpi_analytics:
+    +store_failures: true
+    +schema: data_quality

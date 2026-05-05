@@ -26,6 +26,7 @@ from pathlib import Path
 # Add the parent directory to the path so we can import mpi_backend
 sys.path.append(str(Path(__file__).parent.parent))
 
+from sqlalchemy import text
 from mpi_backend.config.logging_config import setup_logging
 from mpi_backend.database import db_context
 from mpi_backend.database.controllers import GoogleSheetSyncController
@@ -46,23 +47,21 @@ class UltraFastMappingUpdater:
         # Check database connection on initialization
         self._check_database_connection()
         
-        # Supplier suffix patterns for cleaning
+        # Use centralized supplier suffix manager
+        from mpi_backend.utils.supplier_suffix_manager import (
+            get_all_supplier_suffixes,
+            _SUPPLIER_NAME_TO_ID
+        )
+        
+        # Get suffix patterns from centralized manager (with dash prefix)
+        suffix_map = get_all_supplier_suffixes()
         self.suffix_patterns = {
-            1: "-B", 2: "-W", 3: "-Y", 4: "-S", 5: "-P",
-            6: "-A", 7: "-PA", 8: "-G", 9: "-F", 10: "-FM",
-            11: "-PE", 12: "-AF", 13: "-L", 14: "-BF"
+            sid: f"-{suffix}" if suffix else None
+            for sid, suffix in suffix_map.items()
         }
         
-        # Supplier name mappings
-        self.supplier_names = {
-            "BMW Plumbing Supplies": 1, "World Wide Plumbing": 2,
-            "Y & S Plumbing Supply": 3, "Supreme Plumbing Supply": 4,
-            "Pyramid Plumbing": 5, "ABC Opus Services": 6,
-            "Park Plumbing Supply": 7, "Gotham Plumbing Supply": 8,
-            "FW Webb Plumbing Supply": 9, "Flow Mark Plumbing Supply": 10,
-            "Plumbing Exchange": 11, "AF Supply": 12,
-            "Lion Hvac Supplies": 13, "Bruce Ferguson": 14
-        }
+        # Supplier name mappings from centralized manager
+        self.supplier_names = _SUPPLIER_NAME_TO_ID.copy()
     
     def _check_database_connection(self):
         """Check if database connection is working."""

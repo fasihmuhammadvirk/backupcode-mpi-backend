@@ -1,0 +1,80 @@
+version: 2
+
+snapshots:
+  - name: snp__google_sheet_mappings
+    description: |
+      SCD Type-2 snapshot of raw.raw_google_sheet_mappings.
+
+      Automatically maintained by dbt. A new row is written only when
+      `mapping_type` or `mpi_code` changes for a given supplier item.
+      Rows are closed (dbt_valid_to set) when items are removed from the
+      Google Sheet (invalidate_hard_deletes = True).
+
+      Triggered by: `dbt snapshot --select snp__google_sheet_mappings`
+      Called from: dbt_scheduler.py after each Google Sheet sync (_run_data_load).
+
+    columns:
+      - name: sheet_title_clean
+        description: "Cleaned title in order to partition and derive unique row for google sheet item"
+
+      - name: supplier_item_ids_clean
+        description: "Cleaned supplier item ID in order to partition and derive unique row for google sheet item"
+
+      - name: sheet_supplier_unique_key
+        description: "Generated unique hash based key for the google sheet item to be used as unique_key for snapshot using cleaned sheet_title_clean and supplier_item_ids_clean"
+
+      - name: sheet_title
+        description: "Category/tab name from Google Sheets (e.g., 'AIR FITTINGS')"
+
+      - name: google_sheet_name
+        description: "Name of the Google Sheet file"
+
+      - name: sheet_id
+        description: "Google Sheets gid for tracking across renames"
+
+      - name: mpi_code
+        description: "Internal MPI item code (e.g., 'FWCR4030'). NULL for temporary mappings."
+
+      - name: mpi_description
+        description: "Human-readable MPI description"
+
+      - name: supplier
+        description: "Supplier name (e.g., 'World Wide Plumbing')"
+
+      - name: supplier_id
+        description: "Supplier ID. NULL for items not yet assigned to a supplier."
+
+      - name: supplier_item_ids
+        description: "Supplier's item code — the join key for invoice items"
+
+      - name: mapping_type
+        description: >
+          Classification of the mapping. One of: permanent, temporary, invalid.
+          Changes to this column trigger a new snapshot row (via check_cols).
+
+      - name: validation_status
+        description: "Validation result from the Google Sheet extractor"
+
+      - name: extraction_timestamp
+        description: "When this data was extracted from Google Sheets"
+
+      - name: loaded_at
+        description: "When this record was loaded into raw.raw_google_sheet_mappings"
+
+      # dbt-managed snapshot columns
+      - name: dbt_scd_id
+        description: "Surrogate key for this specific snapshot row (dbt-managed)"
+
+      - name: dbt_valid_from
+        description: >
+          When this version of the row became active.
+          Use MIN(dbt_valid_from) to find when an item first appeared with a given mapping_type.
+
+      - name: dbt_valid_to
+        description: >
+          When this version was superseded by a newer snapshot row.
+          NULL = this is the currently active version of the row.
+          Use WHERE dbt_valid_to IS NULL to get the current state of all items.
+
+      - name: dbt_updated_at
+        description: "When dbt last wrote or updated this snapshot row (dbt-managed)"

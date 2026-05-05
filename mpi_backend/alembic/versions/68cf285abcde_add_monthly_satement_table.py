@@ -51,15 +51,17 @@ def upgrade():
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_plumbing_invoices_id'), 'plumbing_invoices', ['id'], unique=False)
-    op.drop_index('idx_invoice_items_customer_job', table_name='invoice_items')
-    op.drop_index('idx_invoice_items_date', table_name='invoice_items')
-    op.drop_index('idx_invoice_items_date_vendor', table_name='invoice_items')
-    op.drop_index('idx_invoice_items_export_status', table_name='invoice_items')
-    op.drop_index('idx_invoice_items_id', table_name='invoice_items')
-    op.drop_index('idx_invoice_items_invoice_id', table_name='invoice_items')
-    op.drop_index('idx_invoice_items_item', table_name='invoice_items')
-    op.drop_index('idx_invoice_items_ref_no', table_name='invoice_items')
-    op.drop_index('idx_invoice_items_vendor', table_name='invoice_items')
+    
+    # Drop indexes only if they exist
+    op.execute("DROP INDEX IF EXISTS idx_invoice_items_customer_job")
+    op.execute("DROP INDEX IF EXISTS idx_invoice_items_date")
+    op.execute("DROP INDEX IF EXISTS idx_invoice_items_date_vendor")
+    op.execute("DROP INDEX IF EXISTS idx_invoice_items_export_status")
+    op.execute("DROP INDEX IF EXISTS idx_invoice_items_id")
+    op.execute("DROP INDEX IF EXISTS idx_invoice_items_invoice_id")
+    op.execute("DROP INDEX IF EXISTS idx_invoice_items_item")
+    op.execute("DROP INDEX IF EXISTS idx_invoice_items_ref_no")
+    op.execute("DROP INDEX IF EXISTS idx_invoice_items_vendor")
     # ### end Alembic commands ###
 
 

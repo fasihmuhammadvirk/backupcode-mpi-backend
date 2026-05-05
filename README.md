@@ -2,16 +2,6 @@
 
 A comprehensive FastAPI-based application for managing invoice processing, supplier data, and QuickBooks integration. The system handles automated invoice downloads, statement processing, item mapping, and price comparison functionality.
 
-## 🚀 **Latest Updates (Python 3.11 Upgrade)**
-
-- ✅ **Upgraded to Python 3.11.9** - Full compatibility with modern Python features
-- ✅ **Fixed PyPDF2 deprecation issues** - Updated to use modern PDF processing libraries
-- ✅ **Resolved pandas deprecation warnings** - All data processing now uses current pandas syntax
-- ✅ **Cross-platform compatibility** - Works seamlessly on macOS, Linux, and Windows
-- ✅ **Enhanced PDF to Excel conversion** - All 12 supplier processing modules tested and verified
-- ✅ **Improved dependency management** - Clean, organized requirements with platform-specific support
-- ✅ **Fixed jpype integration** - Faster PDF processing with Java-Python bridge
-- ✅ **Updated backup system** - Streamlined database backup process
 
 ## Features
 - **Invoice Management**: Automated download, processing, and storage of invoices from multiple suppliers
@@ -24,19 +14,9 @@ A comprehensive FastAPI-based application for managing invoice processing, suppl
 - **Background Tasks**: Scheduled tasks for data synchronization and processing
 - **File Processing**: PDF to Excel conversion and data extraction
 - **S3 Integration**: Cloud storage for processed files and exports
-
-## Technology Stack
-- **Python**: 3.11.9 (Latest stable version)
-- **Framework**: FastAPI 0.104.0
-- **Database**: PostgreSQL with SQLAlchemy 2.0.4
-- **Authentication**: JWT with PyJWT
-- **Background Tasks**: APScheduler 3.10.4
-- **File Processing**: PyPDF2, PyPDF4, tabula-py, camelot-py, openpyxl, PyMuPDF
-- **Data Processing**: Pandas, NumPy
-- **Cloud Storage**: AWS S3 (boto3)
-- **Monitoring**: Middleware APM
-- **Containerization**: Docker & Docker Compose
-- **Environment Management**: Conda (mpi64bit environment)
+- **AI Chatbot**: Natural language database queries with conversational intelligence and multi-agent support
+- **User Management**: Multi-user support with role-based access control (admin, bookkeeping, standard)
+- **Company Management**: Multi-tenant support with company-based data isolation
 
 ## Performance Optimizations
 - **Proactive Resource Management**: Advanced optimizations that prevent high CPU usage before it occurs
@@ -48,53 +28,6 @@ A comprehensive FastAPI-based application for managing invoice processing, suppl
 - **Request Processing Optimization**: Intelligent caching and batch processing
 - **Proactive Monitoring**: Real-time optimization based on resource usage patterns
 
-## Project Structure
-
-```
-mpi-backend/
-├── mpi_backend/                    # Main application package
-│   ├── api/                       # API layer
-│   │   └── routes/                # API endpoints
-│   │       ├── customer_job.py    # Customer job mapping endpoints
-│   │       ├── filters.py         # Data filtering and search
-│   │       ├── get_mappings.py    # Item mapping management
-│   │       ├── health.py          # Health check endpoint
-│   │       ├── invoice_items.py   # Invoice items CRUD
-│   │       ├── invoices_list.py   # Invoice management
-│   │       ├── monthly_comparison.py # Price comparison
-│   │       ├── quickbooks.py      # QuickBooks integration
-│   │       ├── signin.py          # Authentication
-│   │       ├── statements.py      # Monthly statements
-│   │       ├── supplier.py        # Supplier management
-│   │       └── sync_mappings.py   # Mapping synchronization
-│   ├── config/                    # Configuration management
-│   │   ├── logging_config.py      # Logging setup
-│   │   └── spreadsheet_config.py  # Spreadsheet processing config
-│   ├── database/                  # Database layer
-│   │   ├── controllers/           # Business logic controllers
-│   │   ├── models/                # SQLAlchemy models
-│   │   └── schemas/               # Pydantic schemas
-│   ├── utils/                     # Utility modules
-│   │   ├── auth/                  # Authentication utilities
-│   │   ├── customer_job_mapping/  # Customer job mapping logic
-│   │   ├── google_sheets/         # Google Sheets integration
-│   │   ├── pdf_to_excel/          # PDF processing utilities
-│   │   ├── statement_extractor/   # Statement processing
-│   │   └── sync_mapping/          # Mapping synchronization
-│   ├── alembic/                   # Database migrations
-│   │   └── versions/              # Migration files
-│   └── main.py                    # Application entry point
-├── scripts/                       # Utility scripts
-├── tests/                         # Test files
-├── docs/                          # Documentation
-├── logs/                          # Application logs
-├── backups/                       # Database backups
-├── docker-compose.yml             # Docker orchestration
-├── Dockerfile                     # Container configuration
-├── requirements.txt               # Python dependencies
-└── alembic.ini                    # Alembic configuration
-```
-
 ## API Endpoints
 
 ### Authentication
@@ -102,6 +35,20 @@ mpi-backend/
 
 ### Health & Monitoring
 - `GET /health` - Application health check
+
+### Chatbot (AI Assistant)
+- `POST /qa/query` - Natural language database queries via AI chatbot
+- `GET /qa/agents` - Get information about registered AI agents
+
+### User Management
+- `GET /users` - Get all users (admin only)
+- `GET /users/{user_id}` - Get user by ID
+- `POST /users` - Create new user (admin only)
+- `PUT /users/{user_id}` - Update user (admin only)
+
+### Company Management
+- `GET /companies` - Get all companies
+- `POST /companies` - Create new company
 
 ### Invoice Management
 - `GET /invoice` - List invoices with filtering and pagination
@@ -173,12 +120,14 @@ The application runs several scheduled background tasks:
 ## Configuration
 
 ### Environment Variables
-- `POSTGRES_HOST`, `POSTGRES_DB`, `POSTGRES_USERNAME`, `POSTGRES_PASSWORD` - Database configuration
+- `POSTGRES_HOST`, `POSTGRES_DB`, `POSTGRES_USERNAME`, `POSTGRES_PASSWORD`, `POSTGRES_PORT` - Database configuration
+- `ENVIRONMENT` - Environment mode (dev, staging, production)
+- `PYTHONBUFFERED` - Python output buffering setting
 - `SECRET_KEY` - JWT secret key
 - `LOGIN_EMAIL`, `LOGIN_PWD`, `SMTP_SERVER` - Email configuration
-- `AWS_SERVER_PUBLIC_KEY`, `AWS_SERVER_SECRET_KEY`, `REGION`, `BUCKET_NAME` - S3 configuration
+- `PUBLIC_ACCESS_KEY`, `SECRET_ACCESS_KEY`, `REGION`, `BUCKET_NAME` - AWS S3 configuration
 - `INVOICE_DOWNLOAD_FOLDER` - Local storage path
-- `LOG_LEVEL` - Logging level
+- `GOOGLE_CHATBOT_API_KEY` - Google Chatbot API key for AI assistant
 
 ### QuickBooks Configuration
 - `QB_PRIORITY_MODE` - Enable QuickBooks priority mode
@@ -187,301 +136,453 @@ The application runs several scheduled background tasks:
 - `MIGRATE_ALL_ABSOLUTE_PRIORITY` - Priority for migrate-all operations
 
 ## Alembic
-Almebic is used for migrations. To run migrations do the following
+Alembic is used for migrations. To run migrations do the following
 
 ```bash
 cd mpi_backend
 export PYTHONPATH=../ 
-alembic upgrade head
+uv run alembic upgrade head
 ```
 
 ### Generating Migrations
 To create a new migration of revision use following command and commit the resultant file to git: 
 ```bash
-alembic revision --autogenerate -m "change details"
+uv run alembic revision --autogenerate -m "change details"
 ```
 
-## 🐍 **Environment Setup (Conda)**
+## 🚀 **Quick Setup with uv**
 
 ### Prerequisites
-- **Conda** (Anaconda or Miniconda)
 - **PostgreSQL** 14+ 
 - **Java Runtime Environment** (for PDF processing)
-- **macOS**: Homebrew for PostgreSQL installation
 
-### 1. Create and Activate Conda Environment
-
-```bash
-# Create conda environment with Python 3.11
-conda create -n mpi64bit python=3.11.9
-
-# Activate the environment
-conda activate mpi64bit
-
-# Verify Python version
-python --version  # Should show Python 3.11.9
-```
-
-### 2. Install Dependencies
+### 1. Automated Setup
 
 ```bash
-# Install dependencies (macOS - excludes Windows-specific packages)
-pip install -r requirements_macos.txt
+# Windows
+.\setup.ps1
 
-# OR for other platforms
-pip install -r requirements.txt
+# Linux/Mac
+chmod +x setup.sh
+./setup.sh
 ```
 
-### 3. Database Setup
+The setup script will automatically:
+- Install uv if not present
+- Create virtual environment
+- Install all dependencies from lockfile
+- Set up environment file
+
+### 2. Manual Setup (Alternative)
 
 ```bash
-# Install PostgreSQL (macOS with Homebrew)
-brew install postgresql@14
+# Install uv (if not already installed)
+# Windows: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+# Linux/Mac: curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Start PostgreSQL service
-brew services start postgresql@14
+# Create virtual environment and install dependencies
+uv sync --frozen
 
-# Set environment variable for library path (macOS)
-export DYLD_LIBRARY_PATH="/opt/homebrew/opt/postgresql@14/lib:$DYLD_LIBRARY_PATH"
+# Copy environment template
+cp .env.example .env
 ```
 
-### 4. Environment Variables
+### 3. Environment Variables
 
-Create a `.env` file in the project root with the following variables:
+Edit the `.env` file with your configuration:
 
 ```bash
 # Database Configuration
 POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
 POSTGRES_DB=mpi_db
-POSTGRES_USERNAME=postgres
+POSTGRES_USERNAME=your_username
 POSTGRES_PASSWORD=your_password
+POSTGRES_PORT=5432
 
-# JWT Secret
+# Application Configuration
+ENVIRONMENT=dev
+LOG_LEVEL=INFO
 SECRET_KEY=your_secret_key
 
 # Email Configuration
+SMTP_SERVER=imap.gmail.com
 LOGIN_EMAIL=your_email@example.com
 LOGIN_PWD=your_email_password
-SMTP_SERVER=smtp.gmail.com
-
-# AWS S3 Configuration
-AWS_SERVER_PUBLIC_KEY=your_aws_key
-AWS_SERVER_SECRET_KEY=your_aws_secret
-REGION=us-east-1
-BUCKET_NAME=your_bucket_name
 
 # Local Storage
 INVOICE_DOWNLOAD_FOLDER=mpi_backend/storage
 
-# Logging
-LOG_LEVEL=INFO
+# AWS S3 Configuration
+PUBLIC_ACCESS_KEY=your_aws_public_key
+SECRET_ACCESS_KEY=your_aws_secret_key
+BUCKET_NAME=your_bucket_name
+REGION=us-east-1
+
+# Google Chatbot API
+GOOGLE_CHATBOT_API_KEY=your_google_chatbot_api_key
 ```
 
-## 🚀 **Running the Application**
+---
 
-### 1. Activate Conda Environment
+## 🚀 Development Setup
+
+### 1. Database Setup
 
 ```bash
-# Always activate the conda environment first
-conda activate mpi64bit
+# Install PostgreSQL 14+
+# Windows: Download from postgresql.org
+# Mac: brew install postgresql@14
+# Linux: sudo apt-get install postgresql-14
 
-# Verify you're in the correct environment
-which python  # Should point to conda environment
+# Start PostgreSQL service
+# Mac: brew services start postgresql@14
+# Linux: sudo systemctl start postgresql
+
+# Create database
+createdb mpi_db
 ```
 
-### 2. Database Migration
+### 2. Install dbt Packages
+
+The `dbt_packages/` directory is gitignored, so you need to install dbt
+packages after cloning (or after `git clean`). The `setup.sh` / `setup.ps1`
+scripts above already run this step — run it manually only if you skipped
+those scripts or cleaned the directory:
 
 ```bash
-# Run database migrations
-cd mpi_backend
-export PYTHONPATH=../
-alembic upgrade head
+(cd mpi_analytics && uv run python run_dbt.py deps)
 ```
 
-### 3. Start the Application
+### 3. Run Database Migrations
 
-#### Development Mode
 ```bash
-# Set PostgreSQL library path (macOS)
-export DYLD_LIBRARY_PATH="/opt/homebrew/opt/postgresql@14/lib:$DYLD_LIBRARY_PATH"
-
-# Start the application with auto-reload
-uvicorn mpi_backend.main:app --host 0.0.0.0 --port 8000 --reload
+# From project root
+uv run alembic upgrade head
 ```
 
-#### Production Mode
+### 4. Start Development Server
+
 ```bash
-# 1. Open terminal and navigate to project directory
-cd Desktop/mpi-backend
-
-# 2. Activate conda environment
-conda activate mpi64bit
-
-# 3. Start the application
-uvicorn mpi_backend.main:app --host 0.0.0.0 --port 8000
+# Start server with hot-reload (uv will automatically use the virtual environment)
+uv run uvicorn mpi_backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 4. Verify Application is Running
+### 5. Verify Application
 
 ```bash
 # Check health endpoint
 curl http://localhost:8000/health
 
+# Access API documentation
+# Open browser: http://localhost:8000/docs
+```
 # Expected response:
+```json
+{"status":"healthy","message":"MPI Backend is running"}
+```
+
+---
+
+## 🛠️ Optional: Makefile Shortcuts
+
+A `Makefile` is included with convenience targets that wrap the commands
+above. Using it is optional — all commands work without it.
+
+**Prerequisite:** `make` must be installed.
+- **macOS / Linux:** usually pre-installed (otherwise `brew install make` or `sudo apt-get install build-essential`).
+- **Windows:** install via Chocolatey (`choco install make`) or use WSL.
+
+```bash
+make setup      # install dbt packages + run migrations
+make dbt-deps   # install dbt packages only
+make migrate    # run alembic migrations
+make dev        # start dev server with hot-reload
+make test       # run pytest
+```
+
+---
+
+## 🔧 Common Development Tasks
+
+### Adding Dependencies
+
+```bash
+# Add a new package
+uv add package-name
+
+# Add development dependency
+uv add --dev package-name
+
+# This automatically:
+# - Updates pyproject.toml
+# - Updates uv.lock
+# - Installs the package
+
+# Commit both files
+git add pyproject.toml uv.lock
+git commit -m "Add package-name dependency"
+```
+
+### Removing Dependencies
+
+```bash
+# Remove a package
+uv remove package-name
+
+# Remove development dependency
+uv remove --dev package-name
+```
+
+### Updating Dependencies
+
+```bash
+# Update all packages to latest compatible versions
+uv lock --upgrade
+
+# Or update specific package
+uv lock --upgrade-package pandas
+
+# Install updated versions
+uv sync
+
+# Commit changes
+git add uv.lock
+git commit -m "Update dependencies"
+```
+
+### After Pulling Changes
+
+```bash
+# If pyproject.toml or uv.lock changed
+uv sync --frozen
+
+# If packages.yml changed or dbt_packages/ is missing
+(cd mpi_analytics && uv run python run_dbt.py deps)
+```
+
+### Running the Application
+
+```bash
+# Start development server (uv automatically uses virtual environment)
+uv run uvicorn mpi_backend.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Creating Database Migrations
+
+```bash
+# Create a new migration
+uv run alembic revision --autogenerate -m "description of changes"
+
+# Apply migrations
+uv run alembic upgrade head
+
+# Rollback migration
+uv run alembic downgrade -1
+```
+
+---
+
+## 🧪 Testing
+
+### Prerequisites
+- Dependencies installed (via `uv sync`)
+- PostgreSQL running
+- Test database configured
+
+### Test Structure
+
+```
+mpi_backend/tests/
+├── unit/                      # Unit tests (isolated, mocked)
+│   ├── business_logic/       # Core business logic tests
+│   ├── controllers/          # Controller unit tests
+│   ├── utils/                # Utility function tests
+│   └── models/               # Model tests
+├── integration/              # Integration tests (real DB)
+│   ├── api/                  # API endpoint integration tests
+│   ├── workflows/            # End-to-end workflow tests
+│   └── database/             # Database integration tests
+├── functional/               # Functional/acceptance tests
+├── fixtures/                 # Shared test data factories
+└── pdf_to_excel_test_files/  # PDF conversion test data
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+uv run pytest
+
+# Run specific test categories
+uv run pytest -m unit              # Unit tests only
+uv run pytest -m integration       # Integration tests only
+uv run pytest -m functional        # Functional tests only
+
+# Run specific test file
+uv run pytest mpi_backend/tests/unit/business_logic/test_invoice_duplicate_detection.py
+
+# Run with verbose output
+uv run pytest -v
+
+# Run with coverage report
+uv run pytest --cov=mpi_backend --cov-report=html
+```
+
+### Test Markers
+
+The project uses pytest markers for test organization:
+- `unit`: Unit tests (isolated, mocked dependencies)
+- `integration`: Integration tests (real database)
+- `functional`: Functional/acceptance tests
+- `business_logic`: Critical business rule tests
+- `slow`: Long-running tests
+- `requires_db`: Tests needing database connection
+
+---
+
+## Docker
+
+### Build
+
+```bash
+docker build -t mpi-backend .
+```
+
+### Run (with host Postgres)
+
+The container needs your `.env` for database credentials and API keys.
+Use `--network host` so `POSTGRES_HOST=localhost` in `.env` resolves to
+your (Linux) host machine's Postgres, not the container's loopback.
+
+```bash
+docker run --rm \
+    --env-file .env \
+    --network host \
+    mpi-backend
+```
+
+This will:
+1. Run `alembic upgrade head` (migrations)
+2. Start uvicorn on port 8000
+3. Start the background scheduler (dbt refresh, Google Sheet sync, etc.)
+
+### Run (skip migrations, just the server)
+
+```bash
+docker run --rm \
+    --env-file .env \
+    --network host \
+    mpi-backend \
+    uvicorn mpi_backend.main:app --host 0.0.0.0 --port 8000
+```
+
+### Verify
+
+```bash
+curl http://localhost:8000/health
 # {"status":"healthy","message":"MPI Backend is running"}
 ```
 
-### Server Prerequisites
+### Notes
 
-Before running on server, ensure:
+- The image is a multi-stage build using `uv`. Dependencies are installed at build time; `uv` is included in the runtime image because the dbt
+  scheduler shells out to `uv run python run_dbt.py`.
+- `dbt deps` runs at build time so dbt packages are baked into the image.
+- `UV_PROJECT_ENVIRONMENT=/app/.venv` and `UV_NO_SYNC=1` are set so
+  runtime `uv run` calls reuse the pre-built venv without syncing.
+- `.dockerignore` excludes `.git`, `docs/`, `database_backups/`, `app-specs/`, etc. It includes `scripts/` and `mpi_analytics/` because the scheduler needs them at runtime.
 
-1. **Conda environment is created and activated**
-2. **Dependencies are installed** (`pip install -r requirements_macos.txt`)
-3. **Database is set up and migrated** (`alembic upgrade head`)
-4. **Environment variables are configured** (`.env` file)
-5. **PostgreSQL is running** and accessible
-6. **Port 8000 is available** and not blocked by firewall
-
-### Server Environment Variables
-
-Make sure your server has the correct environment variables in `.env`:
-
-```bash
-# Database Configuration
-POSTGRES_HOST=localhost  # or your database server IP
-POSTGRES_PORT=5432
-POSTGRES_DB=mpi_db
-POSTGRES_USERNAME=postgres
-POSTGRES_PASSWORD=your_secure_password
-
-# JWT Secret (use a strong, unique secret)
-SECRET_KEY=your_very_secure_secret_key_here
-
-# Other required variables...
-```
-
-### Running as Background Service
-
-For production, consider running as a background service:
-
-```bash
-# Using nohup to run in background
-nohup uvicorn mpi_backend.main:app --host 0.0.0.0 --port 8000 > app.log 2>&1 &
-
-# Or using screen/tmux for session management
-screen -S mpi-backend
-conda activate mpi64bit
-uvicorn mpi_backend.main:app --host 0.0.0.0 --port 8000
-# Press Ctrl+A, D to detach from screen
-```
-
-### Docker Deployment
-To run the application using Docker:
+### Docker Compose
 
 ```bash
 # Build and start all services
 docker-compose up --build
 
-# Run in background
-docker-compose up -d
+# Access API at http://localhost:8000
 
 # View logs
 docker-compose logs -f mpi-backend
+
+# Stop services
+docker-compose down
 ```
 
-## 🧪 **Development & Testing**
+---
 
-### Prerequisites
-- **Python 3.11.9** (via conda environment)
-- **PostgreSQL 14+**
-- **Java Runtime Environment** (for PDF processing)
-- **Conda** (for environment management)
-- **Docker & Docker Compose** (optional)
+## Troubleshooting
 
-### Quick Start
+### "uv: command not found"
 ```bash
-# 1. Clone the repository
-git clone <repository-url>
-cd mpi-backend
-
-# 2. Create and activate conda environment
-conda create -n mpi64bit python=3.11.9
-conda activate mpi64bit
-
-# 3. Install dependencies
-pip install -r requirements_macos.txt  # macOS
-# OR
-pip install -r requirements.txt       # Other platforms
-
-# 4. Set up environment variables
-cp .env.example .env  # Edit with your values
-
-# 5. Run database migrations
-cd mpi_backend
-export PYTHONPATH=../
-alembic upgrade head
-
-# 6. Start the application
-export DYLD_LIBRARY_PATH="/opt/homebrew/opt/postgresql@14/lib:$DYLD_LIBRARY_PATH"  # macOS
-uvicorn mpi_backend.main:app --host 0.0.0.0 --port 8000 --reload
+# Run the setup script - it will install uv
+.\setup.ps1  # Windows
+./setup.sh   # Linux/Mac
 ```
 
-### Testing
+### "Cannot activate virtual environment" (Windows)
+```powershell
+# Note: You don't need to activate the environment when using uv run
+# But if you want to activate manually:
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+### "Module not found" errors
 ```bash
-# Activate conda environment
-conda activate mpi64bit
-
-# Run all tests
-pytest
-
-# Run specific test file
-pytest tests/test_invoices.py
-
-# Run with verbose output
-pytest -v
+# Reinstall dependencies
+uv sync --frozen
 ```
 
-### PDF Processing Testing
+### dbt fails with missing packages (dbt-utils, elementary, etc.)
 ```bash
-# Test PDF to Excel conversion
-python -c "
-from mpi_backend.utils.pdf_to_excel.main_extractor import extract_data
-result = extract_data('path/to/test.pdf', 'output.xlsx', 'Supplier Name')
-print('PDF processing test:', result)
-"
+# Install dbt packages (gitignored, not included in the repo)
+(cd mpi_analytics && uv run python run_dbt.py deps)
 ```
 
-### Scripts
-The `scripts/` directory contains utility scripts for:
-- Database backup and restore
-- Historical data processing
-- Data cleanup and maintenance
-- Performance optimization
+### NumPy/OpenCV compatibility issues
+**Why numpy<2.0?** NumPy 2.0 (released June 2024) introduced breaking changes:
+- C API incompatibility - packages like OpenCV compiled with NumPy 1.x may not work
+- Type promotion rules changed, affecting pandas and other libraries
+- Default integer type changed on Windows (32-bit → 64-bit)
 
-## 🔧 **Recent Fixes & Improvements**
+We pin to `numpy==1.26.4` to ensure compatibility with OpenCV 4.8.1.78 and pandas 2.3.2.
 
-### Python 3.11 Compatibility
-- ✅ **PyPDF2 Deprecation**: Updated `PdfFileReader`/`PdfFileWriter` to `PdfReader`/`PdfWriter`
-- ✅ **Pandas Warnings**: Fixed `fillna(method="ffill")` to `.ffill()` syntax
-- ✅ **Series Indexing**: Updated deprecated `df[0][1]` to `df.iloc[0, 1]`
-- ✅ **Cross-Platform Paths**: Fixed hardcoded Windows paths for macOS/Linux compatibility
+```bash
+# numpy is pinned to 1.26.4 in pyproject.toml for compatibility
+# To update numpy (with caution), update the pin in pyproject.toml then:
+uv lock
+uv sync --frozen
+```
 
-### PDF Processing Enhancements
-- ✅ **All 12 Suppliers Tested**: World Wide Plumbing, BMW, Y&S, Supreme, Gotham, etc.
-- ✅ **jpype Integration**: Faster PDF processing with Java-Python bridge
-- ✅ **Error Handling**: Improved error handling and logging for PDF conversion
-- ✅ **Memory Optimization**: Better memory management for large PDF files
+### Database connection errors
+```bash
+# Check PostgreSQL is running
+# Check .env has correct database credentials
+# Try creating database manually:
+createdb mpi_db
+```
 
-### Database & Backup
-- ✅ **Backup Script**: Python-based backup (no pg_dump required)
-- ✅ **Clean Storage**: Backups only stored in `database backups/` directory
-- ✅ **Dependency Order**: Proper table creation order respecting foreign keys
+### Starting fresh
+```bash
+# Delete virtual environment
+rm -rf .venv
 
-### Environment Management
-- ✅ **Conda Environment**: `mpi64bit` environment with Python 3.11.9
-- ✅ **Platform-Specific Requirements**: `requirements_macos.txt` for macOS
-- ✅ **Dependency Resolution**: Fixed version conflicts and duplicates
+# Run setup again
+.\setup.ps1  # Windows
+./setup.sh   # Linux/Mac
+```
+
+---
+
+## 📚 Additional Documentation
+
+- **[API Documentation](http://localhost:8000/docs)** - Interactive API docs (when running)
+- **[Redoc](http://localhost:8000/redoc)** - Alternative API documentation (when running)
+- **[API_Endpoints.md](docs/API_Endpoints.md)** - Detailed API endpoint documentation
+- **[QA_SYSTEM_ENHANCEMENTS.md](docs/QA_SYSTEM_ENHANCEMENTS.md)** - AI chatbot system documentation
+- **[QUICKBOOKS_BUSINESS_LOGIC_UPDATE.md](docs/QUICKBOOKS_BUSINESS_LOGIC_UPDATE.md)** - QuickBooks integration details
+- **[Feature Flags](docs/FEATURE_FLAGS.md)** - Feature flag usage instructions
+- **[Testing Guidelines](docs/TESTING_GUIDELINES.md)** - Testing Guidelines
+
+---
 
 ## Monitoring & Logging
 
@@ -501,11 +602,14 @@ The application includes comprehensive logging and monitoring:
 - SQL injection prevention with SQLAlchemy
 - File upload validation
 
-## Performance Optimizations
+## Scripts
 
-- Database connection pooling
-- Query optimization and indexing
-- Caching for frequently accessed data
-- Background task processing
-- Memory management and cleanup
-- Optimized file processing pipelines
+The `scripts/` directory contains utility scripts for:
+- Database backup and restore
+- Historical data processing
+- Data cleanup and maintenance
+- Performance optimization
+
+---
+
+

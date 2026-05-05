@@ -1,0 +1,9 @@
+I want to make sure I get you exactly the right information! Could you be more specific about what you're looking for?
+
+For example, you could specify:
+- **Which data type?** (invoices, items, suppliers, customer jobs)
+- **Date range?** (e.g., "from last month", "July 2024")
+- **Specific supplier or vendor?**
+- **Customer job name?**
+
+What would you like to know?

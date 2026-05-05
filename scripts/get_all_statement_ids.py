@@ -35,13 +35,13 @@ def get_all_statements_with_details(db) -> List[Dict[str, Any]]:
         
         # Get all statements with a very large limit
         statements = controller.get_statements_summary(
-            supplier_id=0,  # Get all suppliers
+            supplier_id=None,  # Get all suppliers
             limit=100000  # Very large limit to get all statements
         )
-        
+
         print(f"Found {len(statements)} statements in database")
         return statements
-        
+
     except Exception as e:
         print(f"Error getting statements: {str(e)}")
         return []
@@ -50,19 +50,19 @@ def get_all_statements_with_details(db) -> List[Dict[str, Any]]:
 def get_statement_ids_only(db) -> List[int]:
     """
     Get only statement IDs from the database
-    
+
     Args:
         db: Database session
-        
+
     Returns:
         List of statement IDs
     """
     try:
         controller = StatementController(db)
-        
+
         # Get all statements with a very large limit
         statements = controller.get_statements_summary(
-            supplier_id=0,  # Get all suppliers
+            supplier_id=None,  # Get all suppliers
             limit=100000  # Very large limit to get all statements
         )
         

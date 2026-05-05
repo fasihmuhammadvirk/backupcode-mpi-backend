@@ -1,16 +1,25 @@
+import logging
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
 from mpi_backend.database.controllers.ItemsMappingController import ItemsMappingController
+from mpi_backend.database.dao.invoice_items_map import get_mapping_types as dao_get_mapping_types
 from mpi_backend.database.schemas import ItemMappingsResponse, UpdateMappingRequest
-from mpi_backend.utils.auth.auth_bearer import JWTBearer
+from mpi_backend.database.models.User import User
+from mpi_backend.utils.auth.dependencies import get_current_user
 
 router = APIRouter(prefix="/mapping", tags=['Item Mappings'])
 
+logger = logging.getLogger(__name__)
+
 
 @router.post("")
-def update_item_mappings(request: UpdateMappingRequest, db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+def update_item_mappings(
+    request: UpdateMappingRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
     Update item mappings with validation and temporary mapping handling.
     
@@ -121,10 +130,9 @@ def update_item_mappings(request: UpdateMappingRequest, db: Session = Depends(ge
 
 @router.get("/search-item")
 def search_item_mapping(
-    item: str = Query(...,
-                      description="Clean item code from invoice to search for"),
+    item: str = Query(..., description="Clean item code from invoice to search for"),
     db: Session = Depends(get_db),
-    token: str = Depends(JWTBearer())
+    current_user: User = Depends(get_current_user)
 ):
     """
     Search for item mappings by clean item code across all suppliers.
@@ -203,7 +211,10 @@ def search_item_mapping(
 
 
 @router.get("/mpi_types")
-def get_mapping_by_mpi_type(db: Session = Depends(get_db), token: str = Depends(JWTBearer())):
+def get_mapping_by_mpi_type(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
     Get all MPI type mappings organized by MPI code.
     
@@ -289,14 +300,53 @@ def get_mapping_by_mpi_type(db: Session = Depends(get_db), token: str = Depends(
         logger.error(f"Error fetching MPI types: {str(e)}")
         
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail="Failed to fetch MPI types. Please try again."
         )
 
 
+@router.get("/mapping_types")
+def get_mapping_types(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Retrieve distinct mapping types from the database.
+
+    **Summary:**
+        Fetches all distinct mapping_type values from the invoice items map.
+
+    **Authentication:**
+        - Requires valid JWT token in Authorization header
+
+    **Returns:**
+        - **Dict**: Contains mapping types and metadata:
+            - **mapping_types** (`List[str]`): List of distinct mapping type values
+            - **source** (`str`): Data source identifier
+
+    **Response Example:**
+    ```json
+    {
+        "mapping_types": ["no_match", "permanent", "temporary"],
+        "source": "mart__invoice_items_map"
+    }
+    ```
+
+    **Error Codes:**
+        - **500**: Internal server error during data retrieval
+    """
+    logger.info("Getting mapping types")
+    try:
+        result = dao_get_mapping_types(db)
+        logger.info(f"Got {len(result.mapping_types)} types")
+        return result.to_dict()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to fetch mapping types: {e}")
+
+
 @router.get("/{supplier_id}", response_model=List[ItemMappingsResponse])
 def get_mapping_by_supplier_id(
-    supplier_id: int, db: Session = Depends(get_db), token: str = Depends(JWTBearer())
+    supplier_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Retrieve item mappings for a specific supplier ID with pagination.
@@ -381,3 +431,4 @@ def get_mapping_by_supplier_id(
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to fetch item mapping: {e}")
+

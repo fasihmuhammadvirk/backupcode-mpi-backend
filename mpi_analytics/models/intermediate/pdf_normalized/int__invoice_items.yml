@@ -1,0 +1,205 @@
+version: 2
+
+models:
+  - name: int__invoice_items
+    description: |
+      TODO: This was split into two models, some of this needs to be moved to a new `int__invoice_items_with_normalized_fields.yml`
+
+      Applies intermediate business logic and transformations to invoice items. This model cleans,
+      standardizes, and prepares the data for the mart layer.
+
+      **Key Transformations:**
+        - Numeric casts for calculations (amount_numeric, cost_numeric, qty_numeric)
+          - TODO: We should use int and convert to cents to prevent floating point errors
+        - Standardized customer addresses (title case, street abbreviations)
+        - Buyer normalization via join to int__buyers model
+        - Vendor-specific item suffixes for categorization
+        - Auto-assigned accounts based on business rules
+        - Credit memo amount corrections
+        - Optimized indexes for common query patterns
+
+      **Data Quality:**
+        - Addresses normalized to title case with standard abbreviations (St., Ave., Rd., etc.)
+        - Business terms preserved (LLC, LLP, Inc., Corp., etc.)
+        - Reference numbers normalized (leading zeros removed, prefixes standardized)
+        - Amounts safely cast to numeric types with NULL for invalid values
+        - Credit memos have negative amounts
+        - Buyer names normalized and canonicalized via int__buyers model
+
+      **Model Dependencies:**
+        - Joins to int__buyers for buyer normalization and canonicalization
+
+      **Security**
+        - Defensively adds a limit of 1000 characters when `REGEX_REPLACE` to prevent dbt from hanging
+    tests:
+      - dbt_utils.expression_is_true:
+          name: amount_has_valid_characters
+          expression: "NOT (amount_raw ~ '[^0-9.,$+\\-]') OR amount_raw IS NULL OR amount_raw = ''"
+          config:
+            where: "is_active = true"
+            severity: warn
+            error_if: ">100"
+            warn_if: ">0"
+      - dbt_utils.expression_is_true:
+          name: cost_has_valid_characters
+          expression: "NOT (cost_raw ~ '[^0-9.,$+\\-]') OR cost_raw IS NULL OR cost_raw = ''"
+          config:
+            where: "is_active = true"
+            severity: warn
+            error_if: ">100"
+            warn_if: ">0"
+      - dbt_utils.expression_is_true:
+          name: qty_has_valid_characters
+          expression: "NOT (qty_raw ~ '[^0-9.,$+\\-]') OR qty_raw IS NULL OR qty_raw = ''"
+          config:
+            where: "is_active = true"
+            severity: warn
+            error_if: ">100"
+            warn_if: ">0"
+      - dbt_utils.expression_is_true:
+          name: ref_no_pattern_valid
+          expression: "ref_no ~ '^(CR-|I-|[0-9]+[A-Z]?|[A-Z]+-?[0-9]+)' OR ref_no IS NULL"
+          config:
+            where: "is_active = true"
+            severity: warn
+            error_if: ">500"
+            warn_if: ">10"
+      - dbt_utils.expression_is_true:
+          name: vendor_not_empty
+          expression: "LENGTH(TRIM(vendor)) > 0 OR vendor IS NULL"
+          config:
+            where: "is_active = true"
+            severity: warn
+      - dbt_utils.expression_is_true:
+          name: customer_job_not_empty
+          expression: "LENGTH(TRIM(customer_job)) > 0 OR customer_job IS NULL"
+          config:
+            where: "is_active = true"
+            severity: warn
+            error_if: ">100"
+            warn_if: ">10"
+      - dbt_utils.expression_is_true:
+          name: item_not_empty
+          expression: "LENGTH(TRIM(item)) > 0 OR item IS NULL"
+          config:
+            where: "is_active = true"
+            severity: warn
+            error_if: ">100"
+            warn_if: ">10"
+    columns:
+      - name: invoice_items_id
+        description: "Primary key of the invoice item."
+        tests:
+          - unique
+          - not_null
+      - name: invoice_id
+        description: "The foreign key to the invoice."
+      - name: is_active
+        description: "Flag indicating if the invoice item is active."
+      - name: amount
+        description: "Amount as NUMERIC(18,2), safe-cast from amount_raw. NULL if the raw value cannot be cast. See amount_has_valid_characters on amount_raw for upstream character validation."
+      - name: cost
+        description: "Cost as NUMERIC(18,2), safe-cast from cost_raw. NULL if the raw value cannot be cast. See cost_has_valid_characters on cost_raw for upstream character validation."
+      - name: qty
+        description: "Quantity as NUMERIC(18,2), safe-cast from qty_raw. NULL if the raw value cannot be cast. See qty_has_valid_characters on qty_raw for upstream character validation."
+        tests:
+          - dbt_utils.not_null_proportion:
+              at_least: 0.95
+              config:
+                where: "is_active = true"
+                severity: warn
+      - name: amount_raw
+        description: "Original amount value as text from staging, kept for audit. Character-validated by amount_has_valid_characters."
+      - name: cost_raw
+        description: "Original cost value as text from staging, kept for audit. Character-validated by cost_has_valid_characters."
+      - name: qty_raw
+        description: "Original qty value as text from staging, kept for audit. Character-validated by qty_has_valid_characters (pre-cast, so invalid text can be detected before safe_cast silently turns it into NULL)."
+      - name: date
+        description: "Invoice date."
+        tests:
+          - not_null:
+              config:
+                where: "is_active = true"
+                severity: warn
+          - dbt_utils.expression_is_true:
+              name: date_not_future
+              expression: "<= CURRENT_DATE"
+              config:
+                where: "is_active = true AND date IS NOT NULL"
+                severity: warn
+                error_if: ">10"
+                warn_if: ">0"
+      - name: ref_no
+        description: "Reference number for the invoice."
+        tests:
+          - not_null:
+              config:
+                where: "is_active = true"
+                severity: warn
+      - name: vendor
+        description: "Vendor name."
+        tests:
+          - not_null:
+              config:
+                where: "is_active = true"
+                severity: warn
+      - name: customer_job
+        description: "Customer job/address."
+      - name: item
+        description: "Item code."
+      - name: ref_no_normalized
+        description: "The 'ref_no' normalized to remove leading zeros and handle various formats for consistent matching. From `_normalize_ref_no_for_comparison`."
+      # TODO: Commenting out since "item" already has this suffix logic but will revisit in the near future.
+      # See int__invoice_items for implementation
+      # - name: item_with_suffix
+      #   description: "The 'item' code with a suffix ('-B' or '-Y') appended based on the vendor. From `_calculate_item_suffix_fast`."
+      - name: corrected_amount
+        description: |
+          The final amount with its sign corrected to be negative for credit memos ('CR-').
+          From `insert_invoice_items`.
+      - name: assigned_account
+        description: "The final account code ('M', 'E', 'A', etc.) assigned based on a hierarchy of business rules. From `_auto_assign_account`."
+      - name: customer_job_normalized
+        description: |
+          Normalized customer job address with:
+          - Title case formatting
+          - Standardized street type abbreviations (Street->St., Avenue->Ave., Road->Rd., etc.)
+          - Business/legal terms preserved (LLC, LLP, LP, Inc., Corp., USA, NYC)
+          - Trailing commas removed
+          - Multiple spaces normalized to single space
+      - name: buyer_normalized_base
+        description: |
+          Normalized buyer name from the int__buyers model.
+          This column is populated via LEFT JOIN to int__buyers on the original buyer value.
+          
+          Normalization process:
+          - Removes all non-alphanumeric characters
+          - Separates alphabetic and numeric segments
+          - Formats as "ALPHABETIC NUMERIC" with space separator
+          
+          Examples: "AR LE M 9 29 44 2 -9 55 8" -> "ARLEM 9294429558"
+      - name: buyer_normalized_canonical
+        description: |
+          Canonical buyer name from the int__buyers model.
+          This column is populated via LEFT JOIN to int__buyers on the original buyer value.
+          
+          The canonical name is determined by fuzzy matching (90% similarity threshold)
+          and represents the most frequently occurring similar buyer name.
+          This helps consolidate variations of the same buyer under one canonical representation.
+      - name: po_number
+        description: "The purchase order number"
+      - name: class_
+        description: "Purpose unknown. TODO: investigate"
+      - name: sheet_name_normalized
+        description: |
+           Transformation: Normalize sheet_name format.
+           Remove parentheses and periods, replace ") (" patterns with dash for consistency.
+           If the sheet name is empty, we replace it with `NO SHEET NAME`.
+
+           **Examples:** "(AIR FITTINGS)" -> "AIR FITTINGS", "(BLACK MALLEABLE) (GAS)" -> "BLACK MALLEABLE - GAS"
+
+           Step 1: Replace ") (" with " - "
+           Step 2: Remove remaining parentheses
+           Step 3: Remove periods
+           Step 4: Collapse multiple spaces and trim
+

@@ -1,0 +1,23 @@
+version: 2
+
+sources:
+  - name: public
+    tables:
+      - name: supplier_email_patterns
+        description: "Sender patterns tied to suppliers for email-based vendor resolution."
+        columns:
+          - name: id
+            description: "UUID primary key"
+          - name: supplier_id
+            description: "FK to public.suppliers"
+            tests:
+              - not_null
+          - name: sender_pattern
+            description: "Email domain or full address used in LIKE match against queue sender"
+            tests:
+              - unique
+              - not_null
+          - name: is_active
+            description: "When false, excluded from Gmail whitelist and inactive for mapping"
+            tests:
+              - not_null

@@ -8,7 +8,6 @@ Create Date: 2024-12-24 11:07:53.823189
 from alembic import op
 import sqlalchemy as sa
 import json
-from mpi_backend.database.models import ItemClassification
 
 # revision identifiers, used by Alembic.
 revision = '3a948951ad57'
@@ -17,7 +16,11 @@ branch_labels = None
 depends_on = None
 
 def read_mapping_file(filename):
-    with open(filename) as json_file:
+    import os
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))))
+    full_path = os.path.join(base_dir, filename)
+    with open(full_path) as json_file:
         json_data = json.load(json_file)
         return json_data
 
@@ -31,8 +34,9 @@ def upgrade():
     sa.PrimaryKeyConstraint('id')
     )
 
-    # self updated code to populate mappings and supplier tabled with static data
-    op.bulk_insert(ItemClassification.__table__, read_mapping_file('storage/fixtures/item-classifications.json'))
+    from mpi_backend.database.models import ItemClassification
+    op.bulk_insert(ItemClassification.__table__, read_mapping_file(
+        'mpi_backend/storage/fixtures/item-classifications.json'))
     # ### end Alembic commands ###
 
 

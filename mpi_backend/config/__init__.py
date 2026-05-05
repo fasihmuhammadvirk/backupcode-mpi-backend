@@ -3,10 +3,14 @@ from pathlib import Path
 from dotenv import load_dotenv
 import pytz
 
-dotenv_path = Path('.env')
+# Determine the project root directory by finding the location of `pyproject.toml`
+# This makes the .env file loading robust, regardless of where the script is run from
+project_root = Path(__file__).resolve().parent.parent.parent
+dotenv_path = project_root / '.env'
 load_dotenv(dotenv_path=dotenv_path)
 
 TIMEZONE = pytz.timezone('America/New_York')
+ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
 LOG_LEVEL = os.getenv("LOG_LEVEL")
 POSTGRES_HOST = os.getenv("POSTGRES_HOST")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT")
@@ -19,6 +23,10 @@ AWS_SERVER_PUBLIC_KEY = os.getenv("PUBLIC_ACCESS_KEY")
 AWS_SERVER_SECRET_KEY = os.getenv("SECRET_ACCESS_KEY")
 REGION = os.getenv("REGION")
 BUCKET_NAME = os.getenv("BUCKET_NAME")
+INVOICES_PDFS_AWS_SERVER_PUBLIC_KEY=os.getenv("INVOICES_PDFS_AWS_SERVER_PUBLIC_KEY")
+INVOICES_PDFS_AWS_SERVER_SECRET_KEY=os.getenv("INVOICES_PDFS_AWS_SERVER_SECRET_KEY")
+INVOICES_PDFS_BUCKET_NAME=os.getenv("INVOICES_PDFS_BUCKET_NAME")
+INVOICES_PDFS_REGION=os.getenv("INVOICES_PDFS_REGION", "us-east-2")
 
 # Handle the port safely for different environments
 def get_db_port():
@@ -39,23 +47,30 @@ SQLALCHEMY_DATABASE_URI = f"postgresql://{POSTGRES_USERNAME}:" \
 SMTP_SERVER = os.getenv("SMTP_SERVER")
 LOGIN_EMAIL = os.getenv("LOGIN_EMAIL")
 LOGIN_PWD = os.getenv("LOGIN_PWD")
+
+# Gmail API Configuration (Service Account)
+GOOGLE_SERVICE_ACCOUNT_B64 = os.getenv("GOOGLE_SERVICE_ACCOUNT_B64")
+GOOGLE_SERVICE_ACCOUNT_PATH = os.getenv(
+    "GOOGLE_SERVICE_ACCOUNT_PATH",
+    str(Path(__file__).parent.parent.parent / "service-account.json")
+)
+GMAIL_USER_EMAIL = os.getenv("GMAIL_USER_EMAIL")  # Email inbox to access (required for Gmail API)
 INVOICE_DOWNLOAD_FOLDER = os.getenv("INVOICE_DOWNLOAD_FOLDER", "mpi_backend/storage")
 
-SUPPLIERS = ['BMW Plumbing Supplies', 'World Wide Plumbing', 'Y & S Plumbing Supply', 'Supreme Plumbing Supply',
-             'Pyramid Plumbing', 'ABC Opus Services', 'Park Plumbing Supply', 'Gotham Plumbing Supply',
-             'FW Webb Plumbing Supply', 'Flow Mark Plumbing Supply', 'AF Supply','Lion Hvac Supplies']
-
-PROCESSABLE_SUPPLIERS = ['BMW Plumbing Supplies', 'World Wide Plumbing', 'Y & S Plumbing Supply',
-                         'Supreme Plumbing Supply', 'Pyramid Plumbing', 'ABC Opus Services', 'Park Plumbing Supply',
-                         'Gotham Plumbing Supply', 'FW Webb Plumbing Supply', 'Flow Mark Plumbing Supply', 'Plumbing Exchange',
-                         'AF Supply', 'Lion Hvac Supplies']
+# Email Scan & Download Configuration
+EMAIL_SCAN_HOURS = int(os.getenv("EMAIL_SCAN_HOURS", "24"))
+EMAIL_BATCH_SIZE = int(os.getenv("EMAIL_BATCH_SIZE", "50"))
+EMAIL_MAX_BATCHES = int(os.getenv("EMAIL_MAX_BATCHES", "1"))
+EMAIL_MAX_RETRIES = int(os.getenv("EMAIL_MAX_RETRIES", "3"))
 
 # Database Configuration
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://username:password@localhost/dbname")
 
 # JWT Configuration
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 30  # Fallback for legacy code
+ACCESS_TOKEN_REMEMBER_ME_DAYS = 7  # Token expiration for "Remember Me" enabled (7 days)
+ACCESS_TOKEN_SESSION_HOURS = 8  # Token expiration for session-only login (8 hours)
 
 # File Upload Configuration
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -64,10 +79,10 @@ INVOICE_DOWNLOAD_FOLDER = os.getenv("INVOICE_DOWNLOAD_FOLDER", str(BASE_DIR / "m
 # Logging Configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
-# Export Optimization Configuration
-EXPORT_BATCH_SIZE = int(os.getenv("EXPORT_BATCH_SIZE", "1000"))  # Records per batch for large exports
+# Export Optimization Configuration - Optimized for sub-100s processing
+EXPORT_BATCH_SIZE = int(os.getenv("EXPORT_BATCH_SIZE", "500"))  # Records per batch for large exports (reduced for faster processing)
 EXPORT_USE_OPTIMIZED = os.getenv("EXPORT_USE_OPTIMIZED", "true").lower() == "true"  # Enable optimized exports by default
-EXPORT_MAX_RECORDS_BEFORE_BATCH = int(os.getenv("EXPORT_MAX_RECORDS_BEFORE_BATCH", "5000"))
+EXPORT_MAX_RECORDS_BEFORE_BATCH = int(os.getenv("EXPORT_MAX_RECORDS_BEFORE_BATCH", "2000"))  # Lower threshold for earlier batch processing
 
 # ENHANCED QuickBooks Priority Configuration with MIGRATE-ALL absolute priority
 QB_PRIORITY_MODE = os.getenv("QB_PRIORITY_MODE", "true").lower() == "true"  # Priority mode for QB exports
@@ -111,3 +126,14 @@ S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "")
 S3_REGION = os.getenv("S3_REGION", "us-east-1")
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+# File Upload Safety Limits
+MAX_BULK_UPLOAD_COUNT = int(os.getenv("MAX_BULK_UPLOAD_COUNT", "50"))
+MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "10"))
+MAX_TOTAL_BULK_UPLOAD_SIZE_MB = int(os.getenv("MAX_TOTAL_BULK_UPLOAD_SIZE_MB", "50"))
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
+# Elementary Report Configuration
+ELEMENTARY_S3_BUCKET_NAME = os.getenv("ELEMENTARY_S3_BUCKET_NAME", "")
+ELEMENTARY_S3_REGION = os.getenv("ELEMENTARY_S3_REGION", "us-east-2")
+ELEMENTARY_REPORT_ENABLED = os.getenv("ELEMENTARY_REPORT_ENABLED", "false").lower() == "true"

@@ -1,0 +1,14 @@
+I'm an AI assistant for the MPI Backend plumbing supply management system.
+
+**What I can do:**
+- Query invoices, items, suppliers, and customer jobs
+- Search and filter data by date, supplier, status, and more
+- Provide counts, totals, and summaries
+- Help you find specific records
+
+**How I work:**
+- I'll ask clarifying questions before executing queries to make sure I get you the right data
+- I remember our conversation context, so you can ask follow-up questions
+- I only perform read operations - your data is safe
+
+What would you like to explore?

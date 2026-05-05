@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script to add missing item classifications from item-mapping.json
+Script to add missing item classifications from mapping export JSON.
 This script:
 1. Updates item-classifications.json (preserves existing ones)
 2. Updates the database directly
@@ -44,7 +44,12 @@ def find_missing_classifications():
         return None, None
     
     print(" Loading item mappings...")
-    mappings_data = load_json_file('mpi_backend/storage/fixtures/item-mapping.json')
+    try:
+        from mpi_backend.config.spreadsheet_config import DEFAULT_OUTPUT_FILE
+        mappings_path = DEFAULT_OUTPUT_FILE
+    except ImportError:
+        mappings_path = 'mpi_backend/storage/fixtures/mapping_export.json'
+    mappings_data = load_json_file(mappings_path)
     if not mappings_data:
         return None, None
     
@@ -275,16 +280,21 @@ def main():
     print(" ADD MISSING ITEM CLASSIFICATIONS (JSON + DATABASE)")
     print("=" * 70)
     print("This script will:")
-    print("1. Find missing sheet names from item-mapping.json")
+    print("1. Find missing sheet names from mapping export JSON")
     print("2. ADD them to item-classifications.json (preserving existing)")
     print("3. INSERT them into the database (item_classification table)")
     print("4. Generate SQL script as backup")
     print()
     
     # Check required files
+    try:
+        from mpi_backend.config.spreadsheet_config import DEFAULT_OUTPUT_FILE
+        mappings_path = DEFAULT_OUTPUT_FILE
+    except ImportError:
+        mappings_path = 'mpi_backend/storage/fixtures/mapping_export.json'
     required_files = [
         'mpi_backend/storage/fixtures/item-classifications.json',
-        'mpi_backend/storage/fixtures/item-mapping.json'
+        mappings_path
     ]
     
     for filepath in required_files:

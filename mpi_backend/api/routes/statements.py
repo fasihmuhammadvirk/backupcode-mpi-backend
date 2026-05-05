@@ -8,9 +8,13 @@ from mpi_backend.database import get_db
 from mpi_backend.database.controllers.StatementController import (
     StatementController
 )
-from mpi_backend.utils.auth.auth_bearer import JWTBearer
+from mpi_backend.database.schemas.MonthlyStatement import (
+    MonthlyStatementExportAllRequest,
+    MonthlyStatementExportSelectedRequest
+)
+from mpi_backend.database.models.User import User
+from mpi_backend.utils.auth.dependencies import get_current_user
 from mpi_backend.utils.s3_utils import get_presigned_url
-# Removed unused imports
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +50,7 @@ def get_statement_invoice_data(
     ),
     supplier_names: Optional[List[str]] = Query(
         None,
-        description="List of supplier names, supplier IDs, or ['All'] to filter by. Use '0' for all suppliers."
+        description="List of supplier names, supplier IDs, or ['All'] to filter by. Use '0' for Unknown Supplier."
     ),
     status: Optional[str] = Query(
         None,
@@ -64,7 +68,7 @@ def get_statement_invoice_data(
         description="Number of items per page (1-100)"
     ),
     db: Session = Depends(get_db),
-    token: str = Depends(JWTBearer())
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get statement invoice data with filters and pagination.
@@ -82,9 +86,9 @@ def get_statement_invoice_data(
       (filters by invoice_date)
     - **to_date**: End date filter in DD/MM/YYYY format 
       (filters by invoice_date)
-    - **supplier_names**: Filter by list of supplier names (partial match supported), 
-      supplier IDs (numeric), ["All"] for all suppliers, or ["0"] for all suppliers
-    - **status**: Filter by reconciliation status 
+    - **supplier_names**: Filter by list of supplier names (partial match supported),
+      supplier IDs (numeric), ["All"] for all suppliers, or ["0"] for Unknown Supplier
+    - **status**: Filter by reconciliation status
       ('Processed', 'Failed', 'Unlisted', 'Missing System', 'Missing Statement', 'All')
       - 'All' returns combined data from all categories
       - 'Missing System' returns invalid invoices from system (InvoiceItem table)
@@ -221,10 +225,10 @@ def get_statement_invoice_data(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in invoice data endpoint: {str(e)}")
+        logger.error(f"Error in invoice data endpoint: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Internal server error: {str(e)}"
+            detail="Failed to retrieve invoice data. Please contact support if the issue persists."
         )
 
 
@@ -235,7 +239,7 @@ def download_statement_pdf(
         description="ID of the statement to download"
     ),
     db: Session = Depends(get_db),
-    token: str = Depends(JWTBearer())
+    current_user: User = Depends(get_current_user)
 ):
     """
     Download monthly statement PDF by statement ID.
@@ -335,10 +339,10 @@ def download_statement_pdf(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in statement download endpoint: {str(e)}")
+        logger.error(f"Error in statement download endpoint: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Internal server error: {str(e)}"
+            detail="Failed to download statement. Please contact support if the issue persists."
         )
         
  
@@ -359,7 +363,7 @@ def reprocess_statement(
         description="Maximum number of statements to reprocess in bulk (1-1000)"
     ),
     db: Session = Depends(get_db),
-    token: str = Depends(JWTBearer())
+    current_user: User = Depends(get_current_user)
 ):
     """
     Reprocess monthly statements.
@@ -453,10 +457,143 @@ def reprocess_statement(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in statement reprocessing endpoint: {str(e)}")
+        logger.error(f"Error in statement reprocessing endpoint: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Internal server error: {str(e)}"
+            detail="Failed to reprocess statement. Please contact support if the issue persists."
+        )
+
+
+@router.get("/aggregate-monthly")
+def get_aggregate_monthly(
+    from_date: Optional[str] = Query(
+        None,
+        description="Start date in DD/MM/YYYY format (e.g., '01/05/2025')",
+        regex=r"^\d{1,2}/\d{1,2}/\d{4}$"
+    ),
+    to_date: Optional[str] = Query(
+        None,
+        description="End date in DD/MM/YYYY format (e.g., '01/06/2025')",
+        regex=r"^\d{1,2}/\d{1,2}/\d{4}$"
+    ),
+    supplier_names: Optional[List[str]] = Query(
+        None,
+        description="List of supplier names, supplier IDs, or ['All'] to filter by. Use '0' for Unknown Supplier."
+    ),
+    status: Optional[str] = Query(
+        None,
+        description="Invoice status filter: 'Processed', 'Failed', 'Unlisted', 'Missing System', 'Missing Statement', or 'all'"
+    ),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get aggregated statistics for statement invoices.
+    
+    Returns aggregated amounts from all/processed/failed/unlisted/missing invoices
+    based on the selected filters. Uses the same filtering logic as the invoice-data endpoint
+    but returns aggregated totals instead of paginated data.
+    
+    **Parameters:**
+    - **from_date**: Start date filter in DD/MM/YYYY format 
+    - **to_date**: End date filter in DD/MM/YYYY format 
+    - **supplier_names**: Filter by list of supplier names (partial match supported),
+      supplier IDs (numeric), ["All"] for all suppliers, or ["0"] for Unknown Supplier
+    - **status**: Filter by reconciliation status
+      ('Processed', 'Failed', 'Unlisted', 'Missing System', 'Missing Statement', 'All')
+    
+    **Returns:**
+    - **quantity**: Total number of invoices
+    - **average**: Average of original invoice amounts (formatted currency)
+    - **amount**: Sum of all original invoice amounts (formatted currency)
+    - **filters_applied**: Summary of applied filters
+    
+    **Examples:**
+    ```
+    # Get aggregates for a specific month
+    GET /statements/aggregate-monthly?from_date=01/05/2025&to_date=31/05/2025&status=Processed
+    
+    # Get aggregates for all suppliers
+    GET /statements/aggregate-monthly?supplier_names=All&from_date=01/01/2025&to_date=31/12/2025
+    
+    # Get aggregates for failed invoices
+    GET /statements/aggregate-monthly?status=Failed&from_date=01/01/2025&to_date=31/12/2025
+    ```
+    """
+    try:
+        from_date_obj = None
+        to_date_obj = None
+        
+        if from_date:
+            try:
+                from_date_obj = parse_date_ddmmyyyy(from_date)
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid from_date format: {str(e)}"
+                )
+        
+        if to_date:
+            try:
+                to_date_obj = parse_date_ddmmyyyy(to_date)
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid to_date format: {str(e)}"
+                )
+        
+        if from_date_obj and to_date_obj and from_date_obj > to_date_obj:
+            raise HTTPException(
+                status_code=400,
+                detail="from_date must be earlier than or equal to to_date"
+            )
+        
+        valid_statuses = ['processed', 'failed', 'unlisted', 'missing', 'missing system', 'missing statement', 'all', None]
+        if status and status.lower() not in valid_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status. Must be one of: {valid_statuses[:-1]}"
+            )
+        
+        logger.info(
+            f"Getting aggregate monthly - "
+            f"Dates: {from_date} to {to_date}, "
+            f"Suppliers: {supplier_names}, Status: {status}"
+        )
+        
+        controller = StatementController(db)
+        result = controller.get_aggregate_monthly(
+            from_date=from_date_obj,
+            to_date=to_date_obj,
+            supplier_names=supplier_names,
+            status=status
+        )
+        
+        if not result['success']:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Failed to calculate aggregates: "
+                    f"{result.get('error', 'Unknown error')}"
+                )
+            )
+        
+        logger.info(
+            f"Successfully calculated aggregates: "
+            f"Quantity: {result['quantity']}, "
+            f"Average: {result['average']}, "
+            f"Amount: {result['amount']}"
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in aggregate monthly endpoint: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve aggregate data. Please contact support if the issue persists."
         )
 
 
@@ -464,7 +601,7 @@ def reprocess_statement(
 def delete_statement(
     statement_id: int,
     db: Session = Depends(get_db),
-    token: str = Depends(JWTBearer())
+    current_user: User = Depends(get_current_user)
 ):
     """
     Delete a monthly statement and all its associated invoice items.
@@ -523,9 +660,210 @@ def delete_statement(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in delete statement endpoint: {str(e)}")
+        logger.error(f"Error in delete statement endpoint: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Internal server error: {str(e)}"
+            detail="Failed to delete statement. Please contact support if the issue persists."
         )
-       
+
+
+@router.post("/export")
+async def export_selected_statements(
+    request: MonthlyStatementExportSelectedRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Export specific statement invoices by their IDs to Excel.
+    
+    **Summary:**
+        Exports specific invoices from monthly statements identified by their invoice IDs.
+        Each supplier gets its own sheet in the Excel file.
+        
+    **Request Body:**
+        - **request** (`MonthlyStatementExportSelectedRequest`, required):
+            - **invoice_ids** (`List[str]`, required): List of IDs to export. Supports three types: UUIDs (Invoice table), integer invoice_ids (plumbing_invoices), integer item IDs (invoice_items). The system intelligently detects and handles all types.
+            
+    **Authentication:**
+        - Requires valid JWT token in Authorization header
+        
+    **Returns:**
+        - **str**: Presigned S3 URL for downloading the Excel file
+        
+    **Response Example:**
+    ```json
+    "https://s3.amazonaws.com/bucket/Exports/MonthlyStatement_Selected.xlsx?AWSAccessKeyId=..."
+    ```
+    
+    **Excel File Structure:**
+        - Each supplier gets its own sheet
+        - Sheet name = Supplier name (max 31 chars)
+        - Sheets sorted alphabetically by supplier name
+        - Data within each sheet sorted by Invoice Date (ascending)
+        
+    **Columns (in order):**
+        1. Invoice Number
+        2. Invoice Date (YYYY-MM-DD)
+        3. Statement Date (YYYY-MM-DD)
+        4. Supplier Name
+        5. Status (Processed/Failed)
+        6. Original Amount (currency)
+        7. Balance (currency)
+        
+    **Request Example:**
+    ```json
+    {
+      "invoice_ids": [
+        "bf5daa2e-6d21-49f1-a855-81203f6095fa",
+        "123",
+        "456"
+      ]
+    }
+    ```
+    
+    **Intelligent ID Handling:**
+        - The endpoint automatically detects three ID types:
+          1. **UUIDs** - From Invoice table (parent invoice with all items)
+          2. **Integers (invoice_id)** - From plumbing_invoices (statement invoices)
+          3. **Integers (item_id)** - From invoice_items (individual items)
+        - Mixed types in the same request are fully supported
+        - System queries appropriate tables based on ID format
+    
+    **Notes:**
+        - Only invoices that exist will be exported
+        - File naming: `MonthlyStatement_Selected_{timestamp}.xlsx`
+        - Returns S3 presigned URL for download
+    """
+    try:
+        import time
+        start_time = time.time()
+        
+        if not request.invoice_ids:
+            raise HTTPException(status_code=400, detail="invoice_ids list cannot be empty")
+        
+        controller = StatementController(db)
+        download_url = controller.export_selected_statements(
+            invoice_ids=request.invoice_ids
+        )
+        
+        processing_time = time.time() - start_time
+        logger.info(f"Selected statements export completed in {processing_time:.2f} seconds for {len(request.invoice_ids)} invoices")
+        
+        return download_url
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Selected statements export error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500, 
+            detail="Failed to export selected statements. Please contact support if the issue persists."
+        )
+
+
+@router.post("/export-all")
+async def export_all_statements(
+    request: MonthlyStatementExportAllRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Export all filtered Monthly Statement data to Excel with optional exclusions.
+    
+    **Summary:**
+        Exports invoice data from monthly statements with comprehensive filtering.
+        Supports excluding specific invoice IDs. Each supplier gets its own sheet.
+        
+    **Request Body:**
+        - **request** (`MonthlyStatementExportAllRequest`, required):
+            - **from_date** (`date`): Start date for the date range (YYYY-MM-DD)
+            - **to_date** (`date`): End date for the date range (YYYY-MM-DD)
+            - **supplier_names** (`List[str]`, optional): List of supplier names, ['All'] for all suppliers
+            - **status** (`str`, optional): Invoice status filter - 'Processed', 'Failed', 'Unlisted', 'Missing System', 'Missing Statement', or 'All'
+            - **excluded_invoice_ids** (`List[str]`, optional): IDs to exclude from export. Supports three types: UUIDs (Invoice table), integer invoice_ids (plumbing_invoices), integer item IDs (invoice_items). The system intelligently detects and handles all types.
+            
+    **Authentication:**
+        - Requires valid JWT token in Authorization header
+        
+    **Returns:**
+        - **str**: Presigned S3 URL for downloading the Excel file
+        
+    **Response Example:**
+    ```json
+    "https://s3.amazonaws.com/bucket/Exports/MonthlyStatement_2025-01_AllSuppliers.xlsx?AWSAccessKeyId=..."
+    ```
+    
+    **Excel File Structure:**
+        - Each supplier gets its own sheet
+        - Sheet name = Supplier name (max 31 chars)
+        - Sheets sorted alphabetically by supplier name
+        - Data within each sheet sorted by Invoice Date (ascending)
+        
+    **Columns (in order):**
+        1. Invoice Number
+        2. Invoice Date (YYYY-MM-DD)
+        3. Statement Date (YYYY-MM-DD)
+        4. Supplier Name
+        5. Status (Processed/Failed)
+        6. Original Amount (currency)
+        7. Balance (currency)
+        
+    **File Naming:**
+        - Single supplier: `MonthlyStatement_{YYYY-MM}_{SupplierName}.xlsx`
+        - Multiple/All suppliers: `MonthlyStatement_{YYYY-MM}_AllSuppliers.xlsx`
+        
+    **Request Examples:**
+    ```json
+    // Single supplier with status filter
+    {
+      "from_date": "2025-01-01",
+      "to_date": "2025-01-31",
+      "supplier_names": ["BMW Plumbing Supplies"],
+      "status": "Processed"
+    }
+    
+    // All suppliers with exclusions
+    {
+      "from_date": "2025-01-01",
+      "to_date": "2025-01-31",
+      "supplier_names": ["All"],
+      "status": "All",
+      "excluded_invoice_ids": [123, 456, 789]
+    }
+    ```
+        
+    **Error Codes:**
+        - **404**: No invoice data found for the specified filters
+        - **500**: Export processing error
+        
+    **Notes:**
+        - Follows current filters (month/date, suppliers, status)
+        - Excluded invoices are removed from the export
+        - Returns S3 presigned URL for download
+    """
+    try:
+        import time
+        start_time = time.time()
+        
+        controller = StatementController(db)
+        download_url = controller.export_monthly_statement(
+            from_date=request.from_date,
+            to_date=request.to_date,
+            supplier_names=request.supplier_names,
+            status=request.status,
+            excluded_invoice_ids=request.excluded_invoice_ids
+        )
+        
+        processing_time = time.time() - start_time
+        logger.info(f"Monthly statement export completed in {processing_time:.2f} seconds")
+        
+        return download_url
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Monthly statement export error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500, 
+            detail="Failed to export monthly statement. Please contact support if the issue persists."
+        )

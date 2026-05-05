@@ -1,0 +1,92 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: pdf_extraction_queue
+        description: >
+          Queue of PDFs pending or completed extraction.
+          Links emails to their extracted PDF files.
+        columns:
+          - name: id
+            description: Primary key (UUID)
+          - name: s3_key
+            description: S3 path to the PDF file
+          - name: email_queue_id
+            description: Foreign key to email_download_queue. NULL for user-uploaded PDFs.
+          - name: user_upload_id
+            description: Foreign key to user_uploaded_pdfs. NULL for email-sourced PDFs.
+          - name: deleted_at
+            description: Soft delete timestamp (NULL for active records)
+          - name: deletion_reason
+            description: Reason for soft deletion (not_invoice_nor_credit, parent_email_deleted, etc.)
+
+      - name: model_extracted_data
+        description: >
+          Raw extraction data from AI models (Gemini, etc.).
+          One row per extraction attempt. All invoice data stored in raw_data JSONB.
+
+          This is the new normalized structure where:
+          - Global fields (ref_no, date, vendor, tax, etc.) are stored once per extraction
+          - Line items are stored as a JSONB array in raw_data->'line_items'
+          - dbt models parse and explode the data into normalized structures
+        columns:
+          - name: id
+            description: Primary key (UUID) - unique per extraction attempt
+          - name: s3_file_key
+            description: S3 path identifying the source PDF file
+          - name: pdf_extraction_queue_id
+            description: Foreign key to pdf_extraction_queue table
+          - name: email_queue_id
+            description: >
+              Foreign key to email_download_queue. NULL for user-uploaded PDFs.
+              Mutually exclusive with user_upload_id on pdf_extraction_queue.
+          - name: model_name
+            description: AI model used for extraction (e.g., gemini-2.0-flash, gemini-2.5-flash)
+          - name: prompt_hash
+            description: Hash of the extraction prompt used (for tracking prompt versions)
+          - name: status
+            description: Extraction status (human_review_required, model_approved, etc.)
+          - name: validation_score
+            description: Quality score from validation (0-100)
+          - name: confidence_score
+            description: Model confidence score (0-1)
+          - name: raw_data
+            description: >
+              Complete extraction response as JSONB containing:
+              - ref_no, date, vendor, buyer, po_no, customer_job, bill
+              - tax, sub_total, freight
+              - line_items array with item, description, qty, cost, amount
+              - _validation_passed, _header_details, _line_items_details
+          - name: extracted_at
+            description: Timestamp when extraction occurred (used as incremental key)
+          - name: updated_at
+            description: Timestamp of last update
+          - name: deleted_at
+            description: Soft delete timestamp (NULL for active records)
+          - name: deletion_reason
+            description: Reason for soft deletion
+
+      - name: user_uploaded_pdfs
+        description: >
+          Tracks user-uploaded PDF invoices. One row per uploaded file.
+          Upon INSERT, a trigger automatically creates a corresponding row
+          in raw.pdf_extraction_queue with user_upload_id set and email_queue_id NULL.
+        columns:
+          - name: id
+            description: Primary key (UUID)
+          - name: s3_file_key
+            description: S3 path to the uploaded PDF file
+          - name: supplier_id
+            description: Foreign key to public.suppliers
+          - name: supplier_name
+            description: Human-readable supplier name entered by the user at upload time. Used as vendor fallback in analytics.
+          - name: user_id
+            description: Foreign key to public.users (the uploader)
+          - name: uploaded_at
+            description: Timestamp when the PDF was uploaded
+          - name: deleted_at
+            description: Soft delete timestamp (NULL for active records)
+          - name: deletion_reason
+            description: Reason for soft deletion

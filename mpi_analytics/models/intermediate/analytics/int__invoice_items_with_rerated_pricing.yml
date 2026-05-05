@@ -1,0 +1,166 @@
+version: 2
+
+models:
+  - name: int__invoice_items_with_rerated_pricing
+    description: |
+      Adds Y & S "BOX vs EACH" UOM mismatch price **rerating** on top of
+      `int__invoice_items_with_normalized_fields`.
+
+      **Why this layer exists:**
+      The Price Changes mart (`mart__price_increases`) detects suspected UOM
+      mismatches for `Y & S Plumbing Supply` and recomputes the per-unit price.
+      That correction must propagate to every other surface the App shows
+      (Data Review, QuickBooks, Mapping, Purchase Order, Supplier Comparison).
+      Rather than duplicate the logic in every downstream mart, the rerating is
+      applied once in this intermediate layer and the corrected values
+      (`rerated_cost`, `rerated_qty`) are exposed to all consumers.
+
+      **Detection rule** (kept in lock-step with `mart__price_increases`):
+        - `vendor = 'Y & S Plumbing Supply'`
+        - has a previous purchase of the same item from the same vendor
+        - `((cost - previous_cost) / previous_cost) * 100 > price_increase_threshold`
+
+      **Correction rule:**
+        - `ratio        = ROUND(cost / previous_cost)`
+        - `rerated_cost = ROUND(cost / NULLIF(ratio, 0), 2)`
+        - `rerated_qty  = qty * NULLIF(ratio, 0)`
+
+      Total spend (`cost * qty`) is preserved by construction so reconciliation
+      against bill amounts is unaffected.
+
+      **Column strategy (additive):**
+      The raw `cost` and `qty` columns from upstream are passed through
+      unchanged. Rerated values are exposed in new columns so downstream marts
+      can pick whichever is appropriate for their use case.
+
+      **Threshold configuration:**
+      Driven by the `price_increase_threshold` dbt var, sourced from
+      `DBT_PRICE_INCREASE_THRESHOLD` env var (default 250).
+
+      **Downstream consumers:**
+        - `mart__invoice_items`           (Data Review)
+        - `mart__invoice_items_map`       (Mapping / QuickBooks export)
+        - `mart__item_price_comparison`   (Purchase Order / Supplier Comparison)
+        - `mart__mapping_audit`
+        - `mart__address_sheet_aggregates`
+
+      `mart__price_increases` intentionally still computes its own rerating from
+      `int__invoice_items_with_normalized_fields` and is **not** migrated here
+      yet — see issue #899.
+
+    config:
+      materialized: table
+      tags: ['intermediate', 'pricing', 'rerating']
+
+    columns:
+      - name: invoice_items_id
+        description: Primary key. Inherited from upstream; one row per invoice line.
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              to: ref('int__invoice_items_with_normalized_fields')
+              field: invoice_items_id
+
+      - name: cost
+        description: |
+          Raw per-unit cost from upstream, **unchanged**. Use `rerated_cost`
+          when displaying values that may be affected by Y & S UOM rerating.
+
+      - name: qty
+        description: |
+          Raw quantity from upstream, **unchanged**. Use `rerated_qty` when
+          displaying values that may be affected by Y & S UOM rerating.
+
+      - name: rerated_cost
+        description: |
+          Per-unit cost after Y & S BOX→EACH correction.
+          Equals `cost` when `is_price_rerated = FALSE`.
+          May be negative for credit memos (passed through unchanged).
+
+      - name: rerated_qty
+        description: |
+          Quantity after Y & S BOX→EACH correction (multiplied by the rounded
+          BOX→EACH ratio so total spend is preserved).
+          Equals `qty` when `is_price_rerated = FALSE`.
+
+      - name: is_price_rerated
+        description: |
+          TRUE when this row's `cost`/`qty` were corrected by the Y & S UOM
+          mismatch rule. Used by the FE to surface a tooltip explaining the
+          adjustment.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+
+      - name: original_current_price
+        description: |
+          Snapshot of the raw `cost` at the time of rerating. Mirrors the
+          column name used by `mart__price_increases` (PR #906).
+          Always equals `cost`.
+
+      - name: original_current_qty
+        description: |
+          Snapshot of the raw `qty` at the time of rerating. Mirrors the
+          column name used by `mart__price_increases` (PR #906).
+          Always equals `qty`.
+
+      - name: previous_cost
+        description: |
+          Per-unit `cost` from the immediately preceding non-voided purchase of
+          the same item from the same vendor. NULL for the first purchase or
+          when current row has invalid cost / is voided.
+
+      - name: previous_qty
+        description: |
+          `qty` from the immediately preceding non-voided purchase of the same
+          item from the same vendor. NULL for the first purchase or when
+          current row has invalid cost / is voided.
+
+      - name: previous_date
+        description: |
+          `date` of the immediately preceding non-voided purchase of the same
+          item from the same vendor. NULL for the first purchase or when
+          current row has invalid cost / is voided.
+
+    tests:
+      - dbt_utils.expression_is_true:
+          name: rerated_cost_matches_raw_when_not_rerated
+          expression: |
+            (
+              is_price_rerated = TRUE
+              OR rerated_cost IS NOT DISTINCT FROM ROUND(cost::numeric, 2)
+            )
+          config:
+            severity: error
+
+      - dbt_utils.expression_is_true:
+          name: rerated_qty_matches_raw_when_not_rerated
+          expression: |
+            (
+              is_price_rerated = TRUE
+              OR rerated_qty IS NOT DISTINCT FROM qty
+            )
+          config:
+            severity: error
+
+      - dbt_utils.expression_is_true:
+          name: rerating_only_for_y_and_s
+          expression: "vendor = 'Y & S Plumbing Supply'"
+          config:
+            severity: error
+            where: "is_price_rerated = TRUE"
+
+      - dbt_utils.expression_is_true:
+          name: rerating_preserves_total_spend_within_rounding
+          # Total spend (cost*qty) should equal rerated total within rounding
+          # tolerance. The 2-decimal rounding of `rerated_cost` introduces up
+          # to ±0.005 error per unit, multiplied by `rerated_qty` (= qty *
+          # ratio). So the bound is 0.005 * rerated_qty + small slack.
+          expression: |
+            ABS((rerated_cost * rerated_qty) - (cost * qty))
+              <= 0.005 * ABS(rerated_qty) + 0.01
+          config:
+            severity: warn
+            where: "is_price_rerated = TRUE AND cost IS NOT NULL AND qty IS NOT NULL"

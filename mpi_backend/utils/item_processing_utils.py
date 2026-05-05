@@ -1,74 +1,41 @@
 """
 Utility functions for item processing.
 Suffix cleaning logic has been removed - all item codes now retain their full original form.
+
+This module now uses centralized supplier_suffix_manager for all suffix operations.
 """
 
-from typing import Optional, Dict, Tuple
-
-# Supplier ID to suffix mapping (for reference only)
-SUPPLIER_SUFFIX_MAP = {
-    1: 'B',   # BMW Plumbing Supplies
-    2: 'W',   # World Wide Plumbing  
-    3: 'Y',   # Y & S Plumbing Supply
-    4: 'S',   # Supreme Plumbing Supply
-    5: 'P',   # Pyramid Plumbing
-    6: 'A',   # ABC Opus Services
-    7: 'P',   # Park Plumbing Supply (same as Pyramid)
-    8: 'G',   # Gotham Plumbing Supply
-    9: 'F',   # FW Webb Plumbing Supply
-    10: 'F',  # Flow Mark Plumbing Supply (same as FW Webb)
-    11: None, # Plumbing Exchange (no specific suffix)
-    12: 'A',  # AF Supply (same as ABC Opus)
-    13: None, # Lion Hvac Supplies (no specific suffix)
-    14: 'F',  # Bruce Ferguson
-}
-
-# Supplier name to suffix mapping (for reference only)
-SUPPLIER_NAME_SUFFIX_MAP = {
-    "BMW Plumbing Supplies": "B",
-    "World Wide Plumbing": "W",
-    "Y & S Plumbing Supply": "Y",
-    "Supreme Plumbing Supply": "S",
-    "Pyramid Plumbing": "P",
-    "ABC Opus Services": "A",
-    "Park Plumbing Supply": "P",
-    "Gotham Plumbing Supply": "G",
-    "FW Webb Plumbing Supply": "F",
-    "Flow Mark Plumbing Supply": "F",
-    "Plumbing Exchange": None,  # No suffix
-    "AF Supply": "A",
-    "Lion Hvac Supplies": None,  # No suffix
-    "Bruce Ferguson": "F",
-}
-
-
-def get_supplier_suffix(supplier_id: int) -> Optional[str]:
-    """Get suffix for a supplier ID (for reference only)."""
-    return SUPPLIER_SUFFIX_MAP.get(supplier_id)
+from typing import Optional, Tuple
+from mpi_backend.utils.supplier_suffix_manager import (
+    get_supplier_suffix,
+    get_supplier_id_from_name,
+    extract_supplier_info,
+    SUPPLIER_SUFFIX_MAP,
+    SUPPLIER_NAME_SUFFIX_MAP
+)
 
 
 def get_supplier_suffix_by_name(supplier_name: str) -> Optional[str]:
-    """Get suffix for a supplier name (for reference only)."""
-    return SUPPLIER_NAME_SUFFIX_MAP.get(supplier_name)
+    """
+    Get suffix for a supplier name.
+    
+    DEPRECATED: Use supplier_suffix_manager.get_supplier_suffix() instead.
+    """
+    supplier_id = get_supplier_id_from_name(supplier_name)
+    if supplier_id is not None:
+        return get_supplier_suffix(supplier_id=supplier_id)
+    return None
 
 
 def extract_supplier_id(vendor_name: str) -> Tuple[Optional[int], Optional[str]]:
     """
     Extract supplier ID and name from vendor string.
     Returns (supplier_id, supplier_name)
+    
+    DEPRECATED: Use supplier_suffix_manager.extract_supplier_info() instead.
     """
-    if not vendor_name:
-        return None, None
-    
-    # Try to match vendor name to supplier names
-    for supplier_name in SUPPLIER_NAME_SUFFIX_MAP.keys():
-        if supplier_name.lower() in vendor_name.lower():
-            # Find the supplier ID for this name
-            for sid, name in SUPPLIER_NAME_SUFFIX_MAP.items():
-                if name == supplier_name:
-                    return sid, supplier_name
-    
-    return None, None
+    supplier_id, supplier_name, _ = extract_supplier_info(vendor_name)
+    return supplier_id, supplier_name
 
 
 def should_skip_item(item_code: str) -> bool:

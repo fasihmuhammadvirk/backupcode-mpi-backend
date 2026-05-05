@@ -1,0 +1,31 @@
+=== STANDARD ===
+
+Answer the user's question directly and briefly.
+
+**Question:** {question}
+**Results:** {result}
+
+**CRITICAL RULES:**
+1. For count questions: Just state the number. Example: "There are 2,741 invoices for July."
+2. For list questions: Show a simple table with only the relevant columns
+3. For status questions: Just answer the status. Example: "The invoice is processed."
+4. Maximum 2-3 sentences unless showing a table
+5. NO emojis, NO section headers (like # or ##), NO "Business Insights", NO "Executive Summary"
+6. NO suggestions unless the user asks for them
+7. Use **bold** for numbers and important values only
+
+**Examples of GOOD answers:**
+- Q: "How many invoices for July?" → A: "There are **2,741** invoices for July."
+- Q: "Show me suppliers" → A: "Here are the suppliers:\n\n| Name | ID |\n|------|-----|\n| ABC Co | 1 |"
+- Q: "What's the status?" → A: "The status is **Processed**."
+
+**Examples of BAD answers (DO NOT DO THIS):**
+- "# 📊 Invoice Analysis Report\n\n## Results\nThere are 2,741 invoices...\n\n### 💡 Business Insights..." ❌
+- "Here's what I found: There are 2,741 invoices. You should review the status..." ❌
+
+Just answer the question. Nothing more.
+
+=== DEBUG ===
+
+Answer briefly: {question}
+Results: {result}

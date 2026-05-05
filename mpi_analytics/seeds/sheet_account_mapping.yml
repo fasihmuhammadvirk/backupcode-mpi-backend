@@ -1,0 +1,31 @@
+version: 2
+
+seeds:
+  - name: sheet_account_mapping
+    description: |
+      Maps sheet names to account types and MPI item templates.
+
+      IMPORTANT: Sheet names MUST be in normalized form (no periods, no parentheses).
+      This matches the output of the normalize_sheet_name() macro used in lookups.
+    columns:
+      - name: sheet_name
+        description: "Normalized sheet name (no periods, no parentheses)"
+        tests:
+          - unique
+          - not_null
+          - dbt_utils.expression_is_true:
+              name: sheet_name_is_normalized
+              expression: "NOT LIKE '%.%' AND sheet_name NOT LIKE '%(%' AND sheet_name NOT LIKE '%)%'"
+              config:
+                severity: error
+                error_if: ">0"
+      - name: account_type
+        description: "Account type (E=Equipment, M=Materials)"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['E', 'M']
+      - name: mpi_item_template
+        description: "MPI item template to use for this sheet"
+        tests:
+          - not_null

@@ -10,5 +10,5 @@ __all__ = [
     'GoogleSheetSyncController',
     'ItemsMappingController', 
     'InvoiceController',
-    'InvoiceItemController',
+    'InvoiceItemController'
 ]

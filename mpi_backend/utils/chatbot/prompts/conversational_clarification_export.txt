@@ -1,0 +1,15 @@
+I'd be happy to help you export data! To make sure I get you exactly what you need, could you please tell me:
+
+1. **What type of data?** (invoices, items, suppliers, customer jobs)
+2. **Any specific filters?** For example:
+   - Date range (e.g., "from January 2024" or "last month")
+   - Specific supplier or vendor
+   - Customer job name
+   - Status (processed, pending, exported)
+
+For example, you could say:
+- "Export invoices from ABC Supply for January 2024"
+- "Export all items for customer job Smith Residence"
+- "Export processed invoices from last month"
+
+What specific data would you like me to export?

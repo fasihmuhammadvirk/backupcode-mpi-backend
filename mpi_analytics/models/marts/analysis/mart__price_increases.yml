@@ -1,0 +1,220 @@
+version: 2
+
+models:
+  - name: mart__price_increases
+    description: |
+      Price increase analysis mart that tracks price changes over time for each item-vendor pair.
+
+      **Purpose:**
+      - Provides historical price comparison for invoice items
+      - Enables supplier-specific price tracking
+      - Supports price trend analysis and reporting
+
+      **Key Business Logic:**
+      - Compares each purchase with the immediately preceding purchase chronologically
+      - Price comparisons are supplier-specific (same item from different suppliers tracked separately)
+      - Only includes items with valid cost > 0
+      - First purchase for an item-vendor pair has NULL previous_price
+
+      **Price Rerating Logic (UOM Mismatches):**
+      - Some vendors (e.g., 'Y & S Plumbing Supply') items purchase occasionally switch between unit pricing (EACH) and bulk pricing (BOX).
+      - This results in massive suspected price hikes (e.g., >250%) which are actually Unit of Measure (UOM) mismatches.
+      - **Detection:** When a price increase exceeds the threshold for specific vendors, it is flagged as `is_price_rerated`.
+      - **Correction:** We divide the current price by the rounded price ratio to estimate the 'EACH' price and simultaneously multiply the quantity by the same ratio.
+      - **Result:** This maintains the total invoice amount while allowing for accurate purchase-over-purchase price comparison.
+      - The original values are preserved in `original_current_price` and `original_current_qty`.
+
+      **Relationship to mart__invoice_items:**
+      - One-to-one relationship via invoice_items_id
+      - This mart enriches invoice_items with price history context
+      - Can be joined to get full item details + price increase data
+
+      **Usage Examples:**
+      ```sql
+      -- Get all items with price increases > 10%
+      SELECT * FROM mart__price_increases
+      WHERE percentage_increase > 10;
+
+      -- Get price history for specific item from specific vendor
+      SELECT * FROM mart__price_increases
+      WHERE item = 'ABC123' AND vendor = 'Vendor Name'
+      ORDER BY purchase_date;
+
+      -- Join with invoice items for full context
+      SELECT
+          ii.item,
+          ii.description,
+          ii.vendor,
+          ii.customer_job,
+          pi.purchase_date,
+          pi.current_price,
+          pi.previous_price,
+          pi.percentage_increase_formatted
+      FROM mart__invoice_items ii
+      JOIN mart__price_increases pi ON ii.invoice_items_id = pi.invoice_items_id
+      WHERE pi.has_previous_price = TRUE;
+      ```
+
+      **Performance Notes:**
+      - Materialized as table for fast query performance
+      - Indexed on common query patterns (item, vendor, date)
+      - Composite index on (item, vendor) for supplier-specific queries
+      - ANALYZE post-hook ensures query planner has fresh statistics
+
+    config:
+      materialized: table
+      tags: ['analysis', 'pricing', 'reporting']
+
+    columns:
+      - name: invoice_items_id
+        description: |
+          Unique identifier for the invoice item, foreign key to mart__invoice_items.
+          This creates a one-to-one relationship between the two marts.
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              to: ref('mart__invoice_items')
+              field: invoice_items_id
+
+      - name: item
+        description: |
+          Item code/number from the invoice.
+          Used for grouping price history by product.
+        tests:
+          - not_null
+
+      - name: vendor
+        description: |
+          Vendor/supplier name.
+          Critical for supplier-specific price tracking.
+        tests:
+          - not_null
+
+      - name: purchase_date
+        description: |
+          Date of the current purchase.
+          Used for chronological ordering and temporal analysis.
+          Note: Renamed from 'current_date' to avoid conflict with PostgreSQL's CURRENT_DATE function.
+        tests:
+          - not_null
+
+      - name: current_price
+        description: |
+          Unit price (cost) for the current purchase.
+          For specific vendors, this may be rerated if a large price increase suggests a UOM mismatch (e.g. BOX vs EACH).
+          See `is_price_rerated` and `original_current_price` for more details.
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+              config:
+                severity: warn
+
+      - name: current_qty
+        description: |
+          Quantity purchased in the current transaction.
+          Provided for context but not used in price comparison calculations.
+          For specific vendors, this may be rerated if a large price increase suggests a UOM mismatch.
+          See `is_price_rerated` and `original_current_qty` for more details.
+
+      - name: previous_price
+        description: |
+          Unit price (cost) from the immediately preceding purchase of this item from this vendor.
+          NULL if this is the first purchase for this item-vendor pair.
+
+      - name: previous_date
+        description: |
+          Date of the previous purchase.
+          NULL if this is the first purchase for this item-vendor pair.
+
+      - name: previous_qty
+        description: |
+          Quantity purchased in the previous transaction.
+          Provided for context.
+
+      - name: percentage_increase
+        description: |
+          Percentage change from previous_price to current_price, rounded to 1 decimal place.
+          Formula: ((current_price - previous_price) / previous_price * 100)
+          NULL if no previous price exists or previous_price = 0.
+          Negative values indicate price decreases.
+          Note: Uses the rerated `current_price` where applicable.
+
+      - name: price_change
+        description: |
+          Absolute price change from previous_price to current_price (in dollars).
+          Formula: (current_price - previous_price)
+          NULL if no previous price exists.
+          Negative values indicate price decreases.
+          Note: Uses the rerated `current_price` where applicable.
+
+      - name: has_previous_price
+        description: |
+          Boolean flag indicating whether this item-vendor pair has price history.
+          TRUE: This item has been purchased before from this vendor
+          FALSE: This is the first purchase for this item-vendor pair
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+
+      - name: is_price_rerated
+        description: |
+          Boolean flag indicating whether the current_price was rerated due to a suspected UOM mismatch.
+          See model description for detailed rerating logic.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+
+      - name: original_current_price
+        description: |
+          The original unit price (cost) before any rerating.
+          Matches `current_price` if `is_price_rerated` is FALSE.
+
+      - name: original_current_qty
+        description: |
+          The original quantity before any rerating.
+          Matches `current_qty` if `is_price_rerated` is FALSE.
+
+      - name: percentage_increase_formatted
+        description: |
+          Human-readable percentage string with '%' suffix or 'N/A'.
+          Examples: '15.5%', '-10.2%', 'N/A'
+          Matches the output format of the original calculate_price_increase method.
+        tests:
+          - not_null
+
+    tests:
+      - dbt_utils.expression_is_true:
+          name: percentage_increase_calculation_valid
+          expression: |
+            (
+              (previous_price IS NULL AND percentage_increase IS NULL)
+              OR
+              (previous_price = 0 AND percentage_increase IS NULL)
+              OR
+              (
+                previous_price IS NOT NULL
+                AND previous_price > 0
+                AND percentage_increase IS NOT NULL
+                AND ABS(percentage_increase - ((current_price - previous_price) / previous_price * 100)) < 0.1
+              )
+            )
+          config:
+            severity: error
+
+      - dbt_utils.expression_is_true:
+          name: formatted_percentage_matches_numeric
+          expression: |
+            (
+              (percentage_increase IS NULL AND percentage_increase_formatted = 'N/A')
+              OR
+              (
+                percentage_increase IS NOT NULL
+                AND percentage_increase_formatted = CAST(percentage_increase AS TEXT) || '%'
+              )
+            )
+          config:
+            severity: error

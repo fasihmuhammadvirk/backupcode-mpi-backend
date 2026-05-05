@@ -285,7 +285,7 @@ def extract_statement_metadata(text):
     if not metadata["supplier_name"]:
         # Check for common supplier/customer info format
         customer_info = re.search(
-            r'(?:CUSTOMER|SOLD TO|BILL TO)[^\n]*\n(.*?)\n(.*?)\n(.*?)\n',
+            r'(?:CUSTOMER|BILL TO)[^\n]*\n(.*?)\n(.*?)\n(.*?)\n',
             text, re.IGNORECASE | re.DOTALL)
         if customer_info:
             potential_name = customer_info.group(1).strip()

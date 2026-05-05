@@ -1,0 +1,49 @@
+# Caddy reverse proxy for the Metabase droplet.
+#
+# Caddy auto-provisions and renews Let's Encrypt certificates for
+# {$METABASE_DOMAIN} as long as:
+#   - DNS A record for METABASE_DOMAIN points at this droplet
+#   - Ports 80 and 443 are reachable from the public internet
+#
+# Plain HTTP traffic to :80 is automatically redirected to HTTPS.
+
+{
+	email {$LETSENCRYPT_EMAIL}
+	# Uncomment for staging certs while debugging DNS / TLS issues:
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$METABASE_DOMAIN} {
+	encode zstd gzip
+
+	# Forward everything to the Metabase container on the internal network.
+	reverse_proxy metabase:3000 {
+		# Metabase is behind a proxy; forward the original scheme/host so
+		# generated links and CSRF checks use the public URL.
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+		header_up Host {host}
+	}
+
+	# Security headers
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Metabase needs framing from the embedding app(s); CSP is configured
+		# on the Metabase side via MB_EMBEDDING_APP_ORIGIN.
+		-Server
+	}
+
+	# Skip access logging for Metabase embed routes.
+	# Embed iframe URLs carry signed JWTs in the path (/embed/<token>...),
+	# so logging them would put short-lived bearer tokens in stdout/journald.
+	# Everything else is still logged for ops visibility.
+	log_skip /embed/*
+	log_skip /api/embed/*
+
+	log {
+		output stdout
+		format console
+	}
+}

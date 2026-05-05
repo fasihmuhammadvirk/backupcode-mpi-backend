@@ -1,0 +1,60 @@
+version: 2
+
+models:
+  - name: mart__address_sheet_aggregates
+    description: |
+      Pre-aggregated analysis data for address + sheet_name combinations.
+
+      This mart table provides optimized access to aggregated invoice data grouped by
+      customer_job (address) and sheet_name categories. Pre-computing these aggregations
+      significantly improves performance for the analysis page dashboard.
+
+      Key Features:
+      - Pre-computed totals per address + sheet combination
+      - Per-address totals across all sheets
+      - Handles NULL/empty sheet_names as '(No Sheet Name)'
+      - Unique constraint on (customer_job, sheet_name) for fast lookups
+
+      Usage:
+      - Analysis page dashboard queries
+      - Address-level spending breakdown by category
+      - Global category averages (computed from this data in DAO layer)
+
+      Refresh: Automatically rebuilt when dbt runs (typically every 30 minutes)
+
+    columns:
+      - name: customer_job
+        description: |
+          Normalized customer job address (from customer_job_normalized in int__invoice_items).
+          This represents the project/job site address.
+        tests:
+          - not_null
+
+      - name: sheet_name
+        description: |
+          Normalized sheet name category (from sheet_name_normalized in int__invoice_items).
+          NULL/empty values are coalesced to '(No Sheet Name)' for consistent reporting.
+          Examples: 'AIR FITTINGS', 'BLACK MALLEABLE - GAS', '(No Sheet Name)'
+        tests:
+          - not_null
+
+      - name: total_amount
+        description: |
+          Total amount spent for this specific address + sheet_name combination.
+          Calculated from amount_numeric in int__invoice_items (already handles credit memos).
+          Can be NULL when all underlying amounts are NULL for a given group.
+        tests:
+          - not_null:
+              config:
+                severity: warn
+
+      - name: address_total
+        description: |
+          Total amount spent for this address across ALL sheet_name categories.
+          This is the sum of all total_amount values for the same customer_job.
+        tests:
+          - not_null
+
+    tests:
+      - unique:
+          column_name: "(customer_job || '|' || sheet_name)"

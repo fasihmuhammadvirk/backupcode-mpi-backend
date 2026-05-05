@@ -1,0 +1,24 @@
+Table: invoices
+Columns: id (UUID), date (DATE), filename (VARCHAR), supplier_id (INTEGER), status (VARCHAR), is_exported (VARCHAR), storage_path (VARCHAR)
+
+Key Business Info:
+- Contains invoice header information
+- Links to suppliers via supplier_id
+- Has many invoice_items via invoices.id = invoice_items.invoice_id
+- status: PROCESSED, PENDING, etc.
+- is_exported: Pending, Exported, etc.
+
+CRITICAL: For user queries about invoices, ALWAYS join with invoice_items to get ref_no and customer_job
+because users need this info to identify and understand invoices.
+
+Example intelligent query for "show invoices":
+SELECT DISTINCT i.date, s.supplier_name, i.status, i.is_exported, 
+       STRING_AGG(DISTINCT ii.ref_no, ', ') as ref_nos,
+       STRING_AGG(DISTINCT ii.customer_job, ', ') as customer_jobs
+FROM invoices i 
+JOIN suppliers s ON i.supplier_id = s.id 
+JOIN invoice_items ii ON i.id = ii.invoice_id 
+WHERE ii.is_active IS NOT FALSE
+GROUP BY i.id, i.date, s.supplier_name, i.status, i.is_exported
+ORDER BY i.date DESC;
+

@@ -10,6 +10,7 @@ class ItemsMapping(Base):
     id = Column(Integer, primary_key=True)
 
     google_sheet_name = Column(String)
+    sheet_id = Column(String)  # Google Sheets gid for tracking across renames
     mpi_code = Column(String)
     description = Column(String)
     supplier_item_ids = Column(String)

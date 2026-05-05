@@ -1,0 +1,8 @@
+I can help you find items! To narrow down the search, could you tell me:
+
+- **What kind of item?** (e.g., "copper pipe", "fittings")
+- **From which supplier/vendor?**
+- **For which customer job?**
+- **Date range?**
+
+What items are you looking for?

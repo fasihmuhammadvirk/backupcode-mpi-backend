@@ -1,0 +1,4 @@
+.env
+*.env.local
+*.bak
+docker-compose.override.yml

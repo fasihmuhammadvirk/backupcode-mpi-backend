@@ -1,0 +1,16 @@
+Table: invoice_items
+Columns: id, ref_no (VARCHAR), customer_job (VARCHAR), item (VARCHAR), description (VARCHAR), 
+         qty (INTEGER), cost (FLOAT), amount (VARCHAR), date (DATE), vendor (VARCHAR), 
+         export_status (VARCHAR), invoice_id (UUID), is_active (BOOLEAN)
+
+Key Business Info:
+- Contains individual line items from invoices
+- ref_no: Critical for identifying specific invoices/items
+- customer_job: Critical for project tracking
+- Links to invoices via invoice_id
+- is_active: TRUE/NULL = active, FALSE = deleted (always filter for active)
+
+Business Rules:
+- ALWAYS filter: WHERE is_active IS NOT FALSE (to exclude deleted items)
+- For financial calculations, amount field contains strings with commas
+

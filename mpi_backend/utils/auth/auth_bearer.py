@@ -1,6 +1,5 @@
 from fastapi import Request, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-import os
 
 from mpi_backend.utils.auth.auth_handler import decodeJWT
 
@@ -10,10 +9,6 @@ class JWTBearer(HTTPBearer):
         super(JWTBearer, self).__init__(auto_error=auto_error)
 
     async def __call__(self, request: Request):
-        # Bypass authentication during pytest runs to allow unit tests.
-        # Pytest exposes the PYTEST_CURRENT_TEST environment variable.
-        if os.getenv("PYTEST_CURRENT_TEST"):
-            return "test-token"
         credentials: HTTPAuthorizationCredentials = await super(
             JWTBearer, self
         ).__call__(request)

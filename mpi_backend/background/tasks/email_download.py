@@ -1,27 +1,37 @@
 """
 Email Download Task for Background Scheduler
-Downloads emails and processes invoices automatically
-"""
 
+Orchestrates two independent service phases:
+  1. Scan Gmail + download attachments to S3
+  2. Claim pending PDF extractions + run AI extraction
+
+Each phase is best-effort: extraction runs even if scan/download fails,
+because there may be previously-queued items waiting for extraction.
+"""
 import logging
+
+from mpi_backend.services.email_download_service import scan_and_download
+from mpi_backend.services.extraction_service import run_extraction_loop
 
 logger = logging.getLogger(__name__)
 
+
 def download_emails():
-    """Download emails and process invoices"""
+    """Download emails and process invoices."""
+    logger.info("Starting email download task")
+
+    # Scan + Download (best-effort)
     try:
-        logger.info("Starting email download task")
-        
-        # Import the actual invoice downloader logic
-        from mpi_backend.utils.invoice_downloader import (
-            email_download_background_task
-        )
-        
-        # Run the invoice downloader
-        email_download_background_task()
-        
-        logger.info("Email download task completed successfully")
-        
+        scan_download_result = scan_and_download()
+        logger.info("Scan/download complete: %s", scan_download_result)
     except Exception as e:
-        logger.error(f"Email download task failed: {e}")
-        raise
+        logger.exception("Scan/download phase failed: %s", e)
+
+    # Extraction (best-effort, runs regardless of phase 1 outcome)
+    try:
+        extraction_result = run_extraction_loop()
+        logger.info("Extraction complete: %s", extraction_result)
+    except Exception as e:
+        logger.exception("Extraction phase failed: %s", e)
+
+    logger.info("Email download task finished")

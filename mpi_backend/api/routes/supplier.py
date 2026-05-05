@@ -5,14 +5,17 @@ import logging
 from mpi_backend.database import get_db
 from mpi_backend.database.controllers.Suppliers import SupplierController
 from mpi_backend.utils.auth.auth_bearer import JWTBearer
+from mpi_backend.utils.auth.dependencies import get_current_user
 
 router = APIRouter(prefix="/supplier", tags=["Supplier"])
 logger = logging.getLogger(__name__)
 
 
 @router.get("")
-def get_supplier_list(db: Session = Depends(get_db), 
-                     token: str = Depends(JWTBearer())):
+def get_supplier_list(
+        db: Session = Depends(get_db),
+        current_user: str = Depends(get_current_user)
+):
     """
     Get all suppliers in the system.
     
@@ -64,7 +67,8 @@ def get_supplier_list(db: Session = Depends(get_db),
         - Integration with other API endpoints
         
     **Notes:**
-        - Returns all suppliers regardless of status
+        - Excludes system-level entries (Unknown, subject-resolved inboxes,
+          internal domains with only inactive email patterns)
         - Supplier IDs are converted to strings for consistency
         - Empty dictionary returned if no suppliers exist
         - Logs successful retrieval with count

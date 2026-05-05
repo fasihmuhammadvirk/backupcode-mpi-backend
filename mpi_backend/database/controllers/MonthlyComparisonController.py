@@ -30,6 +30,13 @@ class MonthlyComparisonController:
         # Otherwise assume it's a session factory
         return self.db_context()
 
+    @staticmethod
+    def _normalize_original_item(value: Optional[str]) -> str:
+        """Standardize supplier original item numbers for response payloads."""
+        if not value:
+            return ""
+        return value.strip()
+
     def get_items_in_date_range(
         self, 
         from_date: date, 
@@ -292,6 +299,7 @@ class MonthlyComparisonController:
                 # Get the lowest price per supplier for this item with supplier ID
                 supplier_prices = db.query(
                     InvoiceItem.vendor,
+                    InvoiceItem.item,
                     InvoiceItem.cost,
                     Supplier.id.label('supplier_id')
                 ).join(
@@ -310,17 +318,28 @@ class MonthlyComparisonController:
                 
                 if not supplier_prices:
                     continue
+                
+                suppliers = []
+                absolute_cheapest_price = None
+                absolute_cheapest_original_item = ""
+                
+                for vendor, original_item, cost, supplier_id in supplier_prices:
+                    if cost is None:
+                        continue
+                    normalized_original_item = self._normalize_original_item(original_item)
+                    suppliers.append(
+                        {
+                            "id": supplier_id,
+                            "name": vendor or "Unknown",
+                            "unit_price": format_currency(cost),
+                            "original_item": normalized_original_item
+                        }
+                    )
                     
-                # Format supplier prices with supplier ID
-                suppliers = [
-                    {
-                        "id": supplier_id,
-                        "name": vendor or "Unknown", 
-                        "unit_price": format_currency(cost)
-                    }
-                    for vendor, cost, supplier_id in supplier_prices
-                    if cost is not None
-                ]
+                    numeric_cost = float(cost)
+                    if absolute_cheapest_price is None or numeric_cost < absolute_cheapest_price:
+                        absolute_cheapest_price = numeric_cost
+                        absolute_cheapest_original_item = normalized_original_item
                 
                 # Sort suppliers by price (cheapest first)
                 suppliers.sort(key=lambda x: x["unit_price"])
@@ -330,6 +349,7 @@ class MonthlyComparisonController:
                     "mpi_item": item.mpi_item or "",
                     "original_item": item.original_item or "",
                     "mpi_description": item.mpi_description or "",
+                    "cheapest_original_item": absolute_cheapest_original_item,
                     "suppliers": suppliers
                 })
                 
@@ -389,19 +409,33 @@ class MonthlyComparisonController:
             
             # Use optimized SQL query to get all price data at once
             price_query = text("""
-                WITH supplier_prices AS (
+                WITH ranked_supplier_prices AS (
                     SELECT 
                         ii.mpi_item,
                         ii.vendor,
                         s.id as supplier_id,
-                        MIN(ii.cost) as min_cost
+                        ii.item as original_item,
+                        ii.cost,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY ii.mpi_item, ii.vendor
+                            ORDER BY ii.cost ASC, ii.date DESC, ii.id DESC
+                        ) AS price_rank
                     FROM invoice_items ii
                     LEFT JOIN suppliers s ON s.supplier_name = ii.vendor
                     WHERE ii.mpi_item = ANY(:mpi_items)
                     AND ii.cost IS NOT NULL 
                     AND ii.cost > 0
                     AND ii.vendor IS NOT NULL
-                    GROUP BY ii.mpi_item, ii.vendor, s.id
+                ),
+                supplier_prices AS (
+                    SELECT
+                        mpi_item,
+                        vendor,
+                        supplier_id,
+                        original_item,
+                        cost as min_cost
+                    FROM ranked_supplier_prices
+                    WHERE price_rank = 1
                 ),
                 item_cheapest AS (
                     SELECT 
@@ -414,6 +448,7 @@ class MonthlyComparisonController:
                     sp.mpi_item,
                     sp.vendor,
                     sp.supplier_id,
+                    sp.original_item,
                     sp.min_cost,
                     ic.absolute_cheapest_price
                 FROM supplier_prices sp
@@ -425,13 +460,26 @@ class MonthlyComparisonController:
             query_result = db.execute(price_query, {"mpi_items": mpi_items}).fetchall()
             
             # Group results by mpi_item for efficient processing
-            price_data = {}
+            price_data: Dict[str, Dict[str, Any]] = {}
             for row in query_result:
-                mpi_item, vendor, supplier_id, min_cost, absolute_cheapest = row
+                (
+                    mpi_item,
+                    vendor,
+                    supplier_id,
+                    original_item,
+                    min_cost,
+                    absolute_cheapest
+                ) = row
+                
+                normalized_original_item = self._normalize_original_item(original_item)
+                absolute_cheapest_value = float(absolute_cheapest) if absolute_cheapest is not None else None
+                min_cost_value = float(min_cost) if min_cost is not None else None
                 
                 if mpi_item not in price_data:
                     price_data[mpi_item] = {
                         'absolute_cheapest_price': format_currency(absolute_cheapest),
+                        'absolute_cheapest_price_value': absolute_cheapest_value,
+                        'absolute_cheapest_original_item': "",
                         'suppliers': []
                     }
                 
@@ -439,9 +487,18 @@ class MonthlyComparisonController:
                     SupplierPriceInfo(
                         id=supplier_id,
                         name=vendor or "Unknown",
-                        unit_price=format_currency(min_cost)
+                        unit_price=format_currency(min_cost),
+                        original_item=normalized_original_item
                     )
                 )
+                
+                if (
+                    price_data[mpi_item]['absolute_cheapest_original_item'] == ""
+                    and min_cost_value is not None
+                    and absolute_cheapest_value is not None
+                    and abs(min_cost_value - absolute_cheapest_value) < 0.0001
+                ):
+                    price_data[mpi_item]['absolute_cheapest_original_item'] = normalized_original_item
             
             # Build the result using the pre-processed data
             result = []
@@ -456,6 +513,7 @@ class MonthlyComparisonController:
                             original_item=item.original_item or "",
                             mpi_description=item.mpi_description or "",
                             cheapest_unit_price=data['absolute_cheapest_price'],
+                            cheapest_original_item=data['absolute_cheapest_original_item'],
                             suppliers=suppliers
                         )
                     )
@@ -468,6 +526,7 @@ class MonthlyComparisonController:
                             original_item=item.original_item or "",
                             mpi_description=item.mpi_description or "",
                             cheapest_unit_price=format_currency(0.0),
+                            cheapest_original_item="",
                             suppliers=[]
                         )
                     )
@@ -528,6 +587,7 @@ class MonthlyComparisonController:
                 # Get all prices for this item across all suppliers
                 all_prices = db.query(
                     InvoiceItem.vendor,
+                    InvoiceItem.item,
                     InvoiceItem.cost,
                     Supplier.id.label('supplier_id')
                 ).join(
@@ -543,30 +603,42 @@ class MonthlyComparisonController:
                 if not all_prices:
                     continue
                 
-                # Get the absolute cheapest price across all suppliers and dates
-                # Only consider prices greater than zero
-                absolute_cheapest_price = min([float(cost) for _, cost, _ in all_prices if cost is not None and float(cost) > 0])
+                # Track absolute cheapest price and original item across all suppliers
+                absolute_cheapest_price = None
+                absolute_cheapest_original_item = ""
                 
                 # Get the lowest price per supplier for this item
                 supplier_prices_dict = {}
-                for vendor, cost, supplier_id in all_prices:
-                    if vendor not in supplier_prices_dict or float(cost) < supplier_prices_dict[vendor][1]:
-                        supplier_prices_dict[vendor] = (supplier_id, float(cost))
+                for vendor, original_item, cost, supplier_id in all_prices:
+                    if cost is None:
+                        continue
+                    price_value = float(cost)
+                    if price_value <= 0:
+                        continue
+                    normalized_original_item = self._normalize_original_item(original_item)
+                    
+                    if absolute_cheapest_price is None or price_value < absolute_cheapest_price:
+                        absolute_cheapest_price = price_value
+                        absolute_cheapest_original_item = normalized_original_item
+                    
+                    if vendor not in supplier_prices_dict or price_value < supplier_prices_dict[vendor][1]:
+                        supplier_prices_dict[vendor] = (supplier_id, price_value, normalized_original_item)
                 
                 # Format supplier prices with supplier ID
                 suppliers = [
                     SupplierPriceInfo(
                         id=supplier_id,
                         name=vendor or "Unknown", 
-                        unit_price=format_currency(price)
+                        unit_price=format_currency(price),
+                        original_item=original_item_value
                     )
-                    for vendor, (supplier_id, price) in supplier_prices_dict.items()
+                    for vendor, (supplier_id, price, original_item_value) in supplier_prices_dict.items()
                 ]
                 
                 # Sort suppliers by price (cheapest first)
                 suppliers.sort(key=lambda x: x.unit_price)
                 
-                if not suppliers:
+                if not suppliers or absolute_cheapest_price is None:
                     continue
                 
                 # Create enriched response
@@ -577,6 +649,7 @@ class MonthlyComparisonController:
                         original_item=item.original_item or "",
                         mpi_description=item.mpi_description or "",
                         cheapest_unit_price=format_currency(absolute_cheapest_price),
+                        cheapest_original_item=absolute_cheapest_original_item,
                         suppliers=suppliers
                     )
                 )
@@ -698,6 +771,7 @@ class MonthlyComparisonController:
                 # Get all prices for this item across all suppliers within date range
                 all_prices = db.query(
                     InvoiceItem.vendor,
+                    InvoiceItem.item,
                     InvoiceItem.cost,
                     Supplier.id.label('supplier_id')
                 ).join(
@@ -721,36 +795,46 @@ class MonthlyComparisonController:
                             original_item=item.original_item or "",
                             mpi_description=item.mpi_description or "",
                             cheapest_unit_price=format_currency(0.0),
+                            cheapest_original_item="",
                             suppliers=[],
                         )
                     )
                     continue
 
                 # Absolute cheapest price across all suppliers and dates (> 0)
-                absolute_cheapest_price = min(
-                    [float(cost) for _, cost, _ in all_prices if cost is not None and float(cost) > 0]
-                )
+                absolute_cheapest_price = None
+                absolute_cheapest_original_item = ""
 
                 # Lowest price per supplier
                 supplier_prices_dict: Dict[str, Any] = {}
-                for vendor, cost, supplier_id in all_prices:
+                for vendor, original_item, cost, supplier_id in all_prices:
                     if cost is None:
                         continue
                     price_value = float(cost)
-                    if vendor not in supplier_prices_dict or price_value < supplier_prices_dict[vendor][1]:
-                        supplier_prices_dict[vendor] = (supplier_id, price_value)
+                    if price_value <= 0:
+                        continue
+                    normalized_original_item = self._normalize_original_item(original_item)
+                    if absolute_cheapest_price is None or price_value < absolute_cheapest_price:
+                        absolute_cheapest_price = price_value
+                        absolute_cheapest_original_item = normalized_original_item
+                    if (
+                        vendor not in supplier_prices_dict
+                        or price_value < supplier_prices_dict[vendor][1]
+                    ):
+                        supplier_prices_dict[vendor] = (supplier_id, price_value, normalized_original_item)
 
                 suppliers = [
                     SupplierPriceInfo(
                         id=supplier_id,
                         name=vendor or "Unknown",
-                        unit_price=format_currency(price)
+                        unit_price=format_currency(price),
+                        original_item=original_item_value
                     )
-                    for vendor, (supplier_id, price) in supplier_prices_dict.items()
+                    for vendor, (supplier_id, price, original_item_value) in supplier_prices_dict.items()
                 ]
 
                 suppliers.sort(key=lambda x: x.unit_price)
-                if not suppliers:
+                if not suppliers or absolute_cheapest_price is None:
                     continue
 
                 result.append(
@@ -760,6 +844,7 @@ class MonthlyComparisonController:
                         original_item=item.original_item or "",
                         mpi_description=item.mpi_description or "",
                         cheapest_unit_price=format_currency(absolute_cheapest_price),
+                        cheapest_original_item=absolute_cheapest_original_item,
                         suppliers=suppliers
                     )
                 )

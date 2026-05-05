@@ -1,0 +1,15 @@
+Table: supplier_item_mappings
+Columns: id (INTEGER), google_sheet_name (VARCHAR), mpi_code (VARCHAR), description (VARCHAR), supplier_item_ids (VARCHAR), supplier_id (INTEGER)
+
+Key Business Info:
+- Contains permanent mappings between supplier items and MPI codes
+- supplier_item_ids: The original supplier item code (like NHPT20-W)
+- mpi_code: The standardized MPI code
+- description: MPI description
+- supplier_id: Links to suppliers table
+- google_sheet_name: Source sheet for the mapping
+
+Business Rules:
+- Use supplier_item_ids for queries about specific item codes
+- These are permanent mappings (not temporary)
+

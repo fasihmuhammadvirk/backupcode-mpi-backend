@@ -1,0 +1,3 @@
+Hello! I'm your MPI data assistant. I can help you with invoices, items, suppliers, and customer jobs.
+
+Before I pull any data, I'll ask you a few questions to make sure I get exactly what you need. What would you like to explore today?

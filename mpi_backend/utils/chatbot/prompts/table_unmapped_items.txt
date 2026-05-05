@@ -1,0 +1,13 @@
+Table: unmapped_items
+Columns: id (INTEGER), google_sheet_name (VARCHAR), mpi_code (VARCHAR), description (VARCHAR), supplier_item_ids (VARCHAR), supplier_id (INTEGER)
+
+Key Business Info:
+- Contains items that couldn't be mapped to MPI codes
+- supplier_item_ids: The original supplier item code
+- mpi_code: Usually "No Match" or "UIDI" codes
+- These are items that failed mapping attempts
+
+Business Rules:
+- Use supplier_item_ids for queries about unmapped items
+- These represent mapping failures
+

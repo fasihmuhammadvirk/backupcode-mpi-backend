@@ -5,6 +5,40 @@ import re
 from typing import Dict, Tuple, Optional, List
 
 
+def is_empty_or_unassigned_sheet_name(sheet_name: Optional[str]) -> bool:
+    """
+    Check if a sheet name is empty or unassigned.
+    
+    A sheet name is considered empty/unassigned if:
+    - It is None
+    - It is an empty string ""
+    - It is "NO SHEET NAME" (case-insensitive)
+    
+    Args:
+        sheet_name: The sheet name to check
+        
+    Returns:
+        bool: True if the sheet name is empty or unassigned, False otherwise
+    """
+    if sheet_name is None:
+        return True
+    
+    if not isinstance(sheet_name, str):
+        return True
+    
+    stripped = sheet_name.strip()
+    
+    # Check for empty string
+    if stripped == "":
+        return True
+    
+    # Check for "NO SHEET NAME" (case-insensitive)
+    if stripped.upper() == "NO SHEET NAME":
+        return True
+    
+    return False
+
+
 # Define what constitutes temporary/placeholder mappings
 TEMPORARY_MPI_PATTERNS = [
     r'^UIDI',           # Any UIDI codes
@@ -83,18 +117,31 @@ def validate_mapping_for_permanent_storage(mapping_data: Dict) -> Tuple[bool, Li
         )
 
     # Modified validation: Allow empty MPI code if there's a valid description and supplier_item_ids
-    # This handles cases like FLUX9-F where MPI code is empty but item_code and description exist
+    # This handles cases where MPI code is empty but item code and description exist
     if not mpi_code:
-        # Only require MPI code if there's no description or supplier_item_ids
-        if not description or not supplier_item_ids:
+        # Require either description or supplier_item_ids (or both)
+        # If we have both description and supplier_item_ids, we can use supplier_item_ids as MPI code
+        if not description and not supplier_item_ids:
             errors.append(
-                "MPI code is required when description or supplier item IDs are missing")
+                "MPI code is required when both description and supplier item IDs are missing")
+        # If we have supplier_item_ids but no description, we still need description for a valid mapping
+        elif supplier_item_ids and not description:
+            errors.append(
+                "Description is required when MPI code is missing, even if supplier item IDs are present")
     else:
         # If MPI code exists, validate its format
-        if len(mpi_code.strip()) < 2:
+        # Allow single-character MPI codes if there's a valid description and supplier_item_ids
+        # This handles cases where MPI code is a single character with a valid item code pattern
+        if len(mpi_code.strip()) < 1:
             errors.append(
                 f"MPI code too short: '{mpi_code}' - may be placeholder"
             )
+        elif len(mpi_code.strip()) == 1:
+            # Single-character MPI codes are valid if there's a description and supplier item
+            if not description or not supplier_item_ids:
+                errors.append(
+                    f"Single-character MPI code '{mpi_code}' requires valid description and supplier item IDs"
+                )
 
     if not supplier_item_ids:
         errors.append("Supplier item IDs are required and cannot be empty")

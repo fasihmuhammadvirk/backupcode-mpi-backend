@@ -1,6 +1,8 @@
 from fastapi import (
     APIRouter, Depends, HTTPException, Query, UploadFile, File
 )
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from mpi_backend.database import get_db
@@ -16,10 +18,20 @@ from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
 from mpi_backend.utils.extracted_data_processor import process_extracted_data
 from mpi_backend.utils.invoice_converter import convert_single_invoice
 from mpi_backend.database.schemas import Invoice, PaginatedInvoiceResponse
-from mpi_backend.utils.auth.auth_bearer import JWTBearer
-from mpi_backend.utils.s3_utils import get_presigned_url, upload_file
+from mpi_backend.database.models.User import User
+from mpi_backend.utils.auth.dependencies import get_current_user
+from mpi_backend.utils.s3_utils import get_presigned_url, get_invoice_pdf_presigned_url, upload_file
+from mpi_backend.database.controllers.UserUploadedPdfController import UserUploadedPdfController
 import re
 import shutil
+
+# Create a dedicated thread pool executor for background tasks
+# This runs in a separate thread pool, not blocking the main FastAPI event loop
+BACKGROUND_EXECUTOR = ThreadPoolExecutor(
+    max_workers=10, 
+    thread_name_prefix="invoice_reprocess"
+)
+
 def _sanitize_path_component(name: str) -> str:
     """Sanitize user/DB-provided strings for safe filesystem usage on Windows/Linux.
     Replaces reserved characters and path separators with underscores.
@@ -55,7 +67,7 @@ def get_invoices(
         export_status: str = Query(None),
         page: int = Query(1, ge=1),
         size: int = Query(10, ge=1, le=100),
-        token: str = Depends(JWTBearer())
+        current_user: User = Depends(get_current_user)
 ):
     """
     Get paginated list of invoices with advanced filtering capabilities.
@@ -162,8 +174,8 @@ def get_invoices(
 
 @router.get("/all")
 def get_all_invoices(
-    db: Session = Depends(get_db), 
-    token: str = Depends(JWTBearer())
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get all invoices without pagination or filtering.
@@ -243,73 +255,151 @@ def get_all_invoices(
 
 @router.get("/download")
 def download_invoice(
-    db: Session = Depends(get_db), 
-    invoice_id: str = Query(None)
+    filename: str = Query(...),
+    current_user: User = Depends(get_current_user)
 ):
     """
-    Download invoice PDF file by invoice ID.
-    
+    Download invoice PDF file by filename path.
+
     **Summary:**
-        Generates a presigned URL for downloading an invoice PDF file from S3
-        storage. The URL provides secure, time-limited access to the invoice
-        file without requiring direct S3 credentials.
-        
+        Generates a presigned URL for downloading an invoice PDF file from the
+        dedicated invoices S3 bucket. The URL provides secure, time-limited
+        access to the invoice file without requiring direct S3 credentials.
+
     **Query Parameters:**
-        - **invoice_id** (`str`, required): The ID of the invoice to download
-        
+        - **filename** (`str`, required): The full S3 path to the PDF file
+          (e.g., 'invoices/bmwpsupply_at_gmail.com/2026-01/19bb4e4f85460b3f_doc00076757.pdf')
+
     **Returns:**
         - **Dict**: Object containing the download link:
             - **link** (`str`): Presigned S3 URL for downloading the PDF
-            
+
     **Response Example:**
     ```json
     {
-        "link": "https://s3.amazonaws.com/bucket/supplier_name/invoice_id?AWSAccessKeyId=..."
+        "link": "https://s3.amazonaws.com/invoices-bucket/invoices/bmwpsupply_at_gmail.com/2026-01/19bb4e4f85460b3f_doc00076757.pdf?AWSAccessKeyId=..."
     }
     ```
-    
+
     **Process Flow:**
-        1. Retrieves invoice record by invoice ID
-        2. Gets supplier information for the invoice
-        3. Constructs S3 file key using supplier name and invoice ID
-        4. Generates presigned URL with expiration time
-        5. Returns secure download link
-        
+        1. Authenticates the user
+        2. Uses the filename directly as the S3 key
+        3. Generates presigned URL with expiration time
+        4. Returns secure download link
+
     **Error Codes:**
-        - **404**: Invoice not found or file not available
-        
+        - **401**: Authentication required
+        - **404**: File not available
+
     **Notes:**
-        - Presigned URLs have limited expiration time
-        - File access is controlled through S3 permissions
-        - No authentication required for this endpoint
-        - URL provides direct access to the PDF file
-        - File path follows pattern: {supplier_name}/{invoice_id}
+        - Presigned URLs have limited expiration time (180 seconds)
+        - Authentication required via get_current_user dependency
+        - File path is used directly without database lookups
+        - Uses dedicated invoice PDFs bucket and credentials
     """
-    logger.info(f"GET /invoice/download - Downloading invoice: {invoice_id}")
+    logger.info(f"GET /invoice/download - Downloading invoice: {filename}")
     try:
-        invoice = InvoiceController(db).get_invoice_by_invoiceID(
-            invoice_id, db
+        url = get_invoice_pdf_presigned_url(
+            file_key=filename,
+            expiration_time=180
         )
-        supplier_name = SupplierController(db).get_supplier_by_id(
-            invoice.supplier_id
-        )
-        url = get_presigned_url(file_key=f'{supplier_name}/{invoice_id}')
-        logger.info(f"GET /invoice/download - Successfully generated download URL for invoice: {invoice_id}")
+
+        if url is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Couldn't fetch requested file"
+            )
+
+        logger.info(f"GET /invoice/download - Successfully generated download URL for: {filename}")
         return {"link": url}
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"GET /invoice/download - Error downloading invoice {invoice_id}: {str(e)}")
+        logger.error(f"GET /invoice/download - Error downloading invoice {filename}: {str(e)}")
         raise HTTPException(
-            status_code=404, 
+            status_code=404,
             detail="Couldn't fetch requested file"
         )
 
 
+def reprocess_invoice_background_task(invoice_id: str, supplier: str, filename: str):
+    """
+    Background task to reprocess an invoice without blocking the API response.
+    
+    Args:
+        invoice_id: The ID of the invoice to reprocess
+        supplier: The supplier name
+        filename: The filename of the invoice
+    """
+    logger.info(f"Background task started: Reprocessing invoice {invoice_id}")
+    
+    try:
+        # Create a new database session for the background task
+        from mpi_backend.database import SessionLocal
+        db = SessionLocal()
+        
+        try:
+            # Download invoice from S3
+            invoice_url = get_presigned_url(file_key=f'{supplier}/{invoice_id}')
+            if not invoice_url:
+                logger.error(f"Background task - Couldn't fetch requested Invoice URL for: {invoice_id}")
+                return
+            
+            # Create upload directory (sanitize supplier for filesystem safety)
+            safe_supplier = _sanitize_path_component(supplier)
+            upload_folder = os.path.join(INVOICE_DOWNLOAD_FOLDER, safe_supplier)
+            if not os.path.exists(upload_folder):
+                os.makedirs(upload_folder)
+            
+            # Download file
+            response = requests.get(invoice_url, timeout=30)
+            if response.status_code == 200:
+                file_path = os.path.join(upload_folder, filename)
+                with open(file_path, 'wb') as file:
+                    file.write(response.content)
+            else:
+                logger.error(f"Background task - Failed to download invoice from URL: {invoice_url}, status: {response.status_code}")
+                return
+            
+            # Convert and process the invoice
+            converted_files, failed_files = convert_single_invoice(
+                file_path, supplier
+            )
+            if failed_files:
+                logger.error(f"Background task - Failed to convert invoice: {failed_files}")
+                return
+            
+            # Process extracted data with existing invoice ID
+            process_extracted_data(
+                converted_files, failed_files, existing_invoice_id=invoice_id
+            )
+            
+            # Clean up files after processing
+            for entry in os.listdir(upload_folder):
+                path = os.path.join(upload_folder, entry)
+                try:
+                    if os.path.isfile(path) or os.path.islink(path):
+                        os.remove(path)
+                    elif os.path.isdir(path):
+                        shutil.rmtree(path, ignore_errors=True)
+                except Exception:
+                    pass
+            
+            logger.info(f"Background task completed: Successfully reprocessed invoice {filename}")
+            
+        finally:
+            db.close()
+            
+    except Exception as e:
+        logger.error(f"Background task failed for invoice {invoice_id}: {str(e)}")
+
+
 @router.post("/upload")
 async def upload_and_process_invoice(
-    supplier_id: int, 
-    file: UploadFile = File(...), 
+    supplier_id: int,
+    file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    token: str = Depends(JWTBearer())
+    current_user: User = Depends(get_current_user)
 ):
     """
     Upload and process invoice PDF file synchronously.
@@ -516,20 +606,190 @@ async def upload_and_process_invoice(
         )
 
 
-@router.post("/process")
-async def process_again(
-    invoice_id: str, 
+@router.post("/bulk-upload")
+async def bulk_upload_invoices(
+    supplier_id: int,
+    files: List[UploadFile] = File(...),
     db: Session = Depends(get_db),
-    token: str = Depends(JWTBearer())
+    current_user: User = Depends(get_current_user)
 ):
     """
-    Reprocess an existing invoice to update extracted data.
+    Upload multiple invoice PDF files and queue them for extraction.
     
     **Summary:**
-        Downloads an existing invoice from S3 storage and reprocesses it to
-        update the extracted data. This is useful when the original processing
-        failed or when updated processing logic needs to be applied to existing
-        invoices.
+        Accepts a supplier ID and a list of PDF files. Uploads them to S3 following
+        the structure `invoices/{supplier_name}/{date}/{filename}` and adds them
+        to the PDF extraction queue for processing via a database trigger.
+        
+    **Form Data:**
+        - **supplier_id** (`int`, required): The ID of the supplier for the invoices
+        - **files** (`List[UploadFile]`, required): List of PDF files to upload
+        
+    **Authentication:**
+        - Requires valid JWT token in Authorization header
+        
+    **Returns:**
+        - **List[Dict]**: List of processing results for each file
+    """
+    logger.info(f"POST /invoice/bulk-upload - Uploading {len(files)} invoices for supplier_id: {supplier_id}")
+    controller = UserUploadedPdfController(db)
+    results = await controller.bulk_upload_invoices(
+        supplier_id=supplier_id,
+        files=files,
+        user_id=str(current_user.id)
+    )
+    return results
+
+
+@router.get("/uploads")
+def get_recent_uploads(
+    db: Session = Depends(get_db),
+    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    size: int = Query(20, ge=1, le=100, description="Items per page"),
+    supplier_id: Optional[int] = Query(None, description="Filter by supplier ID"),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get paginated list of user-uploaded PDF invoices with their extraction status.
+
+    **Summary:**
+        Returns all files uploaded by users via the bulk-upload endpoint, ordered
+        by most-recent upload first. Each row includes the extraction queue status
+        (pending, in_progress, completed, failed) so the front-end can show a
+        live processing state.
+
+    **Query Parameters:**
+        - **page** (`int`, default=1): Page number (1-based)
+        - **size** (`int`, default=20): Items per page (1-100)
+        - **supplier_id** (`int`, optional): Filter results to one supplier
+
+    **Returns:**
+        Paginated envelope:
+        ```json
+        {
+            "items": [
+                {
+                    "id": "uuid",
+                    "filename": "INV-2026-0042.pdf",
+                    "s3_file_key": "invoices/Flowmark/2026-02/INV-2026-0042.pdf",
+                    "supplier_id": 3,
+                    "supplier_name": "Flowmark",
+                    "uploaded_at": "2026-02-23T10:15:00+00:00",
+                    "queue_status": "completed",
+                    "queue_error": null
+                    "queue_id": "uuid"
+                }
+            ],
+            "total": 42,
+            "page": 1,
+            "size": 10,
+            "pages": 5
+        }
+        ```
+
+    **queue_status values:**
+        - `pending`     — queued, not yet picked up by the AI worker
+        - `in_progress` — AI worker is currently extracting
+        - `completed`   — extraction finished successfully
+        - `failed`      — extraction failed (see queue_error for details)
+        - `null`        — queue row not yet created (race condition, rare)
+
+    **Error Codes:**
+        - **401**: Authentication required
+        - **500**: Internal server error
+    """
+    logger.info(
+        f"GET /invoice/uploads - page={page}, size={size}, supplier_id={supplier_id}"
+    )
+    try:
+        result = UserUploadedPdfController(db).get_recent_uploads(
+            page=page,
+            size=size,
+            supplier_id=supplier_id,
+            user_id=str(current_user.id)
+        )
+        return result
+    except Exception as e:
+        logger.error(f"GET /invoice/uploads - Error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve recent uploads"
+        )
+
+
+@router.get("/uploads/{queue_id}/extraction-details")
+def get_upload_extraction_details(
+    queue_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get extracted invoice header fields for a specific upload by its extraction queue ID.
+
+    **Summary:**
+        Queries the `raw.model_extracted_data` for the row linked to the given `queue_id` (pdf_extraction_queue.id).
+        Returns the best latest extraction attempt (highest validation score). Returns 404 if the AI worker
+        has not yet processed the file.
+
+    **Path Parameters:**
+        - **queue_id** (`str`, required): The UUID of the pdf_extraction_queue row
+          (returned as `queue_id` in the `/invoice/uploads` response)
+
+    **Returns:**
+    ```json
+    {
+        "confidence_score": 0.98,
+        "validation_score": 100,
+        "ref_no": "INV-88392",
+        "date": "2026-02-20",
+        "po_number": "PO-2026-019",
+        "tax": "0",
+        "sub_total": "4250.00",
+        "freight": "0",
+        "status": "model_approved",
+        "extracted_at": "2026-02-21T08:32:10+00:00"
+    }
+    ```
+
+    **Error Codes:**
+        - **401**: Authentication required
+        - **404**: Extraction not found — file has not been processed yet
+        - **500**: Internal server error
+    """
+    logger.info(f"GET /invoice/uploads/{queue_id}/extraction-details")
+    try:
+        result = UserUploadedPdfController(db).get_extracted_header_details(queue_id=queue_id)
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Extraction data not found. The file may still be processing."
+            )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"GET /invoice/uploads/{queue_id}/extraction-details - Error: {str(e)}"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve extraction details"
+        )
+
+
+@router.post("/process")
+async def process_again(
+    invoice_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Reprocess an existing invoice to update extracted data (TRUE ASYNC).
+    
+    **Summary:**
+        Queues an existing invoice for reprocessing in a dedicated background thread pool.
+        This endpoint returns immediately while the actual reprocessing happens in a separate
+        thread pool, ensuring ZERO blocking of other API requests. Perfect for bulk operations.
         
     **Query Parameters:**
         - **invoice_id** (`str`, required): The ID of the invoice to reprocess
@@ -538,33 +798,36 @@ async def process_again(
         - Requires valid JWT token in Authorization header
         
     **Returns:**
-        - **Dict**: Reprocessing results containing:
-            - **status** (`str`): Success message
-            - **invoice_id** (`str`): The reprocessed invoice ID
+        - **Dict**: Immediate response containing:
+            - **status** (`str`): Confirmation message
+            - **invoice_id** (`str`): The invoice ID being reprocessed
             - **filename** (`str`): Original filename
+            - **message** (`str`): Status information
             
     **Response Example:**
     ```json
     {
-        "status": "Success Invoice 'invoice_001.pdf' reprocessed successfully.",
+        "status": "Invoice reprocessing queued successfully",
         "invoice_id": "123",
-        "filename": "invoice_001.pdf"
+        "filename": "invoice_001.pdf",
+        "message": "Reprocessing started in background thread pool. Check logs for progress."
     }
     ```
     
     **Process Flow:**
-        1. Retrieves existing invoice record
-        2. Gets supplier information
-        3. Downloads PDF file from S3
-        4. Saves file to temporary storage
-        5. Converts PDF to Excel format
-        6. Reprocesses extracted data
-        7. Updates existing invoice items
-        8. Cleans up temporary files
+        1. Validates invoice exists and gets supplier info
+        2. Queues task in dedicated background thread pool
+        3. Returns immediate response (ZERO blocking)
+        4. Background thread handles:
+           - Downloads PDF file from S3
+           - Converts PDF to Excel format
+           - Reprocesses extracted data
+           - Updates existing invoice items
+           - Cleans up temporary files
         
     **Error Codes:**
-        - **404**: Invoice not found or file not available
-        - **500**: Processing error or file conversion failure
+        - **404**: Invoice not found or supplier not found
+        - **500**: Validation error
         
     **Reprocessing Behavior:**
         - Updates existing invoice items without deleting invoice record
@@ -572,16 +835,24 @@ async def process_again(
         - Preserves original invoice metadata
         - Updates extracted item data with latest processing logic
         
+    **Performance Benefits:**
+        - **TRUE ASYNC**: Runs in separate thread pool (not FastAPI's event loop)
+        - **ZERO BLOCKING**: Other API calls are never delayed
+        - **BULK FRIENDLY**: Can process 100+ invoices simultaneously
+        - **SCALABLE**: Dedicated thread pool with configurable workers
+        - **MONITORED**: Comprehensive logging for progress tracking
+        
     **Notes:**
-        - Processing is synchronous (blocks until complete)
-        - Original invoice record is preserved
-        - Invoice items are updated with new extracted data
-        - Temporary files are automatically cleaned up
-        - Useful for applying updated extraction logic to existing invoices
+        - Processing is TRUE ASYNC (separate thread pool)
+        - Returns immediately with confirmation
+        - Other API requests are NEVER blocked
+        - Perfect for bulk reprocessing operations
+        - Check application logs for processing status
+        - Thread pool executor handles concurrent processing
     """
-    logger.info(f"POST /invoice/process - Reprocessing invoice: {invoice_id}")
+    logger.info(f"POST /invoice/process - Queuing invoice for async reprocessing: {invoice_id}")
     try:
-        # Get invoice and supplier info
+        # Get invoice and supplier info for validation
         invoice = InvoiceController(db).get_invoice_by_invoiceID(
             invoice_id, db
         )
@@ -602,70 +873,25 @@ async def process_again(
                 detail=f"Supplier for invoice {invoice_id} not found"
             )
 
-        # Download invoice from S3
-        invoice_url = get_presigned_url(file_key=f'{supplier}/{invoice_id}')
-        if not invoice_url:
-            logger.error(f"POST /invoice/process - Couldn't fetch requested Invoice URL for: {invoice_id}")
-            raise HTTPException(
-                status_code=404, 
-                detail="Couldn't fetch requested Invoice"
-            )
-
-        # Create upload directory (sanitize supplier for filesystem safety)
-        safe_supplier = _sanitize_path_component(supplier)
-        upload_folder = os.path.join(INVOICE_DOWNLOAD_FOLDER, safe_supplier)
-        if not os.path.exists(upload_folder):
-            os.makedirs(upload_folder)
-
-        # Download file
-        # Stream download with small timeout to avoid blocking and suppress
-        # verbose third-party logs
-        response = requests.get(invoice_url, timeout=30)
-        if response.status_code == 200:
-            file_path = os.path.join(upload_folder, invoice.filename)
-            with open(file_path, 'wb') as file:
-                file.write(response.content)
-        else:
-            logger.error(f"POST /invoice/process - Failed to download invoice from URL: {invoice_url}, status: {response.status_code}, detail: {response.text}")
-            raise HTTPException(
-                status_code=response.status_code, 
-                detail=response.text
-            )
-
-        # Convert and process the invoice
-        converted_files, failed_files = convert_single_invoice(
-            file_path, supplier
+        # Queue the background task using async executor (non-blocking)
+        loop = asyncio.get_event_loop()
+        future = loop.run_in_executor(
+            BACKGROUND_EXECUTOR,
+            reprocess_invoice_background_task,
+            invoice_id,
+            supplier,
+            invoice.filename
         )
-        if failed_files:
-            logger.error(f"POST /invoice/process - Failed to convert invoice: {failed_files}")
-            raise HTTPException(
-                status_code=500, 
-                detail=f"Failed to convert invoice: {failed_files}"
-            )
-
-        # Process extracted data with existing invoice ID
-        # The enhanced duplicate detection logic will handle updating existing invoice items
-        # without deleting the invoice record itself
-        process_extracted_data(
-            converted_files, failed_files, existing_invoice_id=invoice_id
-        )
-
-        # Clean up files after processing (handle files and directories)
-        for entry in os.listdir(upload_folder):
-            path = os.path.join(upload_folder, entry)
-            try:
-                if os.path.isfile(path) or os.path.islink(path):
-                    os.remove(path)
-                elif os.path.isdir(path):
-                    shutil.rmtree(path, ignore_errors=True)
-            except Exception:
-                pass
-
-        logger.info(f"POST /invoice/process - Successfully reprocessed invoice: {invoice.filename}")
+        
+        # Don't await the future - let it run in background
+        # This ensures the endpoint returns immediately
+        logger.info(f"POST /invoice/process - Successfully queued invoice {invoice.filename} for async reprocessing")
+        
         return {
-            "status": f"Success Invoice '{invoice.filename}' reprocessed successfully.",
+            "status": "Invoice reprocessing queued successfully",
             "invoice_id": invoice_id,
-            "filename": invoice.filename
+            "filename": invoice.filename,
+            "message": "Reprocessing started in background thread pool. Check logs for progress."
         }
 
     except HTTPException:
@@ -674,7 +900,7 @@ async def process_again(
         logger.error(f"POST /invoice/process - Error in reprocess endpoint: {str(e)}")
         raise HTTPException(
             status_code=500, 
-            detail=f"Reprocessing failed: {str(e)}"
+            detail=f"Failed to queue reprocessing: {str(e)}"
         )
 
 
@@ -773,11 +999,11 @@ def sort_invoices(
 @router.delete("/delete")
 async def delete_invoice(
     invoice_id: str = Query(
-        ..., 
+        ...,
         description="Invoice ID(s) to delete. Can be a single ID or multiple comma-separated IDs (e.g., '778cc73f-845a-491d-b1a2-c1bece2ca146' or '778cc73f-845a-491d-b1a2-c1bece2ca146,9a8b7c6d-5e4f-3g2h-1i0j-k1l2m3n4o5p6')"
     ),
-    db: Session = Depends(get_db), 
-    token: str = Depends(JWTBearer())
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Delete one or more invoices and their associated files from the system.

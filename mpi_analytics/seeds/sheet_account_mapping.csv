@@ -1,0 +1,63 @@
+sheet_name,account_type,mpi_item_template
+HEAVY EQUIPMENT,E,UIDI - Job Equipment
+HOT WATER,E,UIDI - Job Equipment
+INJECTOR PUMPS,E,UIDI - Job Equipment
+LIGHT EQUIPMENT,E,UIDI - Job Equipment
+SPRINKLER EQUIPMENT,E,UIDI - Job Equipment
+WATER BOOSTER,E,UIDI - Job Equipment
+AIR FITTINGS,M,UIDI - Job Materials Purchased
+BLACK MALLEABLE - GAS,M,UIDI - Job Materials Purchased
+BLADES & BITS,M,UIDI - Job Materials Purchased
+BOXES,M,UIDI - Job Materials Purchased
+BRASS,M,UIDI - Job Materials Purchased
+CAST IRON - STEAM - SPRINKLER,M,UIDI - Job Materials Purchased
+CONTROLS,M,UIDI - Job Materials Purchased
+COPPER PRESS,M,UIDI - Job Materials Purchased
+COPPER,M,UIDI - Job Materials Purchased
+CPVC,M,UIDI - Job Materials Purchased
+DIELECTRIC FITTINGS,M,UIDI - Job Materials Purchased
+DRAINAGE,M,UIDI - Job Materials Purchased
+DRINKING,M,UIDI - Job Materials Purchased
+DUCKTILE,M,UIDI - Job Materials Purchased
+FINISHINGS,M,UIDI - Job Materials Purchased
+FIXTURES & MISCELLANEOUS,M,UIDI - Job Materials Purchased
+FLANGES,M,UIDI - Job Materials Purchased
+GALV FITTING,M,UIDI - Job Materials Purchased
+GARDEN HOSES,M,UIDI - Job Materials Purchased
+GAS,M,UIDI - Job Materials Purchased
+GASKETS,M,UIDI - Job Materials Purchased
+GAUGES,M,UIDI - Job Materials Purchased
+GROOVED FITTING,M,UIDI - Job Materials Purchased
+HANGERS AND FASTENERS,M,UIDI - Job Materials Purchased
+INSULATION,M,UIDI - Job Materials Purchased
+MISCELLANEOUS,M,UIDI - Job Materials Purchased
+NDS DRAINAGE,M,UIDI - Job Materials Purchased
+NIPPLES,M,UIDI - Job Materials Purchased
+NO-HUB COUPLINGS,M,UIDI - Job Materials Purchased
+NO-HUB PIPE & FITTINGS,M,UIDI - Job Materials Purchased
+PEX,M,UIDI - Job Materials Purchased
+PIPE JOINING MATERIALS,M,UIDI - Job Materials Purchased
+POLYPROPYLENE,M,UIDI - Job Materials Purchased
+PVC,M,UIDI - Job Materials Purchased
+RADIANT HEAT,M,UIDI - Job Materials Purchased
+SHOWER BODY,M,UIDI - Job Materials Purchased
+SIGNS,M,UIDI - Job Materials Purchased
+SLEEVES,M,UIDI - Job Materials Purchased
+SPACE HEATING,M,UIDI - Job Materials Purchased
+SPECIAL VALVES,M,UIDI - Job Materials Purchased
+SPRINKLER HEADS,M,UIDI - Job Materials Purchased
+SPRINKLER,M,UIDI - Job Materials Purchased
+SSDS,M,UIDI - Job Materials Purchased
+STAINLESS STEEL,M,UIDI - Job Materials Purchased
+STEEL PIPE,M,UIDI - Job Materials Purchased
+SV,M,UIDI - Job Materials Purchased
+TAPE,M,UIDI - Job Materials Purchased
+TESTING,M,UIDI - Job Materials Purchased
+TOOLS,M,UIDI - Job Materials Purchased
+TUB & MISCELLANEOUS,M,UIDI - Job Materials Purchased
+UNDERGROUND PVC FITTINGS,M,UIDI - Job Materials Purchased
+VALVES,M,UIDI - Job Materials Purchased
+VENT PIPE,M,UIDI - Job Materials Purchased
+WASTE,M,UIDI - Job Materials Purchased
+WATER MAIN,M,UIDI - Job Materials Purchased
+WELD FITTING,M,UIDI - Job Materials Purchased

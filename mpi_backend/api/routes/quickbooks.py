@@ -6,6 +6,7 @@ import pandas as pd
 import time
 import logging
 import traceback
+import os
 from contextlib import contextmanager
 from mpi_backend.database import get_qb_db
 from mpi_backend.database.controllers.InvoiceItems import InvoiceItemController
@@ -13,8 +14,15 @@ from mpi_backend.database.controllers.Invoice import InvoiceController
 from mpi_backend.database.controllers.ItemClassification import (
     ItemClassificationController
 )
-from mpi_backend.database.schemas import SendtoQBFilterRequest
-from mpi_backend.utils.s3_utils import upload_file, get_presigned_url
+from mpi_backend.database.controllers.QuickBooksController import QuickBooksController
+from mpi_backend.database.schemas import (
+    SendtoQBFilterRequest, 
+    QuickBooksPreviewItem, 
+    QuickBooksPreviewRequest, 
+    QuickBooksExportRequest,
+    QuickBooksUnprocessedDateRangeResponse
+)
+from mpi_backend.utils.s3_utils import upload_export_and_get_url
 from mpi_backend.utils.quickbooks_priority_controller import (
     pause_background_jobs,
     resume_background_jobs,
@@ -396,18 +404,158 @@ def immediate_status_update(all_item_ids_for_status: List,
         return results
 
 
+def process_qb_export_in_background(export_id: str, invoice_ids: List[UUID], order_by: list = None):
+    """
+    Background task to process large QuickBooks exports without blocking the request.
+    Updates status file with progress and final download URL.
+    Handles Cloudflare 100s timeout by processing asynchronously.
+    """
+    import json
+    from mpi_backend.database import SessionLocal
+    from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
+    from datetime import datetime
+    
+    export_status_file = f'{INVOICE_DOWNLOAD_FOLDER}/Exports/qb_status_{export_id}.json'
+    
+    try:
+        # Create new database session for background task
+        db = SessionLocal()
+        
+        # Update status to processing
+        with open(export_status_file, 'w') as f:
+            json.dump({
+                'status': 'processing',
+                'export_id': export_id,
+                'invoice_count': len(invoice_ids),
+                'started_at': datetime.now().isoformat(),
+                'message': 'QuickBooks export is being processed'
+            }, f)
+        
+        logger.info(f"QB Background Export {export_id}: Starting for {len(invoice_ids)} invoices")
+        
+        # Process with priority context
+        with safe_priority_context("migrate_all"):
+            # Use the ultra-fast migration function
+            download_url = migrate_invoice_to_QB_ultra_fast(
+                invoice_ids, 
+                db=db, 
+                operation_id=export_id,
+                background_tasks=None,  # No nested background tasks
+                update_mode="background",
+                item_order=None,
+                order_by=order_by
+            )
+        
+        # Update status to completed
+        with open(export_status_file, 'w') as f:
+            json.dump({
+                'status': 'completed',
+                'export_id': export_id,
+                'invoice_count': len(invoice_ids),
+                'started_at': datetime.now().isoformat(),
+                'completed_at': datetime.now().isoformat(),
+                'download_url': download_url,
+                'message': 'QuickBooks export completed successfully'
+            }, f)
+        
+        logger.info(f"QB Background Export {export_id}: Completed successfully")
+        db.close()
+        
+    except Exception as e:
+        logger.error(f"QB Background Export {export_id}: Failed - {str(e)}")
+        # Update status to failed
+        try:
+            with open(export_status_file, 'w') as f:
+                json.dump({
+                    'status': 'failed',
+                    'export_id': export_id,
+                    'error': str(e),
+                    'message': 'QuickBooks export failed'
+                }, f)
+        except Exception:
+            pass
+
+
+@router.get("/export-status/{export_id}")
+def get_qb_export_status(export_id: str):
+    """
+    Get the status of a QuickBooks export job.
+    
+    **Summary:**
+        Check the status of a background QuickBooks export and get the download URL when completed.
+        Used to handle large exports that exceed Cloudflare's 100s timeout.
+        
+    **Path Parameters:**
+        - **export_id** (`str`, required): The export ID returned from /quickbooks/migrate-all
+        
+    **Returns:**
+        - **dict**: Status information including:
+            - **status** (`str`): 'processing', 'completed', or 'failed'
+            - **export_id** (`str`): The export ID
+            - **download_url** (`str`, optional): S3 download URL (only when completed)
+            - **message** (`str`): Status message
+            
+    **Response Examples:**
+    
+    Processing:
+    ```json
+    {
+      "status": "processing",
+      "export_id": "qb_abc123",
+      "invoice_count": 5000,
+      "message": "QuickBooks export is being processed"
+    }
+    ```
+    
+    Completed:
+    ```json
+    {
+      "status": "completed",
+      "export_id": "qb_abc123",
+      "invoice_count": 5000,
+      "download_url": "https://s3.amazonaws.com/...",
+      "message": "QuickBooks export completed successfully"
+    }
+    ```
+    
+    Failed:
+    ```json
+    {
+      "status": "failed",
+      "export_id": "qb_abc123",
+      "error": "Error message",
+      "message": "QuickBooks export failed"
+    }
+    ```
+    """
+    import json
+    from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
+    
+    export_status_file = f'{INVOICE_DOWNLOAD_FOLDER}/Exports/qb_status_{export_id}.json'
+    
+    if not os.path.exists(export_status_file):
+        raise HTTPException(status_code=404, detail="Export ID not found")
+    
+    try:
+        with open(export_status_file, 'r') as f:
+            status_data = json.load(f)
+        return status_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading export status: {str(e)}")
+
+
 @router.post("/migrate-all")
 def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
                               background_tasks: BackgroundTasks,
                               db: Session = Depends(get_qb_db)):
     """
-    Migrate all filtered invoices to QuickBooks with ultra-fast processing.
+    Migrate all filtered invoices to QuickBooks with Cloudflare timeout handling.
     
     **Summary:**
         Exports all invoices matching the specified filter criteria to QuickBooks
-        format with ultra-fast processing and guaranteed status updates. This
-        endpoint is optimized for bulk operations and handles large datasets
-        efficiently with priority control over background jobs.
+        format. For large exports (>500 invoices), processing happens in the background
+        to avoid Cloudflare's 100-second timeout. Returns immediately with an export ID
+        for status tracking.
         
     **Request Body:**
         - **request** (`SendtoQBFilterRequest`): Filter criteria for selecting invoices:
@@ -415,105 +563,145 @@ def migrate_all_invoice_to_QB(request: SendtoQBFilterRequest,
             - **excluded_invoice_ids** (`List[str]`, optional): Invoice IDs to exclude
             - **order_by** (`List[dict]`, optional): Sorting criteria
             
-    **Background Tasks:**
-        - **background_tasks** (`BackgroundTasks`): FastAPI background tasks for async processing
-        
     **Returns:**
-        - **str**: Presigned S3 URL for downloading the QuickBooks Excel file
+        - For small exports (<500 invoices): **str** - Direct S3 download URL
+        - For large exports (>=500 invoices): **dict** - Export status with export_id
         
-    **Response Example:**
+    **Response Examples:**
+    
+    Small export (direct URL):
     ```json
     "https://s3.amazonaws.com/bucket/Exports/qb_export_20241219_143025.xlsx?AWSAccessKeyId=..."
     ```
     
+    Large export (background processing):
+    ```json
+    {
+      "export_id": "qb_abc123",
+      "status": "processing",
+      "invoice_count": 5000,
+      "message": "QuickBooks export is being processed. Use the export_id to check status.",
+      "status_endpoint": "/quickbooks/export-status/qb_abc123"
+    }
+    ```
+        
     **Process Flow:**
         1. Applies filter criteria to get matching invoice IDs
         2. Excludes specified invoice IDs if provided
-        3. Pauses all background jobs for absolute priority
-        4. Processes invoices with ultra-fast QuickBooks migration
-        5. Generates Excel file in QuickBooks format
-        6. Updates export statuses to 'Sent'
-        7. Resumes background jobs
-        8. Returns download URL
-        
-    **Priority Control:**
-        - **ABSOLUTE PRIORITY**: Pauses ALL background jobs during processing
-        - Ensures maximum system resources for QuickBooks migration
-        - Automatic resume of background jobs after completion
-        - Critical priority context management
+        3. For large exports: Returns immediately with export_id, processes in background
+        4. For small exports: Processes synchronously and returns download URL
+        5. Updates export statuses to 'Sent'
         
     **Performance Features:**
+        - Cloudflare 100s timeout handling with background processing
         - Ultra-fast data processing with vectorized operations
         - Optimized database queries for large datasets
-        - Fast Excel generation and S3 upload
-        - Immediate status updates for guaranteed consistency
+        - Automatic determination of sync vs async processing
+        - Real-time status tracking via status endpoint
         
     **Error Codes:**
         - **400**: No invoice IDs found for export
         - **500**: Processing or upload error
         
-    **Status Updates:**
-        - Invoice-level export status updated to 'Sent'
-        - Item-level export status updated to 'Sent'
-        - Immediate updates for guaranteed consistency
-        - Comprehensive status reporting
-        
     **Notes:**
-        - Designed for bulk operations with large datasets
-        - Uses absolute priority control over background jobs
-        - Guaranteed status updates before response
+        - Threshold: 500 invoices (sync vs async)
+        - Background exports provide status endpoint for polling
         - Excel file includes QuickBooks-compatible format
         - File is stored in S3 with timestamp for uniqueness
-        - Presigned URL has limited expiration time
-        - Automatic cleanup by S3 lifecycle policies
+        - Use /quickbooks/export-status/{export_id} to check progress
     """
     operation_start = time.time()
     operation_id = f"qb_migrate_all_{int(operation_start)}"
 
     logger.info(f"POST /quickbooks/migrate-all - Starting migrate-all operation: {operation_id}")
 
-    with safe_priority_context("migrate_all"):
-        try:
-            logger.info("QB Migrate-All: Starting ULTRA-FAST QuickBooks migration with guaranteed status updates")
+    try:
+        # Get filtered invoice IDs
+        filtered_data = InvoiceItemController(db).apply_filters(
+            request, page=1, size=0
+        )
+        invoice_ids = [item.invoice_id for item in filtered_data['items']]
+        if (not invoice_ids or len(invoice_ids) == 0):
+            # If no invoice_ids, fetch all matching invoice IDs from the DB (old behavior)
+            from mpi_backend.database.models import Invoice
+            query = db.query(Invoice.id)
+            # Optionally apply filters from request here if needed
+            invoice_ids = [row.id for row in query.all()]
+        
+        if request.excluded_invoice_ids:
+            invoice_ids = [
+                invoice_id for invoice_id in invoice_ids
+                if invoice_id not in request.excluded_invoice_ids
+            ]
+        invoice_ids = list(set(invoice_ids))
+        if not invoice_ids:
+            raise HTTPException(status_code=400, detail="No invoice IDs provided or found for export.")
 
-            filtered_data = InvoiceItemController(db).apply_filters(
-                request, page=1, size=0
-            )
-            invoice_ids = [item.invoice_id for item in filtered_data['items']]
-            if (not invoice_ids or len(invoice_ids) == 0):
-                # If no invoice_ids, fetch all matching invoice IDs from the DB (old behavior)
-                from mpi_backend.database.models import Invoice
-                query = db.query(Invoice.id)
-                # Optionally apply filters from request here if needed
-                invoice_ids = [row.id for row in query.all()]
+        logger.info(f"QB Migrate-All: Processing {len(invoice_ids)} invoices")
+
+        # CLOUDFLARE TIMEOUT HANDLING: For large exports, process in background
+        # Threshold: 500 invoices (estimated ~60-80s processing time)
+        if len(invoice_ids) >= 500:
+            import uuid
+            import json
+            from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
+            from datetime import datetime
             
-            if request.excluded_invoice_ids:
-                invoice_ids = [
-                    invoice_id for invoice_id in invoice_ids
-                    if invoice_id not in request.excluded_invoice_ids
-                ]
-            invoice_ids = list(set(invoice_ids))
-            if not invoice_ids:
-                raise HTTPException(status_code=400, detail="No invoice IDs provided or found for export.")
-
-            logger.info(f"QB Migrate-All: Processing {len(invoice_ids)} invoices with STATUS PRIORITY")
-
-            # ULTRA-FAST PROCESSING: Generate Excel and ensure status updates
+            # Generate unique export ID
+            export_id = f"qb_{str(uuid.uuid4())}"
+            export_status_file = f'{INVOICE_DOWNLOAD_FOLDER}/Exports/qb_status_{export_id}.json'
+            
+            # Create status file
+            os.makedirs(f'{INVOICE_DOWNLOAD_FOLDER}/Exports/', exist_ok=True)
+            with open(export_status_file, 'w') as f:
+                json.dump({
+                    'status': 'processing',
+                    'export_id': export_id,
+                    'invoice_count': len(invoice_ids),
+                    'started_at': datetime.now().isoformat(),
+                    'message': 'QuickBooks export is being processed in the background'
+                }, f)
+            
+            # Add background task
+            background_tasks.add_task(
+                process_qb_export_in_background,
+                export_id=export_id,
+                invoice_ids=invoice_ids,
+                order_by=getattr(request, 'order_by', None)
+            )
+            
+            logger.info(f"QB Migrate-All: Large export ({len(invoice_ids)} invoices) - processing in background with ID {export_id}")
+            
+            # Return immediately with export ID
+            return {
+                "export_id": export_id,
+                "status": "processing",
+                "invoice_count": len(invoice_ids),
+                "message": "QuickBooks export is being processed. Use the export_id to check status.",
+                "status_endpoint": f"/quickbooks/export-status/{export_id}"
+            }
+        
+        # For small exports, process synchronously (old behavior)
+        logger.info(f"QB Migrate-All: Small export ({len(invoice_ids)} invoices) - processing synchronously")
+        
+        with safe_priority_context("migrate_all"):
             result = migrate_invoice_to_QB_ultra_fast(
                 invoice_ids, db=db, operation_id=operation_id,
-                background_tasks=background_tasks, update_mode="immediate",
+                background_tasks=background_tasks, update_mode="background",
                 item_order=None,
                 order_by=getattr(request, 'order_by', None)
             )
 
             operation_time = time.time() - operation_start
-            logger.info(f"POST /quickbooks/migrate-all - Completed in {operation_time:.2f}s with status updates")
+            logger.info(f"POST /quickbooks/migrate-all - Completed in {operation_time:.2f}s")
             return result
 
-        except Exception as e:
-            operation_time = time.time() - operation_start
-            logger.error(f"POST /quickbooks/migrate-all - Failed after {operation_time:.2f}s: {str(e)}")
-            raise
+    except HTTPException:
+        raise
+    except Exception as e:
+        operation_time = time.time() - operation_start
+        logger.error(f"POST /quickbooks/migrate-all - Failed after {operation_time:.2f}s: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"QuickBooks export failed: {str(e)}")
 
 
 @router.post("/migrate")
@@ -655,6 +843,268 @@ async def migrate_invoice_to_QB(
             raise
 
 
+@router.get("/unprocessed-date-range", response_model=QuickBooksUnprocessedDateRangeResponse)
+def get_unprocessed_date_range(
+    db: Session = Depends(get_qb_db)
+):
+    """
+    Get the oldest and latest invoice date for unprocessed invoices.
+    
+    **Returns:**
+        - **oldest_date** (date): Date of the first unprocessed invoice
+        - **latest_date** (date): Date of the last unprocessed invoice
+    """
+    try:
+        controller = QuickBooksController(db)
+        return controller.get_unprocessed_date_range()
+    except Exception as e:
+        logger.error(f"GET /quickbooks/unprocessed-date-range - Failed: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch unprocessed date range: {str(e)}"
+        )
+
+
+@router.post("/preview-export", response_model=List[QuickBooksPreviewItem])
+def preview_quickbooks_export(
+    request: QuickBooksPreviewRequest,
+    db: Session = Depends(get_qb_db)
+):
+    """
+    Preview QuickBooks export data for frontend review and editing.
+
+    **Request Body:**
+        - **start_date** (date): Start date for invoice filtering
+        - **end_date** (date): End date for invoice filtering
+        - **invoice_filter** (str): "unprocessed" or "all"
+            - "unprocessed": Only items with export_status != 'Sent'
+            - "all": All items in date range
+
+    **Returns:**
+        - **List[QuickBooksPreviewItem]**: List of invoice line items with:
+            - Full QuickBooks account paths
+            - Tax amounts (8.875% rate)
+            - Tax-inclusive amounts
+            - Total rows for split invoices
+
+    **Response Example:**
+    ```json
+    [
+        {
+            "id": 123,
+            "invoice_id": "uuid",
+            "date": "01/20/2025",
+            "ref": "INV-SPLIT-01",
+            "filename": "invoice.pdf",
+            "vendor": "City Supplies",
+            "account": "UnInvoiced JIP:Cost Of Materials:Job Materials Purchased",
+            "customer_job": "Project Beta/Phase 1",
+            "class": "A",
+            "tax": 50.00,
+            "amount": 50.00,
+            "memo": "PVC Pipe",
+            "is_total_row": false
+        },
+        {
+            "id": 124,
+            "invoice_id": "uuid",
+            "date": "01/20/2025",
+            "ref": "INV-SPLIT-01",
+            "filename": "invoice.pdf",
+            "vendor": "City Supplies",
+            "account": "UnInvoiced JIP:Cost Of Materials:Job Equipment",
+            "customer_job": "Project Beta/Phase 1",
+            "class": "E",
+            "tax": 20.00,
+            "amount": 20.00,
+            "memo": "Excavator Rental",
+            "is_total_row": false
+        },
+        {
+            "id": null,
+            "invoice_id": "uuid",
+            "date": "01/20/2025",
+            "ref": "INV-SPLIT-01",
+            "filename": "invoice.pdf",
+            "vendor": "City Supplies",
+            "account": "UnInvoiced JIP:Cost Of Materials:Job Materials Purchased",
+            "customer_job": "Project Beta/Phase 1",
+            "class": "A",
+            "tax": 100.00,
+            "amount": 1100.00,
+            "memo": "INVOICE TOTAL",
+            "is_total_row": true
+        }
+    ]
+    ```
+
+    **Error Codes:**
+        - **500**: Processing error
+
+    **Notes:**
+        - Uses fixed 8.875% tax rate
+        - Splits invoices by account when needed
+        - Total row only added for split invoices
+        - Total row uses material account when available
+        - Finishings class gets separate row with Job Materials account
+    """
+    operation_start = time.time()
+    operation_id = f"qb_preview_{int(operation_start)}"
+    
+    logger.info(
+        f"POST /quickbooks/preview-export - Starting: {operation_id}, "
+        f"Date range: {request.start_date} to {request.end_date}, "
+        f"Filter: {request.invoice_filter}"
+    )
+    
+    try:
+        controller = QuickBooksController(db)
+        preview_items = controller.get_preview_export(
+            request.start_date,
+            request.end_date,
+            request.invoice_filter
+        )
+        
+        operation_time = time.time() - operation_start
+        logger.info(
+            f"POST /quickbooks/preview-export - Operation :{operation_id} Completed in {operation_time:.2f}s "
+            f"with {len(preview_items)} items"
+        )
+        
+        return preview_items
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        operation_time = time.time() - operation_start
+        logger.error(
+            f"POST /quickbooks/preview-export - Operation :{operation_id} Failed after {operation_time:.2f}s: {str(e)}"
+        )
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Preview generation failed: {str(e)}"
+        )
+
+@router.post("/update-preview", response_model=List[QuickBooksPreviewItem])
+def update_item_preview(
+    preview_items: List[QuickBooksPreviewItem],
+    db: Session = Depends(get_qb_db)
+):
+    """
+    Update QuickBooks preview items with new account or class assignments.
+    
+    **Request Body:**
+        - **items** (List[QuickBooksPreviewItem]): Edited items from frontend table
+        
+    **Response:**
+        - **List[QuickBooksPreviewItem]**: Updated items with new account paths and totals
+    """
+    operation_start = time.time()
+    operation_id = f"qb_preview_update_{int(operation_start)}"
+
+    logger.info(
+        f"POST /quickbooks/update-preview - Starting: {operation_id}"
+    )
+
+    try:
+        controller = QuickBooksController(db)
+        updated_items = controller.update_items_group(preview_items, True)
+
+        return updated_items
+    except HTTPException:
+        raise
+    except Exception as e:
+        operation_time = time.time() - operation_start
+        logger.error(
+            f"POST /quickbooks/update-preview - Operation :{operation_id} Failed after {operation_time:.2f}s: {str(e)}"
+        )
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Preview generation failed: {str(e)}"
+        )
+
+@router.post("/export-from-preview")
+def export_quickbooks_from_preview(
+    request: QuickBooksExportRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_qb_db)
+):
+    """
+    Export edited QuickBooks data to formatted Excel file.
+        
+    **Request Body:**
+        - **items** (List[QuickBooksPreviewItem]): Edited items from frontend table
+
+    **Response:**
+        - **Sync** (< 1000 items): Presigned S3 URL string
+        - **Async** (>= 1000 items): Dict with export_id and status endpoint
+        
+    **Excel Formatting:**
+        - Columns: Date, Ref, Vendor, Account, Customer Job, Class, Amount, Memo
+        
+    **Behavior:**
+        - Always updates export_status to 'Sent' for all exported items
+        - Total rows (id=null) are excluded from status update
+        
+    **Response Example (Sync)**:
+    ```
+    "https://s3.amazonaws.com/bucket/Exports/QuickBooks_2025-01-29_10-30-45.xlsx?..."
+    ```
+    
+    **Response Example (Async)**:
+    ```json
+    {
+        "export_id": "uuid",
+        "status": "processing",
+        "record_count": 1500,
+        "message": "Export is being processed. Use the export_id to check status.",
+        "status_endpoint": "/quickbooks/export-status/{export_id}"
+    }
+    ```
+    
+    **Error Codes:**
+        - **400**: No items provided or invalid data
+        - **500**: Export generation failed
+    """
+    operation_start = time.time()
+    operation_id = f"qb_export_{int(operation_start)}"
+    
+    logger.info(
+        f"POST /quickbooks/export-from-preview - Starting: {operation_id}, "
+        f"Items: {len(request.items)}"
+    )
+    
+    try:
+        controller = QuickBooksController(db)
+        result = controller.export_from_preview(
+            items=request.items,
+            background_tasks=background_tasks
+        )
+        
+        operation_time = time.time() - operation_start
+        logger.info(
+            f"POST /quickbooks/export-from-preview - Completed in {operation_time:.2f}s"
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        operation_time = time.time() - operation_start
+        logger.error(
+            f"POST /quickbooks/export-from-preview - Failed after {operation_time:.2f}s: {str(e)}"
+        )
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Export generation failed: {str(e)}"
+        )
+
+
 def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
                                      db: Session, operation_id: str,
                                      background_tasks: BackgroundTasks,
@@ -694,14 +1144,38 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
     # Get classification controller
     classification_controller = ItemClassificationController(db)
 
-    # Pre-build classification cache (vectorized)
-    unique_sheet_names = set(getattr(item, 'sheet_name', '') for item in invoice_items if getattr(item, 'sheet_name', '').strip())
+    # PERFORMANCE OPTIMIZATION: Batch fetch all classifications to avoid multiple queries
+    unique_sheet_names = set(getattr(item, 'sheet_name', '') or '' for item in invoice_items if (getattr(item, 'sheet_name', '') or '').strip())
     classification_cache = {'': '', None: ''}
-    for sheet_name in unique_sheet_names:
-        try:
-            classification_cache[sheet_name] = classification_controller.get_classification(sheet_name)
-        except Exception:
-            classification_cache[sheet_name] = ''
+    
+    if unique_sheet_names:
+        from mpi_backend.database.models.ItemClassification import ItemClassification
+        classifications = db.query(ItemClassification).filter(
+            ItemClassification.item.in_(unique_sheet_names)
+        ).all()
+        
+        for classification in classifications:
+            try:
+                # Map classification category to account
+                category = (classification.category or '').strip().upper()
+                if category == 'M':
+                    classification_cache[classification.item] = 'UnInvoiced JIP:Cost Of Materials:Job Materials Purchased'
+                elif category == 'E':
+                    classification_cache[classification.item] = 'UnInvoiced JIP:Cost Of Materials:Job Equipment'
+                elif category == 'A':
+                    classification_cache[classification.item] = 'UnInvoiced JIP:Subcontractors Expense:Labor & Material:Additional Material'
+                else:
+                    classification_cache[classification.item] = ''
+            except Exception:
+                classification_cache[classification.item] = ''
+        
+        # For any sheet names not found in batch query, use fallback
+        for sheet_name in unique_sheet_names:
+            if sheet_name not in classification_cache:
+                try:
+                    classification_cache[sheet_name] = classification_controller.get_classification(sheet_name)
+                except Exception:
+                    classification_cache[sheet_name] = ''
 
     # Pre-allocate lists for speed
     all_items_data = []
@@ -856,6 +1330,13 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
         df = df.sort_values(['id'])
 
     # --- Output account lines and total line for each invoice ---
+    # PERFORMANCE OPTIMIZATION: Fetch all invoices at once to avoid N+1 query problem
+    from mpi_backend.database.models import Invoice
+    all_invoices = db.query(Invoice).filter(
+        Invoice.id.in_(df['invoice_id'].unique())
+    ).all()
+    invoice_dict = {str(inv.id): inv for inv in all_invoices}
+    
     result_rows = []
     for invoice_id, invoice_items in df.groupby('invoice_id', sort=False):
         ref_no = invoice_items['ref_no'].iloc[0]
@@ -864,8 +1345,8 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
         memo = invoice_items['memo'].iloc[0]
         customer_job = invoice_items['customer_job'].iloc[0]
         tax_amount = invoice_items['tax_amount'].iloc[0]
-        from mpi_backend.database.models import Invoice
-        db_invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        # Use pre-fetched invoice dict instead of querying database
+        db_invoice = invoice_dict.get(str(invoice_id))
         if db_invoice and hasattr(db_invoice, 'amount') and db_invoice.amount is not None:
             authoritative_total = float(db_invoice.amount)
         else:
@@ -935,10 +1416,8 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
                     f"Generating Excel file with {len(final_batch_entry)} "
                     f"rows")
 
-    # FAST Excel generation and S3 upload
     excel_start = time.time()
 
-    # Use same fast method as export-all
     try:
         from mpi_backend.utils.pdf_to_excel.formatting_util import (
             save_ultra_fast_excel
@@ -956,24 +1435,22 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
         if not os.path.exists(upload_folder):
             os.makedirs(upload_folder)
 
-        # FAST Excel save
         save_ultra_fast_excel(final_batch_entry, file_path)
+    except Exception as excel_error:
+        logger.exception("Failed to generate QuickBooks Excel export")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate export",
+        ) from excel_error
 
-        # FAST S3 upload
-        upload_file(file_path, file_key=f'Exports/{filename}',
-                    is_invoice=False)
-        download_url = get_presigned_url(file_key=f'Exports/{filename}',
-                                         is_invoice=False)
-
-        # Clean up
-        try:
-            os.remove(file_path)
-        except OSError:
-            pass
-
+    try:
+        download_url = upload_export_and_get_url(file_path)
     except Exception as upload_error:
-        logger.error(f"S3 upload failed: {str(upload_error)}")
-        raise HTTPException(status_code=500, detail="Failed to upload to S3")
+        logger.exception("Failed to upload QuickBooks export to S3 or generate URL")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to upload to S3 or generate URL",
+        ) from upload_error
 
     logger.info(
         f"Excel and S3 upload in {time.time() - excel_start:.3f}s"
@@ -983,7 +1460,9 @@ def migrate_invoice_to_QB_ultra_fast(invoice_ids: List[UUID],
     update_progress(operation_id, "updating_statuses", 90,
                     f"CRITICAL: Updating statuses ({update_mode} mode)")
     
-    if update_mode == "immediate":
+    # If background_tasks is None, we're already in a background context
+    # so we must use immediate updates
+    if update_mode == "immediate" or background_tasks is None:
         # IMMEDIATE STATUS UPDATE - Guaranteed before return
         logger.info("CRITICAL: Performing IMMEDIATE status updates")
         status_results = immediate_status_update(

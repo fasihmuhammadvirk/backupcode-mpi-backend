@@ -1,0 +1,181 @@
+version: 2
+
+models:
+  - name: mart__invoice_items
+    description: |
+      Clean invoice items mart for reporting in Data Review page on the frontend.
+
+      This model is the final layer for invoice item data, building on all transformations from the
+      intermediate layer. It is materialized as a table with indexes for optimal query performance.
+
+      Columns that are `_normalized` may simply be replacing some characters by a single space, converting to
+      lowercase and truncating to 1000 characters. _May_ because `customer_job` is an address and it gets
+      normalized differently.
+
+      See `int__invoice_items` for the details on transformation and data cleaning.
+
+    columns:
+      - name: invoice_items_id
+        description: "Unique identifier for each invoice item (primary key)"
+        tests:
+          - not_null
+          - unique
+      - name: invoice_id
+        description: "Unique identifier that references an invoice PDF. TODO: Verify this is the case"
+        tests:
+          - not_null
+      - name: item
+        description: |
+          Item code with vendor-specific suffix for categorization.
+          - BMW vendors: suffix '-B'
+          - Y&S vendors: suffix '-Y'
+          - Others: no suffix (original item)
+      - name: description
+        description: "Item description from the invoice"
+      - name: mpi_item
+        description: "MPI standardized item classification"
+      - name: mpi_description
+        description: "MPI standardized item description"
+      - name: qty
+        description: The raw 'qty' in numeric. Use `rerated_qty` when displaying the Y & S BOX→EACH-corrected value.
+      - name: cost
+        description: The raw per-unit 'cost' in numeric. Use `rerated_cost` when displaying the Y & S BOX→EACH-corrected value.
+      - name: amount
+        description: The 'amount' in numeric. Preserved by rerating construction.
+
+      - name: rerated_cost
+        description: |
+          Per-unit cost after Y & S BOX→EACH rerating. Equals `cost` when
+          `is_price_rerated = FALSE`. The FE should prefer this over `cost`
+          when surfacing a corrected price.
+      - name: rerated_qty
+        description: |
+          Quantity after Y & S BOX→EACH rerating (multiplied by the rounded
+          BOX→EACH ratio so total spend is preserved). Equals `qty` when
+          `is_price_rerated = FALSE`.
+      - name: is_price_rerated
+        description: |
+          TRUE when this row's `rerated_cost` / `rerated_qty` differ from the
+          raw `cost` / `qty` because the Y & S UOM mismatch rule was tripped.
+          FE uses this to surface a tooltip.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: ref_no
+        description: "Reference number from the original invoice"
+        tests:
+          - not_null
+      - name: vendor
+        description: "Vendor name from the invoice"
+      - name: po_number
+        description: "The purchase order number"
+      - name: sheet_name
+        description: "The material type. TODO: Clarify why it's called sheet_name"
+      - name: buyer
+        description: "Buyer name or identifier"
+      - name: account
+        description: Original account classification from the invoice
+
+      - name: customer_job
+        description: |
+          Customer job address with company name/prefix removed.
+          Uses extracted address from int__customer_job_addresses when available,
+          falls back to normalized address otherwise.
+          Examples:
+          - "Mpi Plumbing 172-02 Hilside Ave. Jamaica Ny" → "172-02 Hilside Ave. Jamaica Ny"
+          - "Att: +1 (646) 708-4476 886 East 24 St. Brooklyn Ny" → "886 East 24 St. Brooklyn Ny"
+
+      - name: street_number
+        description: |
+          Extracted street number from customer_job.
+          Supports hyphenated formats like "172-02".
+          NULL if address could not be parsed.
+
+      - name: street_name
+        description: |
+          Extracted street name with type suffix (Ave., St., Blvd., etc.)
+          Examples: "Hillside Ave.", "Pine St.", "Cabrini Blvd."
+          NULL if could not be parsed.
+
+      - name: city
+        description: |
+          Extracted city name from customer_job.
+          Recognizes NYC boroughs (Brooklyn, Queens, Bronx, Manhattan, Staten Island)
+          and common NYC area cities (Jamaica, Flushing, Astoria, etc.)
+          NULL if could not be parsed.
+
+      - name: state
+        description: |
+          Extracted state abbreviation, normalized to standard format.
+          Currently supports: NY, NJ, CT
+          NULL if could not be determined.
+
+      - name: zip_code
+        description: |
+          Extracted 5-digit ZIP code (with optional +4 extension).
+          NULL if not present in the original address.
+
+      - name: address_confidence
+        description: |
+          Quality indicator for address extraction:
+          - high: Street number found AND state detected
+          - medium: Street number found but no state
+          - low: Could not identify standard address pattern
+          NULL if customer_job was empty or no extraction attempted.
+
+      - name: date
+        description: "Invoice date"
+        tests:
+          - not_null
+      # TODO: How is corrected amount used?
+      # - name: corrected_amount
+      #   description: |
+      #     Amount with sign correction for credit memos.
+      #     Credit memos (ref_no starting with 'CR-') have negative amounts.
+      #     Regular invoices use the original amount_numeric value.
+      - name: assigned_account
+        description: |
+          Auto-assigned account based on business rules hierarchy:
+          1. Preserve explicit 'A' designation
+          2. UIDI-specific mapping by mpi_item (M for materials, E for equipment)
+          3. Fuzzy mapping from sheet_name
+          4. Fallback to original account if exists
+          5. Default to NULL if no rule applies
+      - name: class_
+        description: "Purpose unknown. TODO: investigate"
+      - name: item_normalized
+        description: The 'item' column but normalized
+      - name: mpi_item_normalized
+        description: The 'item' column but normalized
+      - name: description_normalized
+        description: The 'description' column but normalized
+      - name: mpi_description_normalized
+        description: The 'mpi_description' column but normalized
+      - name: vendor_normalized
+        description: The 'vendor' column but normalized
+      - name: buyer_normalized
+        description: The 'buyer' column but normalized
+      - name: sheet_name_normalized
+        description: The 'sheet_name' column but normalized
+      - name: customer_job_normalized
+        description: The 'customer_job' column but normalized
+      - name: ref_no_normalized
+        description: |
+          Normalized reference number with leading zeros removed and standardized format.
+          Used for consistent duplicate detection and filtering.
+          Examples: "I-000987" -> "I-987", "066617" -> "66617"
+
+      - name: invoice_voided_at
+        description: |
+          Timestamp when the invoice was voided. NULL means the invoice is active.
+          Populated by dbt from public.invoice_voided on each run. The filter DAO
+          also live-joins public.invoice_voided so the UI shows void state
+          immediately without waiting for a dbt run.
+
+    tests:
+      # Ensure no duplicate IDs
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - invoice_items_id
+            - invoice_id

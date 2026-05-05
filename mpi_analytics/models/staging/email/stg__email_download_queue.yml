@@ -1,0 +1,35 @@
+version: 2
+
+sources:
+  - name: raw
+    tables:
+      - name: email_download_queue
+        description: "Email download queue with sender information for vendor mapping"
+
+models:
+  - name: stg__email_download_queue
+    description: |
+      Staged Email Download Queue
+
+      Source of truth for email download queue data used for email-based vendor resolution.
+      Data from raw.email_download_queue containing email metadata including sender information.
+
+      Data lineage:
+        raw.email_download_queue → THIS MODEL → int__model_extracted_data (vendor resolution)
+
+    columns:
+      - name: id
+        description: "The primary key for email download queue"
+        tests:
+          - unique
+          - not_null
+      - name: sender
+        description: "Email sender address used for vendor mapping"
+        tests:
+          - not_null
+      - name: status
+        description: "Email processing status (DOWNLOADED, FAILED, etc.)"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['DOWNLOADED', 'FAILED', 'PENDING', 'SKIPPED']

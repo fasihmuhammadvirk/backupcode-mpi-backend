@@ -1,0 +1,124 @@
+version: 2
+
+models:
+  - name: int__extracted_data_combined_compat
+    description: |
+      Intermediate Model: Extracted Data Combined - Compatibility Layer
+
+      This model adapts the new normalized extraction pipeline output (int__extracted_data_combined)
+      to match the schema expected by int__model_extracted_data, enabling downstream models
+      to work with either pipeline without changes.
+
+      **Key Features:**
+        - Maps new pipeline columns to old pipeline column names
+        - Applies email-derived vendor logic (same as int__model_extracted_data)
+        - Applies vendor suffix to items (same as int__model_extracted_data)
+        - Adds missing columns with NULL or default values
+        - Applies same filtering logic as old pipeline (validation, active status, etc.)
+        - Numeric casting and consistency checks
+
+      **Filtering Rules (same as old pipeline):**
+        - Only keep records where status = 'model_approved' OR validation_score > min_validation_score (project var)
+        - Only keep records where item is not empty
+        - Filter out descriptions starting with "invoice"
+        - Filter out date-like descriptions (MM/DD/YY pattern)
+        - Filter out question mark descriptions
+        - Filter out Y & S Plumbing Supply invoices before 04/22/2018
+
+      **Deduplication Rules (same as old pipeline):**
+        - Partition by: email_derived_vendor, ref_no, date, item_with_suffix
+        - Order by: date_added DESC, validation_score DESC, status DESC, invoice_items_id DESC
+        - Keep only the most recent extraction per logical invoice record
+
+      **Data Lineage:**
+        stg__extracted_global_fields + stg__extracted_line_items
+          → int__extracted_data_combined
+          → THIS MODEL (compatibility layer)
+          → int__extracted_data_switched (when data_source='model_extracted_data')
+          → int__invoice_items_mapped
+          → downstream...
+
+      **Note:** This is a compatibility layer for Phase 5 pipeline switching.
+      The old pipeline remains the default for backwards compatibility.
+
+    columns:
+      - name: invoice_items_id
+        description: Primary key - surrogate key for line items, deterministic key for tax records
+        tests:
+          - unique
+          - not_null
+      - name: filename
+        description: S3 file key (alias for compatibility with existing models)
+        tests:
+          - not_null
+      - name: item
+        description: |
+          Item code with vendor suffix applied.
+          For tax records: '10 Materials' with vendor suffix (e.g., '10 Materials-B').
+          For line items: Original item_code (or promoted description) with vendor suffix.
+
+          *Note: For PLUMBING EXCHANGE, the description is promoted to item code since they don't provide codes.*
+      - name: description
+        description: Item description - original value for line items, 'Tax' for tax records
+      - name: vendor
+        description: Email-derived vendor name (reliable, replaces OCR-extracted vendor)
+      - name: date
+        description: Invoice date
+      - name: ref_no
+        description: Invoice reference number (with 1- to I- correction applied)
+      - name: po_number
+        description: Purchase order number
+      - name: customer_job
+        description: Customer job reference
+      - name: buyer
+        description: Buyer name from invoice
+      - name: date_added
+        description: Timestamp when extraction occurred (alias for extracted_at)
+      - name: invoice_id
+        description: Extraction ID (mapped from extraction_id for compatibility)
+      - name: is_active
+        description: Always true for new pipeline records
+      - name: mpi_item
+        description: NULL (not available in new pipeline - use mapping tables)
+      - name: mpi_description
+        description: NULL (not available in new pipeline - use mapping tables)
+      - name: sheet_name
+        description: NULL (not available in new pipeline - use mapping tables)
+      - name: class_
+        description: NULL (not available in new pipeline)
+      - name: account
+        description: NULL (not available in new pipeline)
+      - name: export_status
+        description: NULL (not available in new pipeline)
+      - name: bill
+        description: Bill information from invoice
+      - name: memo
+        description: NULL (not available in new pipeline)
+      - name: model_name
+        description: AI model used for extraction (e.g., gemini-2.0-flash)
+      - name: status
+        description: Extraction status (human_review_required, model_approved, etc.)
+      - name: validation_score
+        description: Quality score from validation (0-100)
+      - name: confidence_score
+        description: Model confidence score (0-1)
+      - name: amount
+        description: Line total amount (numeric, safely cast from text)
+      - name: cost
+        description: Unit cost (numeric, 0 for tax records)
+      - name: qty
+        description: Quantity (numeric, NULL for tax records)
+      - name: amount_raw
+        description: Original amount value as text (for audit)
+      - name: cost_raw
+        description: Original cost value as text (for audit)
+      - name: qty_raw
+        description: Original qty value as text (for audit)
+      - name: is_amount_consistent
+        description: Whether qty * cost = amount (within 1 cent tolerance)
+      - name: amount_cents
+        description: Amount in cents (integer)
+      - name: cost_cents
+        description: Cost in cents (integer)
+      - name: line_order
+        description: Position of item in invoice (1-indexed, tax records appear last)

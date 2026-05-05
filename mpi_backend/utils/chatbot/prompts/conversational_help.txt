@@ -1,0 +1,16 @@
+I'm here to help you query your MPI data! Here's how to get the best results:
+
+**Be specific with your requests:**
+- Instead of "show me data" → "Show me invoices from ABC Supply for July 2024"
+- Instead of "export everything" → "Export items for customer job Smith Residence"
+
+**I can help you with:**
+- **Invoices**: "How many invoices from last month?" or "Show pending invoices"
+- **Items**: "Find items containing copper pipe" or "Total spent on materials"
+- **Suppliers**: "List all suppliers" or "Show invoices from Ferguson"
+- **Customer Jobs**: "What's the total for project ABC?" or "Items for Smith Residence"
+- **Exports**: "Show exported invoices" or "What's pending export?"
+
+**I'll always ask for clarification** if your request is too broad to ensure you get exactly what you need.
+
+What would you like to know?

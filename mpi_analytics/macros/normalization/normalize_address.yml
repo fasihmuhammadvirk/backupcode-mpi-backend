@@ -1,0 +1,23 @@
+version: 2
+
+macros:
+  - name: normalize_address
+    description: |
+      Normalizes address formatting by applying title case and normalizing street type abbreviations.
+
+      This macro ensures consistent address formatting across all records by:
+      1. Converting the address to title case (e.g., "MAIN STREET" -> "Main Street")
+      2. Normalizing street type abbreviations:
+         - "Street" -> "St."
+         - "Avenue" -> "Ave."
+         - "Road" -> "Rd."
+      3. Fixing incorrect punctuation (e.g., "St," -> "St.")
+      4. Fixing typos (e.g., Hilside -> Hillside)
+
+    arguments:
+      - name: address_column
+        type: string
+        description: The name of the address column to normalize (e.g., 'customer_job')
+
+    returns:
+      description: The normalized address string with title case and proper abbreviations

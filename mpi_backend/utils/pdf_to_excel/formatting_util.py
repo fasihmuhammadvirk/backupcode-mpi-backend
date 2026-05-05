@@ -1,6 +1,7 @@
 import pandas as pd
 from datetime import datetime
 import os
+from typing import List
 # import openpyxl
 
 
@@ -189,6 +190,17 @@ def save_final_data_fast(final_df, output_path):
         if 'Ref NO' in final_df.columns:
             final_df['Ref NO'] = final_df['Ref NO'].astype(str)
         
+        # Clean the number-related columns
+        # Remove commas and convert to numeric, convert errors (NaN) to 0
+        # TODO: If there are errors, we should color the cell to red
+        # TODO: Add all other number columns here then have the monetary ones have a separate handling of formatting
+        for col in ['Qty', 'Subtotal QTY']:
+            if col in final_df.columns:
+                final_df[col] = final_df[col].astype(str).str.replace(',', '', regex=False)
+                final_df[col] = pd.to_numeric(final_df[col], errors='coerce')
+                final_df[col] = final_df[col].fillna(0)
+                final_df[col] = final_df[col].astype(int)
+
         # Use xlsxwriter for better performance
         with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
             # Write data without formatting first
@@ -197,69 +209,45 @@ def save_final_data_fast(final_df, output_path):
             # Get workbook and worksheet
             workbook = writer.book
             worksheet = writer.sheets['Exported Data']
-            
-            # Force ref_no column to be treated as text in Excel (no visual changes)
+
+            # Force ref_no column to be treated as text in Excel
             if 'Ref NO' in final_df.columns:
                 ref_no_col_idx = final_df.columns.get_loc('Ref NO')
-                
+
                 # Create text format that prevents Excel from auto-converting
                 text_format = workbook.add_format({
                     'num_format': '@',  # @ = text format
                     'text_wrap': False,
                     'align': 'left'
                 })
-                
+
                 # Set column format
                 worksheet.set_column(ref_no_col_idx, ref_no_col_idx, 15, text_format)
-                
-                # Write header as text
+
+                # Write header
                 worksheet.write_string(0, ref_no_col_idx, 'Ref NO', text_format)
-                
-                # Write each ref_no value as text with explicit text format (invisible prefix to prevent Excel errors)
-                for row_idx, value in enumerate(final_df['Ref NO'], 1):  # Start from row 1 (skip header)
-                    # Add invisible non-breaking space to prevent Excel "Number Stored as Text" error
-                    text_value = str(value)
-                    if text_value.isdigit():
-                        text_value = '\u00A0' + text_value  # Non-breaking space (invisible)
-                    worksheet.write_string(row_idx, ref_no_col_idx, text_value, text_format)
+
+                # Write entire column at once
+                ref_no_values = [str(val) for val in final_df['Ref NO']]
+                worksheet.write_column(1, ref_no_col_idx, ref_no_values, text_format)
             
-            # Write amount column as numbers
-            if 'Amount' in final_df.columns:
-                amount_col_idx = final_df.columns.get_loc('Amount')
-                
-                # Write header
-                worksheet.write_string(0, amount_col_idx, 'Amount')
-                
-                # Write each amount value as number
-                for row_idx, value in enumerate(final_df['Amount'], 1):  # Start from row 1 (skip header)
-                    if pd.notna(value):
-                        # Remove commas and convert to float
-                        clean_value = str(value).replace(',', '')
-                        try:
-                            worksheet.write_number(row_idx, amount_col_idx, float(clean_value))
-                        except (ValueError, TypeError):
-                            worksheet.write_number(row_idx, amount_col_idx, 0)
-                    else:
-                        worksheet.write_number(row_idx, amount_col_idx, 0)
-            
-            # Write cost column as numbers
-            if 'Cost' in final_df.columns:
-                cost_col_idx = final_df.columns.get_loc('Cost')
-                
-                # Write header
-                worksheet.write_string(0, cost_col_idx, 'Cost')
-                
-                # Write each cost value as number
-                for row_idx, value in enumerate(final_df['Cost'], 1):  # Start from row 1 (skip header)
-                    if pd.notna(value):
-                        # Remove commas and convert to float
-                        clean_value = str(value).replace(',', '')
-                        try:
-                            worksheet.write_number(row_idx, cost_col_idx, float(clean_value))
-                        except (ValueError, TypeError):
-                            worksheet.write_number(row_idx, cost_col_idx, 0)
-                    else:
-                        worksheet.write_number(row_idx, cost_col_idx, 0)
+            # Write all monetary columns as formatted numbers
+            money_format = workbook.add_format({
+                'num_format': '#,##0.00',
+                'align': 'right',
+            })
+            for money_col in ('Amount', 'Cost', 'PPP', 'Total Amount'):
+                if money_col in final_df.columns:
+                    col_idx = final_df.columns.get_loc(money_col)
+                    for row_idx, value in enumerate(final_df[money_col], 1):
+                        if pd.notna(value):
+                            clean_value = str(value).replace(',', '')
+                            try:
+                                worksheet.write_number(row_idx, col_idx, float(clean_value), money_format)
+                            except (ValueError, TypeError):
+                                worksheet.write_number(row_idx, col_idx, 0, money_format)
+                        else:
+                            worksheet.write_blank(row_idx, col_idx, money_format)
             
             # Apply minimal formatting for better readability
             # Header format
@@ -299,7 +287,7 @@ def save_final_data_fast(final_df, output_path):
                     worksheet.set_column(col_num, col_num, 20)
                 elif column in ['Description', 'Customer Job', 'MPI Description']:
                     worksheet.set_column(col_num, col_num, 35) 
-                elif column in ['Cost', 'Amount']:
+                elif column in ['Cost', 'Amount', 'PPP', 'Total Amount']:
                     worksheet.set_column(col_num, col_num, 12)
                 elif column == 'Date':
                     worksheet.set_column(col_num, col_num, 12)
@@ -575,16 +563,23 @@ def export_batch_entry_to_excel(df, output_dir="mpi_backend/storage/Exports"):
     return file_path
 
 
-def export_price_history_to_excel(price_history, output_dir="mpi_backend/storage/Exports"):
+def export_price_history_to_excel(
+    price_history: List['PriceHistoryResponse'],
+    output_dir: str = "mpi_backend/storage/Exports"
+) -> str:
     """
-    Exports price history data to an Excel file with formatted headers using xlsxwriter.
+    Export price history to Excel with conditional formatting for price increases.
+    
+    The 'cost' field is the unit price, and is compared directly between purchases
+    to determine if there was a price increase. Increases are highlighted in red.
 
-    Parameters:
-        price_history (List[PriceHistoryResponse]): List of price history records
-        output_dir (str): Directory to save the file. Defaults to "mpi_backend/storage/Exports"
+    Args:
+        price_history (List[PriceHistoryResponse]): List of price history records to export.
+        output_dir (str, optional): Directory to save the Excel file. 
+            Defaults to "mpi_backend/storage/Exports".
 
     Returns:
-        str: The path of the generated Excel file.
+        str: The absolute path of the generated Excel file.
     """
     # Convert price history to DataFrame
     df = pd.DataFrame([{
@@ -592,10 +587,59 @@ def export_price_history_to_excel(price_history, output_dir="mpi_backend/storage
         'Date': item.date,
         'Cost': float(item.cost),
         'Quantity': item.qty,
+        'Memo': item.memo if item.memo else ""
     } for item in price_history])
 
     # Ensure the output directory exists
     os.makedirs(output_dir, exist_ok=True)
+
+    # Sort by date (newest to oldest) for display
+    # Handle invalid dates gracefully
+    def parse_date_safe(date_str: str) -> pd.Timestamp | None:
+        """
+        Parse date string safely, handling multiple formats and invalid values.
+        
+        Args:
+            date_str (str): Date string to parse. Can be in formats like:
+                           '%m-%d-%Y', '%m/%d/%Y', '%m/%d/%y', or '%Y-%m-%d'.
+                           May also contain 'Invalid date' or be null/empty.
+        
+        Returns:
+            pd.Timestamp | None: Parsed timestamp if successful, None if parsing fails
+                                or if input is invalid/empty.
+        
+        Examples:
+            >>> parse_date_safe("01-15-2024")
+            Timestamp('2024-01-15 00:00:00')
+            >>> parse_date_safe("Invalid date")
+            None
+            >>> parse_date_safe("")
+            None
+        """
+        try:
+            if pd.isna(date_str) or not date_str or date_str == 'Invalid date':
+                return None
+            
+            # Try parsing with different formats
+            date_formats = ['%m-%d-%Y', '%m/%d/%Y', '%m/%d/%y', '%Y-%m-%d']
+            for fmt in date_formats:
+                try:
+                    return pd.to_datetime(date_str, format=fmt)
+                except (ValueError, TypeError):
+                    continue
+            
+            return None
+        except Exception:
+            return None
+    
+    # Add sortable date column
+    df['date_obj'] = df['Date'].apply(parse_date_safe)
+    
+    # Sort: valid dates first (newest to oldest), then invalid dates
+    df['has_valid_date'] = df['date_obj'].notna()
+    df = df.sort_values(['has_valid_date', 'date_obj'], ascending=[False, False], na_position='last')
+    df = df.drop(['date_obj', 'has_valid_date'], axis=1)  # Remove temporary columns
+    df = df.reset_index(drop=True)
 
     # Generate a unique filename based on timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -620,11 +664,21 @@ def export_price_history_to_excel(price_history, output_dir="mpi_backend/storage
             "border": 1
         })
 
-        # Define number format for prices
+        # Define number format for prices (normal - black text)
         price_format = workbook.add_format({
             "num_format": "#,##0.00",
             "align": "right",
-            "border": 1
+            "border": 1,
+            "font_color": "black"
+        })
+
+        # Define number format for prices with increase (red text)
+        price_increase_format = workbook.add_format({
+            "num_format": "#,##0.00",
+            "align": "right",
+            "border": 1,
+            "font_color": "red",
+            "bold": True
         })
 
         # Define date format
@@ -652,18 +706,43 @@ def export_price_history_to_excel(price_history, output_dir="mpi_backend/storage
             "Quantity": 13,
         }
 
-        # Set column widths and formats
+        # Set column widths
         for col_num, column in enumerate(df.columns):
             width = column_widths.get(column, 15)  # Default width is 15 if not specified
             worksheet.set_column(col_num, col_num, width)
 
-            # Apply formats to entire columns
-            if column == "Cost":
-                worksheet.set_column(col_num, col_num, width, price_format)
-            elif column == "Date":
-                worksheet.set_column(col_num, col_num, width, date_format)
+        # Find the Cost column index
+        cost_col_idx = df.columns.get_loc('Cost')
+        
+        # Apply conditional formatting row by row for the Cost column
+        # Compare each entry with the chronologically PREVIOUS purchase (next row, since sorted newest first)
+        # Cost is already the unit price, no need to divide by quantity
+        for row_idx in range(len(df)):
+            excel_row = row_idx + 1  # +1 because Excel rows are 1-indexed and we have a header
+            current_price = df.iloc[row_idx]['Cost']
+            
+            # Compare with the next row (chronologically older purchase)
+            is_price_increase = False
+            if row_idx + 1 < len(df):
+                previous_price = df.iloc[row_idx + 1]['Cost']
+                is_price_increase = current_price > previous_price
+            
+            # Apply formatting based on price increase
+            if is_price_increase:
+                # Price increased - use red format
+                worksheet.write(excel_row, cost_col_idx, current_price, price_increase_format)
             else:
-                worksheet.set_column(col_num, col_num, width, cell_format)
+                # Price stayed same, decreased, or this is the last entry - use normal format
+                worksheet.write(excel_row, cost_col_idx, current_price, price_format)
+            
+            # Apply formats to other columns in this row
+            for col_idx, column in enumerate(df.columns):
+                if column != "Cost":  # We already handled Cost
+                    value = df.iloc[row_idx][column]
+                    if column == "Date":
+                        worksheet.write(excel_row, col_idx, value, date_format)
+                    else:
+                        worksheet.write(excel_row, col_idx, value, cell_format)
 
         worksheet.autofilter(0, 0, len(df.index), len(df.columns))
 

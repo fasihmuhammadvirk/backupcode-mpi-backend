@@ -1,0 +1,1 @@
+I can only query data, not modify it. Try asking about invoices, items, or suppliers instead.

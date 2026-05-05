@@ -1,0 +1,122 @@
+version: 2
+
+exposures:
+  - name: data_review_page
+    type: application
+    description: >
+      Main invoice browsing grid at /data-review. Supports filtering, sorting,
+      pagination, PDF export, supplier reports, bulk edits, and void/restore.
+      Backend: POST /filter, /filter/get_aggregates, /filter/by-column,
+      /invoice-items/export, /filter/export-pdfs, /filter/supplier-report/export.
+    url: https://invoxbooks.com/data-review
+    depends_on:
+      - ref('mart__invoice_items')
+      - ref('mart__price_increases')
+      - ref('mart__item_price_comparison')
+    owner:
+      name: MPI Engineering
+      email: engineering@mpi-plumbing.com
+
+  - name: mappings_page
+    type: application
+    description: >
+      Unmapped items management at /mappings. Shows unmapped invoice items,
+      mapping types, graph stats, mapping history timeline, and Google Sheet sync.
+      Backend: /filter/unmapped-items, /mapping/mapping_types,
+      /filter/unmapped-items/graph-stats, /mapping-history/item.
+    url: https://invoxbooks.com/mappings
+    depends_on:
+      - ref('mart__invoice_items_map')
+      - ref('mart__item_mapping_timeline')
+    owner:
+      name: MPI Engineering
+      email: engineering@mpi-plumbing.com
+
+  - name: price_changes_page
+    type: application
+    description: >
+      Price change analysis at /price-changes and /price-changes/detail.
+      Displays price increases and decreases over time per item-vendor pair,
+      with drill-down into price history.
+      Backend: POST /filter (price-change mode), /filter/price-history,
+      /filter/download-price-history.
+    url: https://invoxbooks.com/price-changes
+    depends_on:
+      - ref('mart__invoice_items')
+      - ref('mart__price_increases')
+    owner:
+      name: MPI Engineering
+      email: engineering@mpi-plumbing.com
+
+  - name: analysis_page
+    type: analysis
+    description: >
+      Job-location cost analysis at /analysis. Shows cost breakdown by address
+      and sheet (material type) with chart visualizations.
+      Backend: POST /filter/aggregates-by-address-and-sheet,
+      GET /filter/get-locations.
+    url: https://invoxbooks.com/analysis
+    depends_on:
+      - ref('mart__invoice_items')
+      - ref('mart__address_sheet_aggregates')
+    owner:
+      name: MPI Engineering
+      email: engineering@mpi-plumbing.com
+
+  - name: supplier_comparison_page
+    type: analysis
+    description: >
+      Supplier comparison at /supplier-comparison. Compares item prices across
+      suppliers with summary stats and exportable tables.
+      Backend: POST /supplier-comparison/summary, /supplier-comparison/table,
+      /supplier-comparison/export.
+    url: https://invoxbooks.com/supplier-comparison
+    depends_on:
+      - ref('mart__item_price_comparison')
+    owner:
+      name: MPI Engineering
+      email: engineering@mpi-plumbing.com
+
+  - name: purchase_order_page
+    type: application
+    description: >
+      Purchase order price comparison at /purchase-order. Lets users upload or
+      select PO items and compare against historical pricing.
+      Backend: POST /purchase-orders/price-comparison.
+    url: https://invoxbooks.com/purchase-order
+    depends_on:
+      - ref('mart__item_price_comparison')
+    owner:
+      name: MPI Engineering
+      email: engineering@mpi-plumbing.com
+
+  - name: quickbooks_export_page
+    type: application
+    description: >
+      QuickBooks export workflow at /quickbooks-export. Previews invoice data,
+      lets users edit before export, and pushes to QuickBooks.
+      Backend: POST /quickbooks/preview-export, /quickbooks/export-from-preview,
+      GET /quickbooks/unprocessed-date-range.
+    url: https://invoxbooks.com/quickbooks-export
+    depends_on:
+      - ref('mart__invoice_items')
+      - ref('mart__quickbooks_preview')
+    owner:
+      name: MPI Engineering
+      email: engineering@mpi-plumbing.com
+
+  - name: ai_chatbot
+    type: application
+    description: >
+      AI-powered Q&A chatbot embedded in the legacy data review page.
+      Lets users explore invoice data with natural language queries.
+      Uses MartQueryExecutor to run validated SQL against mart tables.
+      Backend: POST /qa/query.
+    url: https://invoxbooks.com/data-review-old
+    depends_on:
+      - ref('mart__invoice_items')
+      - ref('mart__price_increases')
+      - ref('mart__address_sheet_aggregates')
+    owner:
+      name: MPI Engineering
+      email: engineering@mpi-plumbing.com

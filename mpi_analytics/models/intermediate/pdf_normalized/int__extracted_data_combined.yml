@@ -1,0 +1,128 @@
+version: 2
+
+models:
+  - name: int__extracted_data_combined
+    description: |
+      Intermediate Model: Combined Line Items, Tax, Freight, and Misc Charge Records
+
+      Combines global fields + line items + tax + freight + misc charges as records
+      from the new normalized extraction pipeline (raw.model_extracted_data).
+
+      **Key Features:**
+        - Joins global fields with line items
+        - Creates tax records as separate rows (item='10 Materials', description='Tax')
+        - Creates freight records as separate rows (item='FREIGHT', description='Freight')
+        - Creates misc charge records by unnesting the misc_charges array (e.g. RETURN FEE, RESTOCK FEE)
+        - Adds record_type column to distinguish 'line_item' vs 'tax' vs 'freight' vs 'misc_charge'
+
+      **Business Rules:**
+        - One tax record per invoice
+        - One freight record per invoice
+        - Zero or more misc charge records per invoice (one per entry in misc_charges array)
+        - Tax records have item='10 Materials' (to match existing Flow Mark mapping)
+        - Freight records have item='FREIGHT' (to match existing item mapping)
+        - Misc charge records have item=UPPER(label) from the misc_charges array
+        - Tax records have line_order = line_item_count + 1 (after all line items)
+        - Freight records have line_order = line_item_count + 2 (after tax)
+        - Misc charge records have line_order = line_item_count + 2 + N (after freight)
+        - If the PDF is of type credit (ref no starts with CR) then the amounts should be negative. Tax amount
+          should also be negative. Note: The PDF may or may not have a `-` in the amount, the rule is that
+          regardless, we add the negative sign to the amounts found in the PDF
+
+      **Architecture Benefits:**
+        - Uses new normalized structure (one row per extraction in raw table)
+        - Reduced data duplication vs old denormalized approach
+        - Clear separation: raw → staging (parse) → intermediate (combine/enrich)
+        - Supports incremental processing
+
+      Data lineage:
+        raw.model_extracted_data → stg__extracted_global_fields + stg__extracted_line_items
+          → THIS MODEL → downstream models (int__extracted_data_deduped, etc.)
+
+    columns:
+      - name: invoice_items_id
+        description: |
+          Primary key - surrogate key for line items (extraction_id + line_order),
+          deterministic key for tax (extraction_id + 'tax'), freight (extraction_id + 'freight'),
+          and misc charge records (extraction_id + 'misc' + ordinal).
+        tests:
+          - unique
+          - not_null
+      - name: extraction_id
+        description: Foreign key to stg__extracted_global_fields (raw.model_extracted_data.id)
+        tests:
+          - not_null
+      - name: s3_file_key
+        description: S3 path to the source PDF file
+      - name: filename
+        description: Alias for s3_file_key (compatibility with existing models)
+      - name: pdf_extraction_queue_id
+        description: Foreign key to pdf_extraction_queue table
+      - name: email_queue_id
+        description: Foreign key to email_download_queue table (used for vendor resolution)
+      - name: ref_no
+        description: Invoice reference number
+      - name: date
+        description: Invoice date
+      - name: vendor
+        description: Vendor name from invoice (OCR-extracted, may be unreliable - use email_derived_vendor downstream)
+      - name: buyer
+        description: Buyer name from invoice
+      - name: po_number
+        description: Purchase order number
+      - name: customer_job
+        description: Customer job reference
+      - name: bill
+        description: Bill information
+      - name: item
+        description: |
+          Item code - original value for line items, '10 Materials' for tax, 'FREIGHT' for freight,
+          UPPER(label) for misc charges. Item cleaning (leading-digit strip and
+          Flow Mark/Supreme first-word split) is applied in int__extracted_data_items_cleaned.
+
+          **Promotion Rules:**
+          - **Fee/Surcharge Rows:** If item_code, qty, and cost are all empty but description and amount exist,
+            the description is promoted to the item field (e.g., "Gas Surcharge"). This ensures downstream
+            processes (like vendor suffixing) make the row matchable.
+          - **PLUMBING EXCHANGE:** These invoices don't provide item codes. The description field is
+            promoted to the item field whenever the item code is missing.
+      - name: description
+        description: Item description - original value for line items, 'Tax'/'Freight'/label for synthetic records
+      - name: qty
+        description: Quantity (as text) - NULL for tax/freight/misc_charge records
+      - name: cost
+        description: Unit cost (as text) - NULL for tax/freight/misc_charge records
+      - name: amount
+        description: Line total amount (as text) - original amount for line items, respective value for synthetic records
+      - name: line_order
+        description: |
+          Position of item (1-indexed for line items, +1 for tax, +2 for freight, +2+N for misc charges).
+          Used for deterministic ordering and display.
+        tests:
+          - not_null
+      - name: model_name
+        description: AI model used for extraction (e.g., gemini-2.0-flash)
+      - name: status
+        description: Extraction status (human_review_required, model_approved, etc.)
+      - name: validation_score
+        description: Quality score from validation (0-100)
+      - name: confidence_score
+        description: Model confidence score (0-1)
+      - name: extracted_at
+        description: Timestamp when extraction occurred
+      - name: date_added
+        description: Alias for extracted_at (compatibility with existing models)
+      - name: global_tax
+        description: Tax amount from global fields (for reference)
+      - name: sub_total
+        description: Sub-total from global fields
+      - name: freight
+        description: Freight/shipping from global fields
+      - name: line_item_count
+        description: Total number of line items in this extraction
+      - name: record_type
+        description: Type of record - 'line_item', 'tax', 'freight', or 'misc_charge'
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['line_item', 'tax', 'freight', 'misc_charge']

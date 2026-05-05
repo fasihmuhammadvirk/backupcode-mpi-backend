@@ -1,0 +1,13 @@
+version: 2
+
+macros:
+  - name: address_typo_map
+    type: dictionary
+    description: |
+        A map from typo to correct values. Where the typos are a list and the correct values are 
+        the keys
+
+        Details:
+          - 370nostranave, the invoice PDF says 370 nostran ave, it should be mapped to 270 (unique typo)
+
+

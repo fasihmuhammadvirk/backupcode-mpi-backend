@@ -1,0 +1,13 @@
+version: 2
+
+models:
+  - name: int__email_vendor_mapping
+    description: "Intermediate model to map email queue IDs to derived vendor names."
+    columns:
+      - name: email_queue_id
+        description: "The unique identifier for the email queue entry."
+        tests:
+          - unique
+          - not_null
+      - name: email_derived_vendor
+        description: "The vendor name derived from the email sender, with subject-based fallback for forwarded emails (e.g., invoicefwdmpi@gmail.com)."

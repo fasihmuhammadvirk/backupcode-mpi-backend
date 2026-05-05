@@ -2,7 +2,7 @@ import os
 import sys
 from datetime import datetime, date
 from calendar import monthrange
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Generator
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, select
 from math import ceil
@@ -20,6 +20,24 @@ from mpi_backend.database.models.MonthlyStatement import (
 from mpi_backend.database.models.Invoice import Invoice
 from mpi_backend.database.models.InvoiceItems import InvoiceItem
 from mpi_backend.utils.number_formatter import format_currency
+
+# Query type constants
+QUERY_TYPE_PROCESSED_FAILED: str = 'processed_failed'
+QUERY_TYPE_UNLISTED: str = 'unlisted'
+QUERY_TYPE_MISSING: str = 'missing'
+QUERY_TYPE_ALL_COMBINED: str = 'all_combined'
+
+# Status constants
+STATUS_ALL: str = "all"
+STATUS_PROCESSED: str = "processed"
+STATUS_FAILED: str = "failed"
+STATUS_UNLISTED: str = "unlisted"
+STATUS_MISSING: str = "missing"
+STATUS_MISSING_SYSTEM: str = "missing system"
+STATUS_MISSING_STATEMENT: str = "missing statement"
+
+# Invoice constants
+INVOICE_NUMBER_MISSING: str = "MISSING"
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +245,7 @@ class StatementController:
                 # Check each invoice in the statement
                 for stmt_invoice in statement_invoices:
                     # Apply status filter if provided
-                    if status and status.lower() != 'all':
+                    if status and status.lower() != STATUS_ALL:
                         # We'll determine status based on matching
                         pass
 
@@ -252,10 +270,10 @@ class StatementController:
                     }
 
                     # Apply status filter
-                    if status and status.lower() != 'all':
-                        if status.lower() == 'processed' and not match_result['matched']:
+                    if status and status.lower() != STATUS_ALL:
+                        if status.lower() == STATUS_PROCESSED and not match_result['matched']:
                             continue
-                        elif status.lower() == 'failed' and match_result['matched']:
+                        elif status.lower() == STATUS_FAILED and match_result['matched']:
                             continue
 
                     statement_result['invoices'].append(invoice_result)
@@ -320,7 +338,7 @@ class StatementController:
         try:
             query = self.db.query(PlumbingStatement).join(PlumbingSupplier)
 
-            if supplier_id:
+            if supplier_id is not None:
                 query = query.filter(
                     PlumbingStatement.supplier_id == supplier_id)
 
@@ -369,7 +387,7 @@ class StatementController:
             from mpi_backend.database.models.Invoice import Invoice
 
             # Handle special status filters BEFORE executing query
-            if status and status.lower() == "unlisted":
+            if status and status.lower() == STATUS_UNLISTED:
                 return self.get_unlisted_invoices(
                     from_date=from_date,
                     to_date=to_date,
@@ -377,9 +395,9 @@ class StatementController:
                     page=page,
                     page_size=page_size
                 )
-            if status and (status.lower() == "missing" or
-                           status.lower() == "missing system" or
-                           status.lower() == "missing statement"):
+            if status and (status.lower() == STATUS_MISSING or
+                           status.lower() == STATUS_MISSING_SYSTEM or
+                           status.lower() == STATUS_MISSING_STATEMENT):
                 return self.get_missing_invalid_invoices(
                     from_date=from_date,
                     to_date=to_date,
@@ -387,7 +405,7 @@ class StatementController:
                     page=page,
                     page_size=page_size
                 )
-            if status and status.lower() == "all":
+            if status and status.lower() == STATUS_ALL:
                 return self.get_all_invoices_combined(
                     from_date=from_date,
                     to_date=to_date,
@@ -413,6 +431,7 @@ class StatementController:
                     (InvoiceItem.date == PlumbingInvoice.invoice_date) &
                     (InvoiceItem.vendor == PlumbingSupplier.name)
                 )
+                .order_by(PlumbingInvoice.invoice_number.asc(), PlumbingInvoice.invoice_date.desc())
             )
 
             # Apply date filters for statement invoices by statement_date (month/year only)
@@ -437,17 +456,18 @@ class StatementController:
                 )
 
             # Apply supplier filter - support ["All"], multiple supplier IDs, or supplier names
-            if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
+            if supplier_names and not (len(supplier_names) == 1 and (supplier_names[0] or '').lower() == STATUS_ALL):
                 supplier_conditions = []
                 for supplier_name in supplier_names:
+                    # Check if None or empty string - means "all suppliers"
+                    if supplier_name is None or supplier_name == '':
+                        supplier_conditions = []
+                        break
                     if supplier_name.isdigit():
                         supplier_id = int(supplier_name)
-                        if supplier_id == 0:
-                            supplier_conditions = []
-                            break
-                        else:
-                            supplier_conditions.append(
-                                PlumbingSupplier.id == supplier_id)
+                        # Note: 0 is a valid supplier_id (Unknown Supplier)
+                        supplier_conditions.append(
+                            PlumbingSupplier.id == supplier_id)
                     else:
                         supplier_conditions.append(
                             PlumbingSupplier.name.ilike(f"%{supplier_name}%")
@@ -469,10 +489,10 @@ class StatementController:
                     continue
                 seen_keys.add(key)
                 # Apply status filter
-                if status and status.lower() != "all":
-                    if status.lower() == "processed" and not system_invoice_id:
+                if status and status.lower() != STATUS_ALL:
+                    if status.lower() == STATUS_PROCESSED and not system_invoice_id:
                         continue  # Skip if looking for processed but invoice doesn't exist in InvoiceItem
-                    elif status.lower() == "failed" and system_invoice_id:
+                    elif status.lower() == STATUS_FAILED and system_invoice_id:
                         continue  # Skip if looking for failed but invoice exists in InvoiceItem
                 filtered_results.append({
                     'plumbing_invoice': plumbing_invoice,
@@ -543,8 +563,7 @@ class StatementController:
                     'supplier_names': supplier_names,
                     'status': status,
                     'supplier_filter_type': (
-                        'all' if supplier_names and len(supplier_names) == 1 and supplier_names[0].lower() == 'all'
-                        else 'all' if supplier_names and len(supplier_names) == 1 and supplier_names[0] == '0'
+                        STATUS_ALL if supplier_names and len(supplier_names) == 1 and (supplier_names[0] or '').lower() == STATUS_ALL
                         else 'multiple' if supplier_names and len(supplier_names) > 1
                         else 'single'
                     )
@@ -1114,15 +1133,12 @@ class StatementController:
                 joinedload(PlumbingStatement.supplier))
 
             # Apply supplier filter if provided
-            if supplier_name:
+            # Note: None or empty string means "all suppliers" (no filter)
+            if supplier_name and supplier_name != '':
                 if supplier_name.isdigit():
                     supplier_id = int(supplier_name)
-                    # Handle supplier_id = 0 as "all suppliers" - skip filtering
-                    if supplier_id != 0:
-                        # Filter by specific supplier ID
-                        query = query.filter(
-                            PlumbingStatement.supplier_id == supplier_id)
-                    # If supplier_id == 0, don't apply any filter (all suppliers)
+                    # Filter by specific supplier ID (including 0 for Unknown Supplier)
+                    query = query.filter(PlumbingStatement.supplier_id == supplier_id)
                 else:
                     # Filter by supplier name (partial match) - need to join for this
                     query = query.join(PlumbingSupplier).filter(
@@ -1401,7 +1417,7 @@ class StatementController:
                         f"Suppliers: {supplier_names}, Status: {status}, Page: {page}, Size: {page_size}")
 
             # Handle special status filters separately
-            if status and status.lower() == "unlisted":
+            if status and status.lower() == STATUS_UNLISTED:
                 # For unlisted, search system invoices not in statements
                 unlisted_results = self.get_unlisted_invoices(
                     from_date=from_date,
@@ -1450,9 +1466,9 @@ class StatementController:
 
                 return unlisted_results
 
-            if status and (status.lower() == "missing" or
-                           status.lower() == "missing system" or
-                           status.lower() == "missing statement"):
+            if status and (status.lower() == STATUS_MISSING or
+                           status.lower() == STATUS_MISSING_SYSTEM or
+                           status.lower() == STATUS_MISSING_STATEMENT):
                 # For missing, search invalid invoices
                 missing_results = self.get_missing_invalid_invoices(
                     from_date=from_date,
@@ -1466,7 +1482,7 @@ class StatementController:
                 if missing_results['success']:
                     filtered_data = [
                         item for item in missing_results['data']
-                        if item['invoice_number'] != "MISSING" and
+                        if item['invoice_number'] != INVOICE_NUMBER_MISSING and
                         search.lower() in item['invoice_number'].lower()
                     ]
 
@@ -1502,7 +1518,7 @@ class StatementController:
 
                 return missing_results
 
-            if status and status.lower() == "all":
+            if status and status.lower() == STATUS_ALL:
                 # For all status, search across all invoice types
                 all_results = self.get_all_invoices_combined(
                     from_date=from_date,
@@ -1516,7 +1532,7 @@ class StatementController:
                 if all_results['success']:
                     filtered_data = [
                         item for item in all_results['data']
-                        if item['invoice_number'] != "MISSING" and
+                        if item['invoice_number'] != INVOICE_NUMBER_MISSING and
                         (search.lower() in item['invoice_number'].lower())
                     ]
 
@@ -1612,17 +1628,17 @@ class StatementController:
                 )
 
             # Apply supplier filter to statement query
-            if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
+            if supplier_names and not (len(supplier_names) == 1 and (supplier_names[0] or '').lower() == STATUS_ALL):
                 supplier_conditions = []
                 for supplier_name in supplier_names:
+                    # Check if None or empty string - means "all suppliers"
+                    if supplier_name is None or supplier_name == '':
+                        supplier_conditions = []
+                        break
                     if supplier_name.isdigit():
                         supplier_id = int(supplier_name)
-                        if supplier_id == 0:
-                            supplier_conditions = []
-                            break
-                        else:
-                            supplier_conditions.append(
-                                PlumbingSupplier.id == supplier_id)
+                        # Note: 0 is a valid supplier_id (Unknown Supplier)
+                        supplier_conditions.append(PlumbingSupplier.id == supplier_id)
                     else:
                         supplier_conditions.append(
                             PlumbingSupplier.name.ilike(f"%{supplier_name}%")
@@ -1646,10 +1662,10 @@ class StatementController:
                 reconciliation_status = "Processed" if match_result['matched'] else "Failed"
 
                 # Apply status filter if specified
-                if status and status.lower() not in ["all", None]:
-                    if status.lower() == "processed" and not match_result['matched']:
+                if status and status.lower() not in [STATUS_ALL, None]:
+                    if status.lower() == STATUS_PROCESSED and not match_result['matched']:
                         continue
-                    elif status.lower() == "failed" and match_result['matched']:
+                    elif status.lower() == STATUS_FAILED and match_result['matched']:
                         continue
 
                 all_matching_invoices.append({
@@ -1703,17 +1719,17 @@ class StatementController:
                 system_query = system_query.filter(InvoiceItem.date <= to_date)
 
             # Apply supplier filter to system query
-            if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
+            if supplier_names and not (len(supplier_names) == 1 and (supplier_names[0] or '').lower() == STATUS_ALL):
                 supplier_conditions = []
                 for supplier_name in supplier_names:
+                    # Check if None or empty string - means "all suppliers"
+                    if supplier_name is None or supplier_name == '':
+                        supplier_conditions = []
+                        break
                     if supplier_name.isdigit():
                         supplier_id = int(supplier_name)
-                        if supplier_id == 0:
-                            supplier_conditions = []
-                            break
-                        else:
-                            supplier_conditions.append(
-                                Invoice.supplier_id == supplier_id)
+                        # Note: 0 is a valid supplier_id (Unknown Supplier)
+                        supplier_conditions.append(Invoice.supplier_id == supplier_id)
                     else:
                         supplier_conditions.append(
                             PlumbingSupplier.name.ilike(f"%{supplier_name}%")
@@ -1734,7 +1750,7 @@ class StatementController:
             # Process system invoices (these are "Unlisted" status)
             for invoice_item, invoice, supplier in system_results:
                 # Apply status filter if specified (system invoices are Unlisted)
-                if status and status.lower() not in ["all", "unlisted", None]:
+                if status and status.lower() not in [STATUS_ALL, STATUS_UNLISTED, None]:
                     continue  # Skip if not looking for unlisted items
 
                 all_matching_invoices.append({
@@ -1863,17 +1879,18 @@ class StatementController:
                 query = query.filter(InvoiceItem.date <= to_date)
 
             # Apply supplier filter
-            if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
+            if supplier_names and not (len(supplier_names) == 1 and (supplier_names[0] or '').lower() == STATUS_ALL):
                 supplier_conditions = []
                 for supplier_name in supplier_names:
+                    # Check if None or empty string - means "all suppliers"
+                    if supplier_name is None or supplier_name == '':
+                        supplier_conditions = []
+                        break
                     if supplier_name.isdigit():
                         supplier_id = int(supplier_name)
-                        if supplier_id == 0:
-                            supplier_conditions = []
-                            break
-                        else:
-                            supplier_conditions.append(
-                                Invoice.supplier_id == supplier_id)
+                        # Note: 0 is a valid supplier_id (Unknown Supplier)
+                        supplier_conditions.append(
+                            Invoice.supplier_id == supplier_id)
                     else:
                         supplier_conditions.append(
                             PlumbingSupplier.name.ilike(f"%{supplier_name}%")
@@ -1999,15 +2016,20 @@ class StatementController:
             supplier_conditions_system = []
             supplier_conditions_statement = []
 
-            if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
+            if supplier_names and not (len(supplier_names) == 1 and (supplier_names[0] or '').lower() == STATUS_ALL):
                 for supplier_name in supplier_names:
+                    # Check if None or empty string - means "all suppliers"
+                    if supplier_name is None or supplier_name == '':
+                        supplier_conditions_system = []
+                        supplier_conditions_statement = []
+                        break
                     if supplier_name.isdigit():
                         supplier_id = int(supplier_name)
-                        if supplier_id != 0:
-                            supplier_conditions_system.append(
-                                Invoice.supplier_id == supplier_id)
-                            supplier_conditions_statement.append(
-                                PlumbingStatement.supplier_id == supplier_id)
+                        # Note: 0 is a valid supplier_id (Unknown Supplier)
+                        supplier_conditions_system.append(
+                            Invoice.supplier_id == supplier_id)
+                        supplier_conditions_statement.append(
+                            PlumbingStatement.supplier_id == supplier_id)
                     else:
                         supplier_conditions_system.append(
                             PlumbingSupplier.name.ilike(f"%{supplier_name}%"))
@@ -2165,8 +2187,8 @@ class StatementController:
                         'statement_date': None,
                         'supplier_name': inv.supplier_name,
                         'status': 'Missing System',
-                        'original_amount': str(inv.original_amount) if inv.original_amount else "0",
-                        'balance': "0",
+                        'original_amount': format_currency(inv.original_amount) if inv.original_amount else format_currency(0.0),
+                        'balance': format_currency(0.0),
                         'statement_id': None,
                         'invoice_id': None,
                         'system_invoice_id': str(inv.system_invoice_id),
@@ -2194,8 +2216,8 @@ class StatementController:
                         'statement_date': inv.statement_date.isoformat() if inv.statement_date else None,
                         'supplier_name': inv.supplier_name,
                         'status': 'Missing Statement',
-                        'original_amount': str(inv.original_amount) if inv.original_amount else "0",
-                        'balance': str(inv.balance) if inv.balance else "0",
+                        'original_amount': format_currency(inv.original_amount) if inv.original_amount else format_currency(0.0),
+                        'balance': format_currency(inv.balance) if inv.balance else format_currency(0.0),
                         'statement_id': inv.statement_id,
                         'invoice_id': inv.invoice_id,
                         'system_invoice_id': None,
@@ -2304,15 +2326,20 @@ class StatementController:
             supplier_conditions_system = []
             supplier_conditions_statement = []
 
-            if supplier_names and not (len(supplier_names) == 1 and supplier_names[0].lower() == "all"):
+            if supplier_names and not (len(supplier_names) == 1 and (supplier_names[0] or '').lower() == STATUS_ALL):
                 for supplier_name in supplier_names:
+                    # Check if None or empty string - means "all suppliers"
+                    if supplier_name is None or supplier_name == '':
+                        supplier_conditions_system = []
+                        supplier_conditions_statement = []
+                        break
                     if supplier_name.isdigit():
                         supplier_id = int(supplier_name)
-                        if supplier_id != 0:
-                            supplier_conditions_system.append(
-                                Invoice.supplier_id == supplier_id)
-                            supplier_conditions_statement.append(
-                                PlumbingStatement.supplier_id == supplier_id)
+                        # Note: 0 is a valid supplier_id (Unknown Supplier)
+                        supplier_conditions_system.append(
+                            Invoice.supplier_id == supplier_id)
+                        supplier_conditions_statement.append(
+                            PlumbingStatement.supplier_id == supplier_id)
                     else:
                         supplier_conditions_system.append(
                             PlumbingSupplier.name.ilike(f"%{supplier_name}%"))
@@ -2351,9 +2378,12 @@ class StatementController:
                 system_base_query = system_base_query.filter(
                     or_(*supplier_conditions_system))
 
-            # Order system invoices (no limit for comprehensive data)
             system_base_query = system_base_query.order_by(
-                InvoiceItem.date.desc())
+                InvoiceItem.ref_no.asc(),
+                PlumbingSupplier.name.asc(),
+                InvoiceItem.date.desc(),
+                InvoiceItem.id.desc()
+            )
 
             # OPTIMIZED: Single query for statement invoices with all needed data and DISTINCT
             statement_base_query = (
@@ -2399,9 +2429,12 @@ class StatementController:
                 statement_base_query = statement_base_query.filter(
                     or_(*supplier_conditions_statement))
 
-            # Order statement invoices (no limit for comprehensive data)
             statement_base_query = statement_base_query.order_by(
-                PlumbingInvoice.invoice_date.desc())
+                PlumbingInvoice.invoice_number.asc(),
+                PlumbingSupplier.name.asc(),
+                PlumbingInvoice.invoice_date.desc(),
+                PlumbingInvoice.id.desc()
+            )
 
             # Execute both queries
             system_invoices = system_base_query.all()
@@ -2456,8 +2489,8 @@ class StatementController:
                     'statement_date': None,
                     'supplier_name': inv.supplier_name,
                     'status': status,
-                    'original_amount': str(inv.original_amount) if inv.original_amount else "0",
-                    'balance': "0",
+                    'original_amount': format_currency(inv.original_amount) if inv.original_amount else format_currency(0.0),
+                    'balance': format_currency(0.0),
                     'statement_id': None,
                     'invoice_id': None,
                     'system_invoice_id': str(inv.system_invoice_id),
@@ -2481,8 +2514,8 @@ class StatementController:
                     'statement_date': inv.statement_date.isoformat() if inv.statement_date else None,
                     'supplier_name': inv.supplier_name,
                     'status': status,
-                    'original_amount': str(inv.original_amount) if inv.original_amount else "0",
-                    'balance': str(inv.balance) if inv.balance else "0",
+                    'original_amount': format_currency(inv.original_amount) if inv.original_amount else format_currency(0.0),
+                    'balance': format_currency(inv.balance) if inv.balance else format_currency(0.0),
                     'statement_id': inv.statement_id,
                     'invoice_id': inv.invoice_id,
                     'system_invoice_id': None,
@@ -2836,3 +2869,1286 @@ class StatementController:
                 issues.append("Invalid Invoice Number Format")
 
         return issues
+
+    def get_aggregate_monthly(
+        self,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None,
+        supplier_names: Optional[List[str]] = None,
+        status: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get aggregated statistics for statement invoices with filters.
+        
+        Aggregates amounts from all/processed/failed/unlisted/missing invoices
+        based on the selected filters.
+        
+        Args:
+            from_date: Start date filter
+            to_date: End date filter
+            supplier_names: List of supplier names/IDs or ["All"] for all suppliers
+            status: Filter by status (Processed/Failed/Unlisted/Missing/All)
+        
+        Returns:
+            Dict with aggregated statistics
+        """
+        try:
+            from mpi_backend.database.models.InvoiceItems import InvoiceItem
+            from mpi_backend.database.models.Invoice import Invoice
+            from sqlalchemy import func
+            from decimal import Decimal
+            
+            total_original_amount = Decimal('0.0')
+            total_balance = Decimal('0.0')
+            invoice_count = 0
+            supplier_count = 0
+            
+            # Determine which data to aggregate based on status
+            if status and status.lower() == STATUS_UNLISTED:
+                # Get unlisted invoices (InvoiceItem not in PlumbingInvoice)
+                result = self.get_unlisted_invoices(
+                    from_date=from_date,
+                    to_date=to_date,
+                    supplier_names=supplier_names,
+                    page=1,
+                    page_size=999999
+                )
+                
+                if result['success']:
+                    for invoice in result['data']:
+                        amount_str = str(invoice.get('original_amount', '0')).replace('$', '').replace(',', '').strip()
+                        try:
+                            total_original_amount += Decimal(amount_str)
+                        except:
+                            pass
+                        
+                        balance_str = str(invoice.get('balance', '0')).replace('$', '').replace(',', '').strip()
+                        try:
+                            total_balance += Decimal(balance_str)
+                        except:
+                            pass
+                    
+                    invoice_count = result['pagination']['total_results']
+                    suppliers = set(inv['supplier_name'] for inv in result['data'])
+                    supplier_count = len(suppliers)
+                    
+            elif status and (status.lower() == STATUS_MISSING or 
+                           status.lower() == STATUS_MISSING_SYSTEM or 
+                           status.lower() == STATUS_MISSING_STATEMENT):
+                # Get missing/invalid invoices
+                result = self.get_missing_invalid_invoices(
+                    from_date=from_date,
+                    to_date=to_date,
+                    supplier_names=supplier_names,
+                    page=1,
+                    page_size=999999
+                )
+                
+                if result['success']:
+                    for invoice in result['data']:
+                        amount_str = str(invoice.get('original_amount', '0')).replace('$', '').replace(',', '').strip()
+                        try:
+                            total_original_amount += Decimal(amount_str)
+                        except:
+                            pass
+                        
+                        balance_str = str(invoice.get('balance', '0')).replace('$', '').replace(',', '').strip()
+                        try:
+                            total_balance += Decimal(balance_str)
+                        except:
+                            pass
+                    
+                    invoice_count = result['pagination']['total_results']
+                    suppliers = set(inv['supplier_name'] for inv in result['data'])
+                    supplier_count = len(suppliers)
+                    
+            elif status and status.lower() == STATUS_ALL:
+                # Get all invoices combined
+                result = self.get_all_invoices_combined(
+                    from_date=from_date,
+                    to_date=to_date,
+                    supplier_names=supplier_names,
+                    page=1,
+                    page_size=999999
+                )
+                
+                if result['success']:
+                    for invoice in result['data']:
+                        amount_str = str(invoice.get('original_amount', '0')).replace('$', '').replace(',', '').strip()
+                        try:
+                            total_original_amount += Decimal(amount_str)
+                        except:
+                            pass
+                        
+                        balance_str = str(invoice.get('balance', '0')).replace('$', '').replace(',', '').strip()
+                        try:
+                            total_balance += Decimal(balance_str)
+                        except:
+                            pass
+                    
+                    invoice_count = result['pagination']['total_results']
+                    suppliers = set(inv['supplier_name'] for inv in result['data'])
+                    supplier_count = len(suppliers)
+                    
+            else:
+                # For Processed/Failed status: Query PlumbingInvoice directly
+                normalized_from = (
+                    date(from_date.year, from_date.month, 1) if from_date else None
+                )
+                normalized_to = (
+                    date(
+                        to_date.year,
+                        to_date.month,
+                        monthrange(to_date.year, to_date.month)[1]
+                    ) if to_date else None
+                )
+                
+                query = (
+                    self.db.query(
+                        PlumbingInvoice,
+                        PlumbingStatement,
+                        PlumbingSupplier,
+                        InvoiceItem.id.label('system_invoice_id')
+                    )
+                    .join(PlumbingStatement, PlumbingInvoice.statement_id == PlumbingStatement.id)
+                    .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
+                    .outerjoin(
+                        InvoiceItem,
+                        (InvoiceItem.ref_no == PlumbingInvoice.invoice_number) &
+                        (InvoiceItem.date == PlumbingInvoice.invoice_date) &
+                        (InvoiceItem.vendor == PlumbingSupplier.name)
+                    )
+                )
+                
+                if normalized_from:
+                    query = query.filter(
+                        PlumbingStatement.statement_date >= normalized_from
+                    )
+                if normalized_to:
+                    query = query.filter(
+                        PlumbingStatement.statement_date <= normalized_to
+                    )
+                
+                # Apply supplier filter
+                if supplier_names and not (len(supplier_names) == 1 and (supplier_names[0] or '').lower() == STATUS_ALL):
+                    supplier_conditions = []
+                    for supplier_name in supplier_names:
+                        # Check if None or empty string - means "all suppliers"
+                        if supplier_name is None or supplier_name == '':
+                            supplier_conditions = []
+                            break
+                        if supplier_name.isdigit():
+                            supplier_id = int(supplier_name)
+                            # Note: 0 is a valid supplier_id (Unknown Supplier)
+                            supplier_conditions.append(PlumbingSupplier.id == supplier_id)
+                        else:
+                            supplier_conditions.append(
+                                PlumbingSupplier.name.ilike(f"%{supplier_name}%")
+                            )
+                    if supplier_conditions:
+                        query = query.filter(or_(*supplier_conditions))
+                
+                all_results = query.all()
+                seen_keys = set()
+                suppliers = set()
+                
+                for plumbing_invoice, plumbing_statement, plumbing_supplier, system_invoice_id in all_results:
+                    reconciliation_status = "Processed" if system_invoice_id else "Failed"
+                    
+                    key = (plumbing_invoice.invoice_number,
+                           plumbing_supplier.name, plumbing_invoice.invoice_date)
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    
+                    # Apply status filter
+                    if status and status.lower() != STATUS_ALL:
+                        if status.lower() == STATUS_PROCESSED and not system_invoice_id:
+                            continue
+                        elif status.lower() == STATUS_FAILED and system_invoice_id:
+                            continue
+                    
+                    # Aggregate amounts
+                    if plumbing_invoice.original_amount:
+                        try:
+                            total_original_amount += Decimal(str(plumbing_invoice.original_amount))
+                        except:
+                            pass
+                    
+                    if plumbing_invoice.balance:
+                        try:
+                            total_balance += Decimal(str(plumbing_invoice.balance))
+                        except:
+                            pass
+                    
+                    invoice_count += 1
+                    suppliers.add(plumbing_supplier.name)
+                
+                supplier_count = len(suppliers)
+            
+            # Calculate average
+            average_amount = Decimal('0.0')
+            if invoice_count > 0:
+                average_amount = total_original_amount / invoice_count
+            
+            return {
+                'success': True,
+                'quantity': invoice_count,
+                'average': format_currency(float(average_amount)),
+                'amount': format_currency(float(total_original_amount)),
+                'filters_applied': {
+                    'from_date': from_date.isoformat() if from_date else None,
+                    'to_date': to_date.isoformat() if to_date else None,
+                    'supplier_names': supplier_names,
+                    'status': status
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting aggregate monthly: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'quantity': 0,
+                'average': format_currency(0.0),
+                'amount': format_currency(0.0)
+            }
+
+    def _build_export_query(
+        self,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None,
+        supplier_names: Optional[List[str]] = None,
+        status: Optional[str] = None,
+        excluded_ints: Optional[set] = None
+    ) -> Any:
+        """
+        Build a SQLAlchemy query object for export that can use yield_per for streaming.
+        Returns a query object, not results.
+        
+        This method mirrors the logic from get_statement_invoice_data but returns queries
+        instead of executing them, allowing for streaming with yield_per.
+        
+        Args:
+            from_date: Start date filter
+            to_date: End date filter
+            supplier_names: List of supplier names or IDs
+            status: Status filter (Processed, Failed, Unlisted, Missing, All)
+            excluded_ints: Set of integer IDs to exclude at database level
+        """
+        
+        # Handle different status types
+        status_lower: Optional[str] = status.lower() if status else None
+        
+        if status_lower == STATUS_UNLISTED:
+            return self._build_unlisted_query(from_date, to_date, supplier_names, excluded_ints)
+        elif status_lower in (STATUS_MISSING, STATUS_MISSING_SYSTEM, STATUS_MISSING_STATEMENT):
+            return self._build_missing_query(from_date, to_date, supplier_names, excluded_ints)
+        elif status_lower == STATUS_ALL:
+            return self._build_all_combined_query(from_date, to_date, supplier_names, excluded_ints)
+        else:
+            # Processed/Failed status
+            return self._build_processed_failed_query(from_date, to_date, supplier_names, status, excluded_ints)
+    
+    def _build_processed_failed_query(
+        self,
+        from_date: Optional[date],
+        to_date: Optional[date],
+        supplier_names: Optional[List[str]],
+        status: Optional[str],
+        excluded_ints: Optional[set] = None
+    ) -> tuple:
+        """Build query for Processed/Failed status"""
+        
+        query = (
+            self.db.query(
+                PlumbingInvoice,
+                PlumbingStatement,
+                PlumbingSupplier,
+                InvoiceItem.id.label('system_invoice_id')
+            )
+            .join(PlumbingStatement, PlumbingInvoice.statement_id == PlumbingStatement.id)
+            .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
+            .outerjoin(
+                InvoiceItem,
+                (InvoiceItem.ref_no == PlumbingInvoice.invoice_number) &
+                (InvoiceItem.date == PlumbingInvoice.invoice_date) &
+                (InvoiceItem.vendor == PlumbingSupplier.name)
+            )
+        )
+        
+        # Apply date filters
+        normalized_from: Optional[date] = date(from_date.year, from_date.month, 1) if from_date else None
+        normalized_to: Optional[date] = (
+            date(to_date.year, to_date.month, monthrange(to_date.year, to_date.month)[1]) 
+            if to_date else None
+        )
+        
+        if normalized_from:
+            query = query.filter(PlumbingStatement.statement_date >= normalized_from)
+        if normalized_to:
+            query = query.filter(PlumbingStatement.statement_date <= normalized_to)
+        
+        # Apply supplier filter
+        if supplier_names and not (len(supplier_names) == 1 and (supplier_names[0] or '').lower() == STATUS_ALL):
+            supplier_conditions: List = []
+            for supplier_name in supplier_names:
+                # Check if None or empty string - means "all suppliers"
+                if supplier_name is None or supplier_name == '':
+                    supplier_conditions = []
+                    break
+                if supplier_name.isdigit():
+                    supplier_id: int = int(supplier_name)
+                    # Note: 0 is a valid supplier_id (Unknown Supplier)
+                    supplier_conditions.append(PlumbingSupplier.id == supplier_id)
+                else:
+                    supplier_conditions.append(PlumbingSupplier.name.ilike(f"%{supplier_name}%"))
+            if supplier_conditions:
+                query = query.filter(or_(*supplier_conditions))
+
+        # Apply exclusion filter at database level
+        if excluded_ints:
+            query = query.filter(~PlumbingInvoice.id.in_(excluded_ints))
+        
+        query = query.order_by(
+            PlumbingInvoice.invoice_number.asc(),
+            PlumbingSupplier.name.asc(),
+            PlumbingInvoice.invoice_date.desc(),
+            PlumbingInvoice.id.desc()
+        )
+        
+        return query, QUERY_TYPE_PROCESSED_FAILED
+    
+    def _build_unlisted_query(self, from_date: Optional[date], to_date: Optional[date], supplier_names: Optional[List[str]], excluded_ints: Optional[set] = None) -> tuple:
+        """Build query for Unlisted invoices"""
+        
+        query = (
+            self.db.query(
+                InvoiceItem.ref_no,
+                InvoiceItem.date,
+                InvoiceItem.po_number,
+                InvoiceItem.amount,
+                InvoiceItem.customer_job,
+                Invoice.id.label('invoice_id'),
+                PlumbingSupplier.name.label('supplier_name'),
+                PlumbingSupplier.id.label('supplier_id')
+            )
+            .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
+            .join(PlumbingSupplier, Invoice.supplier_id == PlumbingSupplier.id)
+            .distinct(InvoiceItem.ref_no, PlumbingSupplier.name, InvoiceItem.date)
+        )
+        
+        # Apply date filters
+        if from_date:
+            query = query.filter(InvoiceItem.date >= from_date)
+        if to_date:
+            query = query.filter(InvoiceItem.date <= to_date)
+        
+        # Apply supplier filter
+        if supplier_names and not (len(supplier_names) == 1 and (supplier_names[0] or '').lower() == STATUS_ALL):
+            supplier_conditions: List = []
+            for supplier_name in supplier_names:
+                # Check if None or empty string - means "all suppliers"
+                if supplier_name is None or supplier_name == '':
+                    supplier_conditions = []
+                    break
+                if supplier_name.isdigit():
+                    supplier_id: int = int(supplier_name)
+                    # Note: 0 is a valid supplier_id (Unknown Supplier)
+                    supplier_conditions.append(Invoice.supplier_id == supplier_id)
+                else:
+                    supplier_conditions.append(PlumbingSupplier.name.ilike(f"%{supplier_name}%"))
+            if supplier_conditions:
+                query = query.filter(or_(*supplier_conditions))
+
+        # Exclude invoices in PlumbingInvoice
+        subquery = self.db.query(PlumbingInvoice.invoice_number).subquery()
+        query = query.filter(~InvoiceItem.ref_no.in_(select(subquery.c.invoice_number)))
+        
+        # Apply exclusion filter at database level
+        if excluded_ints:
+            query = query.filter(~Invoice.id.in_(excluded_ints))
+        
+        query = query.order_by(
+            InvoiceItem.ref_no.asc(),
+            PlumbingSupplier.name.asc(),
+            InvoiceItem.date.desc(),
+            InvoiceItem.id.desc()
+        )
+        
+        return query, QUERY_TYPE_UNLISTED
+    
+    def _build_system_and_statement_queries(
+        self, 
+        from_date: Optional[date], 
+        to_date: Optional[date], 
+        supplier_names: Optional[List[str]], 
+        excluded_ints: Optional[set] = None,
+        filter_missing: bool = False
+    ) -> tuple:
+        """
+        Build queries for system and statement invoices with optional validation filters.
+        
+        This unified method handles both "Missing/Invalid" and "All Combined" query types:
+        - When filter_missing=True: Returns only invoices with validation issues (QUERY_TYPE_MISSING)
+        - When filter_missing=False: Returns all valid invoices (QUERY_TYPE_ALL_COMBINED)
+        
+        Args:
+            from_date: Start date filter
+            to_date: End date filter
+            supplier_names: List of supplier names/IDs
+            excluded_ints: Set of integer IDs to exclude at database level
+            filter_missing: If True, filter for validation issues; if False, filter for valid records
+            
+        Returns:
+            Tuple of ([system_query, statement_query], query_type_constant)
+        """
+        
+        # Build supplier conditions
+        supplier_conditions_system: List = []
+        supplier_conditions_statement: List = []
+        
+        if supplier_names and not (len(supplier_names) == 1 and (supplier_names[0] or '').lower() == STATUS_ALL):
+            for supplier_name in supplier_names:
+                # Check if None or empty string - means "all suppliers"
+                if supplier_name is None or supplier_name == '':
+                    supplier_conditions_system = []
+                    supplier_conditions_statement = []
+                    break
+                if supplier_name.isdigit():
+                    supplier_id = int(supplier_name)
+                    # Note: 0 is a valid supplier_id (Unknown Supplier)
+                    supplier_conditions_system.append(Invoice.supplier_id == supplier_id)
+                    supplier_conditions_statement.append(PlumbingStatement.supplier_id == supplier_id)
+                else:
+                    supplier_conditions_system.append(PlumbingSupplier.name.ilike(f"%{supplier_name}%"))
+                    supplier_conditions_statement.append(PlumbingSupplier.name.ilike(f"%{supplier_name}%"))
+
+        # System invoices query - base structure
+        system_query = (
+            self.db.query(
+                InvoiceItem.ref_no.label('invoice_number'),
+                InvoiceItem.date.label('invoice_date'),
+                InvoiceItem.po_number.label('customer_po'),
+                InvoiceItem.amount.label('original_amount'),
+                InvoiceItem.customer_job,
+                Invoice.id.label('system_invoice_id'),
+                PlumbingSupplier.name.label('supplier_name')
+            )
+            .join(Invoice, InvoiceItem.invoice_id == Invoice.id)
+            .join(PlumbingSupplier, Invoice.supplier_id == PlumbingSupplier.id)
+            .distinct(InvoiceItem.ref_no, PlumbingSupplier.name, InvoiceItem.date)
+        )
+        
+        # Apply validation filter based on mode
+        if filter_missing:
+            # Filter for invoices WITH validation issues
+            system_query = system_query.filter(
+                or_(
+                    InvoiceItem.amount.is_(None),
+                    InvoiceItem.date.is_(None),
+                    InvoiceItem.ref_no.is_(None),
+                    InvoiceItem.item.is_(None),
+                    InvoiceItem.item == ''
+                )
+            )
+        else:
+            # Filter for valid invoices only (exclude null invoice numbers)
+            system_query = system_query.filter(InvoiceItem.ref_no.isnot(None))
+        
+        # Apply date filters
+        if from_date:
+            system_query = system_query.filter(InvoiceItem.date >= from_date)
+        if to_date:
+            system_query = system_query.filter(InvoiceItem.date <= to_date)
+        if supplier_conditions_system:
+            system_query = system_query.filter(or_(*supplier_conditions_system))
+        
+        # Apply exclusion filter
+        if excluded_ints:
+            system_query = system_query.filter(~Invoice.id.in_(excluded_ints))
+        
+        # Apply ordering
+        system_query = system_query.order_by(
+            InvoiceItem.ref_no.asc(),
+            PlumbingSupplier.name.asc(),
+            InvoiceItem.date.desc(),
+            InvoiceItem.id.desc()
+        )
+        
+        # Statement invoices query - base structure
+        statement_query = (
+            self.db.query(
+                PlumbingInvoice.invoice_number,
+                PlumbingInvoice.invoice_date,
+                PlumbingInvoice.customer_po,
+                PlumbingInvoice.original_amount,
+                PlumbingInvoice.balance,
+                PlumbingInvoice.id.label('invoice_id'),
+                PlumbingStatement.id.label('statement_id'),
+                PlumbingStatement.statement_date,
+                PlumbingSupplier.name.label('supplier_name')
+            )
+            .join(PlumbingStatement, PlumbingInvoice.statement_id == PlumbingStatement.id)
+            .join(PlumbingSupplier, PlumbingStatement.supplier_id == PlumbingSupplier.id)
+            .distinct(PlumbingInvoice.invoice_number, PlumbingSupplier.name, PlumbingInvoice.invoice_date)
+        )
+        
+        # Apply validation filter based on mode
+        if filter_missing:
+            # Filter for invoices WITH validation issues
+            statement_query = statement_query.filter(
+                or_(
+                    PlumbingInvoice.original_amount.is_(None),
+                    PlumbingInvoice.invoice_date.is_(None),
+                    PlumbingInvoice.invoice_number.is_(None)
+                )
+            )
+        else:
+            # Filter for valid invoices only (exclude null invoice numbers)
+            statement_query = statement_query.filter(PlumbingInvoice.invoice_number.isnot(None))
+        
+        # Apply date filters (normalized by month)
+        normalized_from = date(from_date.year, from_date.month, 1) if from_date else None
+        normalized_to = (
+            date(to_date.year, to_date.month, monthrange(to_date.year, to_date.month)[1]) 
+            if to_date else None
+        )
+        
+        if normalized_from:
+            statement_query = statement_query.filter(PlumbingStatement.statement_date >= normalized_from)
+        if normalized_to:
+            statement_query = statement_query.filter(PlumbingStatement.statement_date <= normalized_to)
+        if supplier_conditions_statement:
+            statement_query = statement_query.filter(or_(*supplier_conditions_statement))
+        
+        # Apply exclusion filter
+        if excluded_ints:
+            statement_query = statement_query.filter(~PlumbingInvoice.id.in_(excluded_ints))
+        
+        # Apply ordering - must match DISTINCT ON columns first
+        statement_query = statement_query.order_by(
+            PlumbingInvoice.invoice_number.asc(),
+            PlumbingSupplier.name.asc(),
+            PlumbingInvoice.invoice_date.desc(),
+            PlumbingStatement.statement_date.desc(),
+            PlumbingInvoice.id.desc(),
+        )
+        
+        # Return appropriate query type based on mode
+        query_type = QUERY_TYPE_MISSING if filter_missing else QUERY_TYPE_ALL_COMBINED
+        return [system_query, statement_query], query_type
+    
+    def _build_missing_query(self, from_date: Optional[date], to_date: Optional[date], supplier_names: Optional[List[str]], excluded_ints: Optional[set] = None) -> tuple:
+        """Build queries for Missing/Invalid invoices (wrapper for unified method)"""
+        return self._build_system_and_statement_queries(from_date, to_date, supplier_names, excluded_ints, filter_missing=True)
+    
+    def _build_all_combined_query(self, from_date: Optional[date], to_date: Optional[date], supplier_names: Optional[List[str]], excluded_ints: Optional[set] = None) -> tuple:
+        """Build queries for All combined invoices (wrapper for unified method)"""
+        return self._build_system_and_statement_queries(from_date, to_date, supplier_names, excluded_ints, filter_missing=False)
+    
+    def _stream_and_process_rows(
+        self,
+        query_info: tuple,
+        status: Optional[str] = None,
+        batch_size: int = 1000
+    ) -> Generator[dict, None, None]:
+        """
+        Stream rows from database using yield_per and process them in batches.
+        Yields processed invoice data dictionaries.
+        
+        Args:
+            query_info: Query object(s) and query type from _build_export_query
+            status: Status filter
+            batch_size: Number of rows to fetch per batch
+            
+        Yields:
+            Processed invoice data dictionaries
+        """
+        query_obj, query_type = query_info
+        
+        # Note: QUERY_TYPE_* are module-level constants, not class attributes
+        if query_type == QUERY_TYPE_PROCESSED_FAILED:
+            # Single query returning PlumbingInvoice objects
+            for row in query_obj.yield_per(batch_size):
+                plumbing_invoice, plumbing_statement, plumbing_supplier, system_invoice_id = row
+                
+                # Determine status
+                reconciliation_status = "Processed" if system_invoice_id else "Failed"
+                
+                # Apply status filter
+                if status and status.lower() != STATUS_ALL:
+                    if status.lower() == STATUS_PROCESSED and not system_invoice_id:
+                        continue
+                    elif status.lower() == STATUS_FAILED and system_invoice_id:
+                        continue
+                
+                
+                yield {
+                    'invoice_number': plumbing_invoice.invoice_number,
+                    'invoice_date': plumbing_invoice.invoice_date.isoformat() if plumbing_invoice.invoice_date else None,
+                    'statement_date': plumbing_statement.statement_date.isoformat() if plumbing_statement.statement_date else None,
+                    'supplier_name': plumbing_supplier.name,
+                    'status': reconciliation_status,
+                    'original_amount': format_currency(plumbing_invoice.original_amount) if plumbing_invoice.original_amount else format_currency(0.0),
+                    'balance': format_currency(plumbing_invoice.balance) if plumbing_invoice.balance else format_currency(0.0),
+                    'invoice_id': plumbing_invoice.id,
+                    'statement_id': plumbing_statement.id
+                }
+        
+        elif query_type == QUERY_TYPE_UNLISTED:
+            # Single query returning InvoiceItem data
+            for row in query_obj.yield_per(batch_size):
+                yield {
+                    'invoice_number': row.ref_no,
+                    'invoice_date': row.date.isoformat() if row.date else None,
+                    'statement_date': None,
+                    'supplier_name': row.supplier_name,
+                    'status': 'Unlisted',
+                    'original_amount': format_currency(row.amount) if row.amount else format_currency(0.0),
+                    'balance': format_currency(0.0),
+                    'system_invoice_id': row.invoice_id
+                }
+        
+        elif query_type in (QUERY_TYPE_MISSING, QUERY_TYPE_ALL_COMBINED):
+            # Multiple queries - iterate through each
+            for query in query_obj:
+                for row in query.yield_per(batch_size):
+                    # Determine if this is system or statement data based on available attributes
+                    if hasattr(row, 'system_invoice_id') and row.system_invoice_id:
+                        # System invoice
+                        yield {
+                            'invoice_number': row.invoice_number,
+                            'invoice_date': row.invoice_date.isoformat() if row.invoice_date else None,
+                            'statement_date': None,
+                            'supplier_name': row.supplier_name,
+                            'status': 'Missing' if query_type == QUERY_TYPE_MISSING else 'Unlisted',
+                            'original_amount': format_currency(row.original_amount) if row.original_amount else format_currency(0.0),
+                            'balance': format_currency(0.0),
+                            'system_invoice_id': row.system_invoice_id
+                        }
+                    else:
+                        # Statement invoice
+                        yield {
+                            'invoice_number': row.invoice_number,
+                            'invoice_date': row.invoice_date.isoformat() if row.invoice_date else None,
+                            'statement_date': row.statement_date.isoformat() if hasattr(row, 'statement_date') and row.statement_date else None,
+                            'supplier_name': row.supplier_name,
+                            'status': 'Missing' if query_type == QUERY_TYPE_MISSING else 'Failed',
+                            'original_amount': format_currency(row.original_amount) if row.original_amount else format_currency(0.0),
+                            'balance': format_currency(row.balance) if hasattr(row, 'balance') and row.balance else format_currency(0.0),
+                            'invoice_id': row.invoice_id if hasattr(row, 'invoice_id') else None,
+                            'statement_id': row.statement_id if hasattr(row, 'statement_id') else None
+                        }
+
+    def export_monthly_statement(
+        self,
+        from_date: date,
+        to_date: date,
+        supplier_names: Optional[List[str]] = None,
+        status: Optional[str] = None,
+        excluded_invoice_ids: Optional[List[str]] = None
+    ) -> str:
+        """
+        Export monthly statement data to Excel with invoice details using streaming.
+        Uses yield_per for efficient memory usage with large datasets.
+        Streams rows directly to Excel file as they come from the database.
+        
+        Args:
+            from_date (date): Start date for the date range
+            to_date (date): End date for the date range
+            supplier_names (List[str], optional): List of supplier names or ['All'] for all suppliers
+            status (str, optional): Invoice status filter - 'Processed', 'Failed', 'Unlisted', 'Missing', etc.
+            excluded_invoice_ids (List[str], optional): Invoice IDs to exclude from export
+            
+        Returns:
+            str: Presigned S3 URL for downloading the Excel file
+        """
+        try:
+            import os
+            import xlsxwriter
+            from datetime import datetime
+            from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
+            from mpi_backend.utils.s3_utils import upload_export_and_get_url
+            from fastapi import HTTPException
+            
+            logger.info(f"Starting STREAMING export with filters - from_date: {from_date}, to_date: {to_date}, "
+                       f"supplier_names: {supplier_names}, status: {status}")
+            
+            # Separate excluded IDs into UUIDs and integers
+            import uuid as uuid_lib
+            excluded_ints = set()
+            
+            if excluded_invoice_ids:
+                for id_str in excluded_invoice_ids:
+                    try:
+                        excluded_ints.add(int(id_str))
+                    except (ValueError, TypeError):
+                        raise HTTPException(
+                            status_code=400, 
+                            detail=f"Invalid excluded ID format: {id_str}. Must be integer."
+                        )
+                        
+            
+            # Determine filename first
+            is_all_suppliers = (
+                supplier_names is None or 
+                len(supplier_names) == 0 or 
+                'All' in supplier_names or
+                (len(supplier_names) == 1 and supplier_names[0] in ['All', '', None])
+            )
+            is_single_supplier = not is_all_suppliers and len(supplier_names) == 1
+            
+            month_str = from_date.strftime('%Y-%m')
+            upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/Exports/'
+            if not os.path.exists(upload_folder):
+                os.makedirs(upload_folder)
+            
+            if is_all_suppliers:
+                filename = f'MonthlyStatement_{month_str}_AllSuppliers.xlsx'
+            elif is_single_supplier:
+                clean_supplier = supplier_names[0].replace(' ', '').replace('/', '').replace('\\', '')[:30]
+                filename = f'MonthlyStatement_{month_str}_{clean_supplier}.xlsx'
+            else:
+                filename = f'MonthlyStatement_{month_str}_AllSuppliers.xlsx'
+            
+            file_path = f'{upload_folder}{filename}'
+            
+            # Create Excel workbook and formats upfront
+            workbook = xlsxwriter.Workbook(file_path, {'constant_memory': True})
+            
+            # Define formats
+            header_format = workbook.add_format({
+                'bold': True,
+                'bg_color': '#D7E4BC',
+                'border': 1,
+                'align': 'center'
+            })
+            
+            text_format = workbook.add_format({
+                'num_format': '@',
+                'border': 1,
+                'align': 'left'
+            })
+            
+            date_format = workbook.add_format({
+                'num_format': 'yyyy-mm-dd',
+                'border': 1,
+                'align': 'center'
+            })
+            
+            currency_format = workbook.add_format({
+                'num_format': '$#,##0.00',
+                'border': 1,
+                'align': 'right'
+            })
+            
+            # Track worksheets and row positions for each supplier
+            supplier_worksheets = {}
+            supplier_row_counts = {}
+            supplier_data_for_sorting = {}  # Temporary storage for sorting before writing
+            
+            total_rows = 0
+            parse_errors = []
+            seen_keys = set()  # For deduplication
+            
+            logger.info("Starting to stream and write rows to Excel file...")
+            
+            # Build query for streaming with exclusions handled at database level
+            query_info = self._build_export_query(from_date, to_date, supplier_names, status, excluded_ints)
+            
+            # First pass: collect and sort data per supplier (needed for proper sorting by invoice date)
+            # We collect in batches and write periodically to reduce memory usage
+            BATCH_SIZE = 1000  # Write to file every 50 rows per supplier
+            
+            for item in self._stream_and_process_rows(query_info, status):
+                try:
+                    # Deduplication key
+                    key = (item.get('invoice_number'), item.get('supplier_name'), item.get('invoice_date'))
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    
+                    # Parse currency strings back to float for Excel formatting
+                    original_amount_str = item.get('original_amount', '$0.00')
+                    balance_str = item.get('balance', '$0.00')
+                    
+                    if not original_amount_str or original_amount_str == '':
+                        original_amount_str = '$0.00'
+                    if not balance_str or balance_str == '':
+                        balance_str = '$0.00'
+                    
+                    try:
+                        original_amount = float(str(original_amount_str).replace('$', '').replace(',', '').strip())
+                    except (ValueError, AttributeError) as e:
+                        logger.warning(f"Failed to parse original_amount '{original_amount_str}': {e}")
+                        original_amount = 0.0
+                    
+                    try:
+                        balance = float(str(balance_str).replace('$', '').replace(',', '').strip())
+                    except (ValueError, AttributeError) as e:
+                        logger.warning(f"Failed to parse balance '{balance_str}': {e}")
+                        balance = 0.0
+                    
+                    supplier_name = item.get('supplier_name', 'Unknown')
+                    
+                    # Initialize supplier data if needed
+                    if supplier_name not in supplier_data_for_sorting:
+                        supplier_data_for_sorting[supplier_name] = []
+                    
+                    # Add row data
+                    row_data = {
+                        'invoice_number': item.get('invoice_number', ''),
+                        'invoice_date': item.get('invoice_date', ''),
+                        'statement_date': item.get('statement_date', ''),
+                        'supplier_name': supplier_name,
+                        'status': item.get('status', ''),
+                        'original_amount': original_amount,
+                        'balance': balance
+                    }
+                    
+                    supplier_data_for_sorting[supplier_name].append(row_data)
+                    total_rows += 1
+                    
+                    # Write batch to file if we've accumulated enough rows for this supplier
+                    if len(supplier_data_for_sorting[supplier_name]) >= BATCH_SIZE:
+                        self._write_supplier_batch_to_excel(
+                            workbook, supplier_worksheets, supplier_row_counts,
+                            supplier_name, supplier_data_for_sorting[supplier_name],
+                            header_format, text_format, date_format, currency_format
+                        )
+                        # Clear the batch for this supplier
+                        supplier_data_for_sorting[supplier_name] = []
+                    
+                    # Log progress every 10000 rows
+                    if total_rows % 10000 == 0:
+                        logger.info(f"Processed {total_rows} rows so far across {len(supplier_worksheets)} suppliers...")
+                
+                except Exception as e:
+                    invoice_number = item.get('invoice_number', 'UNKNOWN')
+                    logger.error(f"Error processing invoice #{invoice_number}: {str(e)}", exc_info=True)
+                    parse_errors.append(f"Invoice #{invoice_number}: {str(e)}")
+                    continue
+            
+            # Write any remaining batches
+            for supplier_name, remaining_data in supplier_data_for_sorting.items():
+                if remaining_data:
+                    self._write_supplier_batch_to_excel(
+                        workbook, supplier_worksheets, supplier_row_counts,
+                        supplier_name, remaining_data,
+                        header_format, text_format, date_format, currency_format
+                    )
+            
+            logger.info(f"Completed streaming. Total rows written: {total_rows} across {len(supplier_worksheets)} suppliers")
+            
+            if parse_errors:
+                logger.warning(f"Encountered {len(parse_errors)} parsing errors: {parse_errors[:10]}")
+            
+            # Close the workbook to finalize the file
+            workbook.close()
+            
+            if total_rows == 0:
+                logger.warning(f"No data found for filters")
+                # Clean up empty file
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                raise HTTPException(
+                    status_code=404, 
+                    detail="No statement invoice data found for the specified filters."
+                )
+            
+            logger.info(f"Excel file written successfully: {file_path}")
+
+            logger.info("Uploading to S3...")
+            download_url = upload_export_and_get_url(file_path)
+
+            logger.info(f"Export completed successfully. URL: {download_url}")
+            return download_url
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error exporting monthly statement: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+    
+    def _write_supplier_batch_to_excel(
+        self,
+        workbook,
+        supplier_worksheets: dict,
+        supplier_row_counts: dict,
+        supplier_name: str,
+        rows_data: list,
+        header_format,
+        text_format,
+        date_format,
+        currency_format
+    ):
+        """
+        Write a batch of rows for a supplier to the Excel file.
+        Creates worksheet if it doesn't exist, sorts data by invoice date, and writes rows.
+        
+        Args:
+            workbook: xlsxwriter Workbook object
+            supplier_worksheets: Dict mapping supplier names to worksheet objects
+            supplier_row_counts: Dict tracking current row number for each supplier
+            supplier_name: Name of the supplier
+            rows_data: List of row data dictionaries to write
+            header_format, text_format, date_format, currency_format: Excel format objects
+        """
+        # Sort rows by invoice_date ascending before writing
+        rows_data.sort(key=lambda x: x.get('invoice_date', '') or '')
+        
+        # Create worksheet if it doesn't exist
+        if supplier_name not in supplier_worksheets:
+            # Create sheet name (max 31 chars for Excel)
+            sheet_name = supplier_name[:31] if len(supplier_name) > 31 else supplier_name
+            
+            try:
+                worksheet = workbook.add_worksheet(sheet_name)
+            except Exception as e:
+                logger.warning(f"Failed to create sheet '{sheet_name}': {e}. Using sanitized name.")
+                # Sanitize sheet name more aggressively
+                sheet_name = ''.join(c for c in sheet_name if c.isalnum() or c in (' ', '-', '_'))[:31]
+                worksheet = workbook.add_worksheet(sheet_name)
+            
+            supplier_worksheets[supplier_name] = worksheet
+            supplier_row_counts[supplier_name] = 0
+            
+            # Set column widths
+            worksheet.set_column('A:A', 18)  # Invoice Number
+            worksheet.set_column('B:B', 15)  # Invoice Date
+            worksheet.set_column('C:C', 15)  # Statement Date
+            worksheet.set_column('D:D', 25)  # Supplier Name
+            worksheet.set_column('E:E', 12)  # Status
+            worksheet.set_column('F:F', 15)  # Original Amount
+            worksheet.set_column('G:G', 15)  # Balance
+            
+            # Write header row
+            headers = ['Invoice Number', 'Invoice Date', 'Statement Date', 'Supplier Name', 'Status', 'Original Amount', 'Balance']
+            for col_num, header in enumerate(headers):
+                worksheet.write(0, col_num, header, header_format)
+            
+            supplier_row_counts[supplier_name] = 1  # Start after header
+            
+            logger.info(f"Created worksheet '{sheet_name}' for supplier '{supplier_name}'")
+        
+        worksheet = supplier_worksheets[supplier_name]
+        current_row = supplier_row_counts[supplier_name]
+        
+        # Write data rows
+        for row_data in rows_data:
+            worksheet.write(current_row, 0, row_data['invoice_number'], text_format)
+            worksheet.write(current_row, 1, row_data['invoice_date'], date_format)
+            worksheet.write(current_row, 2, row_data['statement_date'], date_format)
+            worksheet.write(current_row, 3, row_data['supplier_name'], text_format)
+            worksheet.write(current_row, 4, row_data['status'], text_format)
+            worksheet.write(current_row, 5, row_data['original_amount'], currency_format)
+            worksheet.write(current_row, 6, row_data['balance'], currency_format)
+            
+            current_row += 1
+        
+        supplier_row_counts[supplier_name] = current_row
+        logger.debug(f"Wrote {len(rows_data)} rows to '{supplier_name}' sheet (total: {current_row - 1} data rows)")
+
+    def _format_monthly_statement_sheet(self, workbook, worksheet, df):
+        """
+        Apply formatting to monthly statement Excel sheet.
+        
+        Args:
+            workbook: xlsxwriter Workbook object
+            worksheet: xlsxwriter Worksheet object
+            df: DataFrame with the data
+        
+        Columns:
+            A: Invoice Number (text)
+            B: Invoice Date (date)
+            C: Statement Date (date)
+            D: Supplier Name (text)
+            E: Status (text)
+            F: Original Amount (currency)
+            G: Balance (currency)
+        """
+        # Header format
+        header_format = workbook.add_format({
+            'bold': True,
+            'bg_color': '#D7E4BC',
+            'border': 1,
+            'align': 'center'
+        })
+        
+        # Text format
+        text_format = workbook.add_format({
+            'num_format': '@',
+            'border': 1,
+            'align': 'left'
+        })
+        
+        # Currency format
+        currency_format = workbook.add_format({
+            'num_format': '$#,##0.00',
+            'border': 1,
+            'align': 'right'
+        })
+        
+        # Date format
+        date_format = workbook.add_format({
+            'num_format': 'yyyy-mm-dd',
+            'border': 1,
+            'align': 'center'
+        })
+        
+        # Set column widths and formats
+        worksheet.set_column('A:A', 18, text_format)  # Invoice Number
+        worksheet.set_column('B:B', 15, date_format)  # Invoice Date
+        worksheet.set_column('C:C', 15, date_format)  # Statement Date
+        worksheet.set_column('D:D', 30, text_format)  # Supplier Name
+        worksheet.set_column('E:E', 12, text_format)  # Status
+        worksheet.set_column('F:F', 15, currency_format)  # Original Amount
+        worksheet.set_column('G:G', 15, currency_format)  # Balance
+        
+        # Format header row
+        for col_num, column in enumerate(df.columns):
+            worksheet.write(0, col_num, column, header_format)
+        
+        # Apply autofilter
+        worksheet.autofilter(0, 0, len(df), len(df.columns) - 1)
+
+    def export_selected_statements(
+        self,
+        invoice_ids: List[str]
+    ) -> str:
+        """
+        Export specific statement invoices by their IDs to Excel.
+        Intelligently handles three types of IDs:
+        1. UUID - From Invoice table (parent invoice containing items)
+        2. Integer invoice_id - From plumbing_invoices table (statement invoices)
+        3. Integer item_id - From invoice_items table (individual items)
+        
+        Args:
+            invoice_ids (List[str]): List of IDs - can be UUIDs or integers
+            
+        Returns:
+            str: Presigned S3 URL for downloading the Excel file
+        """
+        try:
+            import pandas as pd
+            import os
+            from datetime import datetime
+            import uuid as uuid_lib
+            from mpi_backend.config import INVOICE_DOWNLOAD_FOLDER
+            from mpi_backend.utils.s3_utils import upload_export_and_get_url
+            from fastapi import HTTPException
+            
+            if not invoice_ids:
+                raise HTTPException(status_code=400, detail="invoice_ids list cannot be empty")
+            
+            # Separate UUIDs from integers
+            uuid_ids = []
+            integer_ids = []
+            
+            for id_str in invoice_ids:
+                try:
+                    # Try to parse as UUID first
+                    uuid_obj = uuid_lib.UUID(id_str)
+                    uuid_ids.append(uuid_obj)
+                except (ValueError, AttributeError):
+                    # Not a UUID, try as integer
+                    try:
+                        integer_ids.append(int(id_str))
+                    except (ValueError, TypeError):
+                        raise HTTPException(
+                            status_code=400, 
+                            detail=f"Invalid ID format: {id_str}. Must be UUID or integer."
+                        )
+            
+            logger.info(f"Exporting {len(invoice_ids)} selected invoices - {len(uuid_ids)} UUIDs, {len(integer_ids)} integers")
+            
+            data = []
+            seen_keys = set()
+            
+            # Step 1: Handle UUIDs - Query Invoice table to get all related InvoiceItems
+            if uuid_ids:
+                uuid_query = self.db.query(
+                    InvoiceItem.ref_no,
+                    InvoiceItem.date,
+                    InvoiceItem.amount,
+                    InvoiceItem.customer_job,
+                    PlumbingSupplier.name.label('supplier_name'),
+                    InvoiceItem.id,
+                    Invoice.id.label('invoice_uuid')
+                ).join(
+                    Invoice,
+                    InvoiceItem.invoice_id == Invoice.id
+                ).join(
+                    PlumbingSupplier,
+                    Invoice.supplier_id == PlumbingSupplier.id
+                ).filter(
+                    Invoice.id.in_(uuid_ids)
+                ).order_by(InvoiceItem.date.asc())
+                
+                uuid_results = uuid_query.all()
+                logger.info(f"Found {len(uuid_results)} invoice items from {len(uuid_ids)} Invoice UUIDs")
+                
+                # Process invoice items from UUIDs
+                for result in uuid_results:
+                    key = (result.ref_no, result.supplier_name, result.date)
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    
+                    data.append({
+                        'Invoice Number': str(result.ref_no) if result.ref_no else '',
+                        'Invoice Date': result.date.strftime('%Y-%m-%d') if result.date else '',
+                        'Statement Date': '',  # System invoices don't have statement date
+                        'Supplier Name': result.supplier_name if result.supplier_name else '',
+                        'Status': 'Unlisted',  # Invoice items are typically unlisted
+                        'Original Amount': round(float(result.amount) if result.amount else 0.0, 2),
+                        'Balance': 0.0,  # System invoices don't have balance
+                        'Customer Job': result.customer_job or ''
+                    })
+            
+            # Step 2: Query statement invoices (plumbing_invoices table) by integer invoice_id
+            if integer_ids:
+                statement_query = self.db.query(
+                    PlumbingInvoice,
+                    PlumbingStatement,
+                    PlumbingSupplier,
+                    InvoiceItem.id.label('system_invoice_id')
+                ).join(
+                    PlumbingStatement,
+                    PlumbingInvoice.statement_id == PlumbingStatement.id
+                ).join(
+                    PlumbingSupplier,
+                    PlumbingStatement.supplier_id == PlumbingSupplier.id
+                ).outerjoin(
+                    InvoiceItem,
+                    and_(
+                        InvoiceItem.ref_no == PlumbingInvoice.invoice_number,
+                        InvoiceItem.date == PlumbingInvoice.invoice_date,
+                        InvoiceItem.vendor == PlumbingSupplier.name
+                    )
+                ).filter(
+                    PlumbingInvoice.id.in_(integer_ids)
+                ).order_by(PlumbingInvoice.invoice_date.asc())
+                
+                statement_results = statement_query.all()
+                logger.info(f"Found {len(statement_results)} statement invoices from integer IDs")
+                
+                # Process statement invoices
+                for plumbing_invoice, plumbing_statement, plumbing_supplier, system_invoice_id in statement_results:
+                    key = (plumbing_invoice.invoice_number, plumbing_supplier.name, plumbing_invoice.invoice_date)
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    
+                    reconciliation_status = "Processed" if system_invoice_id else "Failed"
+                    
+                    data.append({
+                        'Invoice Number': str(plumbing_invoice.invoice_number) if plumbing_invoice.invoice_number else '',
+                        'Invoice Date': plumbing_invoice.invoice_date.strftime('%Y-%m-%d') if plumbing_invoice.invoice_date else '',
+                        'Statement Date': plumbing_statement.statement_date.strftime('%Y-%m-%d') if plumbing_statement.statement_date else '',
+                        'Supplier Name': plumbing_supplier.name if plumbing_supplier.name else '',
+                        'Status': reconciliation_status,
+                        'Original Amount': round(float(plumbing_invoice.original_amount) if plumbing_invoice.original_amount else 0.0, 2),
+                        'Balance': round(float(plumbing_invoice.balance) if plumbing_invoice.balance else 0.0, 2),
+                        'Customer Job': plumbing_invoice.customer_po or ''
+                    })
+                
+                # Step 3: Query invoice_items table for integer IDs not found in statement invoices
+                # Only query for IDs not found in statement invoices
+                found_statement_ids = {result[0].id for result in statement_results}
+                remaining_ids = [id for id in integer_ids if id not in found_statement_ids]
+            else:
+                remaining_ids = []
+            
+            if remaining_ids:
+                system_query = self.db.query(
+                    InvoiceItem.ref_no,
+                    InvoiceItem.date,
+                    InvoiceItem.amount,
+                    InvoiceItem.customer_job,
+                    PlumbingSupplier.name.label('supplier_name'),
+                    InvoiceItem.id
+                ).join(
+                    Invoice,
+                    InvoiceItem.invoice_id == Invoice.id
+                ).join(
+                    PlumbingSupplier,
+                    Invoice.supplier_id == PlumbingSupplier.id
+                ).filter(
+                    InvoiceItem.id.in_(remaining_ids)
+                ).order_by(InvoiceItem.date.asc())
+                
+                system_results = system_query.all()
+                logger.info(f"Found {len(system_results)} system-only invoices")
+                
+                # Process system invoices
+                for result in system_results:
+                    key = (result.ref_no, result.supplier_name, result.date)
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    
+                    data.append({
+                        'Invoice Number': str(result.ref_no) if result.ref_no else '',
+                        'Invoice Date': result.date.strftime('%Y-%m-%d') if result.date else '',
+                        'Statement Date': '',  # System invoices don't have statement date
+                        'Supplier Name': result.supplier_name if result.supplier_name else '',
+                        'Status': 'Unlisted',  # System-only invoices are unlisted
+                        'Original Amount': round(float(result.amount) if result.amount else 0.0, 2),
+                        'Balance': 0.0,  # System invoices don't have balance
+                        'Customer Job': result.customer_job or ''
+                    })
+            
+            if not data:
+                raise HTTPException(status_code=404, detail="No invoices found with the specified IDs")
+            
+            logger.info(f"Successfully collected {len(data)} invoices for export")
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(data)
+            
+            # Prepare file paths
+            upload_folder = f'{INVOICE_DOWNLOAD_FOLDER}/Exports/'
+            if not os.path.exists(upload_folder):
+                os.makedirs(upload_folder)
+            
+            # Generate filename with timestamp
+            timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+            filename = f'MonthlyStatement_Selected_{timestamp}.xlsx'
+            file_path = f'{upload_folder}{filename}'
+            
+            # Create Excel file with separate sheets per supplier
+            with pd.ExcelWriter(file_path, engine='xlsxwriter') as writer:
+                workbook = writer.book
+                
+                # Get unique suppliers and create a sheet for each
+                suppliers = df['Supplier Name'].unique()
+                suppliers = sorted(suppliers)
+                
+                for supplier in suppliers:
+                    supplier_df = df[df['Supplier Name'] == supplier].copy()
+                    supplier_df = supplier_df.sort_values('Invoice Date', ascending=True)
+                    
+                    # Create sheet name (max 31 chars for Excel)
+                    sheet_name = supplier[:31] if len(supplier) > 31 else supplier
+                    
+                    # Write to sheet
+                    supplier_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                    
+                    # Get worksheet for formatting
+                    worksheet = writer.sheets[sheet_name]
+                    
+                    # Apply formatting
+                    self._format_monthly_statement_sheet(workbook, worksheet, supplier_df)
+            
+            download_url = upload_export_and_get_url(file_path)
+
+            logger.info(f"Successfully exported {len(data)} invoices to {filename}")
+            return download_url
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error exporting selected statements: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=500, detail="Export failed") from e

@@ -1,0 +1,94 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    description: "Raw data extracted from external sources before transformation"
+    tables:
+      - name: raw_google_sheet_mappings
+        description: |
+          Raw extracted data from Google Sheets item mapping spreadsheet.
+          Loaded by Python script (load_raw_google_sheet_mappings.py) and consumed by dbt.
+
+          Contains all mapping data including permanent, temporary, and invalid entries.
+          The mapping_type column distinguishes between them.
+
+models:
+  - name: stg__google_sheet_mappings
+    description: |
+      Staged data from the raw Google Sheet mappings table.
+
+      Performs basic cleaning:
+      - Trims whitespace from all string columns
+      - Filters out obviously invalid rows
+      - Standardizes NULL handling
+
+      This creates a consistent base for downstream intermediate models:
+      - int__permanent_mappings (permanent mappings for direct use)
+      - int__temporary_mappings (temporary mappings for sheet_name only)
+
+    columns:
+      - name: id
+        description: "Primary key from the raw table"
+        tests:
+          - unique
+          - not_null
+
+      - name: sheet_title
+        description: "Category/tab name from Google Sheets (e.g., 'AIR FITTINGS')"
+        tests:
+          - not_null
+
+      - name: google_sheet_name
+        description: "Name of the Google Sheet file"
+
+      - name: sheet_id
+        description: "Google Sheets gid for tracking across renames"
+
+      - name: mpi_code
+        description: "Internal MPI item code (e.g., 'FWCR4030')"
+
+      - name: mpi_description
+        description: "MPI description (e.g., 'STD CONC REDUCERS')"
+
+      - name: supplier
+        description: "Supplier name (e.g., 'World Wide Plumbing')"
+
+      - name: supplier_id
+        description: "Supplier ID (reference to suppliers table)"
+
+      - name: supplier_item_id
+        description: |
+          Supplier's item code with suffix (e.g., 'WELC4030-Y').
+          This is the key column for joining to invoice_items.item
+
+      - name: original_supplier_item_id
+        description: "Original item code before any processing"
+
+      - name: row_number
+        description: "Row number in the Google Sheet (for debugging)"
+
+      - name: column_index
+        description: "Column index in the Google Sheet (for debugging)"
+
+      - name: mapping_type
+        description: "Classification: permanent, temporary, or invalid"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['permanent', 'temporary', 'invalid']
+
+      - name: validation_status
+        description: "Validation result (valid_permanent, valid_temporary, etc.)"
+
+      - name: extraction_timestamp
+        description: "When the data was extracted from Google Sheets"
+
+      - name: loaded_at
+        description: "When the raw data was loaded into dbt"
+
+      - name: is_temporary_mapping
+        description: "Boolean flag: TRUE if this is a temporary mapping"
+
+      - name: is_valid_for_join
+        description: "Boolean flag: TRUE if supplier_item_ids is valid for joining"

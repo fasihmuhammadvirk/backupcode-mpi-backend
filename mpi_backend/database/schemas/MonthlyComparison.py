@@ -56,6 +56,10 @@ class SupplierPriceInfo(BaseModel):
     id: int = Field(..., description="Supplier ID")
     name: str = Field(..., description="Supplier name")
     unit_price: float = Field(..., description="Lowest unit price from this supplier")
+    original_item: Optional[str] = Field(
+        default=None,
+        description="Supplier's original item number associated with the price"
+    )
 
 class SupplierCheapestItemsResponse(ItemInfo):
     """Response schema for getting cheapest items per supplier."""
@@ -67,6 +71,10 @@ class SupplierCheapestItemsResponse(ItemInfo):
 class EnrichedItemPriceResponse(ItemInfo):
     """Combined response schema with both cheapest price and supplier information."""
     cheapest_unit_price: float = Field(..., description="Lowest unit price from any supplier")
+    cheapest_original_item: Optional[str] = Field(
+        default=None,
+        description="Original item number tied to the cheapest supplier price"
+    )
     suppliers: List[SupplierPriceInfo] = Field(
         ..., 
         description="List of suppliers with their lowest prices for this item"
@@ -84,16 +92,19 @@ class PaginatedEnrichedItemResponse(PaginatedResponse[EnrichedItemPriceResponse]
                         "original_item": "ORIG001",
                         "mpi_description": "Sample item description",
                         "cheapest_unit_price": 10.99,
+                        "cheapest_original_item": "SUPP-ORIG-001",
                         "suppliers": [
                             {
                                 "id": 1,
                                 "name": "Supplier A",
-                                "unit_price": 10.99
+                                "unit_price": 10.99,
+                                "original_item": "SUPP-ORIG-001"
                             },
                             {
                                 "id": 2,
                                 "name": "Supplier B",
-                                "unit_price": 12.99
+                                "unit_price": 12.99,
+                                "original_item": "SUPP-ORIG-002"
                             }
                         ]
                     }
@@ -142,4 +153,22 @@ class PaginatedItemInfoResponse(PaginatedResponse[ItemInfo]):
                 "size": 10,
                 "pages": 1
             }
-        } 
+        }
+
+class MonthlyAggregateRequest(BaseModel):
+    """Schema for monthly aggregate request."""
+    month: int = Field(..., ge=1, le=12, description="Month (1-12)")
+    year: int = Field(..., ge=2000, le=2100, description="Year (e.g., 2024)")
+    status_filters: Optional[List[str]] = Field(
+        default=["processed", "failed", "unlisted", "missing"],
+        description="List of invoice statuses to include"
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "month": 1,
+                "year": 2024,
+                "status_filters": ["processed", "failed"]
+            }
+        }

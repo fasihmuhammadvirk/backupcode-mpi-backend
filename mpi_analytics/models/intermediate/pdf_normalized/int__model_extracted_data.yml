@@ -1,0 +1,32 @@
+version: 2
+
+models:
+  - name: int__model_extracted_data
+    description: |
+      Model Extracted Data - Cleanup and Email-Based Vendor Resolution
+
+      Cleans AI-extracted invoice data and replaces unreliable vendor column with
+      vendor information derived from email senders. Handles safe numeric casting,
+      item suffix normalization, and basic data cleanup.
+
+      **Key Transformations:**
+        - Email-based vendor resolution using email_queue_id FK relationship
+        - Filters for DOWNLOADED status emails to ensure reliable vendor data
+        - Vendor suffix application using reliable email-derived vendor names
+        - Deduplication logic accounting for email-based vendor changes
+        - Exclusion of internal billing emails as configured
+
+      Data lineage:
+        stg__model_extracted_data + stg__email_download_queue + suppliers + supplier_email_patterns
+        → THIS MODEL → int__invoice_items_mapped → marts
+
+    columns:
+      - name: invoice_items_id
+        description: "The primary key from model_extracted_data.id"
+        tests:
+          - unique
+          - not_null
+      - name: email_derived_vendor
+        description: "Reliable vendor name derived from email sender using suppliers + supplier_email_patterns"
+      - name: item_with_suffix
+        description: "Item code with vendor-specific suffix applied using email-derived vendor"

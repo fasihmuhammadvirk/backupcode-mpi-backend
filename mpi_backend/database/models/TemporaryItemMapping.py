@@ -12,5 +12,6 @@ class TempItemMapping(Base):
     original_item = Column(String)
     original_description = Column(String)
     sheet_name = Column(String)
+    sheet_id = Column(String)  # Google Sheets gid for tracking across renames
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

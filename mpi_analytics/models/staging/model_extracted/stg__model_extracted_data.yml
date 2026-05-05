@@ -1,0 +1,74 @@
+version: 2
+
+sources:
+  - name: public
+    tables:
+      - name: model_extracted_data
+        description: "Invoice data extracted by AI models (Gemini, etc.)"
+
+models:
+  - name: stg__model_extracted_data
+    description: |
+      Staged data from the `model_extracted_data` table. This table contains invoice line item data
+      extracted by AI models (primarily Gemini). Performs basic cleaning, trimming, and type casting.
+
+      This model mirrors the structure of `stg__invoice_items` to maintain consistency in the
+      data pipeline and allow for easy switching between legacy and AI-extracted data sources.
+
+      Key differences from stg__invoice_items:
+      - Source table: `model_extracted_data` instead of `invoice_items`
+      - Includes `model_name` field to track which AI model extracted the data
+      - Some fields (mpi_item, mpi_description, sheet_name, class_, account, export_status, memo)
+        are not available and set to NULL
+
+    columns:
+      - name: invoice_items_id
+        description: "The primary key from model_extracted_data.id"
+      - name: invoice_id
+        description: "Foreign key to pdf_extraction_queue (maps to invoice)"
+      - name: filename
+        description: "The S3 file key of the source PDF"
+      - name: item
+        description: "The original item code extracted from the invoice"
+      - name: description
+        description: "The item description extracted from the invoice"
+      - name: vendor
+        description: "The name of the supplier or vendor"
+      - name: customer_job
+        description: "The customer or job associated with the item"
+      - name: ref_no
+        description: "The invoice reference number"
+      - name: po_number
+        description: "The purchase order number"
+      - name: buyer
+        description: "The name of the buyer"
+      - name: date
+        description: "The date of the invoice item"
+      - name: date_added
+        description: "The timestamp when extraction occurred (extracted_at)"
+      - name: cost
+        description: "The cost of the item (as text)"
+      - name: qty
+        description: "The quantity of the item (as text)"
+      - name: amount
+        description: "The total amount for the item line (as text)"
+      - name: bill
+        description: "The bill information"
+      - name: is_active
+        description: "Flag indicating if the record is active (always true for model_extracted_data)"
+      - name: model_name
+        description: "The AI model used for extraction (e.g., 'gemini-2.0-flash')"
+      - name: mpi_item
+        description: "Not available in model_extracted_data (set to NULL)"
+      - name: mpi_description
+        description: "Not available in model_extracted_data (set to NULL)"
+      - name: sheet_name
+        description: "Not available in model_extracted_data (set to NULL)"
+      - name: class_
+        description: "Not available in model_extracted_data (set to NULL)"
+      - name: account
+        description: "Not available in model_extracted_data (set to NULL)"
+      - name: export_status
+        description: "Not available in model_extracted_data (set to NULL)"
+      - name: memo
+        description: "Not available in model_extracted_data (set to NULL)"

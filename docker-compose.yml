@@ -1,9 +1,18 @@
 version: '3.0'
 
 services:
-  postgresql:
-    container_name: database
-    image: postgres:latest
+  mpi_database:
+    container_name: main_database
+    image: postgres:16
+    shm_size: '256m'
+    command: >
+      postgres
+        -c shared_buffers=256MB
+        -c work_mem=64MB
+        -c maintenance_work_mem=128MB
+        -c effective_cache_size=1GB
+        -c checkpoint_completion_target=0.9
+        -c wal_buffers=16MB
     environment:
       POSTGRES_USER: woodpecker
       POSTGRES_PASSWORD: woodpecker
@@ -13,7 +22,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - mpi_pgdata:/var/lib/postgresql/data
     networks:
       - postgres_ntw
     healthcheck:
@@ -41,12 +50,12 @@ services:
       - LOGIN_PWD=${LOGIN_PWD}
       - INVOICE_DOWNLOAD_FOLDER=${INVOICE_DOWNLOAD_FOLDER}
     depends_on:
-      postgresql:
+      mpi_database:
         condition: service_healthy
     networks:
       - postgres_ntw
 volumes:
-  pgdata: {}
+  mpi_pgdata: {}
 
 networks:
   postgres_ntw:

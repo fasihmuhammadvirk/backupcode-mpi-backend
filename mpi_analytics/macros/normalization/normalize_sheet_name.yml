@@ -1,0 +1,35 @@
+version: 2
+
+macros:
+  - name: normalize_sheet_name
+    description: |
+      Normalizes sheet name formatting by removing parentheses and periods,
+      and standardizing multi-part sheet names with dashes.
+
+      This macro ensures consistent sheet name formatting across all records by:
+      1. Replacing ") (" with " - " to convert multi-part sheet names
+      2. Removing all remaining parentheses
+      3. Removing all periods
+      4. Collapsing multiple spaces to single space
+      5. Trimming leading/trailing whitespace
+      6. Replacing NULL or empty values with 'NO SHEET NAME'
+
+      **Examples:**
+        - Input: "(AIR FITTINGS)"
+          Output: "AIR FITTINGS"
+
+        - Input: "(BLACK MALLEABLE) (GAS)"
+          Output: "BLACK MALLEABLE - GAS"
+
+        - Input: NULL or ""
+          Output: "NO SHEET NAME"
+
+    arguments:
+      - name: sheet_name_column
+        type: string
+        description: |
+          The name of the sheet_name column to normalize.
+          Can include table aliases (e.g., 'm.resolved_sheet_name', 'temp_sheet_name')
+
+    returns:
+      description: The normalized sheet name string with consistent formatting

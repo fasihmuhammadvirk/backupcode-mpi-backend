@@ -1,0 +1,11 @@
+Yes, I can help you query export-related data! Before I do, let me know:
+
+- **What type of export data?** (invoice export status, QuickBooks export status)
+- **Any specific filters?** (date range, supplier, customer job)
+- **What status?** (pending export, already exported)
+
+For example:
+- "Show invoices pending export from last month"
+- "Which items from ABC Supply are exported?"
+
+What specific export information do you need?

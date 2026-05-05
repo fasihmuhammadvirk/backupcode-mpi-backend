@@ -1,26 +1,38 @@
 import boto3
+from botocore.config import Config
 import logging
-from typing import Optional
+import os
+from os import PathLike
+from typing import Optional, Union
 
 from mpi_backend.config import (
     AWS_SERVER_PUBLIC_KEY,
     AWS_SERVER_SECRET_KEY,
     REGION,
     BUCKET_NAME,
+    INVOICES_PDFS_AWS_SERVER_PUBLIC_KEY,
+    INVOICES_PDFS_AWS_SERVER_SECRET_KEY,
+    INVOICES_PDFS_BUCKET_NAME,
+    INVOICES_PDFS_REGION,
+    S3_PRESIGNED_URL_EXPIRY,
 )
 
 # Set up logging
 logger = logging.getLogger(__name__)
 
 
-def upload_file(file_name, file_key, is_invoice=True):
-    """Upload a file to S3 bucket"""
+def upload_file(file_name, file_key, is_invoice=True) -> bool:
+    """Upload a file to S3 bucket.
+
+    Returns:
+        bool: True if upload succeeded, False otherwise.
+    """
     try:
         s3_client = boto3.client(
             's3',
-            aws_access_key_id=AWS_SERVER_PUBLIC_KEY,
-            aws_secret_access_key=AWS_SERVER_SECRET_KEY,
-            region_name=REGION
+            aws_access_key_id=INVOICES_PDFS_AWS_SERVER_PUBLIC_KEY,
+            aws_secret_access_key=INVOICES_PDFS_AWS_SERVER_SECRET_KEY,
+            region_name=INVOICES_PDFS_REGION
         )
 
         if is_invoice:
@@ -30,10 +42,10 @@ def upload_file(file_name, file_key, is_invoice=True):
                 s3_key = file_key_str + '.pdf'
             else:
                 s3_key = file_key_str
-            
+
             s3_client.upload_file(
                 file_name,
-                BUCKET_NAME,
+                INVOICES_PDFS_BUCKET_NAME,
                 s3_key,
                 ExtraArgs={
                     'ContentDisposition': 'inline',
@@ -42,11 +54,80 @@ def upload_file(file_name, file_key, is_invoice=True):
             )
             logger.info("Invoice with Key uploaded: %s", s3_key)
         else:
-            s3_client.upload_file(file_name, BUCKET_NAME, file_key)
+            s3_client.upload_file(file_name, INVOICES_PDFS_BUCKET_NAME, file_key)
             logger.info("File uploaded: %s", file_key)
+        return True
     except Exception as e:
         err_msg = f"{file_name} -> Failed during upload to S3 Bucket. "
         logger.error("%s Raised Exception-->%s", err_msg, str(e))
+        return False
+
+
+def upload_export_and_get_url(
+    file_path: Union[str, PathLike[str]],
+    file_key: Optional[str] = None,
+    expiration_time: int = S3_PRESIGNED_URL_EXPIRY,
+) -> str:
+    """Upload an export file and return its presigned URL.
+
+    Args:
+        file_path: Local export file path. Deleted after upload is attempted.
+        file_key: Optional S3 key. Defaults to ``Exports/<filename>``.
+        expiration_time: Presigned URL expiry in seconds.
+    """
+    file_path_str = os.fspath(file_path)
+    export_key = file_key or f"Exports/{os.path.basename(file_path_str)}"
+
+    try:
+        if not upload_file(file_path_str, file_key=export_key, is_invoice=False):
+            raise RuntimeError("Failed to upload export file to S3")
+
+        download_url = get_presigned_url(
+            file_key=export_key,
+            expiration_time=expiration_time,
+            is_invoice=False,
+        )
+        if not download_url:
+            raise RuntimeError("Failed to generate download URL")
+
+        return download_url
+    finally:
+        try:
+            if os.path.exists(file_path_str):
+                os.remove(file_path_str)
+        except OSError as cleanup_error:
+            logger.warning(
+                "Failed to clean up local export file %s: %s",
+                file_path_str,
+                cleanup_error,
+            )
+
+
+def download_s3_file(file_key: str, local_path: str, is_invoice: bool = True) -> bool:
+    """Download a file from S3 bucket.
+
+    Returns:
+        bool: True if download succeeded, False otherwise.
+    """
+    try:
+        s3_client = boto3.client(
+            's3',
+            aws_access_key_id=INVOICES_PDFS_AWS_SERVER_PUBLIC_KEY,
+            aws_secret_access_key=INVOICES_PDFS_AWS_SERVER_SECRET_KEY,
+            region_name=INVOICES_PDFS_REGION
+        )
+
+        # Smart handling of PDF extension
+        s3_key = str(file_key)
+        if is_invoice and not s3_key.lower().endswith('.pdf'):
+            s3_key += '.pdf'
+
+        s3_client.download_file(INVOICES_PDFS_BUCKET_NAME, s3_key, local_path)
+        logger.info("File downloaded: %s -> %s", s3_key, local_path)
+        return True
+    except Exception as e:
+        logger.error("Failed to download %s from S3: %s", file_key, str(e))
+        return False
 
 
 def get_presigned_url(
@@ -58,9 +139,9 @@ def get_presigned_url(
     try:
         s3_client = boto3.client(
             's3',
-            aws_access_key_id=AWS_SERVER_PUBLIC_KEY,
-            aws_secret_access_key=AWS_SERVER_SECRET_KEY,
-            region_name=REGION
+            aws_access_key_id=INVOICES_PDFS_AWS_SERVER_PUBLIC_KEY,
+            aws_secret_access_key=INVOICES_PDFS_AWS_SERVER_SECRET_KEY,
+            region_name=INVOICES_PDFS_REGION
         )
 
         if is_invoice:
@@ -108,7 +189,7 @@ def get_presigned_url(
                     presigned_url = s3_client.generate_presigned_url(
                         'get_object',
                         Params={
-                            'Bucket': BUCKET_NAME,
+                            'Bucket': INVOICES_PDFS_BUCKET_NAME,
                             'Key': try_key,
                             'ResponseContentDisposition': 'inline',
                             'ResponseContentType': 'application/pdf'
@@ -133,13 +214,64 @@ def get_presigned_url(
         else:
             presigned_url = s3_client.generate_presigned_url(
                 'get_object',
-                Params={'Bucket': BUCKET_NAME, 'Key': file_key},
+                Params={'Bucket': INVOICES_PDFS_BUCKET_NAME, 'Key': file_key},
                 ExpiresIn=expiration_time
             )
             return presigned_url
     except Exception as e:
         logger.error(
             "Error generating presigned URL for %s: %s",
+            file_key,
+            str(e),
+        )
+        return None
+
+
+def get_invoice_pdf_presigned_url(
+    file_key: str,
+    expiration_time: int = 180,
+) -> Optional[str]:
+    """
+    Generate a presigned URL for invoice PDFs from the dedicated bucket.
+
+    Args:
+        file_key: The full S3 path to the PDF file
+                  (e.g., 'invoices/bmwpsupply_at_gmail.com/2026-01/19bb4e4f85460b3f_doc00076757.pdf')
+        expiration_time: URL expiration time in seconds (default: 180)
+
+    Returns:
+        Presigned URL string or None if generation fails
+    """
+    try:
+        # Configure for path-style addressing (required for buckets with dots)
+        s3_config = Config(
+            s3={'addressing_style': 'path'},
+            signature_version='s3v4'
+        )
+
+        s3_client = boto3.client(
+            's3',
+            aws_access_key_id=INVOICES_PDFS_AWS_SERVER_PUBLIC_KEY,
+            aws_secret_access_key=INVOICES_PDFS_AWS_SERVER_SECRET_KEY,
+            region_name=INVOICES_PDFS_REGION,
+            config=s3_config
+        )
+
+        presigned_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={
+                'Bucket': INVOICES_PDFS_BUCKET_NAME,
+                'Key': file_key,
+                'ResponseContentDisposition': 'inline',
+                'ResponseContentType': 'application/pdf'
+            },
+            ExpiresIn=expiration_time
+        )
+        logger.info("Generated presigned URL for invoice PDF: %s", file_key)
+        return presigned_url
+    except Exception as e:
+        logger.error(
+            "Error generating presigned URL for invoice PDF %s: %s",
             file_key,
             str(e),
         )

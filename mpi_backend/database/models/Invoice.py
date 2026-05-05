@@ -14,6 +14,8 @@ class Invoice(Base):
     status = Column(String)
     storage_path = Column(String)
     is_exported = Column(String, default="Pending")
+    # TODO: Add company_id for multi-tenancy
+    # company_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
 
     items = relationship("InvoiceItem", back_populates="invoice")
     supplier_fk = relationship("Supplier", back_populates="supplier")

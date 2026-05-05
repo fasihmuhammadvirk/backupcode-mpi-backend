@@ -1,0 +1,74 @@
+version: 2
+
+models:
+  - name: int__invoice_items_mapped
+    description: |
+      Intermediate Invoice Items with Resolved Mappings
+
+      Maps invoice line items to MPI items through priority-based matching:
+      1. Permanent mappings - supplier_item → mpi_code + mpi_description
+      2. Temporary mappings - supplier_item → sheet_name only → generates UIDI-{Job Equipment/Job Materials Purchased}
+      3. Possible match - no exact match, but possible matches found via suffix removal or case-insensitive matching
+      4. No match - item not found in any mapping → 'No Match'
+
+      **Data Quality:**
+        - All invoice items have exactly one mapping (permanent, temporary, possible_match, or no_match)
+        - Resolved MPI items are never null
+        - Mapping type values are restricted to: permanent, temporary, possible_match, no_match
+
+    columns:
+      - name: invoice_items_id
+        description: "Primary key of the invoice item."
+        tests:
+          - unique
+          - not_null
+
+      - name: resolved_mpi_item
+        description: |
+          The resolved MPI item code based on mapping priority:
+          - Permanent mapping: uses mpi_code from permanent_mappings
+          - Temporary mapping: generates UIDI-{Job Equipment/Job Materials Purchased}
+          - No match: returns 'No Match'
+        tests:
+          - not_null
+
+      - name: mapping_type
+        description: |
+          Type of mapping applied to this invoice item:
+          - permanent: Matched via permanent_mappings (supplier_item → mpi_code)
+          - temporary: Matched via temporary_mappings (supplier_item → sheet_name only)
+          - possible_match: No exact match, but possible matches found via suffix removal or case-insensitive matching
+          - no_match: No mapping found in either table
+        tests:
+          - accepted_values:
+              values: ['permanent', 'temporary', 'possible_match', 'no_match']
+
+      - name: resolved_mpi_description
+        description: "The resolved MPI description based on mapping type."
+
+      - name: resolved_sheet_name
+        description: "The resolved sheet name from permanent or temporary mappings."
+
+      - name: item
+        description: "Supplier's item code from the invoice (used as join key for mappings)."
+
+      - name: vendor
+        description: "Vendor name from the invoice."
+
+      - name: date
+        description: "Invoice date."
+
+      - name: qty
+        description: "Quantity as numeric value."
+
+      - name: cost
+        description: "Cost as numeric value."
+
+      - name: amount
+        description: "Amount as numeric value."
+
+      - name: mapping_source
+        description: "Source of the mapping (e.g., 'google_sheets', 'manual', 'unmapped')."
+
+      - name: mapped_at
+        description: "Timestamp when the mapping was applied."

@@ -4,7 +4,8 @@ from datetime import datetime
 
 from mpi_backend.database import get_db
 from mpi_backend.database.controllers import GoogleSheetSyncController
-from mpi_backend.utils.auth.auth_bearer import JWTBearer
+from mpi_backend.database.models.User import User
+from mpi_backend.utils.auth.dependencies import get_current_user
 from mpi_backend.database.schemas import SyncMappingsResponse
 
 import logging
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/sync", tags=["Sync Mapping"])
 def sync_mapping(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    token: str = Depends(JWTBearer())
+    current_user: User = Depends(get_current_user)
 ):
     """
     Manually trigger enhanced synchronization of mappings from Google Sheets.
@@ -148,7 +149,7 @@ def sync_mapping(
 @router.get("/status")
 def sync_status(
     db: Session = Depends(get_db),
-    token: str = Depends(JWTBearer())
+    current_user: User = Depends(get_current_user)
 ):
     """
     Check the status of synchronization tasks.
@@ -264,6 +265,24 @@ def sync_status(
             # Fallback for unknown operations
             current_operation = operation or "Unknown operation"
 
+    # Get and validate percentage - ensure it's between 0 and 100
+    raw_percentage = status.get("percentage", 0)
+    if not isinstance(raw_percentage, (int, float)):
+        raw_percentage = 0
+    # Clamp percentage to valid range [0, 100]
+    percentage = max(0, min(100, int(raw_percentage)))
+    
+    # If status is idle, ensure percentage is 0
+    if not status["is_running"]:
+        percentage = 0
+    
+    # Get progress tracking information with defaults
+    total_steps = status.get("total_steps", 0) or 0
+    current_step = status.get("current_step", 0) or 0
+    step_progress = status.get("step_progress", 0) or 0
+    total_items_to_process = status.get("total_items_to_process", 0) or 0
+    items_processed = status.get("items_processed", 0) or 0
+    
     return {
         "status": "running" if status["is_running"] else "idle",
         "current_operation": current_operation,
@@ -271,22 +290,22 @@ def sync_status(
         "last_sync_time": status.get("last_sync_time"),
         "last_no_match_uidi_update": status.get("last_update_no_match_uidi_time"),
         "last_full_update": status.get("last_update_all_time"),
-        # Add percentage tracking information
-        "percentage": status.get("percentage", 0),
-        "total_steps": status.get("total_steps", 0),
-        "current_step": status.get("current_step", 0),
-        "step_progress": status.get("step_progress", 0),
+        # Add percentage tracking information (validated and clamped to 0-100)
+        "percentage": percentage,
+        "total_steps": total_steps,
+        "current_step": current_step,
+        "step_progress": step_progress,
         # Add real-time progress information
-        "total_items_to_process": status.get("total_items_to_process", 0),
-        "items_processed": status.get("items_processed", 0),
+        "total_items_to_process": total_items_to_process,
+        "items_processed": items_processed,
     }
 
 
 @router.post("/update-no-match-uidi-mappings")
 def update_no_match_uidi_mappings(
-        background_tasks: BackgroundTasks,
-        db: Session = Depends(get_db),
-        token: str = Depends(JWTBearer())
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Update No Match and UIDI item mappings from Google Sheets.
@@ -436,9 +455,9 @@ def update_no_match_uidi_mappings(
 
 @router.post("/update-all-mappings")
 def update_all_mappings(
-        background_tasks: BackgroundTasks,
-        db: Session = Depends(get_db),
-        token: str = Depends(JWTBearer())
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Update all invoice items with latest mappings from Google Sheets.

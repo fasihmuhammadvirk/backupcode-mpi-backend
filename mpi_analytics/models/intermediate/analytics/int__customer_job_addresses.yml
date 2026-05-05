@@ -1,0 +1,117 @@
+version: 2
+
+models:
+  - name: int__customer_job_addresses
+    description: |
+      Extracts structured address components from the customer_job field.
+
+      **Data Sources:**
+      1. **Python-parsed** (preferred): Uses the `usaddress` library for accurate parsing
+         - Run: `python scripts/parse_customer_job_addresses.py`
+      2. **SQL fallback**: Regex-based parsing for addresses not yet processed by Python
+
+      **Problem Solved:**
+      The customer_job field often contains messy data where addresses are prefixed with
+      company names, phone numbers, day/time info, or duplicated addresses. This model:
+      - Removes prefixes (company names, phone numbers, timestamps)
+      - Deduplicates repeated addresses (e.g., "69 Hope St. 69 Hope St.")
+      - Extracts structured components: street_number, street_name, city, state, zip
+
+      **Examples Handled:**
+      - "Mpi Plumbing 172-02 Hilside Ave. Jamaica Ny" → 172-02 Hilside Ave., Jamaica, NY
+      - "69 Hope St. 69 Hope St. Brooklyn Ny 11211" → 69 Hope St., Brooklyn, NY 11211
+      - "Att: +1 (646) 708-4476 886 East 24 St. Brooklyn Ny" → 886 East 24 St., Brooklyn, NY
+
+      **Quality Indicators:**
+      - extraction_confidence: high/medium/low based on components found
+      - needs_manual_review: flag for addresses that need review
+      - parse_source: "python" or "sql_fallback"
+
+      **Usage:**
+      Joined to mart__invoice_items to enrich invoice data with structured address components.
+
+    columns:
+      - name: customer_job
+        description: "Original customer_job value from source data (unique key for this model)"
+        tests:
+          - unique
+          - not_null
+
+      - name: prefix_text
+        description: |
+          Text that appeared before the detected street address.
+          Examples: "Mpi Plumbing", "Thursday 8:00 Piggy Back", "Att: +1 (646) 708-4476"
+          NULL if the street address starts at the beginning.
+
+      - name: extracted_address
+        description: |
+          The portion of customer_job identified as the street address.
+          Everything from the street number to the end of the string.
+
+      - name: street_number
+        description: |
+          Extracted street number. Supports hyphenated formats.
+          Examples: "172-02", "886", "205", "80"
+
+      - name: street_name_with_suffix
+        description: |
+          Street name including the type suffix (Ave., St., Blvd., etc.)
+          Examples: "Hillside Ave.", "Pine St.", "Cabrini Blvd."
+
+      - name: city
+        description: |
+          Extracted city name. Recognizes common NYC boroughs and surrounding areas.
+          Examples: "Jamaica", "Brooklyn", "Bronx", "Manhattan", "Queens"
+
+      - name: state
+        description: |
+          State abbreviation, normalized to standard format.
+          Currently supports: NY, NJ, CT
+          NULL if state could not be determined.
+
+      - name: zip_code
+        description: |
+          5-digit ZIP code, optionally with +4 extension.
+          Examples: "11217", "10033"
+          NULL if not present in the address.
+
+      - name: cross_street_info
+        description: |
+          Cross street reference if present (from Cor/Bet/Corner/Between patterns).
+          Examples: "173 St" from "Cor 173 St."
+
+      - name: clean_address
+        description: |
+          Reconstructed clean address from parsed components.
+          Format: "{street_number} {street_name} {city} {state} {zip_code}"
+
+      - name: extraction_confidence
+        description: |
+          Quality indicator for the extraction:
+          - high: Street number found AND state detected
+          - medium: Street number found but no state
+          - low: Could not identify standard address pattern
+        tests:
+          - accepted_values:
+              values: ['high', 'medium', 'low']
+
+      - name: needs_manual_review
+        description: |
+          Boolean flag indicating addresses that may need manual review.
+          TRUE when street_number could not be extracted.
+        tests:
+          - not_null
+
+      - name: parse_source
+        description: |
+          Source of the parsed address:
+          - "python": Parsed using usaddress library (more accurate)
+          - "sql_fallback": Parsed using SQL regex (less accurate)
+
+    tests:
+      - dbt_utils.expression_is_true:
+          name: high_confidence_has_street_number
+          expression: "extraction_confidence = 'high' AND street_number IS NOT NULL"
+          config:
+            where: "extraction_confidence = 'high'"
+            severity: error

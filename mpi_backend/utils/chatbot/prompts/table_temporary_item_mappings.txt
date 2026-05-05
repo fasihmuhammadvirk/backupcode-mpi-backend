@@ -1,0 +1,14 @@
+Table: temporary_item_mappings
+Columns: id (INTEGER), original_item (VARCHAR), original_description (VARCHAR), sheet_name (VARCHAR), created_at (DATETIME), updated_at (DATETIME)
+
+Key Business Info:
+- Contains temporary mappings for items that need to be mapped to MPI codes
+- original_item: The original item code from supplier (also called "org item")
+- original_description: Description of the original item
+- sheet_name: Google sheet name where this mapping was created
+- These are items that haven't been permanently mapped yet
+
+Business Rules:
+- Use original_item for queries about "org items" or "original items"
+- Always filter for active mappings (created_at is recent)
+

@@ -1,0 +1,12 @@
+I want to make sure I do exactly what you need! Could you provide a bit more detail?
+
+- **What specific data** are you interested in? (invoices, items, suppliers, customer jobs)
+- **Any filters** like date range, supplier name, or customer job?
+- **What would you like me to do** with it? (show, count, summarize, export)
+
+For example:
+- "Show me invoices from last month"
+- "Count items for Ferguson Supply"
+- "Summarize spending by customer job for Q1 2024"
+
+What would you like me to help you with?

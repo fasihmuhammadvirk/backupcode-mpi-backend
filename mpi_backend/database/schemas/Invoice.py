@@ -12,6 +12,7 @@ class Invoice(BaseModel):
     ref_no: str
     customer_job: str
     is_exported: str
+    signed_url: Optional[str] = None
 
     class Config:
         from_attributes = True

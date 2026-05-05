@@ -1,0 +1,27 @@
+version: 2
+
+sources:
+  - name: public
+    tables:
+      - name: item_classification
+        description: |
+          Lookup table mapping sheet_name values to QB account category codes.
+          Values: M (Job Materials), E (Job Equipment), A (Additional Material).
+        columns:
+          - name: id
+            description: Primary key.
+          - name: item
+            description: sheet_name value from mart__invoice_items.
+          - name: category
+            description: "Account code: M, E, or A."
+
+      - name: quickbooks_items
+        description: |
+          History of exported items. Used to filter unprocessed items.
+        columns:
+          - name: invoice_items_id
+            description: ID of the item in mart__invoice_items.
+          - name: invoice_id
+            description: ID of the parent invoice.
+          - name: exported_at
+            description: Timestamp of export.

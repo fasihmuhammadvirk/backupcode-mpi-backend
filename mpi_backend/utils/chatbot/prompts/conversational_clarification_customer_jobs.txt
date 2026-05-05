@@ -1,0 +1,7 @@
+I can help you with customer job information! To get the right data, could you tell me:
+
+- **Which customer job?** (e.g., "Smith Residence", "ABC Construction")
+- **What information?** (items, invoices, totals)
+- **Date range?**
+
+What customer job data do you need?

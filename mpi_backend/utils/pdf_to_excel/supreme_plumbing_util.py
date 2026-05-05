@@ -1,6 +1,10 @@
 import tabula
 import pandas as pd
-import PyPDF2 as pyPdf  # alternate approach
+try:
+    from PyPDF2 import PdfReader
+except ImportError:
+    # PyPDF2 has been deprecated, use pypdf instead
+    from pypdf import PdfReader
 import fitz
 import re
 from mpi_backend.utils.pdf_to_excel.formatting_util import save_final_data, save_final_data_for_database
@@ -15,8 +19,13 @@ def extract_supreme_plumbing_data(filename, output_path):
 
     # get tax details
     tax = extract_tax(filename, get_pages(filename))
+    freight = extract_freight(filename)
 
     tax = float(tax.replace("$", "").replace(",", ""))
+    freight_value = float(freight) if freight else 0.0
+    
+    # Only add freight row if freight > 0
+    freight_row = ["10 Materials", "Freight", "", "", freight_value] if freight_value > 0 else None
     tax_row = ["10 Materials", "Tax", "", "", tax]
 
     data = fitz.open(filename)
@@ -37,9 +46,13 @@ def extract_supreme_plumbing_data(filename, output_path):
     try: # we have invoices in which there is no amount or cost for items - shipping slips
         results['Amount'] = results['Amount'].str.replace(',', '').str.replace('$', '').astype(float)
         results['Cost'] = results['Cost'].str.replace(',', '').str.replace('$', '').astype(float)
+        if freight_row is not None:
+            results.loc[len(results)] = freight_row
         results.loc[len(results)] = tax_row
     except:
-        results.loc[len(results)] = ["10 Materials", "Tax", tax]
+        if freight_value > 0:
+            results.loc[len(results)] = ["10 Materials", "Freight", "", "", freight_value]
+        results.loc[len(results)] = ["10 Materials", "Tax", "", "", tax]
         cleaned_invoice_attributes['Date'] = extract_date_from_shipping_slip(filename)
 
     results[list(cleaned_invoice_attributes.columns)] = cleaned_invoice_attributes
@@ -181,6 +194,22 @@ def clean_invoice_items(table):
                      'Rate': 'Cost', 'Amount': 'Amount'})
     table.dropna(subset=["Item", "Description", "Qty"], inplace=True)
     table.reset_index(drop=True, inplace=True)
+    
+    # Clean special characters from Item and Description columns (remove carriage returns and other escape sequences)
+    # _x000D_ is a carriage return character that sometimes appears in PDF extractions
+    if 'Item' in table.columns:
+        table['Item'] = table['Item'].astype(str).str.replace('_x000D_', '', regex=False)
+        table['Item'] = table['Item'].str.replace('\r', '', regex=False)
+        table['Item'] = table['Item'].str.replace('\n', '', regex=False)
+        table['Item'] = table['Item'].str.strip()
+    
+    if 'Description' in table.columns:
+        table['Description'] = table['Description'].astype(str).str.replace('_x000D_', ' ', regex=False)
+        table['Description'] = table['Description'].str.replace('\r', ' ', regex=False)
+        table['Description'] = table['Description'].str.replace('\n', ' ', regex=False)
+        table['Description'] = table['Description'].str.replace(r'\s+', ' ', regex=True)
+        table['Description'] = table['Description'].str.strip()
+    
     return table
 
 
@@ -302,9 +331,102 @@ def extract_tax(filename, page):
     return tax
 
 
+def extract_freight(filename):
+    """
+    Extract freight amount from Supreme Plumbing invoices.
+    Handles different freight formats and patterns.
+    """
+    try:
+        # Get raw text from PDF
+        raw_text = fitz.open(filename)
+        raw_text = raw_text[0].get_text()
+        
+        # Look for freight patterns in the text
+        freight_patterns = [
+            r'Freight\s*\$?([0-9,]+\.?[0-9]*)',  # Freight $71.70
+            r'Freight\s*\n\s*\$?([0-9,]+\.?[0-9]*)',  # Freight on new line
+            r'Freight\s*:\s*\$?([0-9,]+\.?[0-9]*)',  # Freight: $71.70
+            r'Shipping\s*\$?([0-9,]+\.?[0-9]*)',  # Shipping $71.70
+            r'Delivery\s*\$?([0-9,]+\.?[0-9]*)',  # Delivery $71.70
+        ]
+        
+        for pattern in freight_patterns:
+            match = re.search(pattern, raw_text, re.IGNORECASE | re.MULTILINE)
+            if match:
+                freight_value = match.group(1)
+                # Clean up the extracted value
+                freight_value = freight_value.replace(',', '').replace('$', '').strip()
+                if freight_value and freight_value != '0':
+                    return float(freight_value)
+        
+        # Try to extract from financial summary table
+        tables = tabula.read_pdf(filename, pages='all')
+        if tables:
+            last_table = tables[-1]
+            freight_amount = extract_freight_from_table(last_table)
+            if freight_amount != 0:
+                return freight_amount
+        
+        return 0.0
+        
+    except Exception as e:
+        print(f"Error extracting freight from {filename}: {e}")
+        return 0.0
+
+
+def extract_freight_from_table(table):
+    """
+    Extract freight amount from the financial summary table.
+    """
+    try:
+        # Convert table to string for easier pattern matching
+        table_str = str(table)
+        
+        # Look for freight patterns in the table data
+        freight_patterns = [
+            r'Freight\s*\$?([0-9,]+\.?[0-9]*)',  # Freight $71.70
+            r'Freight\s*:\s*\$?([0-9,]+\.?[0-9]*)',  # Freight: $71.70
+            r'Shipping\s*\$?([0-9,]+\.?[0-9]*)',  # Shipping $71.70
+            r'Delivery\s*\$?([0-9,]+\.?[0-9]*)',  # Delivery $71.70
+        ]
+        
+        for pattern in freight_patterns:
+            match = re.search(pattern, table_str, re.IGNORECASE)
+            if match:
+                freight_value = match.group(1)
+                # Clean up the extracted value
+                freight_value = freight_value.replace(',', '').replace('$', '').strip()
+                if freight_value and freight_value != '0':
+                    return float(freight_value)
+        
+        # If no pattern match found, try to find freight row by iterating through table data
+        if hasattr(table, 'iloc'):
+            for i in range(len(table)):
+                try:
+                    row_text = str(table.iloc[i]).lower()
+                    if ('freight' in row_text or 'shipping' in row_text or 'delivery' in row_text) and any(char.isdigit() for char in row_text):
+                        # Found a freight row, try to extract the amount
+                        for col in table.columns:
+                            cell_value = str(table.iloc[i][col])
+                            # Check if this cell contains a numeric value
+                            if any(char.isdigit() for char in cell_value):
+                                # Clean and return the value
+                                clean_value = cell_value.replace(',', '').replace('$', '').strip()
+                                if clean_value and clean_value != '0':
+                                    return float(clean_value)
+                except:
+                    continue
+        
+        return 0.0
+        
+    except Exception as e:
+        print(f"Error in extract_freight_from_table: {e}")
+        return 0.0
+
+
 def get_pages(filename):
 
-    reader = pyPdf.PdfReader(filename)
+    reader = PdfReader(filename)
     numPages = len(reader.pages)
     return numPages
 
@@ -449,6 +571,23 @@ def merge_and_clean_invoice_items(tables):
         tables.reset_index(drop=True, inplace=True)
         finalized_tables.append(tables)
         # finalized_tables.append(clean_invoice_items(tables))
+    
+    # Clean special characters from Item and Description columns in all finalized tables
+    # _x000D_ is a carriage return character that sometimes appears in PDF extractions
+    for table in finalized_tables:
+        if 'Item' in table.columns:
+            table['Item'] = table['Item'].astype(str).str.replace('_x000D_', '', regex=False)
+            table['Item'] = table['Item'].str.replace('\r', '', regex=False)
+            table['Item'] = table['Item'].str.replace('\n', '', regex=False)
+            table['Item'] = table['Item'].str.strip()
+        
+        if 'Description' in table.columns:
+            table['Description'] = table['Description'].astype(str).str.replace('_x000D_', ' ', regex=False)
+            table['Description'] = table['Description'].str.replace('\r', ' ', regex=False)
+            table['Description'] = table['Description'].str.replace('\n', ' ', regex=False)
+            table['Description'] = table['Description'].str.replace(r'\s+', ' ', regex=True)
+            table['Description'] = table['Description'].str.strip()
+    
     return finalized_tables
 
 
@@ -473,7 +612,13 @@ def extract_supreme_plumbing_data_multiple_pages(filename, output_path):
 
     # get tax details
     tax = extract_tax(filename, get_pages(filename))
+    freight = extract_freight(filename)
+    
     tax = float(tax.replace("$", "").replace(",", ""))
+    freight_value = float(freight) if freight else 0.0
+    
+    # Only add freight row if freight > 0
+    freight_row = ["10 Materials", "Freight", "", "", freight_value] if freight_value > 0 else None
     tax_row = ["10 Materials", "Tax", "", "", tax]
 
     # generate finalized details
@@ -485,6 +630,8 @@ def extract_supreme_plumbing_data_multiple_pages(filename, output_path):
     results['Amount'] = results['Amount'].str.replace(',', '').str.replace('$', '').astype(float)
     results['Cost'] = results['Cost'].str.replace(',', '').str.replace('$', '').astype(float)
 
+    if freight_row is not None:
+        results.loc[len(results)] = freight_row
     results.loc[len(results)] = tax_row
     results[list(cleaned_invoice_attributes.columns)] = cleaned_invoice_attributes
     results["Date"] = cleaned_invoice_attributes[

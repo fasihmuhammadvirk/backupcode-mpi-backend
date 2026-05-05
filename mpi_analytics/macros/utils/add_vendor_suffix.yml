@@ -1,0 +1,32 @@
+version: 2
+
+macros:
+  - name: add_vendor_suffix
+    description: |
+      Add vendor-specific suffix to item codes based on vendor name.
+
+      Replicates Python's InvoiceItems._add_suffix_to_item() logic.
+      Essential for model_extracted_data items to match legacy invoice_items.
+
+      Administrative Items (No Suffix):
+      - Tax, freight, shipping, handling, subtotal, total
+      - "10 Materials", "11 Equipment" (category headers)
+      - NULL or empty items
+
+      Suffix Mapping:
+      - B = BMW, W = World Wide/WWPS, Y = Y&S
+      - S = Supreme, P = Park/Pyramid, G = Gotham
+      - F = Flow Mark/FW Webb, A = ABC Opus/AF Supply
+
+      Cleaning Logic:
+      - Removes existing suffixes before adding new one
+      - Prevents double-suffix issues (e.g., "88958-B-B")
+
+    arguments:
+      - name: item_column
+        type: string
+        description: Column name containing item codes
+
+      - name: vendor_column
+        type: string
+        description: Column name containing vendor names

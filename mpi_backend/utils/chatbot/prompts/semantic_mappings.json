@@ -1,0 +1,128 @@
+{
+  "synonyms": {
+    "supplier": ["vendor", "company", "manufacturer", "distributor", "seller"],
+    "suppliers": ["vendors", "companies", "manufacturers", "distributors", "sellers"],
+    "item": ["product", "part", "material", "component", "sku"],
+    "items": ["products", "parts", "materials", "components", "skus"],
+    "customer_job": ["project", "job", "work order", "customer project", "job name"],
+    "customer_jobs": ["projects", "jobs", "work orders", "customer projects", "job names"],
+    "org_item": ["original item", "supplier item", "supplier code", "supplier item code", "original code"],
+    "org_items": ["original items", "supplier items", "supplier codes", "supplier item codes", "original codes"],
+    "cost": ["price", "amount", "unit price", "unit cost"],
+    "invoice": ["bill", "receipt", "statement"],
+    "invoices": ["bills", "receipts", "statements"],
+    "export": ["quickbooks", "qb", "accounting", "exported"],
+    "ref_no": ["reference number", "ref number", "reference no", "invoice number", "invoice ref"],
+    "po_number": ["purchase order", "po", "purchase order number"],
+    "qty": ["quantity", "amount", "count"],
+    "description": ["desc", "item description", "details"],
+    "status": ["state", "condition", "export status"],
+    "pending": ["not exported", "waiting", "queued"],
+    "exported": ["sent", "completed", "done"],
+    "processed": ["completed", "done", "finished"]
+  },
+  
+  "abbreviations": {
+    "QB": "QuickBooks",
+    "qb": "QuickBooks",
+    "PO": "purchase order",
+    "po": "purchase order",
+    "ref": "reference",
+    "desc": "description",
+    "qty": "quantity",
+    "amt": "amount",
+    "inv": "invoice",
+    "sup": "supplier",
+    "cust": "customer"
+  },
+  
+  "domain_terms": {
+    "plumbing_items": [
+      "pipe", "pipes", "fitting", "fittings", "valve", "valves",
+      "pvc", "copper", "brass", "steel", "galvanized",
+      "elbow", "tee", "coupling", "adapter", "reducer",
+      "flange", "gasket", "washer", "bolt", "nut",
+      "hose", "tubing", "clamp", "bracket", "hanger"
+    ],
+    "common_suppliers": [
+      "BMW", "BMW Plumbing", "BMW Plumbing Supplies",
+      "Ferguson", "HD Supply", "Grainger",
+      "Williams", "Williams Supply"
+    ],
+    "status_terms": {
+      "processed": ["PROCESSED", "completed", "done"],
+      "pending": ["PENDING", "waiting", "in progress"],
+      "exported": ["Exported", "sent to QuickBooks", "QB exported"],
+      "not_exported": ["Pending", "not exported", "awaiting export"]
+    }
+  },
+  
+  "multi_table_queries": {
+    "org_item": {
+      "tables": [
+        "temporary_item_mappings",
+        "supplier_item_mappings",
+        "unmapped_items",
+        "invoice_items"
+      ],
+      "columns": {
+        "temporary_item_mappings": "original_item",
+        "supplier_item_mappings": "supplier_item_ids",
+        "unmapped_items": "supplier_item_ids",
+        "invoice_items": "item"
+      },
+      "description": "When searching for org items or original items, must query ALL four tables to get complete results"
+    }
+  },
+  
+  "fuzzy_search_config": {
+    "similarity_threshold": 0.3,
+    "high_confidence_threshold": 0.7,
+    "fields_requiring_fuzzy": [
+      "supplier_name",
+      "item",
+      "description",
+      "customer_job",
+      "vendor"
+    ],
+    "exact_match_fields": [
+      "ref_no",
+      "po_number",
+      "mpi_item"
+    ]
+  },
+  
+  "date_patterns": {
+    "relative_dates": {
+      "today": "current_date",
+      "yesterday": "current_date - interval '1 day'",
+      "last week": "current_date - interval '1 week'",
+      "last month": "current_date - interval '1 month'",
+      "last year": "current_date - interval '1 year'",
+      "this week": "start of current week to current_date",
+      "this month": "start of current month to current_date",
+      "this year": "start of current year to current_date"
+    },
+    "month_names": {
+      "january": 1, "jan": 1,
+      "february": 2, "feb": 2,
+      "march": 3, "mar": 3,
+      "april": 4, "apr": 4,
+      "may": 5,
+      "june": 6, "jun": 6,
+      "july": 7, "jul": 7,
+      "august": 8, "aug": 8,
+      "september": 9, "sep": 9, "sept": 9,
+      "october": 10, "oct": 10,
+      "november": 11, "nov": 11,
+      "december": 12, "dec": 12
+    },
+    "quarter_mapping": {
+      "Q1": [1, 2, 3],
+      "Q2": [4, 5, 6],
+      "Q3": [7, 8, 9],
+      "Q4": [10, 11, 12]
+    }
+  }
+}
+

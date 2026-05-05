@@ -25,13 +25,17 @@ import uvicorn
 # Import routes
 from mpi_backend.api.routes import (
     health, supplier, invoices_list, mapping_updates, invoice_items,
-    quickbooks, signin, filters, google_sheets_sync, monthly_comparison, statements, qa
+    quickbooks, signin, filters, google_sheets_sync, monthly_comparison, statements, chatbot,
+    users, companies, feature_flags, model_extracted_data, dbt, purchase_orders, supplier_comparison,
+    project_estimation, project_estimate_fixed_items, project_estimate_fixed_quick_items, project_estimate_sub_items,
+    project_estimate_point_quick_items, project_estimate_point_items, project_estimate_finish_items, project_estimate_finish_quick_items,
+    user_overrides, override_logs, mapping_history, invoice_voids, email_vendor, extraction_queue
 )
 
 # Import scheduler
 from mpi_backend.background.scheduler import start_scheduler
 
-# Setup logging first
+# Setup logging first (before other imports that might log)
 from mpi_backend.config.logging_config import setup_logging, get_missing_logger
 setup_logging()
 
@@ -50,21 +54,22 @@ error_count = 0
 async def lifespan(app: FastAPI):
     """Application lifespan management - UNLIMITED PERFORMANCE"""
     logger.info("Starting UNLIMITED PERFORMANCE MPI Backend")
-    
+
     # Initialize and start scheduler with unlimited performance
     try:
         scheduler = start_scheduler()
         if scheduler:
-            logger.info("Scheduler started with unlimited performance")
+            logger.info("="*30)
+            logger.info("Scheduler started")
+            logger.info("="*30)
         else:
             logger.error("Failed to start scheduler")
-    except Exception as e:
-        logger.error(f"Failed to start scheduler: {e}")
-    
+    except Exception:
+        logger.exception("Failed to start scheduler")
+
     yield
-    
+
     logger.info("Shutting down MPI Backend")
-    
     logger.info("MPI Backend shutdown complete")
 
 # Create FastAPI application
@@ -137,7 +142,28 @@ def register_routes(app):
         ("Google Sheets Sync", google_sheets_sync.router),
         ("Monthly Comparison", monthly_comparison.router),
         ("Statements", statements.router),
-        ("Q/A System", qa.router),
+        ("Chatbot", chatbot.router),
+        ("Users", users.router),
+        ("Companies", companies.router),
+        ("Feature Flags", feature_flags.router),
+        ("Model Extracted Data", model_extracted_data.router),
+        ("DBT Operations", dbt.router),
+        ("Purchase Orders", purchase_orders.router),
+        ("Supplier Comparison", supplier_comparison.router),
+        ("Project Estimation", project_estimation.router),
+        ("Project Estimate Fixed Items", project_estimate_fixed_items.router),
+        ("Project Estimate Fixed Quick Items", project_estimate_fixed_quick_items.router),
+        ("Project Estimate Sub Items", project_estimate_sub_items.router),
+        ("Project Estimate Point Items", project_estimate_point_items.router),
+        ("Project Estimate Point Quick Items", project_estimate_point_quick_items.router),
+        ("Project Estimate Finish Items", project_estimate_finish_items.router),
+        ("Project Estimate Finish Quick Items", project_estimate_finish_quick_items.router),
+        ("User Overrides", user_overrides.router),
+        ("Override Logs", override_logs.router),
+        ("Mapping History", mapping_history.router),
+        ("Invoice Voids", invoice_voids.router),
+        ("Email Vendor", email_vendor.router),
+        ("Extraction Queue", extraction_queue.router),
     ]
     
     for route_name, router in routes:
@@ -150,115 +176,7 @@ def register_routes(app):
 register_routes(app)
 add_pagination(app)
 
-# Enhanced health check endpoint
-@app.get("/health/advanced")
-async def advanced_health_check():
-    """Advanced health check with memory management metrics"""
-    try:
-        # System metrics - simplified for compatibility
-        cpu_percent = 0  # CPU monitoring disabled
-        memory_percent = 0  # Memory monitoring disabled
-        disk_percent = 0  # Disk monitoring disabled
-        
-        # Application metrics
-        uptime = time.time() - app_start_time
-        
-        health_data = {
-            "status": "healthy",
-            "timestamp": time.time(),
-            "uptime_seconds": uptime,
-            "system": {
-                "cpu_percent": cpu_percent,
-                "memory_percent": memory_percent,
-                "memory_available_gb": "monitoring_disabled",
-                "disk_percent": disk_percent,
-                "disk_free_gb": "monitoring_disabled"
-            },
-            "requests": {
-                "total": request_count,
-                "errors": error_count,
-                "success_rate": ((request_count - error_count) / request_count * 100) if request_count > 0 else 100
-            },
-            "background_jobs": {
-                "scheduler_running": "checking...",
-                "jobs_configured": 7
-            }
-        }
-        
-        return health_data
-        
-    except Exception as e:
-        logger.error(f"Error in advanced health check: {e}")
-        return {"status": "error", "error": str(e)}
 
-
-@app.get("/cpu-info")
-async def get_cpu_information():
-    """Get detailed CPU information for debugging"""
-    try:
-        return {
-            "status": "success",
-            "cpu_info": "CPU monitoring disabled",
-            "message": "CPU monitoring is currently disabled for compatibility"
-        }
-    except Exception as e:
-        logger.error(f"Error getting CPU info: {e}")
-        return {"status": "error", "error": str(e)}
-
-# Optimization status endpoint
-@app.get("/optimization/status")
-async def optimization_status():
-    """Get comprehensive optimization status"""
-    try:
-        import gc
-        
-        return {
-            "timestamp": time.time(),
-            "system_resources": {
-                "status": "optimized",
-                "memory_available": "monitoring_disabled"
-            },
-            "optimizations": {
-                "memory_manager": "disabled",
-                "database_health": "optimized",
-                "background_jobs": "optimized",
-                "caching": "multi_level"
-            },
-            "garbage_collection": {
-                "collections": gc.get_count(),
-                "objects_tracked": len(gc.get_objects()) if hasattr(gc, 'get_objects') else 'N/A'
-            },
-            "recommendations": ["System running with basic optimizations"]
-        }
-        
-    except Exception as e:
-        logger.error(f"Optimization status failed: {e}")
-        return {"error": str(e)}
-
-# Memory management endpoint
-@app.get("/memory/status")
-async def memory_status():
-    """Get detailed memory management status"""
-    try:
-        import gc
-        
-        return {
-            "timestamp": time.time(),
-            "system_memory": {
-                "status": "monitoring_disabled",
-                "optimization": "enabled"
-            },
-            "memory_manager": "disabled",
-            "garbage_collection": {
-                "collections": gc.get_count(),
-                "objects_tracked": len(gc.get_objects()) if hasattr(gc, 'get_objects') else 'N/A'
-            },
-            "recommendations": ["Memory monitoring disabled for compatibility"]
-        }
-        
-    except Exception as e:
-        logger.error(f"Memory status failed: {e}")
-        return {"error": str(e)}
 
 # Keep main focused on app setup and route registration only
 
